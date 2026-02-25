@@ -36,8 +36,8 @@ class HybridRerankConfig:
     """Configuration for hybrid rerank service with fallback"""
 
     # Provider types
-    primary_provider: str = "vllm"  # vllm or deepinfra
-    fallback_provider: str = "deepinfra"  # vllm, deepinfra, or none
+    primary_provider: str = "vllm"  # vllm, openai, or deepinfra
+    fallback_provider: str = "deepinfra"  # vllm, openai, deepinfra, or none
 
     # Primary service config
     primary_api_key: str = ""
@@ -103,7 +103,7 @@ class HybridRerankConfig:
             self.fallback_provider.lower() != "none"
             and bool(self.fallback_base_url)
             and (
-                self.fallback_provider.lower() == "vllm"  # vllm doesn't require API key
+                self.fallback_provider.lower() in ("vllm", "openai")  # vllm/openai don't require API key
                 or bool(self.fallback_api_key)  # deepinfra requires API key
             )
         )
@@ -126,7 +126,7 @@ def _create_service_from_config(
     Factory function to create a rerank service based on provider type
 
     Args:
-        provider: Provider type (vllm or deepinfra)
+        provider: Provider type (vllm, openai, or deepinfra)
         api_key: API key for the service
         base_url: Base URL for the service
         model: Model name
@@ -147,6 +147,20 @@ def _create_service_from_config(
             max_retries=max_retries,
             batch_size=batch_size,
             max_concurrent_requests=max_concurrent,
+        )
+        return VllmRerankService(config)
+    elif provider.lower() == "openai":
+        # Generic OpenAI-compatible hosted API (e.g. DashScope, Cohere)
+        # Reuses VllmRerankService but skips Qwen3 special token formatting
+        config = VllmRerankConfig(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            max_retries=max_retries,
+            batch_size=batch_size,
+            max_concurrent_requests=max_concurrent,
+            skip_formatting=True,
         )
         return VllmRerankService(config)
     elif provider.lower() == "deepinfra":

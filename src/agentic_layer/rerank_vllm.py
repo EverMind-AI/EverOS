@@ -1,3 +1,4 @@
+
 """
 vLLM (Self-Deployed) Rerank Service Implementation
 
@@ -27,6 +28,7 @@ class VllmRerankConfig:
     max_retries: int = 3
     batch_size: int = 10
     max_concurrent_requests: int = 5
+    skip_formatting: bool = False  # When True, skip Qwen3 special token formatting (for hosted APIs like DashScope)
 
 
 class VllmRerankService(RerankServiceInterface):
@@ -89,18 +91,25 @@ class VllmRerankService(RerankServiceInterface):
         """Send rerank request batch to vLLM rerank API (OpenAI-compatible format)"""
         await self._ensure_session()
 
-        # Format texts using Qwen-Reranker official format
-        queries, formatted_docs = self._format_rerank_texts(
-            query, documents, instruction
-        )
-
         url = self.config.base_url
-        # Use OpenAI-compatible rerank API format with formatted texts
-        request_data = {
-            "model": self.config.model,
-            "query": queries[0] if queries else query,  # Use formatted query
-            "documents": formatted_docs,  # Use formatted documents
-        }
+
+        if self.config.skip_formatting:
+            # For hosted APIs (e.g. DashScope, Cohere): send raw texts without special token formatting
+            request_data = {
+                "model": self.config.model,
+                "query": query,
+                "documents": documents,
+            }
+        else:
+            # For self-deployed vLLM: format texts using Qwen-Reranker official format
+            queries, formatted_docs = self._format_rerank_texts(
+                query, documents, instruction
+            )
+            request_data = {
+                "model": self.config.model,
+                "query": queries[0] if queries else query,
+                "documents": formatted_docs,
+            }
 
         async with self._semaphore:
             for attempt in range(self.config.max_retries):

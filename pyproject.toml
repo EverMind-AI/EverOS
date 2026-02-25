@@ -72,6 +72,7 @@ dependencies = [
     "nltk>=3.9.2",
     "tiktoken>=0.12.0",
     "prometheus-client>=0.20.0",
+    "motor>=3.7.1",
 ]
 
 [build-system]
@@ -115,6 +116,7 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+asyncio_mode = "auto"
 
 [dependency-groups]
 # Development dependencies - for local development
