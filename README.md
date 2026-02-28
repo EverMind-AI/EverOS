@@ -54,7 +54,7 @@
 ![divider][divider-light]
 ![divider][divider-dark]
 
-<details>
+<!-- <details>
 <summary><kbd>Table of Contents</kbd></summary>
 
 <br>
@@ -78,7 +78,7 @@
 
 <br>
 
-</details>
+</details> -->
 
 ## Welcome to EverMemOS
 
@@ -88,10 +88,10 @@ Welcome to EverMemOS! Join our community to help improve the project and collabo
 | :-------- | :------ |
 | [![Discord][discord-badge]][discord] | Join our Discord community |
 | [![WeChat][wechat-badge]][wechat] | Join the WeChat discussion group |
-| [![X][x-badge]][x] | Follow updates on X |
+<!-- | [![X][x-badge]][x] | Follow updates on X |
 | [![LinkedIn][linkedin-badge]][linkedin] | Connect with us on LinkedIn |
 | [![Hugging Face Space][hugging-face-badge]][hugging-face] | Join our Hugging Face community to explore our spaces and models |
-| [![Reddit][reddit-badge]][reddit] | Join the Reddit community |
+| [![Reddit][reddit-badge]][reddit] | Join the Reddit community | -->
 
 <!-- <br>
 
@@ -115,7 +115,7 @@ Claw is putting the pieces of his memory together. Imagine a 24/7 agent with con
 <br>
 
 
-## Introduction
+<!-- ## Introduction
 
 > 💬 **More than memory — it's foresight.**
 
@@ -145,7 +145,7 @@ Claw is putting the pieces of his memory together. Imagine a 24/7 agent with con
   <img src="https://github.com/user-attachments/assets/a6ff7523-db24-40f5-96ab-aa94f41b2392" alt="EverMemOS Benchmark Results" width="800"/>
   <br>
   <em>EverMemOS outperforms existing memory systems across all major benchmarks</em>
-</p>
+</p> -->
 
 <br>
 
@@ -361,6 +361,20 @@ EverMemOS is available on these AI-powered Q&A platforms. They can help you find
 
 </div>
 
+<br>
+
+<a id="star-us"></a>
+## 🌟 Star and stay tuned with us 
+
+![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+
+<br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
+
 ## Contributing
 
 We love open-source energy! Whether you’re squashing bugs, shipping features, sharpening docs, or just tossing in wild ideas, every PR moves EverMemOS forward. Browse [Issues](https://github.com/EverMind-AI/EverMemOS/issues) to find your perfect entry point—then show us what you’ve got. Let’s build the future of memory together.
@@ -455,18 +469,16 @@ Read our [Contribution Guidelines](CONTRIBUTING.md) for code standards and Git w
 [lang-zh-badge]: https://img.shields.io/badge/简体中文-lightgrey?style=flat-square
 
 <!-- Community Badges -->
-[discord-badge]: https://img.shields.io/badge/Discord-EverMind-5865F2?style=flat&logo=discord&logoColor=white
+[discord-badge]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=5865F2&style=for-the-badge&logo=discord&logoColor=white
 [hugging-face-badge]: https://img.shields.io/badge/Hugging_Face-EverMind-F5C842?style=flat&logo=huggingface&logoColor=white
 [x-badge]: https://img.shields.io/badge/X/Twitter-EverMind-000000?style=flat&logo=x&logoColor=white
 [linkedin-badge]: https://img.shields.io/badge/LinkedIn-EverMind-0A66C2?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyBmaWxsPSIjZmZmIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU%2BTGlua2VkSW48L3RpdGxlPjxwYXRoIGQ9Ik0yMC40NDcgMjAuNDUyaC0zLjU1NHYtNS41NjljMC0xLjMyOC0uMDI3LTMuMDM3LTEuODUyLTMuMDM3LTEuODUzIDAtMi4xMzYgMS40NDUtMi4xMzYgMi45Mzl2NS42NjdIOS4zNTFWOWgzLjQxNHYxLjU2MWguMDQ2Yy40NzctLjkgMS42MzctMS44NSAzLjM3LTEuODUgMy42MDEgMCA0LjI2NyAyLjM3IDQuMjY3IDUuNDU1djYuMjg2ek01LjMzNyA3LjQzM2MtMS4xNDQgMC0yLjA2My0uOTI2LTIuMDYzLTIuMDY1IDAtMS4xMzguOTItMi4wNjMgMi4wNjMtMi4wNjMgMS4xNCAwIDIuMDY0LjkyNSAyLjA2NCAyLjA2MyAwIDEuMTM5LS45MjUgMi4wNjUtMi4wNjQgMi4wNjV6bTEuNzgyIDEzLjAxOUgzLjU1NVY5aDMuNTY0djExLjQ1MnpNMjIuMjI1IDBIMS43NzFDLjc5MiAwIDAgLjc3NCAwIDEuNzI5djIwLjU0MkMwIDIzLjIyNy43OTIgMjQgMS43NzEgMjRoMjAuNDUxQzIzLjIgMjQgMjQgMjMuMjI3IDI0IDIyLjI3MVYxLjcyOUMyNCAuNzc0IDIzLjIgMCAyMi4yMjIgMGguMDAzeiIvPjwvc3ZnPg%3D%3D
 [reddit-badge]: https://img.shields.io/badge/Reddit-EverMind-FF4500?style=flat&logo=reddit&logoColor=white
-[wechat-badge]: https://img.shields.io/badge/WeChat-EverMind-07C160?style=flat&logo=wechat&logoColor=white
+[wechat-badge]: https://img.shields.io/badge/WeChat-EverMemOS-07C160?style=for-the-badge&logo=wechat&logoColor=white
 
 <!-- Q&A Badges -->
 [deepwiki-badge]: https://deepwiki.com/badge.svg
 [readmex-badge]: https://raw.githubusercontent.com/CodePhiliaX/resource-trusteeship/main/readmex.svg
-[wechat-badge]: https://img.shields.io/badge/WeChat-EverMemOS-07C160?style=flat&logo=wechat&logoColor=white
-
 <!-- Misc Badges -->
 [back-to-top]: https://img.shields.io/badge/-Back_to_top-gray?style=flat-square
 [star-us]: #star-us
