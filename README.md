@@ -13,13 +13,13 @@
 [![License][license-badge]][license]
 
 
-<!-- <p><strong>Share EverMemOS Repository</strong></p>
+<p><strong>Share EverMemOS Repository</strong></p>
 
 [![][share-x-shield]][share-x-link]
 [![][share-linkedin-shield]][share-linkedin-link]
 [![][share-reddit-shield]][share-reddit-link]
 [![][share-telegram-shield]][share-telegram-link]
-[![][share-whatsapp-shield]][share-whatsapp-link]
+<!-- [![][share-whatsapp-shield]][share-whatsapp-link]
 [![][share-mastodon-shield]][share-mastodon-link]
 [![][share-weibo-shield]][share-weibo-link] -->
 
@@ -54,7 +54,7 @@
 ![divider][divider-light]
 ![divider][divider-dark]
 
-<details open>
+<details>
 <summary><kbd>Table of Contents</kbd></summary>
 
 <br>
@@ -93,15 +93,27 @@ Welcome to EverMemOS! Join our community to help improve the project and collabo
 | [![Hugging Face Space][hugging-face-badge]][hugging-face] | Join our Hugging Face community to explore our spaces and models |
 | [![Reddit][reddit-badge]][reddit] | Join the Reddit community |
 
-
-<br>
+<!-- <br>
 
 <a id="star-us"></a>
 ## 🌟 Star and stay tuned with us 
 
-![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484) -->
 
 <br>
+
+## Exampels
+
+![example gif](https://github.com/user-attachments/assets/13b87b33-403c-4e5a-acfb-095cc7b55d08)
+
+Claw is putting the pieces of his memory together. Imagine a 24/7 agent with continuous learning memory that you can carry with you wherever you go next.
+
+
+<!-- ![divider][divider-light]
+![divider][divider-dark] -->
+
+<br>
+
 
 ## Introduction
 
@@ -418,7 +430,7 @@ Read our [Contribution Guidelines](CONTRIBUTING.md) for code standards and Git w
 [divider-light]: https://github.com/user-attachments/assets/aec54c94-ced9-4683-ae58-0a5a7ed803bd#gh-light-mode-only
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
-[banner-gif]: https://github.com/user-attachments/assets/965d9f07-9f4b-4ac1-8d0f-a3f5391b7bf2
+[banner-gif]: https://github.com/user-attachments/assets/dfdf2572-f1dd-4b92-a65a-f314619a3922
 
 <!-- Header Badges -->
 [arxiv-badge]: https://img.shields.io/badge/arXiv-EverMemOS_Paper-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white
