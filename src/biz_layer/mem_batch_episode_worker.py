@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from api_specs.memory_types import EpisodeMemory, MemCell, MemoryType, RawDataType
@@ -152,8 +152,10 @@ class BatchEpisodeWorker:
         Returns number of episode documents saved.
         """
         # Sort ascending so the narrative is chronological
+        # Use a timezone-aware sentinel so comparison with aware timestamps works
+        _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
         cells = sorted(
-            memcells, key=lambda mc: mc.timestamp or datetime.min
+            memcells, key=lambda mc: mc.timestamp or _EPOCH
         )
 
         # Merge raw conversation messages
