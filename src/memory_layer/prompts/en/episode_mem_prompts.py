@@ -23,6 +23,7 @@ IMPORTANT TIME HANDLING:
 - Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
 - This dual format supports both absolute and relative time-based questions
 - All absolute time calculations should be based on the provided start time
+- TIMESTAMP FORMAT: Always use strict ISO 8601 format for all timestamps, e.g., 2026-01-23T02:19:25Z or 2026-01-23T10:07:00+08:00. Do NOT use Chinese characters (如2026年1月23日), weekdays (如周五), AM/PM, or non-standard formats.
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
 {{
@@ -88,6 +89,7 @@ IMPORTANT TIME HANDLING:
 - Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
 - This dual format supports both absolute and relative time-based questions
 - All absolute time calculations should be based on the provided start time
+- TIMESTAMP FORMAT: Always use strict ISO 8601 format for all timestamps, e.g., 2026-01-23T02:19:25Z or 2026-01-23T10:07:00+08:00. Do NOT use Chinese characters (如2026年1月23日), weekdays (如周五), AM/PM, or non-standard formats.
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
 {{
