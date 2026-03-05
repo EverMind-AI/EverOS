@@ -30,7 +30,7 @@ from common_utils.datetime_utils import to_iso_format
 from evaluation.src.adapters.evermemos import (
     stage1_memcells_extraction,
     stage2_index_building,
-    stage3_memory_retrivel,
+    stage3_memory_retrieval,
     stage4_response,
 )
 
@@ -497,7 +497,7 @@ class EverMemOSAdapter(BaseAdapter):
 
         if retrieval_mode == "agentic":
             # Agentic retrieval
-            top_results, metadata = await stage3_memory_retrivel.agentic_retrieval(
+            top_results, metadata = await stage3_memory_retrieval.agentic_retrieval(
                 query=query,
                 config=exp_config,
                 llm_provider=self.llm_provider,
@@ -508,7 +508,7 @@ class EverMemOSAdapter(BaseAdapter):
             )
         elif retrieval_mode == "lightweight":
             # Lightweight retrieval
-            top_results, metadata = await stage3_memory_retrivel.lightweight_retrieval(
+            top_results, metadata = await stage3_memory_retrieval.lightweight_retrieval(
                 query=query,
                 emb_index=emb_index,
                 bm25=bm25,
@@ -517,7 +517,7 @@ class EverMemOSAdapter(BaseAdapter):
             )
         else:
             # Default to hybrid retrieval
-            top_results = await stage3_memory_retrivel.hybrid_search_with_rrf(
+            top_results = await stage3_memory_retrieval.hybrid_search_with_rrf(
                 query=query,
                 emb_index=emb_index,
                 bm25=bm25,
