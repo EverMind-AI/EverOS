@@ -537,7 +537,7 @@ Read our [Contribution Guidelines](CONTRIBUTING.md) for code standards and Git w
 [divider-light]: https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
-[banner-gif]: https://github.com/user-attachments/assets/3f22c9a8-a8db-4061-accf-f04c055aa01b
+[banner-gif]: https://github.com/user-attachments/assets/f661bf5b-9942-4142-8310-9d4c5cc57924
 
 <!-- Header Badges -->
 [arxiv-badge]: https://img.shields.io/badge/arXiv-EverMemOS_Paper-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white
