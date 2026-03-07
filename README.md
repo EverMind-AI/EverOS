@@ -1,6 +1,6 @@
 # EverMemOS OpenClaw Plugin
 
-![OpenClaw EverMemOS](https://github.com/user-attachments/assets/60713404-2e94-4cab-9e5f-15b36291dc6f)
+![OpenClaw EverMemOS](https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f)
 
 An OpenClaw memory plugin that gives AI Agents long-term memory powered by [EverMemOS](https://github.com/EverMind-AI/EverMemOS).
 
