@@ -12,7 +12,7 @@
 [![Ask DeepWiki][deepwiki-badge]][deepwiki]
 [![License][license-badge]][license]
 
-<p><strong>Share EverMemOS Repository</strong></p>
+<p><strong>分享 EverMemOS 仓库</strong></p>
 
 [![][share-x-shield]][share-x-link]
 [![][share-linkedin-shield]][share-linkedin-link]
@@ -22,9 +22,9 @@
 [![][share-mastodon-shield]][share-mastodon-link]
 [![][share-weibo-shield]][share-weibo-link] -->
 
-[Documentation][documentation] •
-[API Reference][api-docs] •
-[Demo][demo-section]
+[文档][documentation] •
+[API 参考][api-docs] •
+[演示][demo-section]
 
 [![English][lang-en-badge]][lang-en-readme]
 [![简体中文][lang-zh-badge]][lang-zh-readme]
@@ -39,67 +39,67 @@
 >
 > ### Memory Genesis Competition 2026
 >
-> Join our AI [Memory Competition][competition-link]! Build innovative applications, plugins, or infrastructure improvements powered by EverMemOS.
+> 欢迎参加我们的 AI [记忆竞赛][competition-link]。无论你是构建创新应用、平台插件，还是改进底层基础设施，只要是基于 EverMemOS 的作品都欢迎提交。
 >
-> **Tracks:**
-> - **Agent + Memory** - Build intelligent agents with long-term, evolving memories
-> - **Platform Plugins** - Integrate EverMemOS with VSCode, Chrome, Slack, Notion, LangChain, and more
-> - **OS Infrastructure** - Optimize core functionality and performance
+> **赛道：**
+> - **Agent + Memory** - 构建具备长期、可演化记忆的智能体
+> - **Platform Plugins** - 将 EverMemOS 集成到 VSCode、Chrome、Slack、Notion、LangChain 等平台
+> - **OS Infrastructure** - 优化核心能力与系统性能
 >
-> **[Get Started with the Competition Starter Kit][starter-kit]**
+> **[从竞赛 Starter Kit 开始][starter-kit]**
 >
-> Join our [Discord][discord] to ask anything you want. AMA session is open to everyone and occurs biweekly.
+> 欢迎加入我们的 [Discord][discord] 提问交流。AMA 面向所有人开放，双周举行一次。
 
 <br>
 
 <!-- <details>
-<summary><kbd>Table of Contents</kbd></summary>
+<summary><kbd>目录</kbd></summary>
 
 <br>
 
-- [Welcome to EverMemOS][welcome]
-- [Introduction][introduction]
-- [Star and stay tuned with us][star-us]
-- [Why EverMemOS][why-evermemos]
-- [Quick Start][quick-start]
-  - [Prerequisites][prerequisites]
-  - [Installation][installation]
-- [API Usage][api-usage]
-- [Demo][demo-section]
-  - [Run the Demo][run-demo]
-  - [Full Demo Experience][full-demo-experience]
-- [Evaluation][evaluation-section]
-- [Documentation][docs-section]
+- [欢迎来到 EverMemOS][welcome]
+- [介绍][introduction]
+- [点亮 Star 并关注我们][star-us]
+- [为什么选择 EverMemOS][why-evermemos]
+- [快速开始][quick-start]
+  - [环境要求][prerequisites]
+  - [安装][installation]
+- [API 使用][api-usage]
+- [演示][demo-section]
+  - [运行 Demo][run-demo]
+  - [完整 Demo 体验][full-demo-experience]
+- [评测][evaluation-section]
+- [文档][docs-section]
 - [GitHub Codespaces][codespaces]
-- [Questions][questions-section]
-- [Contributing][contributing]
+- [提问与支持][questions-section]
+- [参与贡献][contributing]
 
 <br>
 
 </details> -->
 
-## Welcome to EverMemOS
+## 欢迎来到 EverMemOS
 
-Welcome to EverMemOS! Join our community to help improve the project and collaborate with talented developers worldwide.
+欢迎来到 EverMemOS。加入我们的社区，一起改进项目，并与来自世界各地的优秀开发者协作。
 
-| Community | Purpose |
-| :-------- | :------ |
-| [![Discord Members][discord-members-badge]][discord] | Join the EverMind Discord community to connect with other users |
-| [![WeChat][wechat-badge]][wechat] | Join the EverMind WeChat group for discussion and updates |
-<!-- | [![X][x-badge]][x] | Follow updates on X |
-| [![LinkedIn][linkedin-badge]][linkedin] | Connect with us on LinkedIn |
-| [![Hugging Face Space][hugging-face-badge]][hugging-face] | Join our Hugging Face community to explore our spaces and models |
-| [![Reddit][reddit-badge]][reddit] | Join the Reddit community | -->
+| 社区 | 用途 |
+| :--- | :--- |
+| [![Discord Members][discord-members-badge]][discord] | 加入 EverMind Discord 社区，与其他用户交流 |
+| [![WeChat][wechat-badge]][wechat] | 加入 EverMind 微信群，参与讨论并获取更新 |
+<!-- | [![X][x-badge]][x] | 在 X 上关注项目动态 |
+| [![LinkedIn][linkedin-badge]][linkedin] | 在 LinkedIn 上与我们联系 |
+| [![Hugging Face Space][hugging-face-badge]][hugging-face] | 加入我们的 Hugging Face 社区，体验相关 Space 与模型 |
+| [![Reddit][reddit-badge]][reddit] | 加入 Reddit 社区 | -->
 
 <br>
 
-## Use Cases
+## 应用场景
 
 [![EverMind + OpenClaw Agent Memory and Plugin][usecase-openclaw-image]][usecase-openclaw-link]
 
 **EverMind + OpenClaw Agent Memory and Plugin**
 
-Claw is putting the pieces of his memory together. Imagine a 24/7 agent with continuous learning memory that you can carry with you wherever you go next. Check out the [agent_memory][usecase-openclaw-link] branch and the [plugin][usecase-openclaw-plugin-link] for more details.
+Claw 正在把自己的记忆碎片重新拼起来。想象一个 24/7 在线、拥有持续学习记忆的 Agent，无论你走到哪里，它都能跟着你继续工作。详情可查看 [agent_memory][usecase-openclaw-link] 分支和对应的 [plugin][usecase-openclaw-plugin-link]。
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -110,8 +110,8 @@ Claw is putting the pieces of his memory together. Imagine a 24/7 agent with con
 
 **Live2D Character with Memory**
 
-Add long-term memory to your anime character that can talk to you in real-time powered by [TEN Framework][ten-framework-link].
-See the [Live2D Character with Memory Example][usecase-live2d-link] for more details.
+为你的二次元角色加上长期记忆，让它能够与你实时语音互动，底层由 [TEN Framework][ten-framework-link] 驱动。
+更多细节请查看 [Live2D Character with Memory Example][usecase-live2d-link]。
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -122,8 +122,8 @@ See the [Live2D Character with Memory Example][usecase-live2d-link] for more det
 
 **Computer-Use with Memory**
 
-Use computer-use to launch screenshot to do analysis all in your memory.
-See the [live demo][usecase-computer-link] for more details.
+将 computer-use 与长期记忆结合起来，启动截图分析并把整个过程沉淀进记忆系统。
+更多细节请查看 [在线演示][usecase-computer-link]。
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -134,8 +134,8 @@ See the [live demo][usecase-computer-link] for more details.
 
 **Game of Thrones Memories**
 
-A demonstration of AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones".
-See the [code][usecase-got-link] for more details.
+这是一个通过《冰与火之歌：权力的游戏》互动问答来展示 AI 记忆基础设施能力的示例。
+更多细节请查看 [代码][usecase-got-link]。
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -146,8 +146,8 @@ See the [code][usecase-got-link] for more details.
 
 **EverMemOS Claude Code Plugin**
 
-Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
-See the [code][usecase-claude-link] for more details.
+为 Claude Code 提供持久化记忆。它会自动保存并召回你过去编程会话中的上下文。
+更多细节请查看 [代码][usecase-claude-link]。
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -158,36 +158,36 @@ See the [code][usecase-claude-link] for more details.
 
 **Visualize Memories with Graphs**
 
-Memory Graph view that visualizes your stored entities and how they relate. This is a pure frontend demo which has not been plugged into the backend yet, and we are working on it.
-See the [live demo][usecase-graph-link].
+Memory Graph 视图会把你存储的实体及其关系可视化出来。这目前还是一个纯前端演示，暂时还没有接入后端，我们正在推进中。
+可查看 [在线演示][usecase-graph-link]。
 
-<!-- ## Introduction
+<!-- ## 介绍
 
-> 💬 **More than memory — it's foresight.**
+> 💬 **不止于记忆，更是前瞻。**
 
-**EverMemOS** enables AI to not only remember what happened, but understand the meaning behind memories and use them to guide decisions. Achieving **93% reasoning accuracy** on the LoCoMo benchmark, EverMemOS provides long-term memory capabilities for conversational AI agents through structured extraction, intelligent retrieval, and progressive profile building.
+**EverMemOS** 不只让 AI 记住发生过什么，还让它理解这些记忆背后的意义，并将其用于当前决策。EverMemOS 在 LoCoMo 基准测试上实现了 **93% 推理准确率**，通过结构化提取、智能检索与持续演化的画像构建，为对话式 AI Agent 提供长期记忆能力。
 
 ![EverMemOS Architecture Overview][overview-image]
 
-**How it works:** EverMemOS extracts structured memories from conversations (Encoding), organizes them into episodes and profiles (Consolidation), and intelligently retrieves relevant context when needed (Retrieval).
+**工作方式：** EverMemOS 从对话中提取结构化记忆（Encoding），将其整理为情景记忆和画像（Consolidation），并在需要时智能检索相关上下文（Retrieval）。
 
-📄 [Paper][paper-link] • 📚 [Vision & Overview][overview-doc] • 🏗️ [Architecture][architecture-doc] • 📖 [Full Documentation][full-docs]
+📄 [论文][paper-link] • 📚 [愿景与总览][overview-doc] • 🏗️ [架构][architecture-doc] • 📖 [完整文档][full-docs]
 
-**Latest**: v1.2.0 with API enhancements + DB efficiency improvements ([Changelog][changelog-doc])
+**最新版本**：v1.2.0，带来 API 增强与数据库效率优化（[Changelog][changelog-doc]）
 
 <br>
 
-## Why EverMemOS?
+## 为什么选择 EverMemOS？
 
-- 🎯 **93% Accuracy** - Best-in-class performance on LoCoMo benchmark
-- 🚀 **Production Ready** - Enterprise-grade with Milvus vector DB, Elasticsearch, MongoDB, and Redis
-- 🔧 **Easy Integration** - Simple REST API, works with any LLM
-- 📊 **Multi-Modal Memory** - Episodes, facts, preferences, relations
-- 🔍 **Smart Retrieval** - BM25, embeddings, or agentic search
+- 🎯 **93% 准确率** - 在 LoCoMo 基准测试上达到同类领先水平
+- 🚀 **生产可用** - 企业级架构，集成 Milvus、Elasticsearch、MongoDB 与 Redis
+- 🔧 **易于集成** - 提供简洁的 REST API，可与任意 LLM 配合使用
+- 📊 **多模态记忆** - 支持情景、事实、偏好、关系等多类记忆
+- 🔍 **智能检索** - 支持 BM25、向量检索和 Agentic 检索
 
 ![EverMemOS Overall Benchmark Results][benchmark-summary-image]
 
-*EverMemOS outperforms existing memory systems across all major benchmarks* -->
+*EverMemOS 在主要基准测试上整体优于现有记忆系统* -->
 
 <br>
 <div align="right">
@@ -196,49 +196,49 @@ See the [live demo][usecase-graph-link].
 
 </div>
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 环境要求
 
-- Python 3.10+ • Docker 20.10+ • uv package manager • 4GB RAM
+- Python 3.10+ • Docker 20.10+ • `uv` 包管理器 • 4GB RAM
 
-**Verify Prerequisites:**
+**验证环境：**
 
 ```bash
-# Verify you have the required versions
-python --version  # Should be 3.10+
-docker --version  # Should be 20.10+
+# 验证所需版本
+python --version  # 应为 3.10+
+docker --version  # 应为 20.10+
 ```
 
-### Installation
+### 安装
 
 ```bash
-# 1. Clone and navigate
+# 1. 克隆仓库并进入目录
 git clone https://github.com/EverMind-AI/EverMemOS.git
 cd EverMemOS
 
-# 2. Start Docker services
+# 2. 启动 Docker 依赖服务
 docker compose up -d
 
-# 3. Install uv and dependencies
+# 3. 安装 uv 和项目依赖
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 
-# 4. Configure API keys
+# 4. 配置 API Key
 cp env.template .env
-# Edit .env and set:
-#   - LLM_API_KEY (for memory extraction)
-#   - VECTORIZE_API_KEY (for embedding/rerank)
+# 编辑 .env 并设置：
+#   - LLM_API_KEY（用于记忆提取）
+#   - VECTORIZE_API_KEY（用于向量化 / rerank）
 
-# 5. Start server
+# 5. 启动服务
 uv run python src/run.py
 
-# 6. Verify installation
+# 6. 验证安装
 curl http://localhost:1995/health
-# Expected response: {"status": "healthy", ...}
+# 期望响应：{"status": "healthy", ...}
 ```
 
-✅ Server running at `http://localhost:1995` • [Full Setup Guide][setup-guide]
+✅ 服务运行地址：`http://localhost:1995` • [完整安装指南][setup-guide]
 
 <br>
 <div align="right">
@@ -247,16 +247,16 @@ curl http://localhost:1995/health
 
 </div>
 
-## Basic Usage
+## 基础使用
 
-Store and retrieve memories with simple Python code:
+通过简单的 Python 代码即可写入并检索记忆：
 
 ```python
 import requests
 
 API_BASE = "http://localhost:1995/api/v1"
 
-# 1. Store a conversation memory
+# 1. 存储一条对话记忆
 requests.post(f"{API_BASE}/memories", json={
     "message_id": "msg_001",
     "create_time": "2025-02-01T10:00:00+00:00",
@@ -264,7 +264,7 @@ requests.post(f"{API_BASE}/memories", json={
     "content": "I love playing soccer on weekends"
 })
 
-# 2. Search for relevant memories
+# 2. 搜索相关记忆
 response = requests.get(f"{API_BASE}/memories/search", json={
     "query": "What sports does the user like?",
     "user_id": "user_001",
@@ -277,7 +277,7 @@ for memory_group in result.get("memories", []):
     print(f"Memory: {memory_group}")
 ```
 
-📖 [More Examples][usage-examples] • 📚 [API Reference][api-docs] • 🎯 [Interactive Demos][interactive-demos]
+📖 [更多示例][usage-examples] • 📚 [API 参考][api-docs] • 🎯 [交互式 Demo][interactive-demos]
 
 <br>
 <div align="right">
@@ -288,29 +288,29 @@ for memory_group in result.get("memories", []):
 
 ## Demo
 
-### Run the Demo
+### 运行 Demo
 
 ```bash
-# Terminal 1: Start the API server
+# 终端 1：启动 API 服务
 uv run python src/run.py
 
-# Terminal 2: Run the simple demo
+# 终端 2：运行简单 Demo
 uv run python src/bootstrap.py demo/simple_demo.py
 ```
 
-**Try it now**: Follow the [Demo Guide][interactive-demos] for step-by-step instructions.
+**现在就试试**：按照 [Demo Guide][interactive-demos] 中的步骤操作即可。
 
-### Full Demo Experience
+### 完整 Demo 体验
 
 ```bash
-# Extract memories from sample data
+# 从样例数据中提取记忆
 uv run python src/bootstrap.py demo/extract_memory.py
 
-# Start interactive chat with memory
+# 启动带记忆的交互式聊天
 uv run python src/bootstrap.py demo/chat_with_memory.py
 ```
 
-See the [Demo Guide][interactive-demos] for details.
+更多细节请查看 [Demo Guide][interactive-demos]。
 
 <br>
 <div align="right">
@@ -319,31 +319,12 @@ See the [Demo Guide][interactive-demos] for details.
 
 </div>
 
-## Advanced Techniques
+## 进阶技巧
 
-- **[Group Chat Conversations][group-chat-guide]** - Combine messages from multiple speakers
-- **[Conversation Metadata Control][metadata-control-guide]** - Fine-grained control over conversation context
-- **[Memory Retrieval Strategies][retrieval-strategies-guide]** - Lightweight vs Agentic retrieval modes
-- **[Batch Operations][batch-operations-guide]** - Process multiple messages efficiently
-
-<br>
-<div align="right">
-
-[![][back-to-top]][readme-top]
-
-</div>
-
-## Documentation
-
-| Guide | Description |
-| ----- | ----------- |
-| [Quick Start][getting-started] | Installation and configuration |
-| [Configuration Guide][config-guide] | Environment variables and services |
-| [API Usage Guide][api-usage-guide] | Endpoints and data formats |
-| [Development Guide][dev-guide] | Architecture and best practices |
-| [Memory API][memory-api-doc] | Complete API reference |
-| [Demo Guide][demo-guide] | Interactive examples |
-| [Evaluation Guide][evaluation-guide] | Benchmark testing |
+- **[群聊对话][group-chat-guide]** - 组合多个说话者的消息
+- **[会话元数据控制][metadata-control-guide]** - 精细控制会话上下文
+- **[记忆检索策略][retrieval-strategies-guide]** - 轻量检索与 Agentic 检索
+- **[批量操作][batch-operations-guide]** - 高效处理多条消息
 
 <br>
 <div align="right">
@@ -352,37 +333,56 @@ See the [Demo Guide][interactive-demos] for details.
 
 </div>
 
-## Evaluation & Benchmarking
+## 文档
 
-EverMemOS achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming comparable memory systems.
+| 指南 | 说明 |
+| ---- | ---- |
+| [快速开始][getting-started] | 安装与配置 |
+| [配置指南][config-guide] | 环境变量与服务配置 |
+| [API 使用指南][api-usage-guide] | 接口与数据格式 |
+| [开发指南][dev-guide] | 架构与最佳实践 |
+| [Memory API][memory-api-doc] | 完整 API 参考 |
+| [Demo Guide][demo-guide] | 交互式示例 |
+| [评测指南][evaluation-guide] | 基准测试方法 |
 
-### Benchmark Results
+<br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
+
+## 评测与基准测试
+
+EverMemOS 在 LoCoMo 基准测试上实现了 **93% 总体准确率**，表现优于可比记忆系统。
+
+### 基准结果
 
 ![EverMemOS Benchmark Results][benchmark-image]
 
-### Supported Benchmarks
+### 支持的基准数据集
 
-- **[LoCoMo][locomo-link]** - Long-context memory benchmark with single/multi-hop reasoning
-- **[LongMemEval][longmemeval-link]** - Multi-session conversation evaluation
-- **[PersonaMem][personamem-link]** - Persona-based memory evaluation
+- **[LoCoMo][locomo-link]** - 面向单跳 / 多跳推理的长上下文记忆基准
+- **[LongMemEval][longmemeval-link]** - 多会话对话记忆评测
+- **[PersonaMem][personamem-link]** - 基于人格画像的记忆评测
 
-### Quick Start
+### 快速开始
 
 ```bash
-# Install evaluation dependencies
+# 安装评测依赖
 uv sync --group evaluation
 
-# Run smoke test (quick verification)
+# 运行 smoke test（快速验证）
 uv run python -m evaluation.cli --dataset locomo --system evermemos --smoke
 
-# Run full evaluation
+# 运行完整评测
 uv run python -m evaluation.cli --dataset locomo --system evermemos
 
-# View results
+# 查看结果
 cat evaluation/results/locomo-evermemos/report.txt
 ```
 
-📊 [Full Evaluation Guide][evaluation-guide] • 📈 [Complete Results][evaluation-results-link]
+📊 [完整评测指南][evaluation-guide] • 📈 [完整结果][evaluation-results-link]
 
 <br>
 <div align="right">
@@ -393,33 +393,33 @@ cat evaluation/results/locomo-evermemos/report.txt
 
 ## GitHub Codespaces
 
-EverMemOS supports [GitHub Codespaces][codespaces-link] for cloud-based development. This eliminates the need to set up Docker, manage local network configurations, or worry about environment compatibility issues.
+EverMemOS 支持使用 [GitHub Codespaces][codespaces-link] 进行云端开发。这意味着你不需要在本地手动配置 Docker、网络环境或兼容性问题。
 
 [![Open in GitHub Codespaces][codespaces-badge]][codespaces-project-link]
 
 ![divider][divider-light]
 ![divider][divider-dark]
 
-### Requirements
+### 资源要求
 
-| Machine Type | Status | Notes |
-| ------------ | ------ | ----- |
-| 2-core (Free tier) | ❌ Not supported | Insufficient resources for infrastructure services |
-| 4-core | ✅ Minimum | Works but may be slow under load |
-| 8-core | ✅ Recommended | Good performance with all services |
-| 16-core+ | ✅ Optimal | Best for heavy development workloads |
+| 机器规格 | 状态 | 说明 |
+| -------- | ---- | ---- |
+| 2-core（免费档） | ❌ 不支持 | 资源不足以运行基础设施服务 |
+| 4-core | ✅ 最低可用 | 可以运行，但负载较高时可能较慢 |
+| 8-core | ✅ 推荐 | 可较稳定地运行全部服务 |
+| 16-core+ | ✅ 最佳 | 适合更重的开发与测试任务 |
 
-> **Note:** If your company provides GitHub Codespaces, hardware limitations typically will not be an issue since enterprise plans often include access to larger machine types.
+> **说明：** 如果你的公司提供 GitHub Codespaces，通常不会受硬件限制影响，因为企业方案往往可以使用更高规格的机器。
 
-### Getting Started with Codespaces
+### 开始使用 Codespaces
 
-1. Click the "Open in GitHub Codespaces" button above
-2. Select a **4-core or larger** machine when prompted
-3. Wait for the container to build and services to start
-4. Update API keys in `.env` (`LLM_API_KEY`, `VECTORIZE_API_KEY`, etc.)
-5. Run `make run` to start the server
+1. 点击上方 "Open in GitHub Codespaces" 按钮
+2. 在弹窗中选择 **4-core 及以上** 的机器规格
+3. 等待容器构建并自动启动服务
+4. 在 `.env` 中填写 API Key（`LLM_API_KEY`、`VECTORIZE_API_KEY` 等）
+5. 运行 `make run` 启动服务
 
-All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automatically and are pre-configured to work together.
+MongoDB、Elasticsearch、Milvus、Redis 等基础设施服务都会自动启动，并已预配置为可协同工作。
 
 <br>
 <div align="right">
@@ -428,12 +428,12 @@ All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automa
 
 </div>
 
-## Questions
+## 提问与支持
 
-EverMemOS is available on these AI-powered Q&A platforms. They can help you find answers quickly and accurately in multiple languages, covering everything from basic setup to advanced implementation details.
+EverMemOS 已接入以下 AI 驱动问答平台。它们可以帮助你快速、准确地获取答案，并支持从基础安装到高级实现的多语言问题查询。
 
-| Service | Link |
-| ------- | ---- |
+| 服务 | 链接 |
+| ---- | ---- |
 | DeepWiki | [![Ask DeepWiki][deepwiki-badge]][deepwiki] |
 
 <br>
@@ -446,7 +446,7 @@ EverMemOS is available on these AI-powered Q&A platforms. They can help you find
 <br>
 
 <a id="star-us"></a>
-## 🌟 Star and stay tuned with us
+## 🌟 点亮 Star 并关注我们
 
 ![star us gif][star-gif]
 
@@ -457,38 +457,38 @@ EverMemOS is available on these AI-powered Q&A platforms. They can help you find
 
 </div>
 
-## Contributing
+## 参与贡献
 
-We love open-source energy! Whether you are squashing bugs, shipping features, sharpening docs, or just tossing in wild ideas, every PR moves EverMemOS forward. Browse [Issues][issues-link] to find your perfect entry point, then show us what you have got. Let us build the future of memory together.
+我们热爱开源社区的活力。无论你是在修 Bug、做功能、完善文档，还是提出一些大胆的新想法，每一个 PR 都会推动 EverMemOS 往前走。欢迎查看 [Issues][issues-link] 寻找适合你的切入点，然后把你的成果提交给我们。一起构建记忆系统的未来。
 
 <br>
 
 > [!TIP]
 >
-> **Welcome all kinds of contributions** 🎉
+> **欢迎各种形式的贡献** 🎉
 >
-> Join us in building EverMemOS better! Every contribution makes a difference, from code to documentation. Share your projects on social media to inspire others!
+> 一起把 EverMemOS 做得更好。从代码到文档，每一份贡献都很重要。也欢迎你把自己的项目分享到社交平台，激发更多人的灵感。
 >
-> Connect with one of the EverMemOS maintainers [@elliotchen200][elliot-x-link] on 𝕏 or [@cyfyifanchen][cyfyifanchen-link] on GitHub for project updates, discussions, and collaboration opportunities.
+> 欢迎通过 𝕏 联系 EverMemOS 维护者 [@elliotchen200][elliot-x-link]，或通过 GitHub 联系 [@cyfyifanchen][cyfyifanchen-link]，获取项目动态、参与讨论并展开合作。
 
 ![divider][divider-light]
 ![divider][divider-dark]
 
-### Code Contributors
+### 代码贡献者
 
 [![EverMemOS Contributors][contributors-image]][contributors]
 
 ![divider][divider-light]
 ![divider][divider-dark]
 
-### Contribution Guidelines
+### 贡献指南
 
-Read our [Contribution Guidelines][contributing-doc] for code standards and Git workflow.
+请阅读 [Contribution Guidelines][contributing-doc] 了解代码规范与 Git 工作流。
 
 ![divider][divider-light]
 ![divider][divider-dark]
 
-### License & Citation & Acknowledgments
+### 许可证、引用与鸣谢
 
 [Apache 2.0][license] • [Citation][citation-doc] • [Acknowledgments][acknowledgments-doc]
 
@@ -502,20 +502,20 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 
 <!-- Navigation -->
 [readme-top]: #readme-top
-[welcome]: #welcome-to-evermemos
-[introduction]: #introduction
-[why-evermemos]: #why-evermemos
-[quick-start]: #quick-start
-[prerequisites]: #prerequisites
-[installation]: #installation
+[welcome]: #欢迎来到-evermemos
+[introduction]: #介绍
+[why-evermemos]: #为什么选择-evermemos
+[quick-start]: #快速开始
+[prerequisites]: #环境要求
+[installation]: #安装
 [codespaces]: #github-codespaces
-[run-demo]: #run-the-demo
-[full-demo-experience]: #full-demo-experience
-[api-usage]: #api-usage
-[evaluation-section]: #evaluation--benchmarking
-[docs-section]: #documentation
-[questions-section]: #questions
-[contributing]: #contributing
+[run-demo]: #运行-demo
+[full-demo-experience]: #完整-demo-体验
+[api-usage]: #api-使用
+[evaluation-section]: #评测与基准测试
+[docs-section]: #文档
+[questions-section]: #提问与支持
+[contributing]: #参与贡献
 [demo-section]: #demo
 
 <!-- Dividers -->
@@ -523,7 +523,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
 <!-- Images -->
-[banner-gif]: https://github.com/user-attachments/assets/f661bf5b-9942-4142-8310-9d4c5cc57924
+[banner-gif]: https://github.com/user-attachments/assets/3f22c9a8-a8db-4061-accf-f04c055aa01b
 [competition-image]: https://github.com/user-attachments/assets/739a0939-ab1d-4659-81c4-0842466afde9
 [usecase-openclaw-image]: https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f
 [usecase-live2d-image]: https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26
