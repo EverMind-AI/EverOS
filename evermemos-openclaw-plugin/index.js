@@ -28,7 +28,7 @@ export default {
         const params = {
           query,
           user_id: cfg.userId,
-          group_ids: cfg.groupId ? [cfg.groupId] : undefined,
+          group_id: cfg.groupId || undefined,
           memory_types: cfg.memoryTypes,
           retrieve_method: cfg.retrieveMethod,
           top_k: cfg.topK,

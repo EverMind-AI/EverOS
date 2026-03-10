@@ -12,9 +12,9 @@ export async function searchMemories(cfg, params) {
 
   const results = await Promise.all(
     searches.map(async ({ label, types }) => {
-      const p = { ...baseParams, memory_types: types };
-      console.log("[memory-api] GET /api/v0/memories/search", label, JSON.stringify(p));
-      const r = await request(cfg, "GET", "/api/v0/memories/search", p);
+      const p = { ...baseParams, memory_types: types.join(",") };
+      console.log("[memory-api] GET /api/v1/memories/search", label, JSON.stringify(p));
+      const r = await request(cfg, "GET", "/api/v1/memories/search", p);
       console.log("[memory-api] GET response", label, JSON.stringify(r));
       return r;
     }),
@@ -39,8 +39,9 @@ export async function saveMemories(cfg, { userId, groupId, messages = [], flush 
   if (!messages.length) return;
   const stamp = Date.now();
   for (let i = 0; i < messages.length; i++) {
-    const { role = "user", content = "", tool_calls, tool_call_id } = messages[i];
-    const sender = role === "assistant" ? role : (role === "tool" ? "tool" : userId);
+    const { role: rawRole = "user", content = "", tool_calls, tool_call_id } = messages[i];
+    const role = rawRole === "user" ? "user" : "assistant";
+    const sender = role === "assistant" ? role : userId;
     const isLast = i === messages.length - 1;
 
     const payload = {
@@ -58,8 +59,8 @@ export async function saveMemories(cfg, { userId, groupId, messages = [], flush 
       ...(tool_call_id && { tool_call_id }),
       ...(flush && isLast && { flush: true }),
     };
-    console.log("[memory-api] POST /api/v0/memories", JSON.stringify(payload));
-    const result = await request(cfg, "POST", "/api/v0/memories", payload);
+    console.log("[memory-api] POST /api/v1/memories", JSON.stringify(payload));
+    const result = await request(cfg, "POST", "/api/v1/memories", payload);
     console.log("[memory-api] POST response", JSON.stringify(result));
   }
 }
