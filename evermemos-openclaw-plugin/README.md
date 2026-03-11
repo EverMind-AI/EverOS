@@ -25,7 +25,7 @@ Add the plugin directory to `plugins.load.paths` and enable it under `plugins.en
       "memory": "evermemos-openclaw-plugin"
     },
     "load": {
-      "paths": ["/path/to/EverMemOS-OpenClaw-Plugin"]
+      "paths": ["~/.openclaw/extensions/evermemos-openclaw-plugin"]
     },
     "entries": {
       "evermemos-openclaw-plugin": {
