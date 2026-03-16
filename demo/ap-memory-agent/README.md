@@ -4,6 +4,10 @@ Accounts Payable automation agent built with **LangGraph + EverMemOS + Claude** 
 
 **Core demo moment:** An agent catches a fraudulent or duplicate invoice because it remembers what happened weeks ago.
 
+## Demo Video
+
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/9834fe7b5fca45c78c304f7101b15ac6-with-play.gif)](https://www.loom.com/share/9834fe7b5fca45c78c304f7101b15ac6)
+
 ## Architecture
 
 ```
