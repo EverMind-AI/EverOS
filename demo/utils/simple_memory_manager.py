@@ -244,11 +244,10 @@ class SimpleMemoryManager:
             query: Query text
             top_k: Number of results to return (default: 3)
             mode: Retrieval mode (default: "rrf")
-                - "rrf": RRF fusion (recommended)
                 - "keyword": Keyword retrieval (BM25)
                 - "vector": Vector retrieval
                 - "hybrid": Keyword + Vector + Rerank
-                - "rrf": Keyword + Vector + RRF fusion
+                - "rrf": Keyword + Vector + Reciprocal Rank Fusion (recommended)
                 - "agentic": LLM-guided multi-round retrieval
             show_details: Whether to show detailed information (default: True)
 
