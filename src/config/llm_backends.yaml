@@ -59,6 +59,21 @@ llm_backends:
     timeout: 600  # Increase to 10 minutes, suitable for time-consuming tasks like paper information extraction
     max_retries: 3
     
+  # MiniMax configuration
+  minimax:
+    name: "MiniMax"
+    provider: "minimax"
+    base_url: "https://api.minimax.io/v1"
+    api_key: ""
+    models:
+      - "MiniMax-M2.7"
+      - "MiniMax-M2.7-highspeed"
+      - "MiniMax-M2.5"
+      - "MiniMax-M2.5-highspeed"
+    model: "MiniMax-M2.7"
+    timeout: 600
+    max_retries: 3
+
   # Local Ollama configuration
   ollama:
     name: "Ollama Local"

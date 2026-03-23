@@ -229,6 +229,10 @@ cp env.template .env
 # 编辑 .env 并设置：
 #   - LLM_API_KEY（用于记忆提取）
 #   - VECTORIZE_API_KEY（用于向量化 / rerank）
+#
+# 支持的 LLM 后端：OpenAI、Anthropic Claude、Google Gemini、
+# MiniMax、Azure OpenAI、Ollama 或任何 OpenAI 兼容 API。
+# 详细配置请参阅 src/config/llm_backends.yaml。
 
 # 5. 启动服务
 uv run python src/run.py
