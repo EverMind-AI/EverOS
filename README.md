@@ -35,43 +35,34 @@
 
 </div>
 
-<!-- <br>
+<br>
 
-[![Memory Genesis Competition 2026][competition-image]][competition-link]
+<!-- [![Memory Genesis Competition 2026][competition-image]][competition-link] -->
 
 > [!IMPORTANT]
 >
-> ### Memory Genesis Competition 2026
+> ### [Memory Sparse Attention](https://github.com/EverMind-AI/MSA)
 >
-> Join our AI [Memory Competition][competition-link]! Build innovative applications, plugins, or infrastructure improvements powered by EverMemOS.
+> Check out our latest papar [Memory Sparse Attention](https://github.com/EverMind-AI/MSA) - A scalable, end-to-end trainable latent-memory framework for 100M token contexts
 >
-> **Tracks:**
-> - **Agent + Memory** - Build intelligent agents with long-term, evolving memories
-> - **Platform Plugins** - Integrate EverMemOS with VSCode, Chrome, Slack, Notion, LangChain, and more
-> - **OS Infrastructure** - Optimize core functionality and performance
->
-> **[Get Started with the Competition Starter Kit][starter-kit]**
+> Scalable sparse attention + document-wise RoPE (parallel/global) achieving near-linear complexity in both training and inference;
+> KV cache compression with a Memory Parallel inference engine to deliver 100M token throughput on 2×A800 GPUs;
+> Memory Interleave for multi-round, multi-hop reasoning across scattered memory segments.
 >
 > Join our [Discord][discord] to ask anything you want. AMA session is open to everyone and occurs biweekly.
 
-<br> -->
+<br>
 
-<!-- <details>
+<details open>
 <summary><kbd>Table of Contents</kbd></summary>
 
 <br>
 
 - [Welcome to EverMemOS][welcome]
-- [Introduction][introduction]
-- [Star and stay tuned with us][star-us]
-- [Why EverMemOS][why-evermemos]
+- [Use Cases][use-cases]
 - [Quick Start][quick-start]
-  - [Prerequisites][prerequisites]
-  - [Installation][installation]
 - [API Usage][api-usage]
 - [Demo][demo-section]
-  - [Run the Demo][run-demo]
-  - [Full Demo Experience][full-demo-experience]
 - [Evaluation][evaluation-section]
 - [Documentation][docs-section]
 - [GitHub Codespaces][codespaces]
@@ -80,7 +71,7 @@
 
 <br>
 
-</details> -->
+</details>
 
 ## Welcome to EverMemOS
 
@@ -509,13 +500,14 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [welcome]: #welcome-to-evermemos
 [introduction]: #introduction
 [why-evermemos]: #why-evermemos
+[use-cases]: #use-cases
 [quick-start]: #quick-start
 [prerequisites]: #prerequisites
 [installation]: #installation
 [codespaces]: #github-codespaces
 [run-demo]: #run-the-demo
 [full-demo-experience]: #full-demo-experience
-[api-usage]: #api-usage
+[api-usage]: #basic-usage
 [evaluation-section]: #evaluation--benchmarking
 [docs-section]: #documentation
 [questions-section]: #questions
