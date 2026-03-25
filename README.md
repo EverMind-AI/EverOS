@@ -43,11 +43,11 @@
 >
 > ### [Memory Sparse Attention](https://github.com/EverMind-AI/MSA)
 >
-> Check out our latest papar [Memory Sparse Attention](https://github.com/EverMind-AI/MSA) - A scalable, end-to-end trainable latent-memory framework for 100M token contexts
+> Check out our latest papar [Memory Sparse Attention](https://github.com/EverMind-AI/MSA) - A scalable, end-to-end trainable latent-memory framework for 100M token contexts.
 >
-> Scalable sparse attention + document-wise RoPE (parallel/global) achieving near-linear complexity in both training and inference;
-> KV cache compression with a Memory Parallel inference engine to deliver 100M token throughput on 2×A800 GPUs;
-> Memory Interleave for multi-round, multi-hop reasoning across scattered memory segments.
+> - Scalable sparse attention + document-wise RoPE (parallel/global) achieving near-linear complexity in both training and inference.
+> - KV cache compression with a Memory Parallel inference engine to deliver 100M token throughput on 2×A800 GPUs.
+> - Memory Interleave for multi-round, multi-hop reasoning across scattered memory segments.
 >
 > Join our [Discord][discord] to ask anything you want. AMA session is open to everyone and occurs biweekly.
 
