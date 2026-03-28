@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "conversation_meta": {
+    "scene": "assistant",
+    "scene_desc": {"description": "AP Agent vendor history for demo"},
+    "name": "AP Agent Vendor History",
+    "description": "Vendor invoice history: Acme Corp (clean), Globex Supplies (dispute), Shadow LLC (duplicate).",
+    "group_id": "eb6618c4d52d3bf9_group",
+    "created_at": "2025-01-15T00:00:00Z",
+    "default_timezone": "UTC",
+    "user_details": {
+      "ap_agent_user": {"full_name": "AP User", "role": "user", "extra": {}},
+      "ap_agent_system": {"full_name": "AP Agent", "role": "assistant", "extra": {}}
+    },
+    "tags": ["AP", "Vendor", "Invoice"]
+  },
+  "conversation_list": [
+    {"message_id": "ap_seed_001", "create_time": "2025-01-15T10:00:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "What was the outcome of invoice INV-001 from Acme Corp?", "refer_list": []},
+    {"message_id": "ap_seed_002", "create_time": "2025-01-15T10:00:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-001 from Acme Corp for $500 approved. Net 30 terms. Paid on time. Line items: Office supplies.", "refer_list": []},
+    {"message_id": "ap_seed_003", "create_time": "2025-01-15T10:01:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "And invoice INV-002?", "refer_list": []},
+    {"message_id": "ap_seed_004", "create_time": "2025-01-15T10:01:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-002 from Acme Corp for $450 approved. Net 30. Paid within terms. Software licenses.", "refer_list": []},
+    {"message_id": "ap_seed_005", "create_time": "2025-01-15T10:02:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "INV-003, INV-004, INV-005 from Acme?", "refer_list": []},
+    {"message_id": "ap_seed_006", "create_time": "2025-01-15T10:02:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-003 from Acme Corp for $550 approved. INV-004 for $480 approved. INV-005 for $520 approved. Net 30. Clean payment history. Acme Corp is low-risk: 5 invoices approved in past 6 months, amounts $400-$600, no disputes.", "refer_list": []},
+
+    {"message_id": "ap_seed_007", "create_time": "2025-01-16T10:05:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "What about Globex Supplies invoices INV-101 and INV-102?", "refer_list": []},
+    {"message_id": "ap_seed_008", "create_time": "2025-01-16T10:05:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-101 from Globex Supplies for $1,200 approved. INV-102 for $980 approved. Net 30. Paid on time.", "refer_list": []},
+    {"message_id": "ap_seed_009", "create_time": "2025-01-16T10:06:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "Was there a dispute with Globex?", "refer_list": []},
+    {"message_id": "ap_seed_010", "create_time": "2025-01-16T10:06:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-103 from Globex Supplies disputed March 2025 — shipment delay. Resolution: partial credit issued. Amount $2,000.", "refer_list": []},
+    {"message_id": "ap_seed_011", "create_time": "2025-01-16T10:07:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "Any late payments from Globex?", "refer_list": []},
+    {"message_id": "ap_seed_012", "create_time": "2025-01-16T10:07:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-104 from Globex Supplies for $1,500 paid 15 days late. Net 30 terms. Globex has prior dispute and late payment. Moderate risk.", "refer_list": []},
+
+    {"message_id": "ap_seed_013", "create_time": "2025-01-17T10:10:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "What happened with Shadow LLC invoice INV-777?", "refer_list": []},
+    {"message_id": "ap_seed_014", "create_time": "2025-01-17T10:10:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Invoice INV-777 from Shadow LLC for $3,000 rejected — duplicate invoice number. Same invoice number submitted twice. Shadow LLC flagged for duplicate attempt. High risk. Always verify invoice numbers against history.", "refer_list": []},
+
+    {"message_id": "ap_seed_015", "create_time": "2025-01-18T09:00:00Z", "sender": "ap_agent_user", "sender_name": "user", "type": "text", "content": "I need to switch to a different task now. Can you pull up the Q1 2025 departmental budget summary?", "refer_list": []},
+    {"message_id": "ap_seed_016", "create_time": "2025-01-18T09:00:30Z", "sender": "ap_agent_system", "sender_name": "assistant", "type": "text", "content": "Sure, here is the Q1 2025 departmental budget summary. Total allocated: $2.4M across 8 departments. Engineering has the largest allocation at $680K, followed by Sales at $520K. All departments are currently within budget. Let me know if you need a detailed breakdown.", "refer_list": []}
+  ]
+}

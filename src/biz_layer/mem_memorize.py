@@ -523,11 +523,18 @@ async def process_memory_extraction(
         return result
     
     if state.is_assistant_scene:
-        _, foresight_memories, event_logs = await asyncio.gather(
+        results = await asyncio.gather(
             _timed_extract_episodes(),
             _timed_extract_foresights(),
             _timed_extract_event_logs(),
+            return_exceptions=True,
         )
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                stage_name = ['episodes', 'foresights', 'event_logs'][i]
+                logger.warning(f"[mem_memorize] {stage_name} extraction failed (non-fatal): {result}")
+        foresight_memories = results[1] if not isinstance(results[1], Exception) else []
+        event_logs = results[2] if not isinstance(results[2], Exception) else []
     else:
         await _timed_extract_episodes()
     record_extraction_stage(
