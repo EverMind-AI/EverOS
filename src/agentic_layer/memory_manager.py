@@ -170,6 +170,7 @@ class MemoryManager:
             end_time=request.end_time,
             version_range=request.version_range,
             limit=request.limit,
+            full=request.full,
         )
 
         # Note: response.metadata already contains complete employee information

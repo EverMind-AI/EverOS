@@ -30,7 +30,7 @@ from common_utils.datetime_utils import to_iso_format
 from evaluation.src.adapters.evermemos import (
     stage1_memcells_extraction,
     stage2_index_building,
-    stage3_memory_retrivel,
+    stage3_memory_retrieval,
     stage4_response,
 )
 
@@ -102,7 +102,8 @@ class EverMemOSAdapter(BaseAdapter):
         return conversation_id
 
     def _check_missing_indexes(
-        self, index_dir: Path, num_conv: int, index_type: str = "bm25"
+        self, index_dir: Path, num_conv: int, index_type: str = "bm25",
+        conversation_ids: List[str] = None
     ) -> List[int]:
         """
         Check for missing index files.
@@ -111,6 +112,7 @@ class EverMemOSAdapter(BaseAdapter):
             index_dir: Index directory
             num_conv: Total number of conversations
             index_type: Index type ("bm25" or "embedding")
+            conversation_ids: List of conversation IDs for proper file naming
 
         Returns:
             List of conversation indices with missing indexes
@@ -118,10 +120,16 @@ class EverMemOSAdapter(BaseAdapter):
         missing_indexes = []
 
         for i in range(num_conv):
+            # Use extracted numeric ID for file naming if conversation_ids provided
+            if conversation_ids and i < len(conversation_ids):
+                conv_id = self._extract_conv_index(conversation_ids[i])
+            else:
+                conv_id = str(i)
+            
             if index_type == "bm25":
-                index_file = index_dir / f"bm25_index_conv_{i}.pkl"
+                index_file = index_dir / f"bm25_index_conv_{conv_id}.pkl"
             else:  # embedding
-                index_file = index_dir / f"embedding_index_conv_{i}.pkl"
+                index_file = index_dir / f"embedding_index_conv_{conv_id}.pkl"
 
             if not index_file.exists():
                 missing_indexes.append(i)
@@ -363,10 +371,14 @@ class EverMemOSAdapter(BaseAdapter):
         # Call stage2 implementation to build indexes
         exp_config = self._convert_config_to_experiment_config()
         exp_config.num_conv = len(conversations)  # Set conversation count
+        # Pass conversation IDs for proper index file naming (supports --from-conv/--to-conv slicing)
+        conversation_ids_list = [conv.conversation_id for conv in conversations]
+        exp_config.conversation_ids = conversation_ids_list
 
         # Smart skip logic: check existing index files
         bm25_need_build = self._check_missing_indexes(
-            index_dir=bm25_index_dir, num_conv=len(conversations), index_type="bm25"
+            index_dir=bm25_index_dir, num_conv=len(conversations), index_type="bm25",
+            conversation_ids=conversation_ids_list
         )
 
         emb_need_build = []
@@ -376,6 +388,7 @@ class EverMemOSAdapter(BaseAdapter):
                 index_dir=emb_index_dir,
                 num_conv=len(conversations),
                 index_type="embedding",
+                conversation_ids=conversation_ids_list
             )
 
         # Statistics
@@ -424,12 +437,29 @@ class EverMemOSAdapter(BaseAdapter):
 
         # ========== Plan A: Return index metadata (lazy loading) ==========
         # Don't load indexes into memory, only return paths and metadata
+        
+        # Build mapping from conversation_id to extracted numeric ID
+        # This is needed because when using --from-conv/--to-conv slicing:
+        # - Index files are saved with extracted numeric IDs (e.g., "234", "235"...)
+        # - But conversation_ids still contain original IDs (e.g., "locomo_exp_user_234")
+        # - We need to map conversation_id -> extracted numeric ID (not sequential index!)
+        conv_id_to_index = {
+            conv.conversation_id: self._extract_conv_index(conv.conversation_id) 
+            for idx, conv in enumerate(conversations)
+        }
+        
+        # Save mapping to a JSON file for persistence across stages
+        mapping_file = output_dir / "conversation_index_mapping.json"
+        with open(mapping_file, "w") as f:
+            json.dump(conv_id_to_index, f, indent=2)
+        
         index_metadata = {
             "type": "lazy_load",  # Mark as lazy loading
             "memcells_dir": str(memcells_dir),
             "bm25_index_dir": str(bm25_index_dir),
             "emb_index_dir": str(emb_index_dir),
             "conversation_ids": [conv.conversation_id for conv in conversations],
+            "conv_id_to_index": conv_id_to_index,  # Add mapping for search stage
             "use_hybrid_search": use_hybrid,
             "total_conversations": len(conversations),
         }
@@ -454,16 +484,29 @@ class EverMemOSAdapter(BaseAdapter):
         Search stage: Retrieve relevant MemCells.
 
         Lazy loading: Load indexes from files on demand (memory-friendly).
+        
+        Fix for --from-conv/--to-conv slicing:
+        - When building indexes, files are saved with sequential indices (0, 1, 2...)
+        - But conversation_id still contains original ID (e.g., "locomo_234")
+        - Use the mapping (conv_id_to_index) to find the correct sequential index
         """
         # Lazy loading - read indexes from files
         bm25_index_dir = Path(index["bm25_index_dir"])
         emb_index_dir = Path(index["emb_index_dir"])
 
-        # Extract numeric index from conversation_id to find index files
-        # Example: conversation_id = "locomo_0" -> conv_index = "0"
-        conv_index = self._extract_conv_index(conversation_id)
+        # Get the sequential index from the mapping
+        # This mapping was created in add() stage and maps conversation_id -> sequential index
+        conv_id_to_index = index.get("conv_id_to_index", {})
+        
+        if conversation_id in conv_id_to_index:
+            # Use the mapping to get sequential index
+            conv_index = conv_id_to_index[conversation_id]
+        else:
+            # Fallback: extract index from conversation_id (legacy behavior)
+            # This handles cases where the mapping is not available (e.g., old index files)
+            conv_index = self._extract_conv_index(conversation_id)
 
-        # Load BM25 index on demand (using numeric index)
+        # Load BM25 index on demand (using sequential index)
         bm25_file = bm25_index_dir / f"bm25_index_conv_{conv_index}.pkl"
         if not bm25_file.exists():
             return SearchResult(
@@ -497,7 +540,7 @@ class EverMemOSAdapter(BaseAdapter):
 
         if retrieval_mode == "agentic":
             # Agentic retrieval
-            top_results, metadata = await stage3_memory_retrivel.agentic_retrieval(
+            top_results, metadata = await stage3_memory_retrieval.agentic_retrieval(
                 query=query,
                 config=exp_config,
                 llm_provider=self.llm_provider,
@@ -508,7 +551,7 @@ class EverMemOSAdapter(BaseAdapter):
             )
         elif retrieval_mode == "lightweight":
             # Lightweight retrieval
-            top_results, metadata = await stage3_memory_retrivel.lightweight_retrieval(
+            top_results, metadata = await stage3_memory_retrieval.lightweight_retrieval(
                 query=query,
                 emb_index=emb_index,
                 bm25=bm25,
@@ -517,7 +560,7 @@ class EverMemOSAdapter(BaseAdapter):
             )
         else:
             # Default to hybrid retrieval
-            top_results = await stage3_memory_retrivel.hybrid_search_with_rrf(
+            top_results = await stage3_memory_retrieval.hybrid_search_with_rrf(
                 query=query,
                 emb_index=emb_index,
                 bm25=bm25,
@@ -682,12 +725,21 @@ class EverMemOSAdapter(BaseAdapter):
         Returns:
             Index metadata dict
         """
+        # Build mapping from conversation_id to extracted numeric ID
+        # This is needed for --from-conv/--to-conv slicing support
+        # Index files are named with extracted numeric IDs (e.g., "234", not sequential 0)
+        conv_id_to_index = {
+            conv.conversation_id: self._extract_conv_index(conv.conversation_id)
+            for idx, conv in enumerate(conversations)
+        }
+        
         return {
             "type": "lazy_load",
             "memcells_dir": str(output_dir / "memcells"),
             "bm25_index_dir": str(output_dir / "bm25_index"),
             "emb_index_dir": str(output_dir / "vectors"),
             "conversation_ids": [conv.conversation_id for conv in conversations],
+            "conv_id_to_index": conv_id_to_index,  # Add mapping for search stage
             "use_hybrid_search": True,
             "total_conversations": len(conversations),
         }

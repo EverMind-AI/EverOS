@@ -126,8 +126,19 @@ def build_bm25_index(
 
     print(f"Reading data from: {data_dir}")
 
+    # Get conversation IDs for proper file naming
+    # If conversation_ids is provided, use them; otherwise fall back to sequential indices
+    conversation_ids = getattr(config, 'conversation_ids', [])
+    
     for i in range(config.num_conv):
-        file_path = data_dir / f"memcell_list_conv_{i}.json"
+        # Use conversation_id if available, otherwise use sequential index
+        if conversation_ids and i < len(conversation_ids):
+            # Extract numeric ID from conversation_id (e.g., "locomo_234" -> "234")
+            conv_id = conversation_ids[i].split("_")[-1] if "_" in conversation_ids[i] else conversation_ids[i]
+        else:
+            conv_id = str(i)
+        
+        file_path = data_dir / f"memcell_list_conv_{conv_id}.json"
         if not file_path.exists():
             print(f"Warning: File not found, skipping: {file_path}")
             continue
@@ -161,7 +172,7 @@ def build_bm25_index(
         # --- Saving the Index ---
         index_data = {"bm25": bm25, "docs": original_docs}
 
-        output_path = bm25_save_dir / f"bm25_index_conv_{i}.pkl"
+        output_path = bm25_save_dir / f"bm25_index_conv_{conv_id}.pkl"
         print(f"Saving index to: {output_path}")
         with open(output_path, "wb") as f:
             pickle.dump(index_data, f)
@@ -190,8 +201,19 @@ async def build_emb_index(config: ExperimentConfig, data_dir: Path, emb_save_dir
 
     import time  # For performance statistics
 
+    # Get conversation IDs for proper file naming
+    # If conversation_ids is provided, use them; otherwise fall back to sequential indices
+    conversation_ids = getattr(config, 'conversation_ids', [])
+
     for i in range(config.num_conv):
-        file_path = data_dir / f"memcell_list_conv_{i}.json"
+        # Use conversation_id if available, otherwise use sequential index
+        if conversation_ids and i < len(conversation_ids):
+            # Extract numeric ID from conversation_id (e.g., "locomo_234" -> "234")
+            conv_id = conversation_ids[i].split("_")[-1] if "_" in conversation_ids[i] else conversation_ids[i]
+        else:
+            conv_id = str(i)
+        
+        file_path = data_dir / f"memcell_list_conv_{conv_id}.json"
         if not file_path.exists():
             print(f"Warning: File not found, skipping: {file_path}")
             continue
@@ -365,7 +387,7 @@ async def build_emb_index(config: ExperimentConfig, data_dir: Path, emb_save_dir
         #     },
         #     ...
         # ]
-        output_path = emb_save_dir / f"embedding_index_conv_{i}.pkl"
+        output_path = emb_save_dir / f"embedding_index_conv_{conv_id}.pkl"
         emb_save_dir.mkdir(parents=True, exist_ok=True)
         print(f"Saving embeddings to: {output_path}")
         with open(output_path, "wb") as f:

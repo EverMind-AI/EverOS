@@ -96,3 +96,7 @@ class ExperimentConfig:
 
     max_retries: int = 5
     max_concurrent_requests: int = 10
+    
+    # Conversation IDs for index building (needed for --from-conv/--to-conv slicing)
+    # This maps sequential indices (0, 1, 2...) to actual conversation IDs
+    conversation_ids: list = []

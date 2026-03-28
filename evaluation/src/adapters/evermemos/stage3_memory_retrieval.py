@@ -1195,9 +1195,21 @@ async def main():
     else:
         print(f"\n🆕 No checkpoint found, starting from scratch")
 
+    # Get conversation IDs for proper file naming
+    # If conversation_ids is provided (e.g., from --from-conv/--to-conv), use them
+    # Otherwise fall back to sequential indices (legacy behavior)
+    conversation_ids = getattr(config, 'conversation_ids', [])
+    
     # Iterate through the dataset, assuming the index of the dataset list
     # corresponds to the conversation index number.
     for i, conversation_data in enumerate(dataset):
+        # Use conversation_id if available for file naming, otherwise use sequential index
+        if conversation_ids and i < len(conversation_ids):
+            # Extract numeric ID from conversation_id (e.g., "locomo_234" -> "234")
+            conv_id_for_file = conversation_ids[i].split("_")[-1] if "_" in conversation_ids[i] else conversation_ids[i]
+        else:
+            conv_id_for_file = str(i)
+        
         conv_id = f"locomo_exp_user_{i}"
 
         # Checkpoint resume: skip processed conversations
@@ -1217,7 +1229,7 @@ async def main():
         # If using hybrid search, need to load both Embedding and BM25 indices
         if config.use_hybrid_search:
             # Load Embedding index
-            emb_index_path = emb_index_dir / f"embedding_index_conv_{i}.pkl"
+            emb_index_path = emb_index_dir / f"embedding_index_conv_{conv_id_for_file}.pkl"
             if not emb_index_path.exists():
                 print(
                     f"Error: Embedding index not found at {emb_index_path}. Skipping conversation."
@@ -1227,7 +1239,7 @@ async def main():
                 emb_index = pickle.load(f)
 
             # Load BM25 index
-            bm25_index_path = bm25_index_dir / f"bm25_index_conv_{i}.pkl"
+            bm25_index_path = bm25_index_dir / f"bm25_index_conv_{conv_id_for_file}.pkl"
             if not bm25_index_path.exists():
                 print(
                     f"Error: BM25 index not found at {bm25_index_path}. Skipping conversation."
@@ -1239,12 +1251,12 @@ async def main():
             docs = index_data["docs"]
 
             print(
-                f"Loaded both Embedding and BM25 indexes for conversation {i} (Hybrid Search)"
+                f"Loaded both Embedding and BM25 indexes for conversation {conv_id} (Hybrid Search)"
             )
 
         elif config.use_emb:
             # Load Embedding index only
-            emb_index_path = emb_index_dir / f"embedding_index_conv_{i}.pkl"
+            emb_index_path = emb_index_dir / f"embedding_index_conv_{conv_id_for_file}.pkl"
             if not emb_index_path.exists():
                 print(
                     f"Error: Index file not found at {emb_index_path}. Skipping conversation."
@@ -1254,7 +1266,7 @@ async def main():
                 emb_index = pickle.load(f)
         else:
             # Load BM25 index only
-            bm25_index_path = bm25_index_dir / f"bm25_index_conv_{i}.pkl"
+            bm25_index_path = bm25_index_dir / f"bm25_index_conv_{conv_id_for_file}.pkl"
             if not bm25_index_path.exists():
                 print(
                     f"Error: Index file not found at {bm25_index_path}. Skipping conversation."
