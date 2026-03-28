@@ -37,7 +37,7 @@ def get_llm_provider() -> LLMProvider:
     try:
         # Try to get from DI container
         return get_bean_by_type(LLMProvider)
-    except:
+    except Exception:
         # If not found in DI container, create directly
         logger.info("LLMProvider not found in DI container, creating directly...")
         return LLMProvider("openai")

@@ -612,7 +612,7 @@ class TestCleanWhitespace:
     def test_empty_text(self):
         """Test empty text"""
         assert clean_whitespace("") == ""
-        assert clean_whitespace(None) == None
+        assert clean_whitespace(None) is None
 
     def test_no_whitespace(self):
         """Test text without whitespace characters"""
