@@ -69,11 +69,18 @@ class DocumentBase(Document):
 
         # Case 2: Object is BaseModel
         if isinstance(obj, BaseModel):
+            # Track if any datetime fields were converted (for list/set sampling optimization)
+            converted_fields = []
             for field_name, value in obj:
                 new_path = f"{path}.{field_name}" if path else field_name
                 new_value = self._recursive_datetime_check(value, new_path, depth + 1)
                 # Directly update value using __dict__ to avoid triggering validators
                 obj.__dict__[field_name] = new_value
+                # Check if the field value changed (for datetime conversion detection)
+                if new_value is not value:
+                    converted_fields.append(field_name)
+            # Attach conversion info for upstream list/set sampling optimization
+            obj.__dict__["_datetime_converted_fields"] = converted_fields
             return obj
 
         # Case 3: Object is list, tuple, or set (performance optimization)
@@ -82,16 +89,29 @@ class DocumentBase(Document):
             if not obj:
                 return obj
 
-            # List: only check the first element
+            # Helper function to check if a BaseModel has converted datetime fields
+            def has_converted_datetimes(item):
+                if isinstance(item, BaseModel):
+                    return bool(item.__dict__.get("_datetime_converted_fields", []))
+                return item is not self._recursive_datetime_check(item, "", depth + 2)
+
+            # List: only check the first element, but handle BaseModel specially
             if isinstance(obj, list):
                 first_item = obj[0]
                 first_checked = self._recursive_datetime_check(
                     first_item, f"{path}[0]", depth + 2
                 )
 
-                # If the first element hasn't changed, assume the whole list doesn't need conversion
-                if first_checked is first_item:
-                    return obj
+                # For BaseModel, check if any datetime fields were converted
+                # For other types, check if reference changed
+                if isinstance(first_item, BaseModel):
+                    # BaseModel is modified in-place, so we check the conversion marker
+                    if not has_converted_datetimes(first_item):
+                        return obj
+                else:
+                    # If the first element hasn't changed, assume the whole list doesn't need conversion
+                    if first_checked is first_item:
+                        return obj
 
             # Set: check any one element (set is unordered, take the first one)
             elif isinstance(obj, set):
@@ -100,9 +120,14 @@ class DocumentBase(Document):
                     sample_item, f"{path}[sample]", depth + 2
                 )
 
-                # If the sampled element hasn't changed, assume the whole set doesn't need conversion
-                if sample_checked is sample_item:
-                    return obj
+                # For BaseModel, check if any datetime fields were converted
+                if isinstance(sample_item, BaseModel):
+                    if not has_converted_datetimes(sample_item):
+                        return obj
+                else:
+                    # If the sampled element hasn't changed, assume the whole set doesn't need conversion
+                    if sample_checked is sample_item:
+                        return obj
 
             # Tuple: only check the first 3 elements
             elif isinstance(obj, tuple):
@@ -115,7 +140,12 @@ class DocumentBase(Document):
                     checked = self._recursive_datetime_check(
                         item, f"{path}[{idx}]", depth + 2
                     )
-                    if checked is not item:
+                    # For BaseModel, check conversion marker; for others, check reference
+                    if isinstance(item, BaseModel):
+                        if has_converted_datetimes(item):
+                            need_transform = True
+                            break
+                    elif checked is not item:
                         need_transform = True
                         break
 
