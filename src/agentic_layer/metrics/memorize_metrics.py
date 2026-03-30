@@ -83,7 +83,7 @@ MEMORIZE_REQUESTS_TOTAL = Counter(
     name='memorize_requests_total',
     description='Total number of memorize requests',
     labelnames=['space_id', 'raw_data_type', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -104,7 +104,7 @@ MEMORIZE_ERRORS_TOTAL = Counter(
     name='memorize_errors_total',
     description='Total number of memorize errors',
     labelnames=['space_id', 'raw_data_type', 'stage', 'error_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -126,7 +126,7 @@ MEMORIZE_DURATION_SECONDS = Histogram(
     name='memorize_duration_seconds',
     description='End-to-end duration of memorize operation in seconds',
     labelnames=['space_id', 'raw_data_type', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.API_CALL,  # 10ms - 30s for API calls
 )
@@ -146,7 +146,7 @@ MEMORIZE_MESSAGES_TOTAL = Counter(
     name='memorize_messages_total',
     description='Total number of messages processed for memorization',
     labelnames=['space_id', 'raw_data_type', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -167,7 +167,7 @@ BOUNDARY_DETECTION_TOTAL = Counter(
     name='boundary_detection_total',
     description='Total number of boundary detection results',
     labelnames=['space_id', 'raw_data_type', 'result', 'trigger_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -185,7 +185,7 @@ MEMCELL_EXTRACTED_TOTAL = Counter(
     name='memcell_extracted_total',
     description='Total number of MemCells extracted',
     labelnames=['space_id', 'raw_data_type', 'trigger_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -206,7 +206,7 @@ MEMORY_EXTRACTION_STAGE_DURATION_SECONDS = Histogram(
     name='memory_extraction_stage_duration_seconds',
     description='Duration of individual memory extraction stages in seconds',
     labelnames=['space_id', 'raw_data_type', 'stage'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.ML_INFERENCE,  # LLM inference buckets
 )
@@ -227,7 +227,7 @@ MEMORY_EXTRACTED_TOTAL = Counter(
     name='memory_extracted_total',
     description='Total number of memories extracted by type',
     labelnames=['space_id', 'raw_data_type', 'memory_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -244,7 +244,7 @@ EXTRACT_MEMORY_REQUESTS_TOTAL = Counter(
     name='extract_memory_requests_total',
     description='Total number of extract_memory calls by memory type',
     labelnames=['space_id', 'raw_data_type', 'memory_type', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='memory_layer',
 )
 """
@@ -262,7 +262,7 @@ EXTRACT_MEMORY_DURATION_SECONDS = Histogram(
     name='extract_memory_duration_seconds',
     description='Duration of extract_memory calls by memory type in seconds',
     labelnames=['space_id', 'raw_data_type', 'memory_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='memory_layer',
     buckets=HistogramBuckets.ML_INFERENCE,  # LLM inference buckets
 )

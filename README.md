@@ -18,7 +18,7 @@
 [![Ask DeepWiki][deepwiki-badge]][deepwiki]
 [![License][license-badge]][license] -->
 
-<!-- <p><strong>Share EverOS Repository</strong></p>
+<!-- <p><strong>Share EverMemOS Repository</strong></p>
 
 [![][share-x-shield]][share-x-link]
 [![][share-linkedin-shield]][share-linkedin-link]
@@ -58,7 +58,7 @@
 
 <br>
 
-- [Welcome to EverOS][welcome]
+- [Welcome to EverMemOS][welcome]
 - [Use Cases][use-cases]
 - [Quick Start][quick-start]
 - [API Usage][api-usage]
@@ -73,9 +73,9 @@
 
 </details>
 
-## Welcome to EverOS
+## Welcome to EverMemOS
 
-Welcome to EverOS! Join our community to help improve the project and collaborate with talented developers worldwide.
+Welcome to EverMemOS! Join our community to help improve the project and collaborate with talented developers worldwide.
 
 | Community | Purpose |
 | :-------- | :------ |
@@ -137,9 +137,9 @@ See the [code][usecase-got-link] for more details.
 
 <br>
 
-[![EverOS Claude Code Plugin][usecase-claude-image]][usecase-claude-link]
+[![EverMemOS Claude Code Plugin][usecase-claude-image]][usecase-claude-link]
 
-**EverOS Claude Code Plugin**
+**EverMemOS Claude Code Plugin**
 
 Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
 See the [code][usecase-claude-link] for more details.
@@ -160,11 +160,11 @@ See the [live demo][usecase-graph-link].
 
 > 💬 **More than memory — it's foresight.**
 
-**EverOS** enables AI to not only remember what happened, but understand the meaning behind memories and use them to guide decisions. Achieving **93% reasoning accuracy** on the LoCoMo benchmark, EverOS provides long-term memory capabilities for conversational AI agents through structured extraction, intelligent retrieval, and progressive profile building.
+**EverMemOS** enables AI to not only remember what happened, but understand the meaning behind memories and use them to guide decisions. Achieving **93% reasoning accuracy** on the LoCoMo benchmark, EverMemOS provides long-term memory capabilities for conversational AI agents through structured extraction, intelligent retrieval, and progressive profile building.
 
-![EverOS Architecture Overview][overview-image]
+![EverMemOS Architecture Overview][overview-image]
 
-**How it works:** EverOS extracts structured memories from conversations (Encoding), organizes them into episodes and profiles (Consolidation), and intelligently retrieves relevant context when needed (Retrieval).
+**How it works:** EverMemOS extracts structured memories from conversations (Encoding), organizes them into episodes and profiles (Consolidation), and intelligently retrieves relevant context when needed (Retrieval).
 
 📄 [Paper][paper-link] • 📚 [Vision & Overview][overview-doc] • 🏗️ [Architecture][architecture-doc] • 📖 [Full Documentation][full-docs]
 
@@ -172,7 +172,7 @@ See the [live demo][usecase-graph-link].
 
 <br>
 
-## Why EverOS?
+## Why EverMemOS?
 
 - 🎯 **93% Accuracy** - Best-in-class performance on LoCoMo benchmark
 - 🚀 **Production Ready** - Enterprise-grade with Milvus vector DB, Elasticsearch, MongoDB, and Redis
@@ -180,9 +180,9 @@ See the [live demo][usecase-graph-link].
 - 📊 **Multi-Modal Memory** - Episodes, facts, preferences, relations
 - 🔍 **Smart Retrieval** - BM25, embeddings, or agentic search
 
-![EverOS Overall Benchmark Results][benchmark-summary-image]
+![EverMemOS Overall Benchmark Results][benchmark-summary-image]
 
-*EverOS outperforms existing memory systems across all major benchmarks* -->
+*EverMemOS outperforms existing memory systems across all major benchmarks* -->
 
 <br>
 <div align="right">
@@ -209,8 +209,8 @@ docker --version  # Should be 20.10+
 
 ```bash
 # 1. Clone and navigate
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
+git clone https://github.com/EverMind-AI/EverMemOS.git
+cd EverMemOS
 
 # 2. Start Docker services
 docker compose up -d
@@ -349,11 +349,11 @@ See the [Demo Guide][interactive-demos] for details.
 
 ## Evaluation & Benchmarking
 
-EverOS achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming comparable memory systems.
+EverMemOS achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming comparable memory systems.
 
 ### Benchmark Results
 
-![EverOS Benchmark Results][benchmark-image]
+![EverMemOS Benchmark Results][benchmark-image]
 
 ### Supported Benchmarks
 
@@ -368,13 +368,13 @@ EverOS achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming 
 uv sync --group evaluation
 
 # Run smoke test (quick verification)
-uv run python -m evaluation.cli --dataset locomo --system everos --smoke
+uv run python -m evaluation.cli --dataset locomo --system evermemos --smoke
 
 # Run full evaluation
-uv run python -m evaluation.cli --dataset locomo --system everos
+uv run python -m evaluation.cli --dataset locomo --system evermemos
 
 # View results
-cat evaluation/results/locomo-everos/report.txt
+cat evaluation/results/locomo-evermemos/report.txt
 ```
 
 📊 [Full Evaluation Guide][evaluation-guide] • 📈 [Complete Results][evaluation-results-link]
@@ -388,7 +388,7 @@ cat evaluation/results/locomo-everos/report.txt
 
 ## GitHub Codespaces
 
-EverOS supports [GitHub Codespaces][codespaces-link] for cloud-based development. This eliminates the need to set up Docker, manage local network configurations, or worry about environment compatibility issues.
+EverMemOS supports [GitHub Codespaces][codespaces-link] for cloud-based development. This eliminates the need to set up Docker, manage local network configurations, or worry about environment compatibility issues.
 
 [![Open in GitHub Codespaces][codespaces-badge]][codespaces-project-link]
 
@@ -425,7 +425,7 @@ All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automa
 
 ## Questions
 
-EverOS is available on these AI-powered Q&A platforms. They can help you find answers quickly and accurately in multiple languages, covering everything from basic setup to advanced implementation details.
+EverMemOS is available on these AI-powered Q&A platforms. They can help you find answers quickly and accurately in multiple languages, covering everything from basic setup to advanced implementation details.
 
 | Service | Link |
 | ------- | ---- |
@@ -454,7 +454,7 @@ EverOS is available on these AI-powered Q&A platforms. They can help you find an
 
 ## Contributing
 
-We love open-source energy! Whether you are squashing bugs, shipping features, sharpening docs, or just tossing in wild ideas, every PR moves EverOS forward. Browse [Issues][issues-link] to find your perfect entry point, then show us what you have got. Let us build the future of memory together.
+We love open-source energy! Whether you are squashing bugs, shipping features, sharpening docs, or just tossing in wild ideas, every PR moves EverMemOS forward. Browse [Issues][issues-link] to find your perfect entry point, then show us what you have got. Let us build the future of memory together.
 
 <br>
 
@@ -462,16 +462,16 @@ We love open-source energy! Whether you are squashing bugs, shipping features, s
 >
 > **Welcome all kinds of contributions** 🎉
 >
-> Join us in building EverOS better! Every contribution makes a difference, from code to documentation. Share your projects on social media to inspire others!
+> Join us in building EverMemOS better! Every contribution makes a difference, from code to documentation. Share your projects on social media to inspire others!
 >
-> Connect with one of the EverOS maintainers [@elliotchen200][elliot-x-link] on 𝕏 or [@cyfyifanchen][cyfyifanchen-link] on GitHub for project updates, discussions, and collaboration opportunities.
+> Connect with one of the EverMemOS maintainers [@elliotchen200][elliot-x-link] on 𝕏 or [@cyfyifanchen][cyfyifanchen-link] on GitHub for project updates, discussions, and collaboration opportunities.
 
 ![divider][divider-light]
 ![divider][divider-dark]
 
 ### Code Contributors
 
-[![EverOS Contributors][contributors-image]][contributors]
+[![EverMemOS Contributors][contributors-image]][contributors]
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -497,9 +497,9 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 
 <!-- Navigation -->
 [readme-top]: #readme-top
-[welcome]: #welcome-to-everos
+[welcome]: #welcome-to-evermemos
 [introduction]: #introduction
-[why-everos]: #why-everos
+[why-evermemos]: #why-evermemos
 [use-cases]: #use-cases
 [quick-start]: #quick-start
 [prerequisites]: #prerequisites
@@ -519,7 +519,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
 <!-- Images -->
-[banner-gif]: https://github.com/user-attachments/assets/73634a04-9ea8-4ce8-a8ec-eb71925df968
+[banner-gif]: https://github.com/user-attachments/assets/f661bf5b-9942-4142-8310-9d4c5cc57924
 [competition-image]: https://github.com/user-attachments/assets/739a0939-ab1d-4659-81c4-0842466afde9
 [usecase-openclaw-image]: https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f
 [usecase-live2d-image]: https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26
@@ -571,7 +571,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [mongodb]: https://www.mongodb.com/
 [elasticsearch]: https://www.elastic.co/elasticsearch/
 [milvus]: https://milvus.io/
-[license]: https://github.com/EverMind-AI/EverOS/blob/main/LICENSE
+[license]: https://github.com/EverMind-AI/EverMemOS/blob/main/LICENSE
 [documentation]: docs/
 [api-docs]: docs/api_docs/memory_api.md
 [lang-en-readme]: README.md
@@ -579,12 +579,12 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [competition-link]: https://luma.com/n88icl03
 [starter-kit]: docs/STARTER_KIT.md
 [discord]: https://discord.gg/gYep5nQRZJ
-[wechat]: https://github.com/EverMind-AI/EverOS/discussions/67
-[deepwiki]: https://deepwiki.com/EverMind-AI/EverOS
-[usecase-openclaw-link]: https://github.com/EverMind-AI/EverOS/tree/agent_memory
-[usecase-openclaw-plugin-link]: https://github.com/EverMind-AI/EverOS/tree/agent_memory/everos-openclaw-plugin
+[wechat]: https://github.com/EverMind-AI/EverMemOS/discussions/67
+[deepwiki]: https://deepwiki.com/EverMind-AI/EverMemOS
+[usecase-openclaw-link]: https://github.com/EverMind-AI/EverMemOS/tree/agent_memory
+[usecase-openclaw-plugin-link]: https://github.com/EverMind-AI/EverMemOS/tree/agent_memory/evermemos-openclaw-plugin
 [ten-framework-link]: https://github.com/TEN-framework/ten-framework
-[usecase-live2d-link]: https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-EverOS
+[usecase-live2d-link]: https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-EverMemOS
 [usecase-computer-link]: https://screenshot-analysis-vercel.vercel.app/
 [usecase-got-link]: https://github.com/EverMind-AI/evermem_got_demo
 [usecase-claude-link]: https://github.com/EverMind-AI/evermem-claude-code
@@ -611,14 +611,14 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [locomo-link]: https://github.com/snap-research/locomo
 [longmemeval-link]: https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned
 [personamem-link]: https://huggingface.co/datasets/bowen-upenn/PersonaMem
-[evaluation-results-link]: https://huggingface.co/datasets/EverMind-AI/EverOS_Eval_Results
+[evaluation-results-link]: https://huggingface.co/datasets/EverMind-AI/EverMemOS_Eval_Results
 [codespaces-link]: https://github.com/features/codespaces
-[codespaces-project-link]: https://codespaces.new/EverMind-AI/EverOS
-[issues-link]: https://github.com/EverMind-AI/EverOS/issues
+[codespaces-project-link]: https://codespaces.new/EverMind-AI/EverMemOS
+[issues-link]: https://github.com/EverMind-AI/EverMemOS/issues
 [elliot-x-link]: https://x.com/elliotchen200
 [cyfyifanchen-link]: https://github.com/cyfyifanchen
-[contributors-image]: https://contrib.rocks/image?repo=EverMind-AI/EverOS
-[contributors]: https://github.com/EverMind-AI/EverOS/graphs/contributors
+[contributors-image]: https://contrib.rocks/image?repo=EverMind-AI/EverMemOS
+[contributors]: https://github.com/EverMind-AI/EverMemOS/graphs/contributors
 [contributing-doc]: CONTRIBUTING.md
 [citation-doc]: docs/CITATION.md
 [acknowledgments-doc]: docs/ACKNOWLEDGMENTS.md
@@ -628,17 +628,17 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [reddit]: https://www.reddit.com/r/EverMindAI/
 
 <!-- Share Badges -->
-[share-linkedin-link]: https://linkedin.com/feed/?shareActive=true&text=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-linkedin-link]: https://linkedin.com/feed/?shareActive=true&text=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-linkedin-shield]: https://img.shields.io/badge/-Share%20on%20LinkedIn-555?labelColor=555&style=flat-square&logo=linkedin&logoColor=white
-[share-mastodon-link]: https://mastodon.social/share?text=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-mastodon-link]: https://mastodon.social/share?text=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-mastodon-shield]: https://img.shields.io/badge/-Share%20on%20Mastodon-555?labelColor=555&logo=mastodon&logoColor=white&style=flat-square
-[share-reddit-link]: https://www.reddit.com/submit?title=EverOS%3A%20persistent%20memory%20for%20all%20agents.%20Open%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-reddit-link]: https://www.reddit.com/submit?title=EverMemOS%3A%20persistent%20memory%20for%20all%20agents.%20Open%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-reddit-shield]: https://img.shields.io/badge/-Share%20on%20Reddit-555?labelColor=555&logo=reddit&logoColor=white&style=flat-square
-[share-telegram-link]: https://t.me/share/url?text=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-telegram-link]: https://t.me/share/url?text=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-telegram-shield]: https://img.shields.io/badge/-Share%20on%20Telegram-555?labelColor=555&logo=telegram&logoColor=white&style=flat-square
-[share-weibo-link]: https://service.weibo.com/share/share.php?sharesource=weibo&title=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-weibo-link]: https://service.weibo.com/share/share.php?sharesource=weibo&title=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-weibo-shield]: https://img.shields.io/badge/-Share%20on%20Weibo-555?labelColor=555&logo=sinaweibo&logoColor=white&style=flat-square
-[share-whatsapp-link]: https://api.whatsapp.com/send?text=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-whatsapp-link]: https://api.whatsapp.com/send?text=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.%0A%0Ahttps%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-whatsapp-shield]: https://img.shields.io/badge/-Share%20on%20WhatsApp-555?labelColor=555&logo=whatsapp&logoColor=white&style=flat-square
-[share-x-link]: https://x.com/intent/tweet?text=Check%20this%20repo%20out.%0A%0AEverOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverOS
+[share-x-link]: https://x.com/intent/tweet?text=Check%20this%20repo%20out.%0A%0AEverMemOS%3A%20persistent%20memory%20for%20all%20agents.%0A%0AOpen%20source%20and%20ready%20to%20use.&url=https%3A%2F%2Fgithub.com%2FEverMind-AI%2FEverMemOS
 [share-x-shield]: https://img.shields.io/badge/-Share%20on%20X-555?labelColor=555&logo=x&logoColor=white&style=flat-square

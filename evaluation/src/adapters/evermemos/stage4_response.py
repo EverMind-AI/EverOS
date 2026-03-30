@@ -11,8 +11,8 @@ import pandas as pd
 from tqdm import tqdm
 
 
-from evaluation.src.adapters.everos.config import ExperimentConfig
-from evaluation.src.adapters.everos.prompts.answer_prompts import ANSWER_PROMPT
+from evaluation.src.adapters.evermemos.config import ExperimentConfig
+from evaluation.src.adapters.evermemos.prompts.answer_prompts import ANSWER_PROMPT
 
 # Use Memory Layer's LLMProvider
 from memory_layer.llm.llm_provider import LLMProvider

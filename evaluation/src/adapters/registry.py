@@ -12,14 +12,14 @@ _ADAPTER_REGISTRY: Dict[str, Type[BaseAdapter]] = {}
 # Adapter module mapping (for lazy loading)
 _ADAPTER_MODULES = {
     # Local systems
-    "everos": "evaluation.src.adapters.everos_adapter",
+    "evermemos": "evaluation.src.adapters.evermemos_adapter",
     
     # Online API systems
     "mem0": "evaluation.src.adapters.mem0_adapter",
     "memos": "evaluation.src.adapters.memos_adapter",
     "memu": "evaluation.src.adapters.memu_adapter",
     "zep": "evaluation.src.adapters.zep_adapter",
-    "everos_api": "evaluation.src.adapters.everos_api_adapter",
+    "evermemos_api": "evaluation.src.adapters.evermemos_api_adapter",
     "memobase": "evaluation.src.adapters.memobase_adapter",
     "supermemory": "evaluation.src.adapters.supermemory_adapter",
     
@@ -33,8 +33,8 @@ def register_adapter(name: str):
     Decorator for registering adapters.
     
     Usage:
-        @register_adapter("everos")
-        class EverOSAdapter(BaseAdapter):
+        @register_adapter("evermemos")
+        class EverMemOSAdapter(BaseAdapter):
             ...
     """
     def decorator(cls: Type[BaseAdapter]):

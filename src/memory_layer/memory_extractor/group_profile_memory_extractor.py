@@ -1,4 +1,4 @@
-"""Group Profile Memory Extraction for EverOS."""
+"""Group Profile Memory Extraction for EverMemOS."""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional

@@ -1,7 +1,7 @@
 {
   "id": "evermind-ai-everos",
   "name": "EverOS OpenClaw Plugin",
-  "description": "Full-lifecycle memory management for OpenClaw through the EverOS backend, powered by EverOS",
+  "description": "Full-lifecycle memory management for OpenClaw through the EverOS backend, powered by EverMemOS",
   "version": "1.4.0",
   "kind": "context-engine",
   "contextEngine": true,

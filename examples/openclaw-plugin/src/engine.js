@@ -159,7 +159,7 @@ export function createContextEngine(pluginMeta, pluginConfig, logger) {
       }
 
       try {
-        // Pre-filter tool messages before convertMessage: EverOS only accepts
+        // Pre-filter tool messages before convertMessage: EverMemOS only accepts
         // user/assistant roles; filtering here avoids unnecessary conversion work.
         const converted = newMessages
           .filter((m) => m.role !== "toolResult" && m.role !== "tool")

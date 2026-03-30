@@ -4,7 +4,7 @@
 
 ## Overview
 
-EverOS supports organizing conversations into **groups** using `group_id` and `group_name`. This allows you to:
+EverMemOS supports organizing conversations into **groups** using `group_id` and `group_name`. This allows you to:
 
 - **Separate messages** into logical groups for better organization
 - **Filter and retrieve memories** by group for targeted searches
@@ -319,7 +319,7 @@ for group in result.get("memories", []):
 
 ## Generating Group Summaries
 
-EverOS can generate contextual summaries within a group because it understands:
+EverMemOS can generate contextual summaries within a group because it understands:
 
 - **Who participated** - User details and roles
 - **What was discussed** - Full conversation context

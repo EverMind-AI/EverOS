@@ -2,9 +2,9 @@
 CLI entry point for the evaluation framework.
 
 Usage:
-    python -m evaluation.cli --dataset locomo --system everos
-    python -m evaluation.cli --dataset locomo --system everos --smoke 10
-    python -m evaluation.cli --dataset locomo --system everos --stages search answer evaluate
+    python -m evaluation.cli --dataset locomo --system evermemos
+    python -m evaluation.cli --dataset locomo --system evermemos --smoke 10
+    python -m evaluation.cli --dataset locomo --system evermemos --stages search answer evaluate
 """
 
 import asyncio
@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-# Environment initialization - must be done before importing EverOS components
+# Environment initialization - must be done before importing EverMemOS components
 # Reference: src/bootstrap.py initialization logic
 
 # Add project paths
@@ -69,7 +69,7 @@ async def main():
         "--dataset", type=str, required=True, help="Dataset name (e.g., locomo)"
     )
     parser.add_argument(
-        "--system", type=str, required=True, help="System name (e.g., everos)"
+        "--system", type=str, required=True, help="System name (e.g., evermemos)"
     )
     parser.add_argument(
         "--stages",
@@ -298,7 +298,7 @@ async def main():
                 console.print(f"[dim]⚠️  Failed to cleanup adapter resources: {e}[/dim]")
 
         # Only systems using rerank need cleanup
-        systems_need_rerank = ["everos"]
+        systems_need_rerank = ["evermemos"]
         if args.system in systems_need_rerank:
             try:
                 from agentic_layer import rerank_service

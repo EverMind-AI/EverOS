@@ -41,7 +41,7 @@ class OnlineAPIAdapter(BaseAdapter):
 
     Provides common functionality:
     1. LLM Provider initialization
-    2. Answer generation (reuses EverOS implementation)
+    2. Answer generation (reuses EverMemOS implementation)
     3. Standard format conversion helper methods
 
     Subclasses only need to implement:

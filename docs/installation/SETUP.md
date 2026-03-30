@@ -2,7 +2,7 @@
 
 [Home](../../README.md) > [Docs](../README.md) > [Installation](.) > Setup
 
-This guide provides comprehensive instructions for installing and setting up EverOS.
+This guide provides comprehensive instructions for installing and setting up EverMemOS.
 
 ---
 
@@ -38,7 +38,7 @@ This guide provides comprehensive instructions for installing and setting up Eve
 
 ### Operating Systems
 
-EverOS has been tested on:
+EverMemOS has been tested on:
 - macOS (Intel and Apple Silicon)
 - Linux (Ubuntu 20.04+, Debian, etc.)
 - Windows (via WSL2)
@@ -47,7 +47,7 @@ EverOS has been tested on:
 
 ## Installation Methods
 
-EverOS can be installed in two ways:
+EverMemOS can be installed in two ways:
 
 1. **Docker Installation (Recommended)** - Use Docker Compose for all dependency services
 2. **Manual Installation** - Install and configure each service manually
@@ -61,8 +61,8 @@ This guide covers the Docker installation method. For manual installation, see [
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
+git clone https://github.com/EverMind-AI/EverMemOS.git
+cd EverMemOS
 ```
 
 ### Step 2: Start Docker Services
@@ -322,7 +322,7 @@ If this works, your installation is successful!
 For more troubleshooting help, see:
 - [Docker Setup Guide](DOCKER_SETUP.md)
 - [Configuration Guide](../usage/CONFIGURATION_GUIDE.md)
-- [GitHub Issues](https://github.com/EverMind-AI/EverOS/issues)
+- [GitHub Issues](https://github.com/EverMind-AI/EverMemOS/issues)
 
 ---
 
@@ -353,10 +353,10 @@ After installing services manually, update connection strings in `.env` accordin
 
 ## Next Steps
 
-Now that EverOS is installed, you can:
+Now that EverMemOS is installed, you can:
 
 1. **[Try the Demos](../usage/DEMOS.md)** - Interactive examples showing memory extraction and chat
-2. **[Learn the API](../api_docs/memory_api.md)** - Integrate EverOS into your application
+2. **[Learn the API](../api_docs/memory_api.md)** - Integrate EverMemOS into your application
 3. **[Explore Usage Examples](../usage/USAGE_EXAMPLES.md)** - Common usage patterns
 4. **[Run Evaluations](../../evaluation/README.md)** - Test on benchmark datasets
 

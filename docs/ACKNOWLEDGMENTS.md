@@ -20,7 +20,7 @@ Thank you to the Nemori project for providing a self-organising long-term memory
 
 ## Open Source Libraries
 
-EverOS is built on top of excellent open-source libraries and frameworks:
+EverMemOS is built on top of excellent open-source libraries and frameworks:
 
 ### Core Framework
 - **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, fast web framework for building APIs
@@ -47,11 +47,11 @@ EverOS is built on top of excellent open-source libraries and frameworks:
 
 Thanks to all the developers who have contributed to this project!
 
-See the full list of contributors on [GitHub](https://github.com/EverMind-AI/EverOS/graphs/contributors).
+See the full list of contributors on [GitHub](https://github.com/EverMind-AI/EverMemOS/graphs/contributors).
 
 <!-- Future: Add contributor image grid
-<a href="https://github.com/EverMind-AI/EverOS/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=EverMind-AI/EverOS" />
+<a href="https://github.com/EverMind-AI/EverMemOS/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=EverMind-AI/EverMemOS" />
 </a>
 -->
 
@@ -70,15 +70,15 @@ Thanks to our community for their valuable feedback, bug reports, and feature su
 
 ## Supporting Organizations
 
-- **Shanda Group** - For supporting the development of EverOS
+- **Shanda Group** - For supporting the development of EverMemOS
 
 ---
 
 ## Special Thanks
 
 - To everyone who has starred the repository
-- To those who have shared EverOS with others
-- To researchers and developers using EverOS in their projects
+- To those who have shared EverMemOS with others
+- To researchers and developers using EverMemOS in their projects
 
 ---
 

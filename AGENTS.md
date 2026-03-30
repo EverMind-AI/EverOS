@@ -1,4 +1,4 @@
-# AGENTS.md - AI Assistant Guide for EverOS
+# AGENTS.md - AI Assistant Guide for EverMemOS
 
 > This file provides project context for AI coding assistants (Claude Code, GitHub Copilot, Cursor, Codeium, etc.) to better understand and work with this project.
 >
@@ -6,7 +6,7 @@
 
 ## Project Summary
 
-**EverOS** is an enterprise-grade long-term memory system for conversational AI agents.
+**EverMemOS** is an enterprise-grade long-term memory system for conversational AI agents.
 
 | Attribute | Value |
 |-----------|-------|
@@ -50,7 +50,7 @@
 ## Directory Structure
 
 ```
-EverOS/
+EverMemOS/
 ├── src/                          # Main source code
 │   ├── run.py                    # Application entry point
 │   ├── app.py                    # FastAPI app configuration

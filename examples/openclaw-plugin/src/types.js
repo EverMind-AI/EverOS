@@ -1,11 +1,11 @@
 /**
- * JSDoc type definitions for EverOS ContextEngine
+ * JSDoc type definitions for EverMemOS ContextEngine
  * This file contains type definitions used across all ContextEngine modules
  */
 
 /**
- * @typedef {Object} EverOSConfig
- * @property {string} serverUrl - EverOS server URL (e.g., "http://localhost:1995")
+ * @typedef {Object} EverMemOSConfig
+ * @property {string} serverUrl - EverMemOS server URL (e.g., "http://localhost:1995")
  * @property {string} userId - User ID for memory storage
  * @property {string} groupId - Group ID for shared memory
  * @property {number} topK - Number of memories to retrieve
@@ -23,7 +23,7 @@
 /**
  * @typedef {Object} BootstrapContext
  * @property {Object} api - OpenClaw API object
- * @property {EverOSConfig} pluginConfig - Plugin configuration
+ * @property {EverMemOSConfig} pluginConfig - Plugin configuration
  */
 
 /**

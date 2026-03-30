@@ -4,7 +4,7 @@
 
 ## Overview
 
-EverOS adopts a layered architecture design that separates concerns and enables scalability. The system is built around two main cognitive tracks: **memory construction** and **memory perception**, which work together to create a comprehensive AI memory system.
+EverMemOS adopts a layered architecture design that separates concerns and enables scalability. The system is built around two main cognitive tracks: **memory construction** and **memory perception**, which work together to create a comprehensive AI memory system.
 
 For a high-level overview of the system framework, see [System Framework in Overview](OVERVIEW.md#system-framework).
 
@@ -12,7 +12,7 @@ For a high-level overview of the system framework, see [System Framework in Over
 
 ## Layered Architecture
 
-EverOS is organized into six main layers, each with specific responsibilities:
+EverMemOS is organized into six main layers, each with specific responsibilities:
 
 ### 1. Agentic Layer
 
@@ -115,7 +115,7 @@ Foundation layer providing cross-cutting concerns.
 ## Project Structure
 
 ```
-everos-opensource/
+evermemos-opensource/
 ├── src/                              # Source code directory
 │   ├── agentic_layer/                # Agentic layer - unified memory interface
 │   ├── memory_layer/                 # Memory layer - memory extraction
@@ -251,7 +251,7 @@ MemCells are the fundamental building blocks of the memory system. Each MemCell 
 
 ### Memory Types
 
-EverOS supports multiple memory types, each serving different purposes:
+EverMemOS supports multiple memory types, each serving different purposes:
 
 - **Episodes** - Coherent conversation threads on specific topics
 - **Profiles** - User characteristics and attributes
@@ -320,7 +320,7 @@ See [Docker Setup Guide](installation/DOCKER_SETUP.md) for service-specific conf
 
 ## For Developers
 
-If you're contributing to EverOS, these resources will help:
+If you're contributing to EverMemOS, these resources will help:
 
 - **[Development Guide](dev_docs/development_guide.md)** - Architecture details and best practices
 - **[Development Standards](dev_docs/development_standards.md)** - Code standards and conventions

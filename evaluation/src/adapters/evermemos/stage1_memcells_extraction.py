@@ -57,12 +57,12 @@ from memory_layer.profile_manager import (
 )
 
 # In-memory storage implementations for evaluation
-from evaluation.src.adapters.everos.tools import (
+from evaluation.src.adapters.evermemos.tools import (
     InMemoryClusterStorage,
     InMemoryProfileStorage,
 )
 
-from evaluation.src.adapters.everos.config import ExperimentConfig
+from evaluation.src.adapters.evermemos.config import ExperimentConfig
 from core.oxm.mongo.mongo_utils import generate_object_id_str
 from datetime import datetime, timedelta
 from pathlib import Path

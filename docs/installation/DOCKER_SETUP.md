@@ -2,7 +2,7 @@
 
 [Home](../../README.md) > [Docs](../README.md) > [Installation](.) > Docker Setup
 
-This guide provides detailed information about Docker setup and configuration for EverOS.
+This guide provides detailed information about Docker setup and configuration for EverMemOS.
 
 ---
 
@@ -22,7 +22,7 @@ This guide provides detailed information about Docker setup and configuration fo
 
 ## Overview
 
-EverOS uses Docker Compose to manage four essential services:
+EverMemOS uses Docker Compose to manage four essential services:
 - **MongoDB** - Primary database
 - **Elasticsearch** - Keyword search engine
 - **Milvus** - Vector database
@@ -227,10 +227,10 @@ All services use Docker volumes to persist data:
 docker volume ls
 
 # Inspect a volume
-docker volume inspect everos_mongodb_data
-docker volume inspect everos_elasticsearch_data
-docker volume inspect everos_milvus_data
-docker volume inspect everos_redis_data
+docker volume inspect evermemos_mongodb_data
+docker volume inspect evermemos_elasticsearch_data
+docker volume inspect evermemos_milvus_data
+docker volume inspect evermemos_redis_data
 ```
 
 ### Backup Data
@@ -442,7 +442,7 @@ Services communicate on a shared network:
 
 ```yaml
 networks:
-  everos-network:
+  evermemos-network:
     driver: bridge
 ```
 

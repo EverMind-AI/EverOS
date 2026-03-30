@@ -1,13 +1,13 @@
 """
-EverOS HTTP Memory API adapter (evaluation side).
+EverMemOS HTTP Memory API adapter (evaluation side).
 
-This adapter talks to EverOS server endpoints:
+This adapter talks to EverMemOS server endpoints:
 - POST   /api/v1/memories         (ingest single message)
 - GET    /api/v1/memories/search  (retrieve memories)
 
 Note:
 - This file was missing in the current workspace; registry.py still references it as
-  `evaluation.src.adapters.everos_api_adapter`.
+  `evaluation.src.adapters.evermemos_api_adapter`.
 """
 
 from __future__ import annotations
@@ -25,10 +25,10 @@ from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, SearchResult
 
 
-@register_adapter("everos_api")
-class EverOSAPIAdapter(OnlineAPIAdapter):
+@register_adapter("evermemos_api")
+class EverMemOSAPIAdapter(OnlineAPIAdapter):
     """
-    Adapter for EverOS Memory API.
+    Adapter for EverMemOS Memory API.
 
     Design:
     - Ingest each conversation once (do NOT duplicate per-speaker perspectives).
@@ -129,7 +129,7 @@ class EverOSAPIAdapter(OnlineAPIAdapter):
 
     # --- overrides to avoid per-speaker duplication on ingest/search ---
     def _need_dual_perspective(self, speaker_a: str, speaker_b: str) -> bool:
-        # EverOS Memory API stores group chat stream; do not split perspectives.
+        # EverMemOS Memory API stores group chat stream; do not split perspectives.
         return False
 
     def _conversation_to_messages(
@@ -167,8 +167,8 @@ class EverOSAPIAdapter(OnlineAPIAdapter):
         return out
 
     def _get_answer_prompt(self) -> str:
-        """Use EverOS CoT answer prompt (same as everos adapter)."""
-        from evaluation.src.adapters.everos.prompts.answer_prompts import ANSWER_PROMPT
+        """Use EverMemOS CoT answer prompt (same as evermemos adapter)."""
+        from evaluation.src.adapters.evermemos.prompts.answer_prompts import ANSWER_PROMPT
         return ANSWER_PROMPT
 
     # --- required abstract methods (OnlineAPIAdapter hooks) ---
@@ -290,7 +290,7 @@ class EverOSAPIAdapter(OnlineAPIAdapter):
         retrieve_method = str(
             search_cfg.get("retrieve_method") or search_cfg.get("mode") or "keyword"
         )
-        system_name = str(self.config.get("name") or "everos_api")
+        system_name = str(self.config.get("name") or "evermemos_api")
 
         retrieval_metadata = {
             "system": system_name,

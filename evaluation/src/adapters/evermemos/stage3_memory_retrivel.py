@@ -15,14 +15,14 @@ import asyncio
 from tqdm import tqdm
 
 
-from evaluation.src.adapters.everos.config import ExperimentConfig
+from evaluation.src.adapters.evermemos.config import ExperimentConfig
 
-# from evaluation.src.adapters.everos.tools.embedding_provider import EmbeddingProvider
-# from evaluation.src.adapters.everos.tools.reranker_provider import RerankerProvider
+# from evaluation.src.adapters.evermemos.tools.embedding_provider import EmbeddingProvider
+# from evaluation.src.adapters.evermemos.tools.reranker_provider import RerankerProvider
 from agentic_layer.vectorize_service import get_vectorize_service
 from agentic_layer import rerank_service
 
-from evaluation.src.adapters.everos.tools import agentic_utils
+from evaluation.src.adapters.evermemos.tools import agentic_utils
 
 from memory_layer.llm.llm_provider import LLMProvider
 

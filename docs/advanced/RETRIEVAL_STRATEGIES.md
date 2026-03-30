@@ -2,7 +2,7 @@
 
 [Home](../../README.md) > [Docs](../README.md) > [Advanced](.) > Retrieval Strategies
 
-This guide explains the different retrieval strategies available in EverOS and when to use each one.
+This guide explains the different retrieval strategies available in EverMemOS and when to use each one.
 
 ---
 
@@ -20,7 +20,7 @@ This guide explains the different retrieval strategies available in EverOS and w
 
 ## Overview
 
-EverOS provides two main retrieval strategies:
+EverMemOS provides two main retrieval strategies:
 
 1. **Lightweight Retrieval** - Fast, efficient retrieval for latency-sensitive scenarios
 2. **Agentic Retrieval** - Intelligent, multi-round retrieval for complex queries

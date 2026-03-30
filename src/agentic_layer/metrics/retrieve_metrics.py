@@ -46,7 +46,7 @@ RETRIEVE_REQUESTS_TOTAL = Counter(
     name='retrieve_requests_total',
     description='Total number of memory retrieval requests',
     labelnames=['memory_type', 'retrieve_method', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -63,7 +63,7 @@ RETRIEVE_ERRORS_TOTAL = Counter(
     name='retrieve_errors_total',
     description='Total number of retrieval errors',
     labelnames=['retrieve_method', 'stage', 'error_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -84,7 +84,7 @@ RETRIEVE_DURATION_SECONDS = Histogram(
     name='retrieve_duration_seconds',
     description='End-to-end duration of memory retrieval in seconds',
     labelnames=['memory_type', 'retrieve_method'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.API_CALL,  # 10ms - 30s for API calls
 )
@@ -103,7 +103,7 @@ RETRIEVE_STAGE_DURATION_SECONDS = Histogram(
     name='retrieve_stage_duration_seconds',
     description='Duration of individual retrieval stages in seconds',
     labelnames=['retrieve_method', 'stage', 'memory_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.DATABASE,  # 1ms - 5s for database operations
 )
@@ -123,7 +123,7 @@ RETRIEVE_RESULTS_COUNT = Histogram(
     name='retrieve_results_count',
     description='Number of results returned from retrieval',
     labelnames=['memory_type', 'retrieve_method'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=(0, 1, 5, 10, 20, 50, 100, 200, 500, 1000),
 )

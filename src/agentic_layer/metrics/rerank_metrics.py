@@ -40,7 +40,7 @@ RERANK_REQUESTS_TOTAL = Counter(
     name='rerank_requests_total',
     description='Total number of rerank requests',
     labelnames=['provider', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -56,7 +56,7 @@ RERANK_FALLBACK_TOTAL = Counter(
     name='rerank_fallback_total',
     description='Total number of rerank fallback events',
     labelnames=['primary_provider', 'fallback_provider', 'reason'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -73,7 +73,7 @@ RERANK_ERRORS_TOTAL = Counter(
     name='rerank_errors_total',
     description='Total number of rerank errors',
     labelnames=['provider', 'error_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -93,7 +93,7 @@ RERANK_DURATION_SECONDS = Histogram(
     name='rerank_duration_seconds',
     description='Duration of rerank operations in seconds',
     labelnames=['provider'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.ML_INFERENCE,  # 10ms - 10s for ML inference
 )
@@ -111,7 +111,7 @@ RERANK_DOCUMENTS_TOTAL = Histogram(
     name='rerank_documents_count',
     description='Number of documents reranked per request',
     labelnames=['provider'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=(1, 5, 10, 20, 50, 100, 200, 500, 1000),
 )

@@ -1,5 +1,5 @@
 {
-  "name": "EverOS",
+  "name": "EverMemOS",
   "dockerComposeFile": ["../docker-compose.yaml", "docker-compose.devcontainer.yaml"],
   "service": "devcontainer",
   "workspaceFolder": "/workspace",
@@ -43,7 +43,7 @@
 
   "forwardPorts": [1995, 27017, 19200, 19530, 6379, 9000, 9001],
   "portsAttributes": {
-    "1995": { "label": "EverOS API", "onAutoForward": "notify" },
+    "1995": { "label": "EverMemOS API", "onAutoForward": "notify" },
     "27017": { "label": "MongoDB", "onAutoForward": "silent" },
     "19200": { "label": "Elasticsearch", "onAutoForward": "silent" },
     "19530": { "label": "Milvus", "onAutoForward": "silent" },

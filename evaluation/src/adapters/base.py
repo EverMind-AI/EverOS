@@ -28,7 +28,7 @@ class BaseAdapter(ABC):
         Ingest conversation data and build index (Add stage).
         
         This method encapsulates system-specific data ingestion and index building:
-        - For EverOS: MemCell extraction + BM25/Embedding index building
+        - For EverMemOS: MemCell extraction + BM25/Embedding index building
         - For Mem0: Direct storage to vector database
         - For other systems: Their respective implementations
         
@@ -98,7 +98,7 @@ class BaseAdapter(ABC):
         Build lazy-loaded index metadata.
         
         Default: return None (online API systems don't need index)
-        Local systems (e.g., EverOS) should override this method
+        Local systems (e.g., EverMemOS) should override this method
         
         Args:
             conversations: Conversation list

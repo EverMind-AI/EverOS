@@ -4,7 +4,7 @@
 
 ## Overview
 
-EverOS uses **conversation metadata** to provide context for memory extraction and retrieval. Properly configured metadata enables:
+EverMemOS uses **conversation metadata** to provide context for memory extraction and retrieval. Properly configured metadata enables:
 
 - **Better memory extraction** - Understanding who said what and in what context
 - **Accurate retrieval filtering** - Querying memories by user, group, or time range
@@ -21,7 +21,7 @@ This guide explains when and how to control metadata for optimal results.
 
 **Use Case:** Group chats, team discussions, meetings with multiple participants
 
-**Why:** Without `user_details`, EverOS cannot distinguish between speakers or understand their roles.
+**Why:** Without `user_details`, EverMemOS cannot distinguish between speakers or understand their roles.
 
 ```json
 {
@@ -52,7 +52,7 @@ This guide explains when and how to control metadata for optimal results.
 
 **Use Case:** 1:1 conversations between a user and an AI assistant
 
-**Why:** The `scene` and `scene_desc` fields tell EverOS which messages are from the AI (to potentially exclude from personal memory extraction).
+**Why:** The `scene` and `scene_desc` fields tell EverMemOS which messages are from the AI (to potentially exclude from personal memory extraction).
 
 ```json
 {
@@ -124,7 +124,7 @@ This guide explains when and how to control metadata for optimal results.
 
 **Use Case:** Setting organization-wide defaults that apply when specific group config is missing
 
-**Why:** EverOS supports a default configuration that applies when a specific `group_id` config is not found.
+**Why:** EverMemOS supports a default configuration that applies when a specific `group_id` config is not found.
 
 ```python
 # Save default config (no group_id)

@@ -2,7 +2,7 @@
 
 [Home](../../README.md) > [Docs](../README.md) > [Usage](.) > Interactive Demos
 
-This guide provides detailed walkthroughs of EverOS's interactive demos.
+This guide provides detailed walkthroughs of EverMemOS's interactive demos.
 
 ---
 
@@ -18,7 +18,7 @@ This guide provides detailed walkthroughs of EverOS's interactive demos.
 
 ## Overview
 
-EverOS provides two demo modes:
+EverMemOS provides two demo modes:
 
 1. **Simple Demo** - Quick 2-step demo showing basic storage and retrieval
 2. **Full Demo** - Complete workflow with memory extraction and interactive chat
@@ -29,7 +29,7 @@ Both demos require the API server to be running.
 
 ## Simple Demo (Recommended)
 
-The fastest way to experience EverOS! Perfect for first-time users.
+The fastest way to experience EverMemOS! Perfect for first-time users.
 
 ### Prerequisites
 
@@ -70,7 +70,7 @@ uv run python src/bootstrap.py demo/simple_demo.py
 ### Expected Output
 
 ```
-=== EverOS Simple Demo ===
+=== EverMemOS Simple Demo ===
 
 Step 1: Storing conversation messages...
 ✓ Stored message 1: I love playing soccer on weekends
@@ -108,13 +108,13 @@ See [`demo/simple_demo.py`](../../demo/simple_demo.py) for the complete source c
 - ✓ Quick testing
 - ✓ Verifying installation
 - ✓ Understanding core concepts
-- ✓ Demonstrating EverOS to others
+- ✓ Demonstrating EverMemOS to others
 
 ---
 
 ## Full-Featured Demo
 
-Experience the complete EverOS workflow: memory extraction from conversations followed by interactive chat with memory retrieval.
+Experience the complete EverMemOS workflow: memory extraction from conversations followed by interactive chat with memory retrieval.
 
 ### Prerequisites
 
@@ -230,7 +230,7 @@ uv run python src/bootstrap.py demo/chat_with_memory.py
 ##### 1. Select Language
 
 ```
-Welcome to EverOS Chat Demo!
+Welcome to EverMemOS Chat Demo!
 Select language / 选择语言:
   1. English
   2. 中文

@@ -4309,7 +4309,7 @@
       "sender": "user_102",
       "sender_name": "Betty",
       "type": "text",
-      "content": "汇报文档我起了个草稿，主题定为“EverOS Beta 收尾 & 下一步规划”。各自部分我标了 TODO。@Alex @Dylan 记得帮我填下数据和系统图。",
+      "content": "汇报文档我起了个草稿，主题定为“EverMemOS Beta 收尾 & 下一步规划”。各自部分我标了 TODO。@Alex @Dylan 记得帮我填下数据和系统图。",
       "refer_list": []
     },
     {
@@ -4669,7 +4669,7 @@
       "sender": "user_103",
       "sender_name": "Chen",
       "type": "text",
-      "content": "好。记得结尾那句我来写：EverOS，让 AI 真正拥有可控的记忆。",
+      "content": "好。记得结尾那句我来写：EverMemOS，让 AI 真正拥有可控的记忆。",
       "refer_list": []
     },
     {
@@ -4678,7 +4678,7 @@
       "sender": "user_103",
       "sender_name": "Chen",
       "type": "text",
-      "content": "各位辛苦了！EverOS v1.0 项目到此圆满结束。感谢大家这几个月的辛勤付出和协作，我们成功交付了一个优秀的产品。现在项目正式结项，今天的讨论到此结束。再次感谢大家！",
+      "content": "各位辛苦了！EverMemOS v1.0 项目到此圆满结束。感谢大家这几个月的辛勤付出和协作，我们成功交付了一个优秀的产品。现在项目正式结项，今天的讨论到此结束。再次感谢大家！",
       "refer_list": []
     }
   ]

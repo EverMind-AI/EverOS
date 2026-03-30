@@ -1,5 +1,5 @@
 """
-Event Log Extractor for EverOS
+Event Log Extractor for EverMemOS
 
 This module extracts atomic event logs from episode memories for optimized retrieval.
 Each event log contains a time and a list of atomic facts extracted from the episode.

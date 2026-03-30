@@ -1,8 +1,8 @@
-# EverOS Competition Starter Kit
+# EverMemOS Competition Starter Kit
 
 [Home](../README.md) > [Docs](./README.md) > Starter Kit
 
-Welcome to the EverOS Competition! This starter kit will help you get up and running quickly so you can focus on building amazing AI memory applications.
+Welcome to the EverMemOS Competition! This starter kit will help you get up and running quickly so you can focus on building amazing AI memory applications.
 
 > **Join our [Discord](https://discord.gg/gYep5nQRZJ)** to brainstorm ideas, find teammates, and get help from the community!
 
@@ -28,8 +28,8 @@ Welcome to the EverOS Competition! This starter kit will help you get up and run
 
 ```bash
 # Clone the repository
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
+git clone https://github.com/EverMind-AI/EverMemOS.git
+cd EverMemOS
 
 # Start all services with Docker
 docker compose up -d
@@ -86,7 +86,7 @@ Build intelligent agents with long-term, evolving memories.
 
 ### Track 2: Platform Plugins
 
-Develop plugins or SDKs to integrate EverOS everywhere developers work.
+Develop plugins or SDKs to integrate EverMemOS everywhere developers work.
 
 | Idea | Description |
 |------|-------------|
@@ -101,7 +101,7 @@ Develop plugins or SDKs to integrate EverOS everywhere developers work.
 
 ### Track 3: OS Infrastructure
 
-Optimize the EverOS platform: core functionality, performance tuning, and system improvements.
+Optimize the EverMemOS platform: core functionality, performance tuning, and system improvements.
 
 | Idea | Description |
 |------|-------------|
@@ -125,7 +125,7 @@ Optimize the EverOS platform: core functionality, performance tuning, and system
 | Item | Description |
 |------|-------------|
 | **GitHub Repository** | Public repo with your project code |
-| **README.md** | Clear project introduction, setup instructions, and how EverOS is used |
+| **README.md** | Clear project introduction, setup instructions, and how EverMemOS is used |
 | **Video Demo** | 3-5 minute video demonstrating your project and explaining the concept |
 
 ### Optional (Preferred)
@@ -138,7 +138,7 @@ Optimize the EverOS platform: core functionality, performance tuning, and system
 
 - [ ] GitHub repository is public and accessible
 - [ ] README includes project overview and setup instructions
-- [ ] README explains how EverOS powers your solution
+- [ ] README explains how EverMemOS powers your solution
 - [ ] Video demo is 3-5 minutes and covers functionality + concept
 - [ ] (Optional) Live demo URL included in README
 
@@ -154,7 +154,7 @@ We value creative and original approaches. Does your project solve a problem in 
 
 ### Technical Depth
 
-We look for well-engineered projects with clean implementation, effective use of EverOS features, and appropriate technical sophistication for the problem being solved.
+We look for well-engineered projects with clean implementation, effective use of EverMemOS features, and appropriate technical sophistication for the problem being solved.
 
 ### Consumer Value
 

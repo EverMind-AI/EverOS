@@ -16,7 +16,7 @@ VECTORIZE_REQUESTS_TOTAL = Counter(
     name='vectorize_requests_total',
     description='Total number of vectorize (embedding) requests',
     labelnames=['provider', 'operation', 'status'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -33,7 +33,7 @@ VECTORIZE_FALLBACK_TOTAL = Counter(
     name='vectorize_fallback_total',
     description='Total number of vectorize fallback events',
     labelnames=['primary_provider', 'fallback_provider', 'reason'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -50,7 +50,7 @@ VECTORIZE_ERRORS_TOTAL = Counter(
     name='vectorize_errors_total',
     description='Total number of vectorize errors',
     labelnames=['provider', 'operation', 'error_type'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -67,7 +67,7 @@ VECTORIZE_TOKENS_TOTAL = Counter(
     name='vectorize_tokens_total',
     description='Total number of tokens processed for embedding',
     labelnames=['provider'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
 )
 """
@@ -86,7 +86,7 @@ VECTORIZE_DURATION_SECONDS = Histogram(
     name='vectorize_duration_seconds',
     description='Duration of vectorize operations in seconds',
     labelnames=['provider', 'operation'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=HistogramBuckets.ML_INFERENCE,  # 10ms - 10s for ML inference
 )
@@ -105,7 +105,7 @@ VECTORIZE_BATCH_SIZE = Histogram(
     name='vectorize_batch_size',
     description='Batch size of vectorize operations',
     labelnames=['provider', 'operation'],
-    namespace='everos',
+    namespace='evermemos',
     subsystem='agentic',
     buckets=(1, 2, 5, 10, 20, 50, 100, 200, 500),
 )

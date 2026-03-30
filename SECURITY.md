@@ -11,7 +11,7 @@ Please do not open public GitHub issues for security vulnerabilities.
 Report privately by email:
 
 - `evermind@shanda.com`
-- Subject: `EverOS Security Report`
+- Subject: `EverMemOS Security Report`
 
 ## What to Include
 

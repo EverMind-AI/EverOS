@@ -135,7 +135,7 @@ function isLegacyPluginPath(entry, currentLoadPath) {
   if (path.resolve(entry) === path.resolve(currentLoadPath)) return false;
 
   const normalized = entry.replace(/\\/g, "/");
-  return normalized.includes("everos-openclaw-plugin") ||
+  return normalized.includes("evermemos-openclaw-plugin") ||
     normalized.includes("evermind-ai-openclaw-plugin") ||
     normalized.includes("@evermind-ai/openclaw-plugin");
 }
@@ -329,7 +329,7 @@ async function install() {
     } else {
       warn(`EverOS backend is not reachable yet (${health.reason || "unknown reason"}).`);
       warn("You can continue, but memory recall/save will not work until the backend is running.");
-      info("Typical start command: cd EverOS && uv run python src/run.py");
+      info("Typical start command: cd EverMemOS && uv run python src/run.py");
     }
 
     const userId = await promptWithDefault("User ID", DEFAULT_CONFIG.userId);

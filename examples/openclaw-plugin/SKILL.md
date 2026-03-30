@@ -13,7 +13,7 @@ description: |
 author: EverMind
 keywords:
   - everos
-  - everos
+  - evermemos
   - context engine
   - persistent memory
   - openclaw
@@ -127,8 +127,8 @@ If it is not healthy, tell the user plainly:
 If the user asks how to start the backend, give the shortest useful path:
 
 ```bash
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
+git clone https://github.com/EverMind-AI/EverMemOS.git
+cd EverMemOS
 docker compose up -d
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
@@ -197,7 +197,7 @@ Merge-safe patch:
 jq '
   .plugins = (.plugins // {}) |
   .plugins.load = (.plugins.load // {}) |
-  .plugins.load.paths = ((.plugins.load.paths // []) + ["/path/to/everos-openclaw-plugin"] | unique) |
+  .plugins.load.paths = ((.plugins.load.paths // []) + ["/path/to/evermemos-openclaw-plugin"] | unique) |
   .plugins.allow = ((.plugins.allow // []) + ["evermind-ai-everos"] | unique) |
   .plugins.slots = (.plugins.slots // {}) |
   .plugins.slots.memory = "none" |
@@ -290,7 +290,7 @@ OpenClaw config file:
 
 - Back up `~/.openclaw/openclaw.json`
 - Back up the EverOS backend data directory or database
-- Back up the EverOS `.env` and deployment configuration
+- Back up the EverMemOS `.env` and deployment configuration
 ```
 
 ---

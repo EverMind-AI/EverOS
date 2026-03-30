@@ -1,10 +1,10 @@
-# Contributing to EverOS
+# Contributing to EverMemOS
 
 Thanks for contributing. This guide is intentionally short so you can start fast.
 
 ## Fast Path
 
-1. Check existing [issues](https://github.com/EverMind-AI/EverOS/issues) and [discussions](https://github.com/EverMind-AI/EverOS/discussions).
+1. Check existing [issues](https://github.com/EverMind-AI/EverMemOS/issues) and [discussions](https://github.com/EverMind-AI/EverMemOS/discussions).
 2. Fork the repo and create a branch.
 3. Run the local setup.
 4. Make a focused change.
@@ -13,8 +13,8 @@ Thanks for contributing. This guide is intentionally short so you can start fast
 ## Local Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/EverOS.git
-cd EverOS
+git clone https://github.com/YOUR_USERNAME/EverMemOS.git
+cd EverMemOS
 
 # install dependencies
 uv sync --group dev
@@ -87,8 +87,8 @@ Keep PRs focused. Smaller PRs review faster.
 
 ## Reporting Bugs and Features
 
-- Bug report: <https://github.com/EverMind-AI/EverOS/issues/new?template=bug_report.md>
-- Feature request: <https://github.com/EverMind-AI/EverOS/issues/new?template=feature_request.md>
+- Bug report: <https://github.com/EverMind-AI/EverMemOS/issues/new?template=bug_report.md>
+- Feature request: <https://github.com/EverMind-AI/EverMemOS/issues/new?template=feature_request.md>
 
 ## Security Reports
 

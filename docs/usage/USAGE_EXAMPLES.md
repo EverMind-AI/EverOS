@@ -2,7 +2,7 @@
 
 [Home](../../README.md) > [Docs](../README.md) > [Usage](.) > Usage Examples
 
-This guide provides comprehensive examples of how to use EverOS in different scenarios.
+This guide provides comprehensive examples of how to use EverMemOS in different scenarios.
 
 ---
 
@@ -32,7 +32,7 @@ Before using these examples, ensure you have:
 
 ## 1. Simple Demo - Quick Start
 
-The fastest way to experience EverOS! Just 2 steps to see memory storage and retrieval in action.
+The fastest way to experience EverMemOS! Just 2 steps to see memory storage and retrieval in action.
 
 ### What It Does
 
@@ -74,7 +74,7 @@ See the complete code at [`demo/simple_demo.py`](../../demo/simple_demo.py)
 
 ## 2. Full Demo - Memory Extraction & Chat
 
-Experience the complete EverOS workflow: memory extraction from conversations followed by interactive chat with memory retrieval.
+Experience the complete EverMemOS workflow: memory extraction from conversations followed by interactive chat with memory retrieval.
 
 ### Prerequisites
 
@@ -148,22 +148,22 @@ Verify everything works with limited data:
 ```bash
 # Default smoke test
 # First conversation, first 10 messages, first 3 questions
-uv run python -m evaluation.cli --dataset locomo --system everos --smoke
+uv run python -m evaluation.cli --dataset locomo --system evermemos --smoke
 
 # Custom smoke test: 20 messages, 5 questions
-uv run python -m evaluation.cli --dataset locomo --system everos \
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --smoke --smoke-messages 20 --smoke-questions 5
 
 # Test different datasets
-uv run python -m evaluation.cli --dataset longmemeval --system everos --smoke
-uv run python -m evaluation.cli --dataset personamem --system everos --smoke
+uv run python -m evaluation.cli --dataset longmemeval --system evermemos --smoke
+uv run python -m evaluation.cli --dataset personamem --system evermemos --smoke
 
 # Test specific stages (e.g., only search and answer)
-uv run python -m evaluation.cli --dataset locomo --system everos \
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --smoke --stages search answer
 
 # View smoke test results quickly
-cat evaluation/results/locomo-everos-smoke/report.txt
+cat evaluation/results/locomo-evermemos-smoke/report.txt
 ```
 
 ### Full Evaluation
@@ -171,29 +171,29 @@ cat evaluation/results/locomo-everos-smoke/report.txt
 Run complete evaluation on entire datasets:
 
 ```bash
-# Evaluate EverOS on LoCoMo benchmark
-uv run python -m evaluation.cli --dataset locomo --system everos
+# Evaluate EvermemOS on LoCoMo benchmark
+uv run python -m evaluation.cli --dataset locomo --system evermemos
 
 # Evaluate on other datasets
-uv run python -m evaluation.cli --dataset longmemeval --system everos
-uv run python -m evaluation.cli --dataset personamem --system everos
+uv run python -m evaluation.cli --dataset longmemeval --system evermemos
+uv run python -m evaluation.cli --dataset personamem --system evermemos
 
 # Use --run-name to distinguish multiple runs (useful for A/B testing)
-uv run python -m evaluation.cli --dataset locomo --system everos --run-name baseline
-uv run python -m evaluation.cli --dataset locomo --system everos --run-name experiment1
+uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name baseline
+uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name experiment1
 
 # Resume from checkpoint if interrupted (automatic)
 # Just re-run the same command - it will detect and resume from checkpoint
-uv run python -m evaluation.cli --dataset locomo --system everos
+uv run python -m evaluation.cli --dataset locomo --system evermemos
 ```
 
 ### View Results
 
 ```bash
 # Results are saved to evaluation/results/{dataset}-{system}[-{run-name}]/
-cat evaluation/results/locomo-everos/report.txt          # Summary metrics
-cat evaluation/results/locomo-everos/eval_results.json   # Detailed per-question results
-cat evaluation/results/locomo-everos/pipeline.log        # Execution logs
+cat evaluation/results/locomo-evermemos/report.txt          # Summary metrics
+cat evaluation/results/locomo-evermemos/eval_results.json   # Detailed per-question results
+cat evaluation/results/locomo-evermemos/pipeline.log        # Execution logs
 ```
 
 ### Evaluation Pipeline
@@ -218,7 +218,7 @@ The evaluation pipeline consists of 4 stages with automatic checkpointing and re
 
 ## 4. Direct API Usage
 
-Use the Memory API to integrate EverOS into your application.
+Use the Memory API to integrate EverMemOS into your application.
 
 ### Prerequisites
 
@@ -280,7 +280,7 @@ For complete API documentation, see [Memory API Documentation](../api_docs/memor
 
 ### Retrieve Memories
 
-EverOS provides two retrieval modes: **Lightweight** (fast) and **Agentic** (intelligent).
+EverMemOS provides two retrieval modes: **Lightweight** (fast) and **Agentic** (intelligent).
 
 #### Lightweight Retrieval
 
@@ -372,12 +372,12 @@ For complete details, see:
 
 ### Python SDK Usage
 
-Use EverOS in your Python applications:
+Use EverMemOS in your Python applications:
 
 ```python
 import requests
 
-class EverOSClient:
+class EverMemOSClient:
     def __init__(self, base_url="http://localhost:1995"):
         self.base_url = base_url
 
@@ -400,7 +400,7 @@ class EverOSClient:
         return response.json()
 
 # Usage
-client = EverOSClient()
+client = EverMemOSClient()
 
 # Store memory
 client.store_memory({

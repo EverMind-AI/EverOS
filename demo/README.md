@@ -1,7 +1,7 @@
-# Demo - EverOS Interactive Examples
+# Demo - EverMemOS Interactive Examples
 
 
-This directory contains interactive demos showcasing the core functionality of EverOS.
+This directory contains interactive demos showcasing the core functionality of EverMemOS.
 
 ## 📂 Directory Structure
 
@@ -46,7 +46,7 @@ demo/
 
 ### 1. `simple_demo.py` - Quick Start Example ⭐
 
-**The simplest way to experience EverOS!** Just 67 lines of code demonstrating the complete memory workflow.
+**The simplest way to experience EverMemOS!** Just 67 lines of code demonstrating the complete memory workflow.
 
 **What it demonstrates:**
 - 💾 **Store**: Save conversation messages via HTTP API
@@ -153,7 +153,7 @@ Command-line interface for conversing with memory-enabled AI agents.
 
 ### Option A: Super Simple Mode (Recommended for Beginners) ⭐
 
-The fastest way to experience EverOS! Just 2 terminals:
+The fastest way to experience EverMemOS! Just 2 terminals:
 
 ```bash
 # Terminal 1: Start the API server (required)

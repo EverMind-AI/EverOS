@@ -1,4 +1,4 @@
-# EverOS Evaluation Framework
+# EverMemOS Evaluation Framework
 
 A unified, modular evaluation framework for benchmarking memory systems on standard datasets.
 
@@ -6,7 +6,7 @@ A unified, modular evaluation framework for benchmarking memory systems on stand
 
 ### Evaluation Scope
 
-In addition to **EverOS**, this framework supports evaluation of several influential memory systems in the industry:
+In addition to **EverMemOS**, this framework supports evaluation of several influential memory systems in the industry:
 - **Mem0** 
 - **MemOS** 
 - **Zep** 
@@ -45,7 +45,7 @@ During our evaluation, we identified several issues in existing open-source refe
 | Zep       | 90.84      | 81.91     | 77.26    | 75.00       | 85.22   | 1411           | web API/v3 (2025.11)                       | gpt-4.1-mini    |
 | MemOS     | 85.37      | 79.43     | 75.08    | 64.58       | 80.76   | 2498           | web API/v1 (2025.11)                       | gpt-4.1-mini    |
 | MemU      | 74.91      | 72.34     | 43.61    | 54.17       | 66.67   | 3964           | web API/v1 (2025.11)                      | gpt-4.1-mini    |
-| EverOS | 96.08      | 91.13     | 89.72    | 70.83       | 92.32   | 2298           | open-source EverOS v1.0.0 companion | gpt-4.1-mini    |
+| EverMemOS | 96.08      | 91.13     | 89.72    | 70.83       | 92.32   | 2298           | open-source EverMemOS v1.0.0 companion | gpt-4.1-mini    |
 
 *Full-context: using the whole conversation as context for answering questions.
 
@@ -54,16 +54,16 @@ During our evaluation, we identified several issues in existing open-source refe
 
 | Longmemeval | Single-session-user  | Single-session-assistant  | Single-session-preference  | Multi-session  | Knowledge-update  | Temporal-reasoning  | Overall |
 |-------------|----------------------|---------------------------|----------------------------|----------------|-------------------|---------------------|---------|
-| EverOS   | 100.00               | 78.57                     | 96.67                      | 78.45          | 87.18             | 71.18               | 82.00   |
+| EverMemOS   | 100.00               | 78.57                     | 96.67                      | 78.45          | 87.18             | 71.18               | 82.00   |
 
-> **Note on Reproducibility**: To ensure the reproducibility of our evaluation, we provide full evaluation intermediate data for all methods. You can access the data at [EverMind-AI/EverOS_Eval_Results](https://huggingface.co/datasets/EverMind-AI/EverOS_Eval_Results).
+> **Note on Reproducibility**: To ensure the reproducibility of our evaluation, we provide full evaluation intermediate data for all methods. You can access the data at [EverMind-AI/EverMemOS_Eval_Results](https://huggingface.co/datasets/EverMind-AI/EverMemOS_Eval_Results).
 
 
 ## 🌟 Key Features
 
 ### Unified & Modular Framework
 - **One codebase for all**: No need to write separate code for each dataset or system
-- **Plug-and-play systems**: Support multiple memory systems (EverOS, Mem0, MemOS, MemU, etc.)
+- **Plug-and-play systems**: Support multiple memory systems (EverMemOS, Mem0, MemOS, MemU, etc.)
 - **Multiple benchmarks**: LoCoMo, LongMemEval, PersonaMem out of the box
 - **Consistent evaluation**: All systems evaluated with the same pipeline and metrics
 
@@ -92,7 +92,7 @@ evaluation/
 │   └── utils/          # Configuration, logging, I/O
 ├── config/
 │   ├── datasets/       # Dataset configurations (locomo.yaml, etc.)
-│   ├── systems/        # System configurations (everos.yaml, etc.)
+│   ├── systems/        # System configurations (evermemos.yaml, etc.)
 │   └── prompts.yaml    # Prompt templates
 ├── data/               # Benchmark datasets
 └── results/            # Evaluation results and logs
@@ -114,7 +114,7 @@ Each stage saves its output and can be resumed independently.
 ### Prerequisites
 
 - Python 3.10+
-- EverOS environment configured (see main project's `env.template`)
+- EverMemOS environment configured (see main project's `env.template`)
 
 ### Data Preparation
 
@@ -154,7 +154,7 @@ The framework will automatically detect and convert non-LoCoMo formats on first 
 Install evaluation-specific dependencies:
 
 ```bash
-# For evaluating local systems (EverOS)
+# For evaluating local systems (EverMemOS)
 uv sync --group evaluation
 
 # For evaluating online API systems (Mem0, MemOS, MemU, etc.)
@@ -163,7 +163,7 @@ uv sync --group evaluation-full
 
 ### Environment Configuration
 
-The evaluation framework reuses most environment variables from the main EverOS `.env` file:
+The evaluation framework reuses most environment variables from the main EverMemOS `.env` file:
 - `LLM_API_KEY`, `LLM_BASE_URL` (for answer generation with GPT-4.1-mini)
 - `VECTORIZE_API_KEY` and  `RERANK_API_KEY` (for embeddings/reranker)
 
@@ -171,7 +171,7 @@ The evaluation framework reuses most environment variables from the main EverOS 
 1. Explicit `api_key` parameter in config
 2. `LLM_API_KEY` environment variable
 
-For testing EverOS, please first configure the whole .env file.
+For testing EverMemOS, please first configure the whole .env file.
 
 **Additional variables for online API systems** (add to `.env` if testing these systems):
 
@@ -195,14 +195,14 @@ Run a quick test with limited data to verify everything works:
 cd /path/to/memsys-opensource
 
 # Default: first conversation, first 10 messages, first 3 questions 
-uv run python -m evaluation.cli --dataset locomo --system everos --smoke
+uv run python -m evaluation.cli --dataset locomo --system evermemos --smoke
 
 # Custom: first conversation, 20 messages, 5 questions
-uv run python -m evaluation.cli --dataset locomo --system everos \
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --smoke --smoke-messages 20 --smoke-questions 5
 
 # You can also evaluate specific conversations with `--from-conv` and `--to-conv` (0-based, end exclusive):
-uv run python -m evaluation.cli --dataset locomo --system everos_custom --from-conv 0 --to-conv 1
+uv run python -m evaluation.cli --dataset locomo --system evermemos_custom --from-conv 0 --to-conv 1
 ```
 
 
@@ -211,13 +211,13 @@ uv run python -m evaluation.cli --dataset locomo --system everos_custom --from-c
 Run the complete benchmark:
 
 ```bash
-# Evaluate EverOS on LoCoMo
-uv run python -m evaluation.cli --dataset locomo --system everos
+# Evaluate EverMemOS on LoCoMo
+uv run python -m evaluation.cli --dataset locomo --system evermemos
 
-# Evaluate EverOS via local API (start server first)
+# Evaluate EverMemOS via local API (start server first)
 uv run python src/run.py
 # Use --clean-groups to clear existing data before Add stage
-uv run python -m evaluation.cli --dataset locomo --system everos_local_api --clean-groups
+uv run python -m evaluation.cli --dataset locomo --system evermemos_local_api --clean-groups
 
 # Evaluate other systems
 uv run python -m evaluation.cli --dataset locomo --system memos
@@ -227,18 +227,18 @@ uv run python -m evaluation.cli --dataset locomo --system mem0 --stages add
 uv run python -m evaluation.cli --dataset locomo --system mem0 --stages search answer evaluate
 
 # Evaluate on other datasets
-uv run python -m evaluation.cli --dataset longmemeval --system everos
-uv run python -m evaluation.cli --dataset personamem --system everos
+uv run python -m evaluation.cli --dataset longmemeval --system evermemos
+uv run python -m evaluation.cli --dataset personamem --system evermemos
 
 # Use --run-name to distinguish multiple runs (useful for A/B testing)
 # Results will be saved to: results/{dataset}-{system}-{run-name}/
-uv run python -m evaluation.cli --dataset locomo --system everos --run-name baseline
-uv run python -m evaluation.cli --dataset locomo --system everos --run-name experiment1
-uv run python -m evaluation.cli --dataset locomo --system everos --run-name 20241107
+uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name baseline
+uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name experiment1
+uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name 20241107
 
 # Resume from checkpoint if interrupted (automatic)
 # Just re-run the same command - it will detect and resume from checkpoint
-uv run python -m evaluation.cli --dataset locomo --system everos
+uv run python -m evaluation.cli --dataset locomo --system evermemos
 
 ```
 
@@ -248,13 +248,13 @@ Results are saved to `evaluation/results/{dataset}-{system}[-{run-name}]/`:
 
 ```bash
 # View summary report
-cat evaluation/results/locomo-everos/report.txt
+cat evaluation/results/locomo-evermemos/report.txt
 
 # View detailed evaluation results
-cat evaluation/results/locomo-everos/eval_results.json
+cat evaluation/results/locomo-evermemos/eval_results.json
 
 # View pipeline execution log
-cat evaluation/results/locomo-everos/pipeline.log
+cat evaluation/results/locomo-evermemos/pipeline.log
 ```
 
 **Result files:**
@@ -330,10 +330,10 @@ Skip completed stages to iterate faster:
 
 ```bash
 # Only run search stage (if add is already done)
-uv run python -m evaluation.cli --dataset locomo --system everos --stages search
+uv run python -m evaluation.cli --dataset locomo --system evermemos --stages search
 
 # Run search, answer, and evaluate (skip add)
-uv run python -m evaluation.cli --dataset locomo --system everos \
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --stages search answer evaluate
 ```
 If you have already done search, and you want to do it again, please remove the "search" (and following stages from the completed_stages in the checkpoint_default.json file):
@@ -353,11 +353,11 @@ Modify system or dataset configurations:
 
 ```bash
 # Copy and edit configuration
-cp evaluation/config/systems/everos.yaml evaluation/config/systems/everos_custom.yaml
-# Edit everos_custom.yaml with your changes
+cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_custom.yaml
+# Edit evermemos_custom.yaml with your changes
 
 # Run with custom config
-uv run python -m evaluation.cli --dataset locomo --system everos_custom
+uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ```
 
 ## 📄 License

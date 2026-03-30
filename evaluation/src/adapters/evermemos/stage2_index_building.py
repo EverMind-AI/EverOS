@@ -12,7 +12,7 @@ from rank_bm25 import BM25Okapi
 import asyncio
 
 
-from evaluation.src.adapters.everos.config import ExperimentConfig
+from evaluation.src.adapters.evermemos.config import ExperimentConfig
 from agentic_layer.vectorize_service import get_vectorize_service
 
 

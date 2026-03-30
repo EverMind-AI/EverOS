@@ -3,7 +3,7 @@ version: '3.8'
 services:
   devcontainer:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
-    container_name: everos-devcontainer
+    container_name: evermemos-devcontainer
     volumes:
       - ..:/workspace:cached
     command: sleep infinity

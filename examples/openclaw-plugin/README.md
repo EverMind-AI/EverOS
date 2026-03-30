@@ -2,7 +2,7 @@
 
 Persistent memory for **OpenClaw** through normal conversation.
 
-This plugin keeps the current OpenClaw `context-engine` architecture and connects it to a self-hosted EverOS backend powered by [EverOS](https://github.com/EverMind-AI/EverOS).
+This plugin keeps the current OpenClaw `context-engine` architecture and connects it to a self-hosted EverOS backend powered by [EverMemOS](https://github.com/EverMind-AI/EverMemOS).
 
 ## What it does
 
@@ -64,8 +64,8 @@ curl http://localhost:1995/health
 If you have not started the EverOS backend yet:
 
 ```bash
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
+git clone https://github.com/EverMind-AI/EverMemOS.git
+cd EverMemOS
 docker compose up -d
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
@@ -152,7 +152,7 @@ everos-install
 
 - `index.js`: plugin entry point (register)
 - `src/engine.js`: ContextEngine lifecycle hooks
-- `src/convert.js`: OpenClaw message to EverOS format conversion
+- `src/convert.js`: OpenClaw message to EverMemOS format conversion
 - `src/api.js`: EverOS backend REST client
 - `src/messages.js`: message normalization and turn collection
 - `src/prompt.js`: memory search response parsing and prompt building

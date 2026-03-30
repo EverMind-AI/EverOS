@@ -1,6 +1,6 @@
-# EverOS Configuration Guide
+# EverMemOS Configuration Guide
 
-This guide provides a detailed explanation of the configuration options in `env.template`. Before deploying EverOS, please copy `env.template` to `.env` and fill in your actual configuration values according to this guide.
+This guide provides a detailed explanation of the configuration options in `env.template`. Before deploying EverMemOS, please copy `env.template` to `.env` and fill in your actual configuration values according to this guide.
 
 > **⚠️ Security Notice**:
 > The `.env` file contains sensitive information (such as API keys and database passwords). Be sure to add it to `.gitignore` and **NEVER** commit it to version control systems.
@@ -63,7 +63,7 @@ Configuration for re-ranking retrieval results to improve relevance.
 
 ## 4. Database Configuration
 
-EverOS relies on multiple database services, typically started via Docker Compose.
+EverMemOS relies on multiple database services, typically started via Docker Compose.
 
 ### Redis
 Used for caching and distributed locks.

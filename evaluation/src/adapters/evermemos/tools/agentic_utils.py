@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 # Import prompts from Python files
-from evaluation.src.adapters.everos.prompts.sufficiency_check_prompts import SUFFICIENCY_CHECK_PROMPT
-from evaluation.src.adapters.everos.prompts.refined_query_prompts import REFINED_QUERY_PROMPT
-from evaluation.src.adapters.everos.prompts.multi_query_prompts import MULTI_QUERY_GENERATION_PROMPT
+from evaluation.src.adapters.evermemos.prompts.sufficiency_check_prompts import SUFFICIENCY_CHECK_PROMPT
+from evaluation.src.adapters.evermemos.prompts.refined_query_prompts import REFINED_QUERY_PROMPT
+from evaluation.src.adapters.evermemos.prompts.multi_query_prompts import MULTI_QUERY_GENERATION_PROMPT
 
 
 def format_documents_for_llm(

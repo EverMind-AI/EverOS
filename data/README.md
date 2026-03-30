@@ -58,7 +58,7 @@ All conversation data files follow the standardized [GroupChatFormat](../data_fo
 
 ### Scenario Types
 
-EverOS supports two core conversation scenarios:
+EverMemOS supports two core conversation scenarios:
 
 - **🤖 Assistant Scenario** (`scene: "assistant"`)
   - Human-AI assistant dialogue
@@ -89,7 +89,7 @@ EverOS supports two core conversation scenarios:
 - **Dylan** - Backend Engineer
 - **Emily** - Frontend Engineer
 
-💡 Explore more details using EverOS!
+💡 Explore more details using EverMemOS!
 
 ### Assistant Scenario (assistant_chat.json)
 
@@ -101,7 +101,7 @@ EverOS supports two core conversation scenarios:
 - Dietary preferences tracking
 - Personal profile building
 
-💡 Use EverOS to explore our personal conversation data and gain deep insights into how the memory system works!
+💡 Use EverMemOS to explore our personal conversation data and gain deep insights into how the memory system works!
 
 ## 🎯 Usage
 
@@ -158,7 +158,7 @@ To add your own conversation data:
 
 ## 🔍 Data Privacy
 
-**Important**: The sample data in this directory is for demonstration purposes only and contains fictional conversations. When using EverOS with real data:
+**Important**: The sample data in this directory is for demonstration purposes only and contains fictional conversations. When using EverMemOS with real data:
 
 - Ensure you have proper consent to process conversation data
 - Follow data privacy regulations (GDPR, CCPA, etc.)

@@ -15,7 +15,7 @@ function cap(s) {
 }
 
 /**
- * Convert OpenClaw AgentMessage to EverOS message format.
+ * Convert OpenClaw AgentMessage to EverMemOS message format.
  * Strips injected memory context from user messages to avoid memory pollution.
  * @param {Object} msg - OpenClaw AgentMessage
  * @returns {{ role: string, content: string }}
@@ -25,7 +25,7 @@ export function convertMessage(msg) {
   let role = msg.role;
   let textContent = "";
 
-  // Only user and assistant are accepted by EverOS; drop system/unknown roles
+  // Only user and assistant are accepted by EverMemOS; drop system/unknown roles
   if (role !== "user" && role !== "assistant") {
     return { role: "user", content: "" };
   }
