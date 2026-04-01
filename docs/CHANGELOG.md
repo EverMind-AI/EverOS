@@ -6,6 +6,17 @@ All notable changes to EverMemOS will be documented in this file.
 
 ---
 
+## [Unreleased] - 2026-03-02
+
+### Added
+- ⚡ **两阶段记忆提取（Two-Phase Memory Extraction）**: 新增 `REALTIME_EVENT_LOG_ONLY` 模式，实时阶段只提取 event_log（原子事实），episodic memory 由后台 `BatchEpisodeWorker` 定时合并多轮上下文后生成，在不丢失数据的前提下保留叙事记忆质量。详见 [使用指南](advanced/TWO_PHASE_EXTRACTION.md)。
+- 🔧 **BatchEpisodeWorker**: 后台定时任务，按 group 聚合 MemCell，批量生成高质量 episodic memory，支持环境变量调优（`BATCH_EPISODE_INTERVAL` / `BATCH_EPISODE_LOOKBACK` / `BATCH_EPISODE_MIN_CELLS`）。
+
+### Fixed
+- 🐛 **客户端初始化解耦**: 修复 `inject_memories=false` 时 `auto_memorize` 静默失效的问题，现在只要 `enabled=true` 就初始化 EverMemOS 客户端，`inject_memories` 仅控制检索注入步骤。
+
+---
+
 ## [1.2.0] - 2025-01-20
 
 ### Changed
