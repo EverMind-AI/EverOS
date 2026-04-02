@@ -83,7 +83,7 @@ class GroupUserProfileMemoryRawRepository(BaseRepository[GroupUserProfileMemory]
             ).update_many({"$set": {"is_latest": False}})
 
             # Update the latest version's is_latest to True
-            if latest_version.is_latest != True:
+            if latest_version.is_latest is not True:
                 latest_version.is_latest = True
                 await latest_version.save(session=session)
                 logger.debug(

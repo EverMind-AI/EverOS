@@ -525,6 +525,12 @@ class FetchMemRequest(BaseModel):
         description="End time for time range filtering (ISO 8601 format)",
         examples=["2024-12-31T23:59:59"],
     )
+    full: Optional[bool] = Field(
+        default=False,
+        description="When set to True, returns the full episode content for episodic memory. "
+        "This includes the complete episode field which is not returned by default for backward compatibility.",
+        examples=[False],
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 

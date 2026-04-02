@@ -82,6 +82,7 @@ class FetchMemoryServiceInterface(ABC):
         end_time: Optional[str] = None,
         version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
         limit: int = 10,
+        full: bool = False,
     ) -> FetchMemResponse:
         """
         Find memories by user ID and optional filters
@@ -94,6 +95,7 @@ class FetchMemoryServiceInterface(ABC):
             end_time: End time for time range filtering (optional)
             version_range: Version range (start, end), closed interval [start, end]
             limit: Limit on number of returned items
+            full: When True, returns full episode content for episodic memory
 
         Returns:
             Memory query response
@@ -345,13 +347,14 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         )
 
     def _convert_episodic_memory(
-        self, episodic_memory, user_details_cache: dict = None
+        self, episodic_memory, user_details_cache: dict = None, full: bool = False
     ) -> EpisodicMemoryModel:
         """Convert episodic memory document to model
 
         Args:
             episodic_memory: Episodic memory document
             user_details_cache: User details cache for batch metadata creation
+            full: When True, includes the full episode content
         """
         # Create metadata with user details from cache
         user_info = (
@@ -369,25 +372,32 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
             phone=user_info.get('phone'),
         )
 
-        return EpisodicMemoryModel(
-            id=str(episodic_memory.id),
-            user_id=episodic_memory.user_id,
-            episode_id=str(episodic_memory.event_id),
-            title=episodic_memory.subject,
-            summary=episodic_memory.summary,
-            participants=episodic_memory.participants or [],
-            location=(
+        # Build the model - include episode only when full=True
+        model_kwargs = {
+            "id": str(episodic_memory.id),
+            "user_id": episodic_memory.user_id,
+            "episode_id": str(episodic_memory.event_id),
+            "title": episodic_memory.subject,
+            "summary": episodic_memory.summary,
+            "participants": episodic_memory.participants or [],
+            "location": (
                 episodic_memory.extend.get("location", "")
                 if episodic_memory.extend
                 else ""
             ),
-            key_events=episodic_memory.keywords or [],
-            group_id=episodic_memory.group_id,
-            group_name=episodic_memory.group_name,
-            created_at=episodic_memory.created_at,
-            updated_at=episodic_memory.updated_at,
-            metadata=metadata,
-        )
+            "key_events": episodic_memory.keywords or [],
+            "group_id": episodic_memory.group_id,
+            "group_name": episodic_memory.group_name,
+            "created_at": episodic_memory.created_at,
+            "updated_at": episodic_memory.updated_at,
+            "metadata": metadata,
+        }
+
+        # Add episode field when full=True (backward compatible)
+        if full:
+            model_kwargs["episode"] = getattr(episodic_memory, "episode", None)
+
+        return EpisodicMemoryModel(**model_kwargs)
 
     def _convert_behavior_history(self, behavior) -> BehaviorHistoryModel:
         """Convert behavior history document to model"""
@@ -522,6 +532,7 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         end_time: Optional[str] = None,
         version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
         limit: int = 10,
+        full: bool = False,
     ) -> FetchMemResponse:
         """
         Find memories by user ID and optional filters
@@ -535,6 +546,7 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
             version_range: Version range (start, end), closed interval [start, end].
                           If not provided or None, get the latest version (ordered by version descending)
             limit: Limit on number of returned items
+            full: When True, returns full episode content for episodic memory
 
         Returns:
             Memory query response
@@ -609,7 +621,7 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
 
                     memories = [
                         self._convert_episodic_memory(
-                            mem, user_details_cache=user_details_cache
+                            mem, user_details_cache=user_details_cache, full=full
                         )
                         for mem in episodic_memories
                     ]

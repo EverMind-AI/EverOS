@@ -273,7 +273,7 @@ uv run python src/bootstrap.py evaluation/locomo_evaluation/stage1_memcells_extr
 
 # Run other evaluation stages
 uv run python src/bootstrap.py evaluation/locomo_evaluation/stage2_index_building.py
-uv run python src/bootstrap.py evaluation/locomo_evaluation/stage3_memory_retrivel.py
+uv run python src/bootstrap.py evaluation/locomo_evaluation/stage3_memory_retrieval.py
 ```
 
 #### 2. Run Demo Scripts
