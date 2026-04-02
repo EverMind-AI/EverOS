@@ -143,7 +143,7 @@ def _convert_timestamp_to_time(
             try:
                 dt = from_iso_format(timestamp)
                 return to_iso_format(dt)
-            except:
+            except Exception:
                 # If parsing fails, return string directly
                 return timestamp
         else:
