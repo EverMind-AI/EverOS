@@ -248,7 +248,6 @@ class SimpleMemoryManager:
                 - "keyword": Keyword retrieval (BM25)
                 - "vector": Vector retrieval
                 - "hybrid": Keyword + Vector + Rerank
-                - "rrf": Keyword + Vector + RRF fusion
                 - "agentic": LLM-guided multi-round retrieval
             show_details: Whether to show detailed information (default: True)
 

@@ -4,7 +4,7 @@
   "last_updated": "2025-01-03",
 
   "paths": {
-    "root": "/Users/admin/Desktop/episodic_memory/memsys",
+    "root": ".",
 
     "data": {
       "description": "Raw data storage paths",
