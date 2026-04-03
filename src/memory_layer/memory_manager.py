@@ -81,6 +81,7 @@ class MemoryManager:
         group_name: Optional[str] = None,
         user_id_list: Optional[List[str]] = None,
         old_memory_list: Optional[List[BaseMemory]] = None,
+        force_boundary: bool = False,
     ) -> tuple[Optional[MemCell], Optional[StatusResult]]:
         """
         Extract MemCell (boundary detection + raw data)
@@ -115,6 +116,7 @@ class MemoryManager:
             group_name=group_name,
             old_memory_list=old_memory_list,
             smart_mask_flag=smart_mask_flag,
+            force_boundary=force_boundary,
         )
 
         extractor = ConvMemCellExtractor(self.llm_provider)

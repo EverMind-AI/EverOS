@@ -284,6 +284,10 @@ class MemorizeRequest(BaseModel):
     # Optional extraction control parameters
     enable_foresight_extraction: bool = True  # Whether to extract foresight
     enable_event_log_extraction: bool = True  # Whether to extract event logs
+    force_boundary: bool = Field(
+        default=False,
+        description="Force the extraction of a new memcell",
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -339,6 +343,10 @@ Enum values from MessageSenderRole:
         default=None,
         description="List of referenced message IDs",
         examples=[["msg_000"]],
+    )
+    force_boundary: bool = Field(
+        default=False,
+        description="Force the extraction of a new memcell",
     )
 
     @model_validator(mode="after")

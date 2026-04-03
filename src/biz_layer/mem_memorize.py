@@ -1317,6 +1317,8 @@ async def memorize(request: MemorizeRequest) -> int:
         request.group_id,
         request.group_name,
         request.user_id_list,
+        old_memory_list=None,
+        force_boundary=request.force_boundary,
     )
     record_extraction_stage(
         space_id=space_id,

@@ -420,4 +420,5 @@ async def convert_simple_message_to_memorize_request(
         group_id=group_id,
         group_name=group_name,
         current_time=timestamp,
+        force_boundary=message_data.get("force_boundary", False),
     )

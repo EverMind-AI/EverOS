@@ -49,7 +49,7 @@ class BoundaryDetectionResult:
 
 @dataclass
 class ConversationMemCellExtractRequest(MemCellExtractRequest):
-    pass
+    force_boundary: bool = False
 
 
 class ConvMemCellExtractor(MemCellExtractor):
@@ -478,7 +478,15 @@ class ConvMemCellExtractor(MemCellExtractor):
             )
 
         # === Normal LLM-based boundary detection ===
-        if request.smart_mask_flag:
+        if getattr(request, 'force_boundary', False):
+            boundary_detection_result = BoundaryDetectionResult(
+                should_end=True,
+                should_wait=False,
+                reasoning="Force boundary requested by API client payload",
+                confidence=1.0,
+                topic_summary="",
+            )
+        elif request.smart_mask_flag:
             boundary_detection_result = await self._detect_boundary(
                 conversation_history=history_message_dict_list[:-1],
                 new_messages=new_message_dict_list,
