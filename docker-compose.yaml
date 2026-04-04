@@ -14,7 +14,6 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./docker/mongodb/init:/docker-entrypoint-initdb.d
     networks:
       - memsys-network
     healthcheck:
