@@ -308,6 +308,45 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
 
     # ==================== Deletion Functionality ====================
 
+    async def delete_by_parent_id(
+        self,
+        parent_id: str,
+        user_id: Optional[str] = None,
+    ) -> int:
+        """
+        Delete episodic memory vectors by parent MemCell ID.
+
+        Args:
+            parent_id: Source MemCell ID
+            user_id: If provided, only delete records for this user.
+
+        Returns:
+            Number of deleted records
+        """
+        try:
+            expr = f'parent_id == "{parent_id}"'
+            if user_id is not None:
+                expr += f' and user_id == "{user_id}"'
+
+            results = await self.collection.query(expr=expr, output_fields=["id"])
+            delete_count = len(results)
+            if delete_count > 0:
+                await self.collection.delete(expr)
+            logger.debug(
+                "✅ Deleted episodic memory vectors by parent_id=%s user_id=%s: %d records",
+                parent_id,
+                user_id,
+                delete_count,
+            )
+            return delete_count
+        except Exception as e:
+            logger.error(
+                "❌ Failed to delete episodic memory vectors by parent_id=%s: %s",
+                parent_id,
+                e,
+            )
+            raise
+
     async def delete_by_event_id(self, event_id: str) -> bool:
         """
         Delete episodic memory document by event_id

@@ -409,3 +409,49 @@ class ForesightEsRepository(BaseRepository[ForesightDoc]):
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 return None
+
+    # ==================== Deletion functionality ====================
+
+    async def delete_expired(
+        self,
+        before: datetime,
+        refresh: bool = False,
+    ) -> int:
+        """
+        Delete foresight documents whose validity period has ended before the given time.
+
+        The end_time is stored as an ISO string inside the ``extend`` field.
+        We use a range query on ``extend.end_time`` to find expired records.
+
+        Args:
+            before: Delete foresights with end_time strictly before this datetime.
+            refresh: Whether to refresh the index immediately
+
+        Returns:
+            Number of deleted documents
+        """
+        try:
+            # extend.end_time is stored as ISO string, e.g. "2024-03-01T00:00:00"
+            before_str = before.isoformat()
+            delete_query = {
+                "range": {
+                    "extend.end_time": {"lt": before_str}
+                }
+            }
+            client = await self.get_client()
+            index_name = self.get_index_name()
+            response = await client.delete_by_query(
+                index=index_name,
+                body={"query": delete_query},
+                refresh=refresh,
+            )
+            deleted_count = response.get("deleted", 0)
+            logger.info(
+                "✅ Deleted expired foresights from ES (before=%s): %d records",
+                before_str,
+                deleted_count,
+            )
+            return deleted_count
+        except Exception as e:
+            logger.error("❌ Failed to delete expired foresights from ES: %s", e)
+            raise

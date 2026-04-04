@@ -292,6 +292,46 @@ class EpisodicMemoryRawRepository(BaseRepository[EpisodicMemory]):
             )
             return False
 
+    async def delete_by_parent_id(
+        self,
+        parent_id: str,
+        user_id: Optional[str] = None,
+        session: Optional[AsyncClientSession] = None,
+    ) -> int:
+        """
+        Delete episodic memories by parent MemCell ID, optionally scoped to a user.
+
+        Args:
+            parent_id: Source MemCell ID (stored as parent_id field)
+            user_id: If provided, only delete records belonging to this user.
+                     Pass None to delete all records (group + personal) for the parent.
+            session: Optional MongoDB session for transaction support
+
+        Returns:
+            Number of deleted records
+        """
+        try:
+            query_filter: Dict[str, Any] = {"parent_id": parent_id}
+            if user_id is not None:
+                query_filter["user_id"] = user_id
+
+            result = await self.model.find(query_filter, session=session).delete()
+            count = result.deleted_count if result else 0
+            logger.info(
+                "✅ Deleted episodic memories by parent_id=%s user_id=%s: %d records",
+                parent_id,
+                user_id,
+                count,
+            )
+            return count
+        except Exception as e:
+            logger.error(
+                "❌ Failed to delete episodic memories by parent_id=%s: %s",
+                parent_id,
+                e,
+            )
+            return 0
+
     async def delete_by_user_id(
         self, user_id: str, session: Optional[AsyncClientSession] = None
     ) -> int:

@@ -266,6 +266,39 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
             logger.error("❌ Failed to retrieve foresights: %s", e)
             return []
 
+    async def delete_expired(
+        self,
+        before: datetime,
+        session: Optional[AsyncClientSession] = None,
+    ) -> int:
+        """
+        Delete foresight records whose validity period ended before the given time.
+
+        Args:
+            before: Delete foresights with end_time strictly before this datetime.
+                    end_time is stored as an ISO date string (YYYY-MM-DD).
+            session: Optional MongoDB session for transaction support
+
+        Returns:
+            Number of deleted records
+        """
+        try:
+            from common_utils.datetime_utils import to_date_str
+
+            before_str = to_date_str(before)
+            query_filter: Dict[str, Any] = {"end_time": {"$lt": before_str}}
+            result = await self.model.find(query_filter, session=session).delete()
+            count = result.deleted_count if result else 0
+            logger.info(
+                "✅ Deleted expired foresights from MongoDB (before=%s): %d records",
+                before_str,
+                count,
+            )
+            return count
+        except Exception as e:
+            logger.error("❌ Failed to delete expired foresights from MongoDB: %s", e)
+            return 0
+
     async def delete_by_id(
         self, memory_id: str, session: Optional[AsyncClientSession] = None
     ) -> bool:

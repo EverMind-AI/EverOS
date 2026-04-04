@@ -354,3 +354,49 @@ class EventLogEsRepository(BaseRepository[EventLogDoc]):
                 e,
             )
             raise
+
+    # ==================== Deletion functionality ====================
+
+    async def delete_by_parent_id(
+        self,
+        parent_id: str,
+        user_id: Optional[str] = None,
+        refresh: bool = False,
+    ) -> int:
+        """
+        Delete event log documents by parent memory ID.
+
+        Args:
+            parent_id: Parent memory ID (MemCell or Episode ID)
+            user_id: If provided, only delete records for this user.
+            refresh: Whether to refresh the index immediately
+
+        Returns:
+            Number of deleted documents
+        """
+        try:
+            filter_queries: List[Dict[str, Any]] = [{"term": {"parent_id": parent_id}}]
+            if user_id is not None:
+                filter_queries.append({"term": {"user_id": user_id}})
+
+            delete_query = {"bool": {"must": filter_queries}}
+            client = await self.get_client()
+            index_name = self.get_index_name()
+            response = await client.delete_by_query(
+                index=index_name,
+                body={"query": delete_query},
+                refresh=refresh,
+            )
+            deleted_count = response.get("deleted", 0)
+            logger.debug(
+                "✅ Deleted event logs by parent_id=%s user_id=%s: %d records",
+                parent_id,
+                user_id,
+                deleted_count,
+            )
+            return deleted_count
+        except Exception as e:
+            logger.error(
+                "❌ Failed to delete event logs by parent_id=%s: %s", parent_id, e
+            )
+            raise

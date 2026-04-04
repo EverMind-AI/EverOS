@@ -79,6 +79,12 @@ from infra_layer.adapters.out.search.repository.episodic_memory_milvus_repositor
 from infra_layer.adapters.out.search.repository.episodic_memory_es_repository import (
     EpisodicMemoryEsRepository,
 )
+from infra_layer.adapters.out.search.repository.event_log_es_repository import (
+    EventLogEsRepository,
+)
+from infra_layer.adapters.out.search.repository.event_log_milvus_repository import (
+    EventLogMilvusRepository,
+)
 from biz_layer.mem_sync import MemorySyncService
 from core.context.context import get_current_app_info
 
@@ -1122,6 +1128,19 @@ async def save_memory_docs(
         saved_episodic: List[Any] = []
 
         for doc in episodic_docs:
+            # Deduplicate: remove any existing records from the same source MemCell
+            # for this specific user before inserting the new one.
+            # Key is (parent_id, user_id) because one MemCell produces one episode
+            # per participant (personal) plus one group episode (user_id=None/"").
+            parent_id = getattr(doc, "parent_id", None)
+            user_id = getattr(doc, "user_id", None)
+            if parent_id:
+                await asyncio.gather(
+                    episodic_repo.delete_by_parent_id(parent_id, user_id=user_id),
+                    episodic_es_repo.delete_by_parent_id(parent_id, user_id=user_id),
+                    episodic_milvus_repo.delete_by_parent_id(parent_id, user_id=user_id),
+                )
+
             saved_doc = await episodic_repo.append_episodic_memory(doc)
             saved_episodic.append(saved_doc)
 
@@ -1158,6 +1177,24 @@ async def save_memory_docs(
     event_log_docs = grouped_docs.get(MemoryType.EVENT_LOG, [])
     if event_log_docs:
         event_log_repo = get_bean_by_type(EventLogRecordRawRepository)
+        event_log_es_repo = get_bean_by_type(EventLogEsRepository)
+        event_log_milvus_repo = get_bean_by_type(EventLogMilvusRepository)
+
+        # Deduplicate: collect unique (parent_id, user_id) pairs and delete old records
+        # before batch-inserting the new ones.
+        seen_parent_keys: set = set()
+        for doc in event_log_docs:
+            parent_id = getattr(doc, "parent_id", None)
+            user_id = getattr(doc, "user_id", None)
+            key = (parent_id, user_id)
+            if parent_id and key not in seen_parent_keys:
+                seen_parent_keys.add(key)
+                await asyncio.gather(
+                    event_log_repo.delete_by_parent_id(parent_id),
+                    event_log_es_repo.delete_by_parent_id(parent_id, user_id=user_id),
+                    event_log_milvus_repo.delete_by_parent_id(parent_id),
+                )
+
         saved_event_logs = await event_log_repo.create_batch(event_log_docs)
         saved_result[MemoryType.EVENT_LOG] = saved_event_logs
 
