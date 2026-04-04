@@ -519,7 +519,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
 <!-- Images -->
-[banner-gif]: https://github.com/user-attachments/assets/f661bf5b-9942-4142-8310-9d4c5cc57924
+[banner-gif]: https://github.com/user-attachments/assets/73634a04-9ea8-4ce8-a8ec-eb71925df968
 [competition-image]: https://github.com/user-attachments/assets/739a0939-ab1d-4659-81c4-0842466afde9
 [usecase-openclaw-image]: https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f
 [usecase-live2d-image]: https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26
