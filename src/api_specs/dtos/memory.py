@@ -922,3 +922,48 @@ class DeleteMemoriesResponse(BaseApiResponse[DeleteMemoriesResult]):
             ]
         }
     }
+
+
+class RestoreMemoriesResult(BaseModel):
+    """Restore soft-deleted memories result data"""
+
+    filters: List[str] = Field(
+        default_factory=list,
+        description="List of filter types used for restoration",
+        examples=[["event_id"], ["user_id"]],
+    )
+    count: int = Field(
+        default=0, description="Number of memories restored", examples=[1, 25]
+    )
+
+
+class RestoreMemoriesResponse(BaseApiResponse[RestoreMemoriesResult]):
+    """Restore soft-deleted memories API response
+
+    Response for POST /api/v1/memories/restore endpoint.
+    """
+
+    result: RestoreMemoriesResult = Field(description="Restore operation result")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "Restore by event_id",
+                    "value": {
+                        "status": "ok",
+                        "message": "Successfully restored 1 memory",
+                        "result": {"filters": ["event_id"], "count": 1},
+                    },
+                },
+                {
+                    "summary": "Restore by user_id",
+                    "value": {
+                        "status": "ok",
+                        "message": "Successfully restored 25 memories",
+                        "result": {"filters": ["user_id"], "count": 25},
+                    },
+                },
+            ]
+        }
+    }
