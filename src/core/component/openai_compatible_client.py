@@ -15,6 +15,7 @@ from core.component.llm.llm_adapter.llm_backend_adapter import LLMBackendAdapter
 from core.component.llm.llm_adapter.openai_adapter import OpenAIAdapter
 from core.component.llm.llm_adapter.anthropic_adapter import AnthropicAdapter
 from core.component.llm.llm_adapter.gemini_adapter import GeminiAdapter
+from core.component.llm.llm_adapter.minimax_adapter import MiniMaxAdapter
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,8 @@ class OpenAICompatibleClient:
                     adapter = AnthropicAdapter(backend_config)
                 elif provider == "gemini":
                     adapter = GeminiAdapter(backend_config)
+                elif provider == "minimax":
+                    adapter = MiniMaxAdapter(backend_config)
                 else:
                     raise ValueError(f"Unsupported provider type: {provider}")
 

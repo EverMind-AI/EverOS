@@ -224,6 +224,10 @@ cp env.template .env
 # Edit .env and set:
 #   - LLM_API_KEY (for memory extraction)
 #   - VECTORIZE_API_KEY (for embedding/rerank)
+#
+# Supported LLM backends: OpenAI, Anthropic Claude, Google Gemini,
+# MiniMax, Azure OpenAI, Ollama, or any OpenAI-compatible API.
+# See src/config/llm_backends.yaml for full configuration details.
 
 # 5. Start server
 uv run python src/run.py
