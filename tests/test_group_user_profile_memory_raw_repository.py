@@ -528,7 +528,7 @@ async def test_batch_get_by_user_groups():
         for user_id, group_id, _ in test_data:
             try:
                 await repo.delete_by_user_group(user_id, group_id)
-            except:
+            except Exception:
                 pass
         raise
 

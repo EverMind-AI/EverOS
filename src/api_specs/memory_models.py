@@ -221,13 +221,37 @@ class PreferenceModel:
 
 @dataclass
 class EpisodicMemoryModel:
-    """Episodic memory model"""
+    """Episodic memory model
+
+    Attributes:
+        id: Unique identifier for the memory
+        user_id: User ID who owns this memory
+        episode_id: Same as id, kept for compatibility
+        title: Memory title/subject
+        summary: Brief summary of the episode (may fallback to content[:200] if no LLM summary available)
+        episode: Full episodic content (returned only when full=True in request)
+        timestamp: When the episode occurred
+        participants: List of participants involved
+        location: Where the episode took place
+        start_time: Start time of the episode
+        end_time: End time of the episode
+        key_events: List of key events extracted
+        group_id: Group ID (for group memories)
+        group_name: Group name
+        created_at: When the memory was created
+        updated_at: When the memory was last updated
+        metadata: Additional metadata
+        extend: Extended fields
+        memcell_event_id_list: List of source memcell event IDs
+        subject: Memory subject (same as title)
+    """
 
     id: str
     user_id: str
     episode_id: str  # Same as id, no difference, kept for compatibility
     title: str
     summary: str
+    episode: Optional[str] = None  # Full episode content (returned only when full=True)
     timestamp: Optional[datetime] = None
     participants: List[str] = field(default_factory=list)
     location: Optional[str] = None

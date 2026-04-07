@@ -31,6 +31,9 @@ Welcome to the EverMemOS Competition! This starter kit will help you get up and 
 git clone https://github.com/EverMind-AI/EverMemOS.git
 cd EverMemOS
 
+# Copy environment template and configure (replace with your API keys)
+cp env.template .env
+
 # Start all services with Docker
 docker compose up -d
 

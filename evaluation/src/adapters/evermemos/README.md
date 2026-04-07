@@ -21,7 +21,7 @@ locomo_evaluation/
 │   └── answer_prompts.py              # Answer generation
 ├── stage1_memcells_extraction.py      # Stage 1: Extract MemCells
 ├── stage2_index_building.py           # Stage 2: Build indexes
-├── stage3_memory_retrivel.py          # Stage 3: Retrieve memories
+├── stage3_memory_retrieval.py          # Stage 3: Retrieve memories
 ├── stage4_response.py                 # Stage 4: Generate responses
 ├── stage5_eval.py                     # Stage 5: Evaluate results
 └── tools/                             # Utility tools
@@ -73,7 +73,7 @@ python evaluation/locomo_evaluation/stage1_memcells_extraction.py
 python evaluation/locomo_evaluation/stage2_index_building.py
 
 # Stage 3: Retrieve memories
-python evaluation/locomo_evaluation/stage3_memory_retrivel.py
+python evaluation/locomo_evaluation/stage3_memory_retrieval.py
 
 # Stage 4: Generate responses
 python evaluation/locomo_evaluation/stage4_response.py

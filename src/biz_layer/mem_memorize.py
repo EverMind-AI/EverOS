@@ -1290,7 +1290,7 @@ async def memorize(request: MemorizeRequest) -> int:
     # ===== Preprocess and get historical data =====
     if request.raw_data_type == RawDataType.CONVERSATION:
         request = await preprocess_conv_request(request, current_time)
-        if request == None:
+        if request is None:
             logger.warning(f"[mem_memorize] preprocess_conv_request returned None")
             return 0
 
@@ -1326,7 +1326,7 @@ async def memorize(request: MemorizeRequest) -> int:
     )
     logger.debug(f"[mem_memorize] Extracting MemCell took: {time.perf_counter() - memcell_start} seconds")
 
-    if memcell_result == None:
+    if memcell_result is None:
         logger.warning(f"[mem_memorize] Skipped extracting MemCell")
         return 0
 
@@ -1345,7 +1345,7 @@ async def memorize(request: MemorizeRequest) -> int:
         )
     logger.info("=" * 80)
 
-    if memcell == None:
+    if memcell is None:
         # No boundary detected, confirm current messages to accumulation (sync_status: -1 -> 0)
         await conversation_data_repo.save_conversation_data(
             request.new_raw_data_list, request.group_id
