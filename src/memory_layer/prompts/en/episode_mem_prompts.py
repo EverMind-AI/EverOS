@@ -22,6 +22,9 @@ IMPORTANT TIME HANDLING:
 - When the conversation mentions relative times (e.g., "yesterday", "last week"), preserve both the original relative expression AND calculate the absolute date
 - Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
 - This dual format supports both absolute and relative time-based questions
+- ALWAYS use ISO 8601 format for timestamps: "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS+HH:MM"
+- Example: "2026-01-23T02:19:25Z" or "2026-01-23T10:07:00+08:00"
+- DO NOT use Chinese characters, weekdays, "AM/PM", "UTC", or any non-standard format
 - All absolute time calculations should be based on the provided start time
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
@@ -63,10 +66,10 @@ Requirements:
 
 
 Example:
-If the conversation start time is "March 14, 2024 (Thursday) at 3:00 PM UTC" and the conversation is about Caroline planning to go hiking:
+If the conversation start time is "2024-03-14T15:00:00Z" and the conversation is about Caroline planning to go hiking:
 {{
     "title": "Caroline's Mount Rainier Hiking Plan March 14, 2024: Weekend Adventure Planning Session",
-    "content": "On March 14, 2024 at 3:00 PM UTC, Caroline expressed interest in hiking this weekend (March 16-17, 2024) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (March 16, 2024) to catch the sunrise and planned to invite friends. She was excited about the trip."
+    "content": "On March 14, 2024 at 3:00 PM UTC, Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16T06:00:00Z) to catch the sunrise and planned to invite friends. She was excited about the trip."
 }}
 
 Return only the JSON object, do not add any other text:
@@ -87,6 +90,9 @@ IMPORTANT TIME HANDLING:
 - When the conversation mentions relative times (e.g., "yesterday", "last week"), preserve both the original relative expression AND calculate the absolute date
 - Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
 - This dual format supports both absolute and relative time-based questions
+- ALWAYS use ISO 8601 format for timestamps: "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS+HH:MM"
+- Example: "2026-01-23T02:19:25Z" or "2026-01-23T10:07:00+08:00"
+- DO NOT use Chinese characters, weekdays, "AM/PM", "UTC", or any non-standard format
 - All absolute time calculations should be based on the provided start time
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
@@ -128,10 +134,10 @@ Requirements:
 
 
 Example:
-If the conversation start time is "March 14, 2024 (Thursday) at 3:00 PM UTC" and the conversation is about Caroline planning to go hiking:
+If the conversation start time is "2024-03-14T15:00:00Z" and the conversation is about Caroline planning to go hiking:
 {{
     "title": "Caroline's Mount Rainier Hiking Plan March 14, 2024: Weekend Adventure Planning Session",
-    "content": "On March 14, 2024 at 3:00 PM UTC, Caroline expressed interest in hiking this weekend (March 16-17, 2024) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (March 16, 2024) to catch the sunrise and planned to invite friends. She was excited about the trip."
+    "content": "On March 14, 2024 at 3:00 PM UTC, Caroline expressed interest in hiking this weekend (2024-03-16 to 2024-03-17) and sought advice. She wanted to see the sunrise at Mount Rainier. When asked about gear by Melanie, Caroline received suggestions: hiking boots, warm clothing, flashlight, water, and high-energy food. Caroline decided to leave early Saturday morning (2024-03-16T06:00:00Z) to catch the sunrise and planned to invite friends. She was excited about the trip."
 }}
 
 Return only the JSON object, do not add any other text:

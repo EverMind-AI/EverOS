@@ -124,7 +124,7 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
                 metadata_json = metadata
                 try:
                     metadata_dict = json.loads(metadata)
-                except:
+                except Exception:
                     metadata_dict = {}
 
             # Prepare entity data
