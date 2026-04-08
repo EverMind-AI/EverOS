@@ -17,12 +17,12 @@ Conversation content:
 Custom instructions:
 {custom_instructions}
 
-IMPORTANT TIME HANDLING:
-- Use the provided "Conversation start time" as the exact time when this conversation/episode began
-- When the conversation mentions relative times (e.g., "yesterday", "last week"), preserve both the original relative expression AND calculate the absolute date
-- Format time references as: "original relative time (absolute date)" - e.g., "last week (May 7, 2023)"
-- This dual format supports both absolute and relative time-based questions
-- All absolute time calculations should be based on the provided start time
+IMPORTANT TIME HANDLING (STRICT ISO 8601):
+- Always use ISO 8601 format with timezone: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SS+HH:MM
+- Example correct formats: 2026-01-23T02:19:25Z or 2026-01-23T10:07:00+08:00
+- NEVER use Chinese characters (年, 月, 日), weekdays, or partial times
+- Example incorrect: "2026年1月22日11:25:33" or "2026年1月23日 02:19:25 UTC"
+- Always convert relative times to absolute ISO 8601 format
 
 Please generate a structured episodic memory and return only a JSON object containing the following two fields:
 {{
