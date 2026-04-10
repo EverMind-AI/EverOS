@@ -50,12 +50,14 @@ from infra_layer.adapters.input.api.dto.memory_dto import (
     SaveConversationMetaResponse,
     PatchConversationMetaResponse,
     DeleteMemoriesResponse,
+    RestoreMemoriesResponse,
 )
 from core.request.timeout_background import timeout_to_background
 from core.request import log_request
 from core.component.redis_provider import RedisProvider
 from service.memory_request_log_service import MemoryRequestLogService
 from service.memcell_delete_service import MemCellDeleteService
+from service.memcell_restore_service import MemCellRestoreService
 from service.conversation_meta_service import ConversationMetaService
 from api_specs.memory_types import RawDataType
 from agentic_layer.metrics.memorize_metrics import (
@@ -1119,4 +1121,122 @@ class MemoryController(BaseController):
             raise HTTPException(
                 status_code=500,
                 detail="Failed to delete memories, please try again later",
+            ) from e
+
+    @post(
+        "/restore",
+        response_model=RestoreMemoriesResponse,
+        summary="Restore soft-deleted memories",
+        description="""
+        Restore soft-deleted memory records based on filter criteria
+        
+        ## Functionality:
+        - Restore previously soft-deleted memories
+        - Supports restore by event_id (single memory) or user_id (batch)
+        - At least one filter must be specified
+        
+        ## Filter Parameters (provide one):
+        - **event_id**: Restore a specific memory by its event_id
+        - **user_id**: Restore all soft-deleted memories of a user
+        
+        ## Use Cases:
+        - Undo accidental deletion
+        - Recover user data
+        - Data restoration after testing
+        """,
+        responses={
+            400: {
+                "description": "Request parameter error",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": ErrorStatus.FAILED.value,
+                            "code": ErrorCode.INVALID_PARAMETER.value,
+                            "message": "At least one of event_id or user_id must be provided",
+                        }
+                    }
+                },
+            },
+            500: {
+                "description": "Internal server error",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": ErrorStatus.FAILED.value,
+                            "code": ErrorCode.SYSTEM_ERROR.value,
+                            "message": "Failed to restore memories, please try again later",
+                        }
+                    }
+                },
+            },
+        },
+    )
+    async def restore_memories(
+        self,
+        fastapi_request: FastAPIRequest,
+        request_body=None,
+    ) -> RestoreMemoriesResponse:
+        """
+        Restore soft-deleted memory data based on filter criteria
+        """
+        del request_body
+
+        try:
+            from core.oxm.constants import MAGIC_ALL
+
+            params = await self._collect_request_params(fastapi_request)
+
+            event_id = params.get("event_id", MAGIC_ALL)
+            user_id = params.get("user_id", MAGIC_ALL)
+
+            # Validate: at least one filter required
+            if (not event_id or event_id == MAGIC_ALL) and (
+                not user_id or user_id == MAGIC_ALL
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="At least one of event_id or user_id must be provided",
+                )
+
+            logger.info(
+                "Received restore request: event_id=%s, user_id=%s",
+                event_id,
+                user_id,
+            )
+
+            # Get restore service
+            restore_service = get_bean_by_type(MemCellRestoreService)
+
+            # Execute restore
+            result = await restore_service.restore_by_combined_criteria(
+                event_id=event_id,
+                user_id=user_id,
+            )
+
+            if not result["success"]:
+                error_msg = result.get(
+                    "error", "No soft-deleted memories found matching the criteria"
+                )
+                logger.warning("Restore operation returned no results: %s", result)
+                raise HTTPException(status_code=404, detail=error_msg)
+
+            logger.info(
+                "Restore request completed successfully: filters=%s, count=%d",
+                result["filters"],
+                result["count"],
+            )
+
+            return {
+                "status": ErrorStatus.OK.value,
+                "message": f"Successfully restored {result['count']} {'memory' if result['count'] == 1 else 'memories'}",
+                "result": {"filters": result["filters"], "count": result["count"]},
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Restore request processing failed: %s", e, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to restore memories, please try again later",
             ) from e
