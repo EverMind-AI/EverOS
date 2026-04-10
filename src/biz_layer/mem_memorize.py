@@ -523,11 +523,80 @@ async def process_memory_extraction(
         return result
     
     if state.is_assistant_scene:
+        # Episode extraction modifies state in-place. Run it concurrently with
+        # Foresight/EventLog, but cap each with a per-task timeout so a slow or
+        # hanging LLM call never blocks episode persistence.
+        _EXTRACTION_TIMEOUT = 120  # seconds per extraction task
+
+        # ★ REALTIME_EVENT_LOG_ONLY mode: only extract event_log right now.
+        #   Episodic memories are generated later by BatchEpisodeWorker which
+        #   merges multiple MemCells into one rich context before calling the
+        #   episode LLM, preserving full multi-turn quality.
+        if os.getenv("REALTIME_EVENT_LOG_ONLY", "false").lower() == "true":
+            try:
+                event_logs = await asyncio.wait_for(
+                    _timed_extract_event_logs(), timeout=_EXTRACTION_TIMEOUT
+                )
+                event_logs = event_logs or []
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("[Realtime] EventLog extraction failed: %s", e)
+                event_logs = []
+            record_extraction_stage(
+                space_id=space_id,
+                raw_data_type=raw_data_type,
+                stage='extract_parallel',
+                duration_seconds=time.perf_counter() - extract_start,
+            )
+            if event_logs:
+                record_memory_extracted(
+                    space_id=space_id,
+                    raw_data_type=raw_data_type,
+                    memory_type='event_log',
+                    count=len(event_logs),
+                )
+            await _update_memcell_and_cluster(state)
+            if if_memorize(memcell):
+                rt_count = await _save_event_logs_without_episode(state, event_logs)
+                await update_status_after_memcell(
+                    state.request, state.memcell, state.current_time,
+                    state.request.raw_data_type,
+                )
+                return rt_count
+            return 0
+
+        async def _safe_extract_foresights():
+            try:
+                return await asyncio.wait_for(_timed_extract_foresights(), timeout=_EXTRACTION_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[Extraction] Foresight extraction timed out after %ss, episode will still be saved",
+                    _EXTRACTION_TIMEOUT,
+                )
+                return []
+            except Exception as e:
+                logger.error("[Extraction] Foresight extraction failed: %s", e)
+                return []
+
+        async def _safe_extract_event_logs():
+            try:
+                return await asyncio.wait_for(_timed_extract_event_logs(), timeout=_EXTRACTION_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[Extraction] EventLog extraction timed out after %ss, episode will still be saved",
+                    _EXTRACTION_TIMEOUT,
+                )
+                return []
+            except Exception as e:
+                logger.error("[Extraction] EventLog extraction failed: %s", e)
+                return []
+
         _, foresight_memories, event_logs = await asyncio.gather(
             _timed_extract_episodes(),
-            _timed_extract_foresights(),
-            _timed_extract_event_logs(),
+            _safe_extract_foresights(),
+            _safe_extract_event_logs(),
         )
+        foresight_memories = foresight_memories or []
+        event_logs = event_logs or []
     else:
         await _timed_extract_episodes()
     record_extraction_stage(
@@ -795,6 +864,68 @@ async def _extract_event_logs(
     result.parent_type = state.parent_type
     result.parent_id = state.parent_id
     return [result]
+
+
+async def _save_event_logs_without_episode(
+    state: ExtractionState,
+    event_logs: List[EventLog],
+) -> int:
+    """Save event logs against the MemCell directly (no episode parent).
+
+    Used in REALTIME_EVENT_LOG_ONLY mode where episode extraction is deferred to
+    BatchEpisodeWorker.  Each EventLogRecord will have:
+      parent_type = "memcell"
+      parent_id   = <memcell.event_id>
+    """
+    if not event_logs:
+        return 0
+
+    class _MemCellParent:
+        """Minimal duck-type shim to satisfy _convert_event_log_to_docs."""
+        timestamp = state.memcell.timestamp
+        participants = state.memcell.participants or []
+        type = (
+            state.memcell.type.value
+            if state.memcell.type
+            else RawDataType.CONVERSATION.value
+        )
+
+    pseudo_parent = _MemCellParent()
+
+    # Override parent pointers to MemCell
+    for el in event_logs:
+        el.parent_type = "memcell"
+        el.parent_id = str(state.memcell.event_id)
+
+    base_docs = []
+    for el in event_logs:
+        base_docs.extend(_convert_event_log_to_docs(el, pseudo_parent, state.current_time))
+
+    if not base_docs:
+        return 0
+
+    all_docs = list(base_docs)
+    # assistant scene: copy to each non-robot user
+    if state.is_assistant_scene:
+        user_ids = [
+            u for u in state.participants
+            if "robot" not in u.lower() and "assistant" not in u.lower()
+        ]
+        all_docs.extend([
+            doc.model_copy(update={"user_id": uid, "user_name": uid})
+            for doc in base_docs
+            for uid in user_ids
+        ])
+
+    payloads = [MemoryDocPayload(MemoryType.EVENT_LOG, doc) for doc in all_docs]
+    saved_map = await save_memory_docs(payloads)
+    count = len(saved_map.get(MemoryType.EVENT_LOG, []))
+    logger.info(
+        "[Realtime] Saved %d event_log facts (parent=memcell %s)",
+        count,
+        state.memcell.event_id,
+    )
+    return count
 
 
 def _clone_episodes_for_users(state: ExtractionState) -> List[EpisodeMemory]:
