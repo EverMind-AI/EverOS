@@ -83,6 +83,7 @@ from agentic_layer.agentic_utils import (
     generate_multi_queries,
 )
 from agentic_layer.retrieval_utils import reciprocal_rank_fusion
+from memory_layer.query_expansion import expand_query, merge_hits_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -623,7 +624,14 @@ class MemoryManager:
     async def retrieve_mem_hybrid(
         self, retrieve_mem_request: 'RetrieveMemRequest'
     ) -> RetrieveMemResponse:
-        """Hybrid memory retrieval: keyword + vector + rerank"""
+        """Hybrid memory retrieval with LLM query expansion.
+
+        Generates 2-3 paraphrase variants of the query before retrieval so
+        that memories using different vocabulary are still recalled.  Results
+        from all variants are union-merged (deduplicated by memory id) and
+        re-ranked against the original query.  Falls back to plain hybrid
+        retrieval if expansion fails or produces no variants.
+        """
         start_time = time.perf_counter()
         memory_type = (
             retrieve_mem_request.memory_types[0].value
@@ -632,7 +640,7 @@ class MemoryManager:
         )
 
         try:
-            hits = await self._search_hybrid(
+            hits = await self._search_hybrid_with_query_expansion(
                 retrieve_mem_request, retrieve_method=RetrieveMethod.HYBRID.value
             )
             duration = time.perf_counter() - start_time
@@ -699,7 +707,7 @@ class MemoryManager:
         request: 'RetrieveMemRequest',
         retrieve_method: str = RetrieveMethod.HYBRID.value,
     ) -> List[Dict]:
-        """Core hybrid search: keyword + vector + rerank, returns flat list"""
+        """Core hybrid search: keyword + vector + rerank, returns flat list."""
         memory_type = (
             request.memory_types[0].value if request.memory_types else 'unknown'
         )
@@ -715,6 +723,148 @@ class MemoryManager:
         ]
         return await self._rerank(
             request.query, merged_results, request.top_k, memory_type, retrieve_method
+        )
+
+    async def _search_hybrid_with_query_expansion(
+        self,
+        request: 'RetrieveMemRequest',
+        retrieve_method: str = RetrieveMethod.HYBRID.value,
+    ) -> List[Dict]:
+        """Hybrid search augmented with LLM query expansion (RAG-Fusion style).
+
+        Before running hybrid retrieval, an LLM generates 2-3 paraphrase
+        variants of the original query.  Retrieval is executed in parallel for
+        the original query *and* every variant.  Results are then union-merged
+        and deduplicated by memory ``id``, ensuring that memories using
+        different vocabulary than the original query can still be surfaced.
+
+        Falls back silently to plain ``_search_hybrid`` when:
+        - No query text is present in the request.
+        - The LLM call for expansion fails.
+        - The expansion produces no usable variants.
+
+        The final rerank step always uses the *original* query so that
+        relevance scoring is consistent with the user's intent.
+        """
+        original_query: Optional[str] = request.query
+
+        # Skip expansion when there is no query (e.g. keyword-only or empty)
+        if not original_query or not original_query.strip():
+            return await self._search_hybrid(request, retrieve_method=retrieve_method)
+
+        # Build a lightweight LLM provider for expansion (reuses env config)
+        try:
+            llm_provider = LLMProvider(
+                provider_type=os.getenv("LLM_PROVIDER", "openai"),
+                model=os.getenv("LLM_MODEL", "openai/gpt-4.1-mini"),  # skip-sensitive-check
+                base_url=os.getenv("LLM_BASE_URL"),
+                api_key=os.getenv("LLM_API_KEY", "your-api-key"),  # skip-sensitive-check
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+                max_tokens=256,
+            )
+        except Exception as exc:
+            logger.warning(
+                "_search_hybrid_with_query_expansion: could not create LLM "
+                "provider, falling back to plain hybrid search: %s",
+                exc,
+            )
+            return await self._search_hybrid(request, retrieve_method=retrieve_method)
+
+        # Generate paraphrase variants (2 variants → 3 queries total with original)
+        variants: List[str] = await expand_query(
+            query=original_query,
+            llm_provider=llm_provider,
+            n_variants=2,
+            temperature=0.6,
+        )
+
+        if not variants:
+            # Expansion failed or produced nothing — plain hybrid is fine
+            logger.debug(
+                "_search_hybrid_with_query_expansion: no variants generated, "
+                "falling back to plain hybrid search"
+            )
+            return await self._search_hybrid(request, retrieve_method=retrieve_method)
+
+        all_queries: List[str] = [original_query] + variants
+        logger.info(
+            "_search_hybrid_with_query_expansion: running %d queries in parallel "
+            "(original + %d variants)",
+            len(all_queries),
+            len(variants),
+        )
+
+        # Run hybrid search (keyword + vector) for each query in parallel.
+        # Note: we intentionally skip the rerank step here — rerank happens
+        # once on the merged result set below using the original query.
+        async def _raw_hybrid(q: str) -> List[Dict]:
+            """Hybrid search without rerank for a single query string."""
+            memory_type = (
+                request.memory_types[0].value if request.memory_types else 'unknown'
+            )
+            sub_request = RetrieveMemRequest(
+                query=q,
+                user_id=request.user_id,
+                group_id=request.group_id,
+                # Fetch more candidates per variant so the union is rich
+                top_k=min(request.top_k * 2, 100),
+                memory_types=request.memory_types,
+                start_time=request.start_time,
+                end_time=request.end_time,
+                retrieve_method=request.retrieve_method,
+                radius=request.radius,
+            )
+            kw, vec = await asyncio.gather(
+                self.get_keyword_search_results(
+                    sub_request, retrieve_method=retrieve_method
+                ),
+                self.get_vector_search_results(
+                    sub_request, retrieve_method=retrieve_method
+                ),
+            )
+            seen: set[str] = {h.get('id') for h in kw}
+            return kw + [h for h in vec if h.get('id') not in seen]
+
+        raw_results = await asyncio.gather(
+            *[_raw_hybrid(q) for q in all_queries], return_exceptions=True
+        )
+
+        # Collect valid (non-exception) result sets
+        hits_per_query: List[List[Dict]] = []
+        for i, result in enumerate(raw_results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "_search_hybrid_with_query_expansion: query %d failed: %s",
+                    i,
+                    result,
+                )
+            else:
+                hits_per_query.append(result)
+
+        if not hits_per_query:
+            # All parallel searches failed; fall back to original query
+            logger.warning(
+                "_search_hybrid_with_query_expansion: all expanded queries "
+                "failed, retrying with original query only"
+            )
+            return await self._search_hybrid(request, retrieve_method=retrieve_method)
+
+        # Union-merge, deduplicated by memory id.  The original-query hits come
+        # first (index 0) so their scores are preserved when there are ties.
+        merged: List[Dict] = merge_hits_by_id(hits_per_query)
+        logger.info(
+            "_search_hybrid_with_query_expansion: merged %d unique hits from "
+            "%d query result sets",
+            len(merged),
+            len(hits_per_query),
+        )
+
+        # Final rerank on the *original* query keeps scoring consistent
+        memory_type_str = (
+            request.memory_types[0].value if request.memory_types else 'unknown'
+        )
+        return await self._rerank(
+            original_query, merged, request.top_k, memory_type_str, retrieve_method
         )
 
     async def _search_rrf(
