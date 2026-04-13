@@ -2,30 +2,19 @@
 
 ![banner-gif][banner-gif]
 
-[![License: Apache 2.0][license-badge]][license]
-[![arXiv: EverOS][arxiv-evermemos-badge]][arxiv-evermemos-link]
-[![arXiv: HyperMem][arxiv-hypermem-badge]][arxiv-hypermem-link]
-[![arXiv: EverMemBench][arxiv-evermembench-badge]][arxiv-evermembench-link]
-[![HuggingFace: EverMemBench-Dynamic][hf-badge]][hf-link]
-[![Ask DeepWiki][deepwiki-badge]][deepwiki]
+<p align="center">
+  <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a>
+  <a href="https://arxiv.org/abs/2604.08256"><img src="https://img.shields.io/badge/arXiv-HyperMem-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: HyperMem"></a>
+  <a href="https://arxiv.org/abs/2602.01313"><img src="https://img.shields.io/badge/arXiv-EverMemBench-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverMemBench"></a>
+  <a href="https://github.com/EverMind-AI/MSA"><img src="https://img.shields.io/badge/arXiv-Memory%20Sparse%20Attention-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: Memory Sparse Attention"></a>
+  <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a>
+  <a href="https://discord.gg/gYep5nQRZJ"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&labelColor=gray&style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeChat-EverMind-07C160?labelColor=gray&style=flat-square&logo=wechat&logoColor=white" alt="WeChat"></a>
+</p>
 
-[Website][website] · [Documentation][docs] · [Blog][blog] · [Discord][discord]
+[Website][website] · [Documentation][docs] · [Blog][blog]
 
 </div>
-
-<br>
-
-> [!IMPORTANT]
->
-> ### [Memory Sparse Attention](https://github.com/EverMind-AI/MSA)
->
-> Check out our latest paper [Memory Sparse Attention](https://github.com/EverMind-AI/MSA) — A scalable, end-to-end trainable latent-memory framework for 100M token contexts.
->
-> - Scalable sparse attention + document-wise RoPE achieving near-linear complexity in both training and inference.
-> - KV cache compression with a Memory Parallel inference engine to deliver 100M token throughput on 2×A800 GPUs.
-> - Memory Interleave for multi-round, multi-hop reasoning across scattered memory segments.
->
-> Join our [Discord][discord] to ask anything. AMA sessions are open to everyone and occur biweekly.
 
 <br>
 
@@ -50,7 +39,23 @@
 
 </details>
 
-## Why EverOS
+## Project Structure
+
+EverOS is built around two pillars — **Methods** give agents memory and evolution capabilities, and **Benchmarks** objectively measure whether those capabilities actually work.
+
+```
+EverOS/
+└── benchmarks/
+│   ├── evermembench/        # Memory quality evaluation
+│   └── evoagentbench/       # Agent self-evolution evaluation
+├── methods/
+│   ├── everos/             # Long-term memory operating system
+│   └── hypermem/           # Hypergraph memory architecture
+```
+
+<br>
+
+## EverMind Ecosystem
 
 Large language models are evolving from single-turn chatbots to long-lived interactive agents. But when an agent needs to stay coherent across weeks of conversation, it hits a hard ceiling: finite context windows and fragmented memory.
 
@@ -58,7 +63,7 @@ Expanding the context window is not the answer — ultra-long contexts are expen
 
 EverOS is a memory operating system that transforms unlimited interaction streams into a structured "digital brain" through a three-stage memory lifecycle: **episodic trace formation**, **semantic consolidation**, and **reconstructive recall** — enabling agents to continuously convert raw interactions into structured, evolving knowledge.
 
-<!-- Benchmark Stats -->
+Benchmark Stats
 <table>
   <tr>
     <td align="center"><strong>93.05%</strong><br><sub>LoCoMo</sub></td>
@@ -74,26 +79,15 @@ EverOS is a memory operating system that transforms unlimited interaction stream
 
 </div>
 
-## Project Structure
 
-EverOS is built around two pillars — **Methods** give agents memory and evolution capabilities, and **Benchmarks** objectively measure whether those capabilities actually work.
-
-```
-EverOS/
-├── methods/
-│   ├── evermemos/          # Long-term memory operating system
-│   └── hypermem/           # Hypergraph memory architecture
-│
-└── benchmarks/
-    ├── evermembench/        # Memory quality evaluation
-    └── evoagentbench/       # Agent self-evolution evaluation
-```
 
 ### Methods
 
 <table>
 <tr>
 <td width="50%">
+
+![banner-gif][banner-gif]
 
 #### EverMemos
 
@@ -103,6 +97,8 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 
 </td>
 <td width="50%">
+
+![banner-gif][banner-gif]
 
 #### HyperMem
 
@@ -152,15 +148,24 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 
 ### Memory Performance
 
+<table width="100%">
+<tr><td>
+
 | System | LoCoMo | LongMemEval-S |
 | :--- | :----: | :----: |
-| **EverMemOS** | **93.05%** | **83.00%** |
+| **EverOS** | **93.05%** | **83.00%** |
 | **HyperMem** | **92.73%** | — |
 | Mem0 | 78.4% | — |
 | MemOS | 74.2% | — |
 | Zep | 71.6% | — |
 
+</td></tr>
+</table>
+
 ### Self-Evolution Gains
+
+<table width="100%">
+<tr><td>
 
 | Task Type | Agent + LLM | Baseline | + EverOS Skills | Delta |
 | :--- | :--- | :----: | :----: | :----: |
@@ -168,6 +173,9 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 | Code (Django) | Nanobot + Qwen3.5-397B | 21% | 47% | **+26%** |
 | General (GDPVAL) | OpenClaw + Qwen3.5-397B | 29% | 69% | **+40%** |
 | General (GDPVAL) | OpenClaw + Qwen3.5-27B | 41% | 61% | **+20%** |
+
+</td></tr>
+</table>
 
 <br>
 <div align="right">
@@ -466,23 +474,6 @@ All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automa
 
 </div>
 
-## Community
-
-We love open-source energy! Whether you are squashing bugs, shipping features, sharpening docs, or tossing in ideas — every PR moves EverOS forward.
-
-| Platform | Link |
-| :--- | :--- |
-| Discord | [![Discord Members][discord-members-badge]][discord] |
-| WeChat | [![WeChat][wechat-badge]][wechat] |
-| DeepWiki | [![Ask DeepWiki][deepwiki-badge]][deepwiki] |
-| Discussions | [GitHub Discussions][discussions] |
-
-<br>
-<div align="right">
-
-[![][back-to-top]][readme-top]
-
-</div>
 
 ## Citation
 
@@ -560,7 +551,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
 <!-- Images -->
-[banner-gif]: https://github.com/user-attachments/assets/73634a04-9ea8-4ce8-a8ec-eb71925df968
+[banner-gif]: https://github.com/user-attachments/assets/646e813a-a7a7-4ba2-bda8-d8bdf884a890
 [usecase-openclaw-image]: https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f
 [usecase-live2d-image]: https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26
 [usecase-computer-image]: https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727
@@ -578,8 +569,8 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [deepwiki-badge]: https://deepwiki.com/badge.svg
 [back-to-top]: https://img.shields.io/badge/-Back_to_top-gray?style=flat-square
 [codespaces-badge]: https://github.com/codespaces/badge.svg
-[discord-members-badge]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&suffix=%20members&label=Discord&color=404EED&style=for-the-badge&logo=discord&logoColor=white
-[wechat-badge]: https://img.shields.io/badge/WeChat-EverMind-07C160?style=for-the-badge&logo=wechat&logoColor=white
+[discord-members-badge]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&style=flat-square&logo=discord&logoColor=white
+[wechat-badge]: https://img.shields.io/badge/WeChat-EverMind-07C160?style=flat-square&logo=wechat&logoColor=white
 
 <!-- Primary Links -->
 [license]: https://github.com/EverMind-AI/EverOS/blob/main/LICENSE
