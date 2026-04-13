@@ -63,7 +63,10 @@ Expanding the context window is not the answer — ultra-long contexts are expen
 
 EverOS is a memory operating system that transforms unlimited interaction streams into a structured "digital brain" through a three-stage memory lifecycle: **episodic trace formation**, **semantic consolidation**, and **reconstructive recall** — enabling agents to continuously convert raw interactions into structured, evolving knowledge.
 
+<div align="center">
+
 Benchmark Stats
+
 <table>
   <tr>
     <td align="center"><strong>93.05%</strong><br><sub>LoCoMo</sub></td>
@@ -71,6 +74,8 @@ Benchmark Stats
     <td align="center"><strong>+40%</strong><br><sub>EvoAgent GDPVAL</sub></td>
   </tr>
 </table>
+
+</div>
 
 <br>
 <div align="right">
@@ -148,8 +153,7 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 
 ### Memory Performance
 
-<table width="100%">
-<tr><td>
+<div align="center">
 
 | System | LoCoMo | LongMemEval-S |
 | :--- | :----: | :----: |
@@ -159,13 +163,11 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 | MemOS | 74.2% | — |
 | Zep | 71.6% | — |
 
-</td></tr>
-</table>
+</div>
 
 ### Self-Evolution Gains
 
-<table width="100%">
-<tr><td>
+<div align="center">
 
 | Task Type | Agent + LLM | Baseline | + EverOS Skills | Delta |
 | :--- | :--- | :----: | :----: | :----: |
@@ -174,8 +176,7 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 | General (GDPVAL) | OpenClaw + Qwen3.5-397B | 29% | 69% | **+40%** |
 | General (GDPVAL) | OpenClaw + Qwen3.5-27B | 41% | 61% | **+20%** |
 
-</td></tr>
-</table>
+</div>
 
 <br>
 <div align="right">
