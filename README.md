@@ -7,7 +7,7 @@
   <a href="https://arxiv.org/abs/2604.08256"><img src="https://img.shields.io/badge/arXiv-HyperMem-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: HyperMem"></a>
   <a href="https://arxiv.org/abs/2602.01313"><img src="https://img.shields.io/badge/arXiv-EverMemBench-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverMemBench"></a>
   <a href="https://github.com/EverMind-AI/MSA"><img src="https://img.shields.io/badge/arXiv-Memory%20Sparse%20Attention-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: Memory Sparse Attention"></a>
-  <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a>
+  <!-- <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a> -->
   <a href="https://discord.gg/gYep5nQRZJ"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&labelColor=gray&style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeChat-EverMind-07C160?labelColor=gray&style=flat-square&logo=wechat&logoColor=white" alt="WeChat"></a>
 </p>
@@ -23,7 +23,6 @@
 
 <br>
 
-- [Why EverOS](#why-everos)
 - [Project Structure](#project-structure)
 - [Key Results](#key-results)
 - [Use Cases](#use-cases)
@@ -55,7 +54,7 @@ EverOS/
 
 <br>
 
-## EverMind Ecosystem
+### EverMind Ecosystem
 
 Large language models are evolving from single-turn chatbots to long-lived interactive agents. But when an agent needs to stay coherent across weeks of conversation, it hits a hard ceiling: finite context windows and fragmented memory.
 
@@ -77,24 +76,15 @@ Benchmark Stats
 
 </div>
 
-<br>
-<div align="right">
-
-[![][back-to-top]][readme-top]
-
-</div>
-
-
-
 ### Methods
 
 <table>
 <tr>
 <td width="50%">
 
-![banner-gif][banner-gif]
+![banner-gif](https://github.com/user-attachments/assets/623862d8-1bc8-48d7-8248-a9ea4edf61e3)
 
-#### EverMemos
+#### EverOS
 
 A self-organizing memory operating system inspired by biological imprinting. Extracts, structures, and retrieves long-term knowledge from conversations — enabling agents to remember, understand, and continuously evolve.
 
@@ -103,7 +93,7 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 </td>
 <td width="50%">
 
-![banner-gif][banner-gif]
+![banner-gif](https://github.com/user-attachments/assets/2289a47d-1516-4a15-85bd-1320bc6f6955)
 
 #### HyperMem
 
@@ -121,6 +111,8 @@ A hypergraph-based hierarchical memory architecture that captures high-order ass
 <tr>
 <td width="50%">
 
+![banner-gif](https://github.com/user-attachments/assets/06b4f598-73e6-44d8-b9cc-8b5483cc363e)
+
 #### EverMemBench
 
 Three-layer memory quality evaluation: factual recall, applied reasoning, and personalized generalization. Evaluates memory systems and LLMs under a unified standard.
@@ -129,6 +121,8 @@ Three-layer memory quality evaluation: factual recall, applied reasoning, and pe
 
 </td>
 <td width="50%">
+
+![banner-gif](https://github.com/user-attachments/assets/3573198d-b4ac-4fd2-b101-d14018c75e39)
 
 #### EvoAgentBench
 
