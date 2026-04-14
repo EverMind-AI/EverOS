@@ -1,0 +1,53 @@
+name: Deploy Website
+
+on:
+  push:
+    branches: [feat/readme-redesign]
+    paths:
+      - 'benchmarks/EvoAgentBench/website/**'
+      - '.github/workflows/deploy-website.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmarks/EvoAgentBench/website
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /EverOS
+        run: npm run build
+
+      - run: touch out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: benchmarks/EvoAgentBench/website/out
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
