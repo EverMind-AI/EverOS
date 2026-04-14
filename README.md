@@ -53,7 +53,7 @@ Our methods are production-ready memory architectures that give agents persisten
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/2d45227d-6817-48f5-83eb-8422d7cb989d)
 
@@ -65,7 +65,7 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 [Paper](https://arxiv.org/abs/2601.02163) · [Docs](methods/evermemos/)
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/b68d354a-3de6-4dea-9656-6113a0a12786)
 
@@ -98,7 +98,7 @@ Three-layer memory quality evaluation: factual recall, applied reasoning, and pe
 [Paper](https://arxiv.org/abs/2602.01313) · [Dataset](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) · [Docs](benchmarks/EverMemBench/)
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/3573198d-b4ac-4fd2-b101-d14018c75e39)
 
@@ -155,7 +155,7 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f)
 
@@ -166,7 +166,7 @@ A 24/7 agent with continuous learning memory that you can carry with you whereve
 [Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26)
 
@@ -179,7 +179,7 @@ Add long-term memory to your anime character that can talk to you in real-time, 
 </td>
 </tr>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727)
 
@@ -190,7 +190,7 @@ Use computer-use to launch screenshot-based analysis, all stored in your memory.
 [Live Demo](https://screenshot-analysis-vercel.vercel.app/)
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449)
 
@@ -203,7 +203,7 @@ A demonstration of AI memory infrastructure through an interactive Q&A experienc
 </td>
 </tr>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81)
 
@@ -214,7 +214,7 @@ Persistent memory for Claude Code. Automatically saves and recalls context from 
 [Code](https://github.com/EverMind-AI/evermem-claude-code)
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c)
 
