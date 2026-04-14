@@ -4,7 +4,7 @@ llm:
   provider: "openai"
   model: "gpt-4o-mini"
   api_key: "${LLM_API_KEY}"
-  base_url: "${LLM_BASE_URL:https://api.openai.com/v1}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0.0
   max_tokens: 1024
 

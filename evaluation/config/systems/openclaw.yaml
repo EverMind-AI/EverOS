@@ -4,7 +4,7 @@ llm:
   provider: "openai"
   model: "gpt-4o-mini"
   api_key: "${LLM_API_KEY}"
-  base_url: "${LLM_BASE_URL:https://api.openai.com/v1}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0.0
   max_tokens: 1024
 
@@ -24,11 +24,11 @@ openclaw:
   backend_mode: "hybrid"
   flush_mode: "native"
   embedding:
-    provider: "${OPENCLAW_EMBED_PROVIDER:auto}"
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
     model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
     api_key: "${SOPH_API_KEY:}"
-    base_url: "${SOPH_EMBED_URL:}"
-    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:}"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/6RT1wCDeN59dVd1L10UMRz/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
     output_dimensionality: 1024
   prompts:
     memory_mode: "native_compiled"
