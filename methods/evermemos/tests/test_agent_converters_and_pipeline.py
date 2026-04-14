@@ -954,8 +954,8 @@ class TestTriggerAgentSkillExtraction:
             await memorize_mod._trigger_agent_skill_extraction(
                 group_id="g1",
                 cluster_id="cluster_001",
-                user_id=agent_case.user_id,
-                agent_cases=[agent_case],
+                memcell=memcell,
+                agent_case=agent_case,
             )
 
             # Verify extractor was called
@@ -999,7 +999,7 @@ class TestTriggerAgentSkillExtraction:
 
             # Should not raise - exception is caught in the outer try-except
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
 
@@ -1507,7 +1507,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
     @pytest.mark.asyncio
@@ -1571,7 +1571,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
             updated_id = str(updated_record.id)
@@ -1641,7 +1641,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
             mock_milvus_repo.insert.assert_not_called()
@@ -1709,7 +1709,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
             mock_es_repo.create.assert_called_once()
@@ -1776,7 +1776,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
     @pytest.mark.asyncio
@@ -1838,7 +1838,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
             assert mock_milvus_repo.delete_by_id.call_count == 2
@@ -1904,7 +1904,7 @@ class TestTriggerAgentSkillExtractionGaps:
             importlib.reload(memorize_mod)
 
             await memorize_mod._trigger_agent_skill_extraction(
-                group_id="g1", cluster_id="c1", user_id=agent_case.user_id, agent_cases=[agent_case]
+                group_id="g1", cluster_id="c1", memcell=memcell, agent_case=agent_case
             )
 
             mock_milvus_repo.insert.assert_not_called()
@@ -2000,8 +2000,8 @@ class TestUpdateMemcellAndClusterAgentCase:
 
     @pytest.mark.asyncio
     async def test_agent_conversation_uses_agent_config(self):
-        """Agent conversations should use AGENT_DEFAULT_MEMORIZE_CONFIG."""
-        from biz_layer.memorize_config import AGENT_DEFAULT_MEMORIZE_CONFIG
+        """Agent conversations should use DEFAULT_MEMORIZE_CONFIG."""
+        from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
         import biz_layer.mem_memorize as mod
 
         memcell = _make_agent_memcell_for_trigger()
@@ -2023,7 +2023,7 @@ class TestUpdateMemcellAndClusterAgentCase:
             await mod._update_memcell_and_cluster(state)
 
             call_kwargs = mock_cluster.call_args.kwargs
-            assert call_kwargs["config"] is AGENT_DEFAULT_MEMORIZE_CONFIG
+            assert call_kwargs["config"] is DEFAULT_MEMORIZE_CONFIG
         finally:
             mod._trigger_clustering = original_trigger
 

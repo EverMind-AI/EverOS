@@ -76,7 +76,6 @@ class ProfileManager:
         group_id: Optional[str] = None,
         max_items: int = 25,
         scene: ScenarioType = ScenarioType.SOLO,
-        new_user_max_context: int = 0,
     ) -> List[ProfileMemory]:
         """Extract profiles from memcells (batch multi-user).
 
@@ -156,19 +155,11 @@ class ProfileManager:
             if old_profile and old_profile.last_updated:
                 user_baseline = old_profile.last_updated
             else:
-                # New user: use the Nth oldest cluster memcell as baseline
-                # so that at most new_user_max_context episodes are included
-                max_cluster = new_user_max_context - 1
-                if max_cluster > 0 and len(cluster_contexts) > max_cluster:
-                    user_baseline = cluster_contexts[-(max_cluster + 1)].get("created_at")
-                elif max_cluster > 0 and cluster_contexts:
-                    user_baseline = None
-                else:
-                    user_baseline = new_context.get("created_at")
+                user_baseline = new_context.get("created_at")
 
             user_cluster_episodes = [
                 ep for ep in cluster_contexts
-                if user_baseline is None or ep.get("created_at") is None or ep.get("created_at") > user_baseline
+                if ep.get("created_at") is None or ep.get("created_at") > user_baseline
             ]
 
             # Build request

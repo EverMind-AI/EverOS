@@ -13,7 +13,7 @@ Supports:
 - All collections rebuild:   --all
 
 Usage (via bootstrap with SKIP_LIFESPAN to avoid schema validation on startup):
-  SKIP_LIFESPAN=true python src/bootstrap.py src/devops_scripts/data_fix/milvus_rebuild_collection.py --all
+  SKIP_LIFESPAN=true TENANT_INIT_STORAGE_INFO='...' python src/bootstrap.py src/devops_scripts/data_fix/milvus_rebuild_collection.py --all
 
 Note: This script migrates data by default (in batches of 3000).
 To disable data migration, use the --no-migrate-data option.
@@ -204,7 +204,7 @@ def discover_all_aliases() -> List[str]:
     Discover all concrete collection aliases by scanning MilvusCollectionBase subclasses.
 
     Returns:
-        List of collection base names (e.g., ["v1_episodic_memory", "v1_user_profile"])
+        List of collection base names (e.g., ["v1_episodic_memory", "v1_user_profile"])  #skip-sensitive-check
     """
     aliases = []
     for cls in get_all_subclasses(MilvusCollectionBase):
@@ -301,8 +301,8 @@ Example usage:
   # Rebuild ALL discovered collections
   ... --all
 
-  # With tenant context
-  SKIP_LIFESPAN=true TENANT_SINGLE_TENANT_ID=xxx python src/bootstrap.py ... --all
+  # With tenant context (recommended)
+  SKIP_LIFESPAN=true TENANT_INIT_STORAGE_INFO='{"tenant_id":"s0001","isolation_mode":"shared","storage_info":{"milvus":{"collection_prefix":"s0001"}}}' python src/bootstrap.py ... --all  #skip-sensitive-check
 
   # Rebuild without migrating data
   ... -a v1_episodic_memory --no-migrate-data
@@ -347,6 +347,15 @@ Example usage:
     args = parser.parse_args(argv)
     migrate_data = not args.no_migrate_data
     progress = StdoutProgressReporter()
+
+    # Set up tenant context from TENANT_INIT_STORAGE_INFO if available
+    import os
+
+    if os.getenv("TENANT_INIT_STORAGE_INFO"):
+        from core.tenants.init_tenant_all import setup_tenant_context_from_env
+
+        tenant_id = setup_tenant_context_from_env()
+        logger.info("Rebuild running with tenant context: %s", tenant_id)
 
     # Determine which aliases to rebuild
     if args.rebuild_all:

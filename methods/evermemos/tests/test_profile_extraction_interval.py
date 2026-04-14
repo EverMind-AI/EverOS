@@ -106,6 +106,35 @@ class TestMemSceneStateSerialization:
         assert state.cluster_counts == {"cluster_000": 1}
         assert state.cluster_last_ts == {"cluster_000": 100.0}
 
+    def test_from_dict_case_cluster_ids_none(self):
+        """case_cluster_ids=None in DB should deserialize to empty set."""
+        data = {
+            "memcell_info": {},
+            "memscene_info": {},
+            "next_cluster_idx": 0,
+            "case_cluster_ids": None,
+        }
+        state = MemSceneState.from_dict(data)
+        assert state.case_cluster_ids == set()
+
+    def test_from_dict_case_cluster_ids_missing(self):
+        """Missing case_cluster_ids key should deserialize to empty set."""
+        data = {
+            "memcell_info": {},
+            "memscene_info": {},
+            "next_cluster_idx": 0,
+        }
+        state = MemSceneState.from_dict(data)
+        assert state.case_cluster_ids == set()
+
+    def test_from_dict_case_cluster_ids_with_values(self):
+        """case_cluster_ids with values should roundtrip correctly."""
+        state = MemSceneState()
+        state.case_cluster_ids = {"cluster_000", "cluster_001"}
+        d = state.to_dict()
+        restored = MemSceneState.from_dict(d)
+        assert restored.case_cluster_ids == {"cluster_000", "cluster_001"}
+
 
 class TestIntervalLogic:
     """Interval skip/trigger decision logic."""

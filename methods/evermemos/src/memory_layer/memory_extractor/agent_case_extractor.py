@@ -97,11 +97,9 @@ class AgentCaseExtractor(MemoryExtractor):
         max_tool_output_tokens: int = MAX_TOOL_OUTPUT_TOKENS,
         max_tool_args_tokens: int = MAX_TOOL_ARGS_TOKENS,
         max_assistant_response_tokens: int = MAX_ASSISTANT_RESPONSE_TOKENS,
-        extra_body: dict | None = None,
     ):
         super().__init__(MemoryType.AGENT_CASE)
         self.llm_provider = llm_provider
-        self.extra_body = extra_body
         self.filter_prompt = filter_prompt or get_prompt_by("AGENT_CASE_FILTER_PROMPT")
         self.experience_compress_prompt = experience_compress_prompt or get_prompt_by(
             "AGENT_CASE_COMPRESS_PROMPT"
@@ -369,9 +367,7 @@ class AgentCaseExtractor(MemoryExtractor):
 
         for attempt in range(2):
             try:
-                resp = await self.llm_provider.generate(
-                    prompt, extra_body=self.extra_body
-                )
+                resp = await self.llm_provider.generate(prompt)
                 data = parse_json_response(resp)
                 if (
                     data
@@ -395,9 +391,7 @@ class AgentCaseExtractor(MemoryExtractor):
         """LLM-based filter to determine if the conversation is worth extracting."""
         prompt = self.filter_prompt.format(messages=messages_json)
         try:
-            resp = await self.llm_provider.generate(
-                prompt, extra_body=self.extra_body
-            )
+            resp = await self.llm_provider.generate(prompt)
             data = parse_json_response(resp)
             if data and "worth_extracting" in data:
                 worth = data["worth_extracting"]
@@ -418,9 +412,7 @@ class AgentCaseExtractor(MemoryExtractor):
 
         for attempt in range(2):
             try:
-                resp = await self.llm_provider.generate(
-                    prompt, extra_body=self.extra_body
-                )
+                resp = await self.llm_provider.generate(prompt)
                 data = parse_json_response(resp)
                 if data and "task_intent" in data:
                     if not data["task_intent"]:

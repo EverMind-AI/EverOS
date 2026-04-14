@@ -14,6 +14,7 @@ from core.oxm.constants import MAGIC_ALL
 from core.oxm.mongo.base_repository import BaseRepository
 from infra_layer.adapters.out.persistence.document.memory.agent_case import (
     AgentCaseRecord,
+    AgentCaseProjection,
 )
 from agentic_layer.vectorize_service import get_vectorize_service
 
@@ -344,6 +345,38 @@ class AgentCaseRawRepository(BaseRepository[AgentCaseRecord]):
         except Exception as e:
             logger.error(f"[AgentCaseRepo] Failed to delete by filters: {e}")
             return 0
+
+    async def fetch_task_intents_by_event_ids(
+        self, event_ids: List[str]
+    ) -> Dict[str, str]:
+        """Fetch task_intent texts from AgentCase DB by parent event IDs.
+
+        Used as context_fetcher callback for ClusterManager in LLM mode.
+
+        Args:
+            event_ids: List of memcell event IDs (used as parent_id in agent cases)
+
+        Returns:
+            Dict mapping event_id -> task_intent text
+        """
+        if not event_ids:
+            return {}
+
+        try:
+            cases = (
+                await self.model.find({"parent_id": {"$in": event_ids}})
+                .project(AgentCaseProjection)
+                .to_list()
+            )
+
+            result: Dict[str, str] = {}
+            for case in cases:
+                if case.parent_id and case.task_intent:
+                    result[case.parent_id] = case.task_intent
+            return result
+        except Exception as e:
+            logger.error(f"[AgentCaseRepo] Failed to fetch task intents: {e}")
+            return {}
 
     async def find_by_filter_paginated(
         self,

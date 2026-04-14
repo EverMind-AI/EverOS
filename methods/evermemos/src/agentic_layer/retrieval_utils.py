@@ -350,6 +350,9 @@ async def multi_query_retrieval(
     ]
 
     multi_query_results = await asyncio.gather(*tasks, return_exceptions=True)
+    from common_utils.async_utils import reraise_critical_errors
+
+    reraise_critical_errors(multi_query_results)
 
     # Collect valid results
     valid_results = []

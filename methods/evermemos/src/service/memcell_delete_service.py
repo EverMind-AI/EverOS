@@ -199,6 +199,9 @@ class MemCellDeleteService:
         names = [t[0] for t in tasks]
         coros = [t[1].delete_by_filters(**t[2]) for t in tasks]
         results = await asyncio.gather(*coros, return_exceptions=True)
+        from common_utils.async_utils import reraise_critical_errors
+
+        reraise_critical_errors(results)
         counts: dict[str, int] = {}
         for name, result in zip(names, results):
             if isinstance(result, Exception):

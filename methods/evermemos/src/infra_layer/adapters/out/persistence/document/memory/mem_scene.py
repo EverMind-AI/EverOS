@@ -29,17 +29,15 @@ class MemScene(TenantAwareDocumentBase, AuditBase):
         description="Per-cluster centroid, latest timestamp, and member count",
     )
 
+    # Cluster IDs that contain agent conversation (case) memcells.
+    # Used to route case memcells to LLM-based clustering and exclude them from embedding-only clustering.
+    case_cluster_ids: Optional[List[str]] = Field(
+        default_factory=list, description="Cluster IDs containing agent case memcells"
+    )
+
     # Auto-increment counter for cluster ID generation (cluster_000, cluster_001, ...).
     next_cluster_idx: int = Field(
         default=0, description="Counter for generating unique cluster IDs"
-    )
-
-    # Pending memcells waiting for batch clustering.
-    # Each entry is a dict with keys: event_id, episode, timestamp, participants, group_id, agent_case.
-    # Drained when len(pending_clustering) >= cluster_batch_size or on explicit flush.
-    pending_clustering: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Memcells waiting for batch clustering",
     )
 
     class Settings:

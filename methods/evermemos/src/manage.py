@@ -216,12 +216,11 @@ def tenant_init(
     """
     Initialize MongoDB and Milvus databases for a specific tenant
 
-    Tenant ID is specified via environment variable TENANT_SINGLE_TENANT_ID.
-    Database connection configurations are obtained from default environment variables.
+    Tenant context is specified via environment variable TENANT_INIT_STORAGE_INFO (JSON).
 
     Examples:
-        # Set tenant ID environment variable
-        export TENANT_SINGLE_TENANT_ID=tenant_001
+        # Set tenant context
+        export TENANT_INIT_STORAGE_INFO='{"tenant_id":"s0001","isolation_mode":"shared","storage_info":{"mongodb":{"database":"s0001_memsys"},"elasticsearch":{"index_prefix":"s0001"},"milvus":{"collection_prefix":"s0001","num_partitions":256}}}'  #skip-sensitive-check
 
         # Run initialization
         python src/manage.py tenant-init

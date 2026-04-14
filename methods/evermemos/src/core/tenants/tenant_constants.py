@@ -8,10 +8,9 @@ Resource prefix convention (all modes):
 
     Prefix   Mode                 Example            Source
     ──────   ──────────────────   ────────────────   ──────────────────────────
-    b0001    Base (no tenant)     b0001_memsys       get_base_resource_prefix()
+    s0001    Base / shared pool   s0001_memsys       get_base_resource_prefix()
     dev      Single-tenant        dev_memsys         TENANT_SINGLE_TENANT_ID
     t3a7b2c  Multi-tenant excl.   t3a7b2c_memsys     enterprise tenant_id_generator
-    s0001    Multi-tenant shared  s0001_memsys       enterprise tenant_id_generator
 
 All separators use underscore (_). No hyphens in resource names.
 
@@ -47,18 +46,21 @@ ISOLATION_MODE_SHARED = "shared"
 ISOLATION_MODE_EXCLUSIVE = "exclusive"
 
 # ============================================================
-# Resource prefix: base ("b") — no tenant context
+# Resource prefix: base / shared pool ("s")
 # ============================================================
 # Used during multi-tenant startup before any request arrives.
+# Using "s" (same as shared pool prefix) means the ORM startup
+# resources (Beanie init, etc.) land directly in the shared pool,
+# avoiding an extra set of "b0001_*" phantom resources.
+#
 # The version suffix is configurable via TENANT_BASE_RESOURCE_VERSION env var,
-# allowing operators to bump the version (b0001 -> b0002) on upgrades so
+# allowing operators to bump the version (s0001 -> s0002) on upgrades so
 # new resources are auto-created while old ones are left intact for rollback.
 #
-# Companion prefixes defined in enterprise (tenant_id_generator.py):
+# Other prefixes defined in enterprise (tenant_id_generator.py):
 #   "t" — exclusive tenant (t + 10-hex hash of org+space, e.g., "t3a7b2c1d9e")
-#   "s" — shared node     (s + 4-digit node id, e.g., "s0001")
 
-BASE_RESOURCE_PREFIX_LETTER = "b"
+BASE_RESOURCE_PREFIX_LETTER = "s"
 
 
 @lru_cache(maxsize=1)
@@ -66,11 +68,11 @@ def get_base_resource_prefix() -> str:
     """
     Get the base resource prefix for resources created without tenant context.
 
-    Format: "b" + version (e.g., "b0001", "b0002").
+    Format: "s" + version (e.g., "s0001", "s0002").
     Version is read from env TENANT_BASE_RESOURCE_VERSION, defaults to "0001".
 
     Returns:
-        str: e.g., "b0001"
+        str: e.g., "s0001"
     """
     version = os.getenv("TENANT_BASE_RESOURCE_VERSION", "0001")
     return f"{BASE_RESOURCE_PREFIX_LETTER}{version}"

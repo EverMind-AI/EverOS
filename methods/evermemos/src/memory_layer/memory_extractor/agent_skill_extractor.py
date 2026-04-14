@@ -26,6 +26,7 @@ from common_utils.json_utils import parse_json_response
 from memory_layer.llm.llm_provider import LLMProvider
 from memory_layer.prompts import get_prompt_by
 from core.observation.logger import get_logger
+from core.observation.stage_timer import timed
 
 logger = get_logger(__name__)
 
@@ -113,7 +114,8 @@ class AgentSkillExtractor:
         text = (text or "").strip()
         if len(text) <= max_chars:
             return text
-        return text[: max_chars - 3].rstrip() + "..."
+        suffix = "... [omitted]"
+        return text[: max_chars - len(suffix)].rstrip() + suffix
 
     def _summarize_case_for_prompt(
         self, case_record: Any, max_approach_chars: int = 800
@@ -158,8 +160,8 @@ class AgentSkillExtractor:
             item: Dict[str, Any] = {
                 "index": idx,
                 "name": rec.name,
-                "description": rec.description,
-                "content": rec.content,
+                "description": self._truncate_text(rec.description, max_chars=1000),
+                "content": self._truncate_text(rec.content, max_chars=20000),
                 "confidence": rec.confidence,
             }
 
@@ -219,7 +221,8 @@ class AgentSkillExtractor:
             if not query_embedding:
                 logger.warning(
                     "[AgentSkillExtractor] Failed to compute query embedding for top-k selection, "
-                    "falling back to first %d skills", top_k,
+                    "falling back to first %d skills",
+                    top_k,
                 )
                 return existing_records[:top_k]
             query_vec = query_embedding["embedding"]
@@ -242,7 +245,9 @@ class AgentSkillExtractor:
 
         logger.info(
             "[AgentSkillExtractor] Top-k selection: %d/%d skills selected (top_k=%d)",
-            len(selected), len(existing_records), top_k,
+            len(selected),
+            len(existing_records),
+            top_k,
         )
         return selected
 
@@ -265,18 +270,22 @@ class AgentSkillExtractor:
 
     def _select_prompt(self, case_records: List[AgentCase]) -> str:
         """Select extraction prompt based on the max quality_score of new cases."""
-        max_quality = max(
-            (getattr(rec, "quality_score", 0.5) or 0.5) for rec in case_records
-        ) if case_records else 0.5
+        max_quality = (
+            max((getattr(rec, "quality_score", 0.5) or 0.5) for rec in case_records)
+            if case_records
+            else 0.5
+        )
         if max_quality < self.FAILURE_QUALITY_THRESHOLD:
             logger.debug(
                 "[AgentSkillExtractor] Using failure prompt (max_quality=%.2f < %.2f)",
-                max_quality, self.FAILURE_QUALITY_THRESHOLD,
+                max_quality,
+                self.FAILURE_QUALITY_THRESHOLD,
             )
             return self.failure_extract_prompt
         logger.debug(
             "[AgentSkillExtractor] Using success prompt (max_quality=%.2f >= %.2f)",
-            max_quality, self.FAILURE_QUALITY_THRESHOLD,
+            max_quality,
+            self.FAILURE_QUALITY_THRESHOLD,
         )
         return self.success_extract_prompt
 
@@ -285,8 +294,7 @@ class AgentSkillExtractor:
     ) -> Optional[Dict[str, Any]]:
         """Single LLM call to produce incremental skill operations."""
         prompt = prompt_template.format(
-            new_case_json=new_case_json,
-            existing_skills_json=existing_skills_json,
+            new_case_json=new_case_json, existing_skills_json=existing_skills_json
         )
         for attempt in range(3):
             try:
@@ -302,17 +310,16 @@ class AgentSkillExtractor:
         return None
 
     async def _evaluate_maturity(
-        self,
-        name: str,
-        description: str,
-        content: str,
-        confidence: float,
+        self, name: str, description: str, content: str, confidence: float
     ) -> Optional[float]:
         """Evaluate maturity of a skill via LLM scoring.
 
         Scores the skill across 4 dimensions (1-5 each, total out of 20),
         then normalizes to 0.0-1.0.
         """
+        if self.skip_maturity_scoring:
+            logger.info("[AgentSkillExtractor] Maturity scoring skipped by config, returning 1.0")
+            return 1.0
         try:
             prompt = self.maturity_prompt.format(
                 name=name or "",
@@ -334,14 +341,16 @@ class AgentSkillExtractor:
             logger.info(
                 "[AgentSkillExtractor] Maturity evaluation: name='%s', "
                 "raw=%.1f, score=%.2f, threshold=%.2f, ready=%s, reason=%s",
-                name, raw_total, score, self.maturity_threshold,
-                score >= self.maturity_threshold, data.get("reason", ""),
+                name,
+                raw_total,
+                score,
+                self.maturity_threshold,
+                score >= self.maturity_threshold,
+                data.get("reason", ""),
             )
             return score
         except Exception as e:
-            logger.warning(
-                "[AgentSkillExtractor] Maturity evaluation failed: %s", e
-            )
+            logger.warning("[AgentSkillExtractor] Maturity evaluation failed: %s", e)
             return None
 
     # Content change ratio below which maturity re-evaluation is always skipped
@@ -359,9 +368,7 @@ class AgentSkillExtractor:
         old_has_potential = bool(
             re.search(r"^##\s+Potential Steps", old_content or "", re.MULTILINE)
         )
-        new_has_steps = bool(
-            re.search(r"^##\s+Steps", new_content or "", re.MULTILINE)
-        )
+        new_has_steps = bool(re.search(r"^##\s+Steps", new_content or "", re.MULTILINE))
         new_has_potential = bool(
             re.search(r"^##\s+Potential Steps", new_content or "", re.MULTILINE)
         )
@@ -406,7 +413,9 @@ class AgentSkillExtractor:
         data = op.get("data", {})
         content = data.get("content", "")
         if not content:
-            logger.warning("[AgentSkillExtractor] add operation has empty content, skipping")
+            logger.warning(
+                "[AgentSkillExtractor] add operation has empty content, skipping"
+            )
             return None
 
         if not self._is_skill_content_sufficient(content):
@@ -420,7 +429,9 @@ class AgentSkillExtractor:
         name = data.get("name", "")
         description = data.get("description", "")
         if not name and not description:
-            logger.warning("[AgentSkillExtractor] add operation has no name and no description, skipping")
+            logger.warning(
+                "[AgentSkillExtractor] add operation has no name and no description, skipping"
+            )
             return None
 
         try:
@@ -435,19 +446,9 @@ class AgentSkillExtractor:
             AgentSkillRecord,
         )
 
-        if self.skip_maturity_scoring:
-            score = 1.0
-            logger.debug(
-                "[AgentSkillExtractor] Skipping maturity scoring for new skill '%s', "
-                "using default score=1.0", name,
-            )
-        else:
-            score = await self._evaluate_maturity(
-                name=name,
-                description=description,
-                content=content,
-                confidence=confidence,
-            )
+        score = await self._evaluate_maturity(
+            name=name, description=description, content=content, confidence=confidence
+        )
 
         record = AgentSkillRecord(
             cluster_id=cluster_id,
@@ -529,7 +530,8 @@ class AgentSkillExtractor:
             logger.warning(
                 "[AgentSkillExtractor] update operation for index %d has insufficient content "
                 "(too short or no steps), skipping. content=%r",
-                index, new_content[:100],
+                index,
+                new_content[:100],
             )
             return False
 
@@ -570,7 +572,10 @@ class AgentSkillExtractor:
             logger.warning(
                 "[AgentSkillExtractor] Retiring skill[%d] (confidence=%.2f < %.2f): "
                 "id=%s, name=%r",
-                index, final_confidence, self.retire_confidence, record_id,
+                index,
+                final_confidence,
+                self.retire_confidence,
+                record_id,
                 getattr(record, "name", ""),
             )
             retire_updates: Dict[str, Any] = {"confidence": final_confidence}
@@ -586,7 +591,9 @@ class AgentSkillExtractor:
 
         # Re-embed only if name or description actually changed
         name_changed = bool(new_name) and new_name != (record.name or "")
-        desc_changed = bool(new_description) and new_description != (record.description or "")
+        desc_changed = bool(new_description) and new_description != (
+            record.description or ""
+        )
         if name_changed or desc_changed:
             effective_name = new_name or record.name or ""
             effective_desc = new_description or record.description or ""
@@ -605,15 +612,11 @@ class AgentSkillExtractor:
         #    - mature (>= threshold) AND confidence not dropping: skip
         #    - immature (< threshold) AND case quality < 0.3: skip (low-quality case won't help)
         #    - otherwise: re-score via LLM
-        real_content_changed = (bool(new_content) and new_content != (record.content or ""))
+        real_content_changed = bool(new_content) and new_content != (
+            record.content or ""
+        )
         content_changed = real_content_changed or name_changed or desc_changed
-        if self.skip_maturity_scoring and content_changed:
-            updates["maturity_score"] = 1.0
-            logger.debug(
-                "[AgentSkillExtractor] Skipping maturity re-evaluation for skill[%d], "
-                "using default score=1.0", index,
-            )
-        elif content_changed:
+        if content_changed:
             change_ratio = self._content_change_ratio(
                 record.content or "", new_content or record.content or ""
             )
@@ -623,7 +626,9 @@ class AgentSkillExtractor:
                 logger.info(
                     "[AgentSkillExtractor] Skipping maturity re-evaluation for skill[%d]: "
                     "trivial change_ratio=%.2f < %.2f",
-                    index, change_ratio, self.MATURITY_TRIVIAL_CHANGE_RATIO,
+                    index,
+                    change_ratio,
+                    self.MATURITY_TRIVIAL_CHANGE_RATIO,
                 )
             # 2) Major change (>= 40%) or hypothesis promotion: always LLM
             elif (
@@ -634,14 +639,19 @@ class AgentSkillExtractor:
             ):
                 reason = (
                     "hypothesis promotion"
-                    if self._is_hypothesis_promotion(record.content or "", new_content or "")
+                    if self._is_hypothesis_promotion(
+                        record.content or "", new_content or ""
+                    )
                     else f"major content change (ratio={change_ratio:.2f})"
                 )
                 logger.info(
                     "[AgentSkillExtractor] %s for skill[%d], using LLM maturity evaluation",
-                    reason, index,
+                    reason,
+                    index,
                 )
-                await self._rescore_maturity(updates, new_name, new_description, new_content, record)
+                await self._rescore_maturity(
+                    updates, new_name, new_description, new_content, record
+                )
             # 3) Moderate change (20~40%)
             else:
                 old_score = record.maturity_score or 0.0
@@ -656,14 +666,22 @@ class AgentSkillExtractor:
                     logger.info(
                         "[AgentSkillExtractor] Skipping maturity re-evaluation for skill[%d]: "
                         "already mature (%.2f >= %.2f), confidence=%.2f (dropping=%s), change_ratio=%.2f",
-                        index, old_score, self.maturity_threshold, new_confidence_val, confidence_dropping, change_ratio,
+                        index,
+                        old_score,
+                        self.maturity_threshold,
+                        new_confidence_val,
+                        confidence_dropping,
+                        change_ratio,
                     )
                 elif old_score < self.maturity_threshold and source_quality < 0.3:
                     # Immature but low-quality case won't improve it: skip
                     logger.info(
                         "[AgentSkillExtractor] Skipping maturity re-evaluation for skill[%d]: "
                         "immature (%.2f) but low source quality (%.2f < 0.3), change_ratio=%.2f",
-                        index, old_score, source_quality, change_ratio,
+                        index,
+                        old_score,
+                        source_quality,
+                        change_ratio,
                     )
                 else:
                     # Re-score: immature skill with decent case, or mature but confidence dropping
@@ -671,9 +689,14 @@ class AgentSkillExtractor:
                         "[AgentSkillExtractor] Moderate change for skill[%d]: "
                         "score=%.2f, confidence_dropping=%s, source_quality=%.2f, "
                         "using LLM maturity evaluation",
-                        index, old_score, confidence_dropping, source_quality,
+                        index,
+                        old_score,
+                        confidence_dropping,
+                        source_quality,
                     )
-                    await self._rescore_maturity(updates, new_name, new_description, new_content, record)
+                    await self._rescore_maturity(
+                        updates, new_name, new_description, new_content, record
+                    )
 
         success = await skill_repo.update_skill_by_id(record_id, updates)
         if success:
@@ -773,11 +796,10 @@ class AgentSkillExtractor:
                 f"[AgentSkillExtractor] {len(existing_skill_records)} existing skills exceed "
                 f"max_skills_in_prompt={max_skills_in_prompt}, selecting top-k"
             )
-            existing_skill_records = await self._select_top_k_skills(
-                existing_skill_records,
-                new_case_records,
-                top_k=max_skills_in_prompt,
-            )
+            with timed("select_top_k_skills"):
+                existing_skill_records = await self._select_top_k_skills(
+                    existing_skill_records, new_case_records, top_k=max_skills_in_prompt
+                )
 
         # Load case history AFTER top-k selection so we only load cases
         # relevant to the skills that will actually appear in the prompt.
@@ -796,7 +818,10 @@ class AgentSkillExtractor:
             f"new_cases={len(new_case_records)}, existing_skills={len(existing_skill_records)}"
         )
 
-        llm_result = await self._call_llm(new_case_json, existing_skills_json, prompt_template)
+        with timed("extract_skill_ops"):
+            llm_result = await self._call_llm(
+                new_case_json, existing_skills_json, prompt_template
+            )
         if not llm_result:
             logger.warning(
                 f"[AgentSkillExtractor] LLM extraction failed for cluster={cluster_id}"
@@ -817,53 +842,65 @@ class AgentSkillExtractor:
         update_count = 0
         processed_indices: set = set()
 
-        for op in operations:
-            action = op.get("action", "none")
+        with timed("apply_operations"):
+            for op in operations:
+                action = op.get("action", "none")
 
-            if action == "add":
-                saved = await self._apply_add(
-                    op, cluster_id, group_id, user_id, skill_repo,
-                    source_case_ids=source_case_ids,
-                )
-                if saved:
-                    result.added_records.append(saved)
-
-            elif action == "update":
-                try:
-                    index = int(op.get("index", -1))
-                except (ValueError, TypeError):
-                    logger.warning(
-                        f"[AgentSkillExtractor] update index is not a valid integer: {op.get('index')!r}, skipping"
+                if action == "add":
+                    saved = await self._apply_add(
+                        op,
+                        cluster_id,
+                        group_id,
+                        user_id,
+                        skill_repo,
+                        source_case_ids=source_case_ids,
                     )
-                    continue
-                if index in processed_indices:
-                    logger.warning(
-                        f"[AgentSkillExtractor] Duplicate operation on index {index}, skipping update"
+                    if saved:
+                        result.added_records.append(saved)
+
+                elif action == "update":
+                    try:
+                        index = int(op.get("index", -1))
+                    except (ValueError, TypeError):
+                        logger.warning(
+                            f"[AgentSkillExtractor] update index is not a valid integer: {op.get('index')!r}, skipping"
+                        )
+                        continue
+                    if index in processed_indices:
+                        logger.warning(
+                            f"[AgentSkillExtractor] Duplicate operation on index {index}, skipping update"
+                        )
+                        continue
+                    processed_indices.add(index)
+                    # Pass max quality_score from new cases for maturity decision
+                    max_quality = (
+                        max(
+                            (getattr(rec, "quality_score", 0.5) or 0.5)
+                            for rec in new_case_records
+                        )
+                        if new_case_records
+                        else 0.5
                     )
-                    continue
-                processed_indices.add(index)
-                # Pass max quality_score from new cases for maturity decision
-                max_quality = max(
-                    (getattr(rec, "quality_score", 0.5) or 0.5)
-                    for rec in new_case_records
-                ) if new_case_records else 0.5
-                success = await self._apply_update(
-                    op, existing_skill_records, skill_repo, result,
-                    source_case_ids=source_case_ids,
-                    source_quality=max_quality,
-                )
-                if success:
-                    update_count += 1
+                    success = await self._apply_update(
+                        op,
+                        existing_skill_records,
+                        skill_repo,
+                        result,
+                        source_case_ids=source_case_ids,
+                        source_quality=max_quality,
+                    )
+                    if success:
+                        update_count += 1
 
-            elif action == "none":
-                logger.debug(
-                    f"[AgentSkillExtractor] No-op for cluster={cluster_id}"
-                )
+                elif action == "none":
+                    logger.debug(
+                        f"[AgentSkillExtractor] No-op for cluster={cluster_id}"
+                    )
 
-            else:
-                logger.warning(
-                    f"[AgentSkillExtractor] Unknown action '{action}', skipping"
-                )
+                else:
+                    logger.warning(
+                        f"[AgentSkillExtractor] Unknown action '{action}', skipping"
+                    )
 
         logger.info(
             f"[AgentSkillExtractor] cluster={cluster_id} operations applied: "

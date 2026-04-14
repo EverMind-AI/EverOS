@@ -11,6 +11,7 @@ Design:
 """
 
 import asyncio
+import json
 import numpy as np
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
@@ -30,6 +31,7 @@ except ImportError:
     logger.warning("Vectorize service not available, clustering will be limited")
 
 
+
 class MemSceneState:
     """Internal state for a single group's clustering."""
 
@@ -47,8 +49,8 @@ class MemSceneState:
         self.cluster_counts: Dict[str, int] = {}
         self.cluster_last_ts: Dict[str, Optional[float]] = {}
 
-        # Pending memcells waiting for batch clustering
-        self.pending_clustering: List[Dict[str, Any]] = []
+        # Clusters that contain agent conversation memcells
+        self.case_cluster_ids: set = set()
 
     def assign_new_cluster(self, event_id: str) -> str:
         """Assign a new cluster ID to an event."""
@@ -127,12 +129,14 @@ class MemSceneState:
                 "count": self.cluster_counts.get(cid, 0),
             }
 
-        return {
+        result = {
             "memcell_info": memcell_info,
             "memscene_info": memscene_info,
             "next_cluster_idx": self.next_cluster_idx,
-            "pending_clustering": self.pending_clustering,
         }
+        if self.case_cluster_ids:
+            result["case_cluster_ids"] = sorted(self.case_cluster_ids)
+        return result
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "MemSceneState":
@@ -143,6 +147,7 @@ class MemSceneState:
         """
         state = MemSceneState()
         state.next_cluster_idx = int(data.get("next_cluster_idx", 0))
+        state.case_cluster_ids = set(data.get("case_cluster_ids") or [])
 
         if "memcell_info" in data:
             # New format
@@ -178,8 +183,6 @@ class MemSceneState:
                 k: float(v) for k, v in (data.get("cluster_last_ts", {}) or {}).items()
             }
 
-        state.pending_clustering = list(data.get("pending_clustering", []))
-
         return state
 
 
@@ -208,22 +211,36 @@ class ClusterManager:
         ```
     """
 
-    def __init__(self, config: Optional[ClusterManagerConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ClusterManagerConfig] = None,
+        llm_provider: Optional[Any] = None,
+        context_fetcher: Optional[Callable] = None,
+    ):
         """Initialize ClusterManager.
 
         Args:
             config: Clustering configuration (uses defaults if None)
+            llm_provider: LLM provider instance (required for agent memcell clustering)
+            context_fetcher: Async callback to fetch context texts from DB.
+                Signature: (event_ids: List[str]) -> Dict[str, str]
+                Returns mapping of event_id -> task_intent text.
+                Required for agent memcell clustering.
         """
         self.config = config or ClusterManagerConfig()
         self._callbacks: List[Callable] = []
 
-        # Vectorize service
+        # Vectorize service (for embedding)
         self._vectorize_service = None
         if VECTORIZE_SERVICE_AVAILABLE:
             try:
                 self._vectorize_service = get_vectorize_service()
             except Exception as e:
                 logger.warning(f"Failed to initialize vectorize service: {e}")
+
+        # LLM provider (for llm algorithm)
+        self._llm_provider = llm_provider
+        self._context_fetcher = context_fetcher
 
         # Statistics
         self._stats = {
@@ -244,22 +261,37 @@ class ClusterManager:
         self._callbacks.append(callback)
 
     async def cluster_memcell(
-        self, memcell: Dict[str, Any], state: MemSceneState
+        self,
+        memcell: Dict[str, Any],
+        state: MemSceneState,
+        has_case: bool = False,
     ) -> Tuple[Optional[str], MemSceneState]:
         """Cluster a memcell and return updated state.
 
-        Pure computation method - no storage operations.
         Caller is responsible for loading state before and saving it after.
+
+        Routing:
+        - has_case=False: embedding clustering over non-case clusters, text=episode
+        - has_case=True:  embedding recall + LLM over case clusters, text=task_intent
 
         Args:
             memcell: Memcell dictionary with event_id, timestamp, episode/summary
             state: Current mem scene state for the group
+            has_case: Whether this memcell has an agent case
 
         Returns:
             Tuple of (cluster_id, updated_state):
             - cluster_id: Assigned cluster ID, or None if failed
             - state: Updated MemSceneState (same object, mutated)
         """
+        if has_case:
+            return await self._cluster_memcell_llm(memcell, state)
+        return await self._cluster_memcell_embedding(memcell, state)
+
+    async def _cluster_memcell_embedding(
+        self, memcell: Dict[str, Any], state: MemSceneState
+    ) -> Tuple[Optional[str], MemSceneState]:
+        """Embedding-based clustering using vector cosine similarity."""
         self._stats["total_memcells"] += 1
 
         # Extract key fields
@@ -273,241 +305,7 @@ class ClusterManager:
 
         # Get embedding
         vector = await self._get_embedding(text)
-        cluster_id = await self._assign_to_cluster(
-            event_id, vector, timestamp, state
-        )
-        return cluster_id, state
-
-    async def cluster_memcells_batch_llm(
-        self,
-        memcells: List[Dict[str, Any]],
-        state: MemSceneState,
-        llm_provider=None,
-        existing_cluster_episodes: Optional[Dict[str, List[str]]] = None,
-        extra_body: Optional[dict] = None,
-    ) -> Tuple[List[Optional[str]], MemSceneState]:
-        """Cluster multiple memcells using LLM-based assignment.
-
-        Instead of embedding similarity, sends batch items and existing cluster
-        descriptions to an LLM, which decides assignments (existing or new clusters).
-
-        Falls back to per-item cluster_memcell if LLM call fails.
-
-        Args:
-            memcells: List of memcell dicts
-            state: Current MemSceneState
-            llm_provider: LLMProvider instance for LLM calls
-            existing_cluster_episodes: Dict of cluster_id -> list of recent episode
-                texts (up to 3), fetched by the caller from the database.
-            extra_body: Optional extra body for LLM requests (e.g. disable thinking).
-
-        Returns:
-            (list_of_cluster_ids, updated_state)
-        """
-        if not memcells:
-            return [], state
-
-        if llm_provider is None:
-            logger.warning(
-                "[LLMClustering] No LLM provider, falling back to per-item embedding clustering"
-            )
-            return await self._fallback_cluster_individually(memcells, state)
-
-        num_clusters = len(existing_cluster_episodes) if existing_cluster_episodes else 0
-        if num_clusters > 200:
-            logger.warning(
-                f"[LLMClustering] Too many existing clusters ({num_clusters} > 200), "
-                "falling back to per-item embedding clustering"
-            )
-            return await self._fallback_cluster_individually(memcells, state)
-        episode_truncate_len = 200 if num_clusters > 100 else 500
-
-        # ===== Extract fields =====
-        event_ids: List[str] = []
-        timestamps: List[Optional[float]] = []
-        texts: List[str] = []
-        valid_indices: List[int] = []
-        for i, mc in enumerate(memcells):
-            eid = str(mc.get("event_id", ""))
-            if not eid:
-                logger.warning("Memcell missing event_id in batch, skipping")
-                continue
-            event_ids.append(eid)
-            timestamps.append(self._parse_timestamp(mc.get("timestamp")))
-            texts.append(self._extract_text(mc))
-            valid_indices.append(i)
-
-        cluster_ids: List[Optional[str]] = [None] * len(memcells)
-        if not event_ids:
-            return cluster_ids, state
-
-        # ===== Build LLM prompt =====
-        existing_clusters_desc = []
-        if existing_cluster_episodes:
-            for cid, episodes in existing_cluster_episodes.items():
-                if not episodes:
-                    continue
-                count = state.cluster_counts.get(cid, 0)
-                existing_clusters_desc.append({
-                    "cluster_id": cid,
-                    "recent_episodes": [ep[:episode_truncate_len] for ep in episodes[-3:]],
-                    "item_count": count,
-                })
-
-        new_items_desc = []
-        for idx, text in enumerate(texts):
-            new_items_desc.append({
-                "item_index": idx,
-                "text": text[:500],
-            })
-
-        import json
-        from memory_layer.prompts import get_prompt_by
-        from common_utils.json_utils import parse_json_response
-
-        prompt_template = get_prompt_by("CLUSTER_LLM_ASSIGNMENT_PROMPT")
-        next_new_id = state.next_cluster_idx
-        prompt = prompt_template.format(
-            existing_clusters_json=json.dumps(existing_clusters_desc, ensure_ascii=False, indent=2),
-            new_items_json=json.dumps(new_items_desc, ensure_ascii=False, indent=2),
-            next_new_id=next_new_id,
-            next_new_id_plus1=next_new_id + 1,
-        )
-
-        # ===== Call LLM =====
-        llm_result = None
-        for attempt in range(2):
-            try:
-                resp = await llm_provider.generate(prompt, extra_body=extra_body)
-                data = parse_json_response(resp)
-                if data and isinstance(data.get("assignments"), list):
-                    llm_result = data
-                    break
-                logger.warning(
-                    f"[LLMClustering] LLM retry {attempt + 1}/2: invalid format"
-                )
-            except Exception as e:
-                logger.warning(f"[LLMClustering] LLM retry {attempt + 1}/2: {e}")
-
-        if llm_result is None:
-            logger.warning(
-                "[LLMClustering] LLM failed after retries, falling back to per-item embedding clustering"
-            )
-            return await self._fallback_cluster_individually(memcells, state)
-
-        # ===== Batch embed (for centroid updates) =====
-        vectors = await self._get_embeddings_batch(texts)
-
-        # ===== Apply LLM assignments =====
-        assignments = llm_result["assignments"]
-        assigned_indices = set()
-
-        for assignment in assignments:
-            item_idx = assignment.get("item_index")
-            target_cid = assignment.get("cluster_id")
-            if item_idx is None or target_cid is None:
-                continue
-            if item_idx < 0 or item_idx >= len(event_ids):
-                continue
-            if item_idx in assigned_indices:
-                continue
-            assigned_indices.add(item_idx)
-
-            eid = event_ids[item_idx]
-            ts = timestamps[item_idx]
-            vec = vectors[item_idx] if item_idx < len(vectors) else None
-            text = texts[item_idx]
-
-            self._stats["total_memcells"] += 1
-
-            known_clusters = set(state.cluster_centroids.keys())
-            if existing_cluster_episodes:
-                known_clusters.update(existing_cluster_episodes.keys())
-            is_existing = target_cid in known_clusters
-            if is_existing:
-                # Assign to existing cluster
-                if vec is not None and hasattr(vec, 'size') and vec.size > 0:
-                    state.add_to_cluster(eid, target_cid, vec, ts)
-                else:
-                    state.eventid_to_cluster[eid] = target_cid
-                    state.cluster_ids.append(target_cid)
-                self._stats["clustered_memcells"] += 1
-            else:
-                # New cluster assigned by LLM
-                state.eventid_to_cluster[eid] = target_cid
-                state.cluster_ids.append(target_cid)
-                # Update next_cluster_idx if LLM used a higher index
-                try:
-                    idx_num = int(target_cid.split("_")[-1])
-                    if idx_num >= state.next_cluster_idx:
-                        state.next_cluster_idx = idx_num + 1
-                except (ValueError, IndexError):
-                    pass
-                if vec is not None and hasattr(vec, 'size') and vec.size > 0:
-                    state._update_cluster_centroid(target_cid, vec, ts)
-                else:
-                    state._update_cluster_centroid(target_cid, None, ts)
-                self._stats["new_clusters"] += 1
-                self._stats["clustered_memcells"] += 1
-
-            state.event_ids.append(eid)
-            state.timestamps.append(ts or 0.0)
-            state.vectors.append(vec if vec is not None else np.zeros((1,), dtype=np.float32))
-            cluster_ids[valid_indices[item_idx]] = target_cid
-
-        # Handle any items not assigned by LLM (fallback: create singleton clusters)
-        unassigned = [i for i in range(len(event_ids)) if i not in assigned_indices]
-        if unassigned:
-            logger.warning(
-                "[LLMClustering] %d/%d items not assigned by LLM, falling back to embedding clustering: %s",
-                len(unassigned), len(event_ids),
-                [event_ids[i] for i in unassigned],
-            )
-            unassigned_memcells = [memcells[valid_indices[idx]] for idx in unassigned]
-            fallback_ids, state = await self._fallback_cluster_individually(
-                unassigned_memcells, state
-            )
-            for idx, cid in zip(unassigned, fallback_ids):
-                cluster_ids[valid_indices[idx]] = cid
-
-        valid_ids = [cid for cid in cluster_ids if cid is not None]
-        unique_clusters = set(valid_ids)
-        logger.info(
-            f"[LLMClustering] 📦 Batch complete: {len(event_ids)} memcells -> "
-            f"{len(unique_clusters)} unique clusters"
-        )
-
-        return cluster_ids, state
-
-    async def _fallback_cluster_individually(
-        self,
-        memcells: List[Dict[str, Any]],
-        state: MemSceneState,
-    ) -> Tuple[List[Optional[str]], MemSceneState]:
-        """Fallback: cluster each memcell individually via embedding similarity.
-
-        Used when LLM clustering fails. Iterates over each memcell and calls
-        cluster_memcell one by one.
-        """
-        cluster_ids: List[Optional[str]] = []
-        for mc in memcells:
-            cid, state = await self.cluster_memcell(mc, state)
-            cluster_ids.append(cid)
-        return cluster_ids, state
-
-    async def _assign_to_cluster(
-        self,
-        event_id: str,
-        vector: Optional[np.ndarray],
-        timestamp: Optional[float],
-        state: MemSceneState,
-    ) -> Optional[str]:
-        """Core assignment logic for single-memcell clustering.
-
-        Assigns event_id to a cluster (existing or new), updates state in-place,
-        and returns the cluster_id.
-        """
-        if vector is None or (hasattr(vector, 'size') and vector.size == 0):
+        if vector is None or vector.size == 0:
             logger.warning(
                 f"Failed to get embedding for event {event_id}, creating singleton cluster"
             )
@@ -517,10 +315,12 @@ class ClusterManager:
             state.vectors.append(np.zeros((1,), dtype=np.float32))
             self._stats["new_clusters"] += 1
             self._stats["failed_embeddings"] += 1
-            return cluster_id
+            return cluster_id, state
 
-        # Find best matching cluster
-        cluster_id = self._find_best_cluster(state, vector, timestamp)
+        # Find best matching cluster (exclude case clusters)
+        cluster_id = self._find_best_cluster(
+            state, vector, timestamp, exclude_cids=state.case_cluster_ids
+        )
 
         # Add to cluster
         if cluster_id is None:
@@ -536,10 +336,346 @@ class ClusterManager:
         state.vectors.append(vector)
 
         self._stats["clustered_memcells"] += 1
+
+        return cluster_id, state
+
+    def _create_new_cluster(
+        self,
+        state: MemSceneState,
+        event_id: str,
+        vector: Optional[np.ndarray],
+        timestamp: Optional[float],
+        is_case: bool = False,
+    ) -> str:
+        """Create a new cluster and assign the event to it."""
+        cluster_id = state.assign_new_cluster(event_id)
+        if is_case:
+            state.case_cluster_ids.add(cluster_id)
+        # _update_cluster_centroid handles cluster_counts when vector is present;
+        # for None/empty vector we must set it explicitly.
+        if vector is not None and vector.size > 0:
+            state._update_cluster_centroid(cluster_id, vector, timestamp)
+        else:
+            state.cluster_counts[cluster_id] = 1
+            if timestamp is not None:
+                state.cluster_last_ts[cluster_id] = timestamp
+        self._stats["new_clusters"] += 1
         return cluster_id
 
+    def _assign_to_cluster(
+        self,
+        state: MemSceneState,
+        event_id: str,
+        cluster_id: str,
+        vector: Optional[np.ndarray],
+        timestamp: Optional[float],
+    ) -> None:
+        """Assign an event to an existing cluster."""
+        state.eventid_to_cluster[event_id] = cluster_id
+        state.cluster_ids.append(cluster_id)
+        # _update_cluster_centroid handles cluster_counts when vector is present;
+        # for None/empty vector we must increment explicitly.
+        if vector is not None and vector.size > 0:
+            state._update_cluster_centroid(cluster_id, vector, timestamp)
+        else:
+            state.cluster_counts[cluster_id] = (
+                state.cluster_counts.get(cluster_id, 0) + 1
+            )
+            if timestamp is not None:
+                prev_ts = state.cluster_last_ts.get(cluster_id)
+                state.cluster_last_ts[cluster_id] = max(
+                    prev_ts or timestamp, timestamp
+                )
+
+    def _append_event(
+        self,
+        state: MemSceneState,
+        event_id: str,
+        vector: Optional[np.ndarray],
+        timestamp: Optional[float],
+    ) -> None:
+        """Append event metadata to state lists."""
+        state.event_ids.append(event_id)
+        state.timestamps.append(timestamp or 0.0)
+        state.vectors.append(
+            vector if vector is not None else np.zeros((1,), dtype=np.float32)
+        )
+
+    async def _cluster_memcell_llm(
+        self,
+        memcell: Dict[str, Any],
+        state: MemSceneState,
+    ) -> Tuple[Optional[str], MemSceneState]:
+        """LLM-based clustering with embedding pre-filtering.
+
+        Two-stage approach:
+        1. Use embedding similarity to recall top-K candidate clusters
+        2. Fetch recent episodes for candidates, let LLM make the final decision
+        """
+        self._stats["total_memcells"] += 1
+
+        event_id = str(memcell.get("event_id", ""))
+        if not event_id:
+            logger.warning("Memcell missing event_id, skipping clustering")
+            return None, state
+
+        timestamp = self._parse_timestamp(memcell.get("timestamp"))
+        text = self._extract_text(memcell)
+
+        if self._llm_provider is None:
+            logger.error(
+                "[LLM Clustering] No LLM provider configured, "
+                "falling back to embedding-only case clustering"
+            )
+            vector = await self._get_embedding(text)
+            best_cid = self._find_top_k_clusters(
+                state, vector, k=1, only_cids=state.case_cluster_ids,
+            )
+            if best_cid and best_cid[0][1] >= self.config.similarity_threshold:
+                cluster_id = best_cid[0][0]
+                self._assign_to_cluster(
+                    state, event_id, cluster_id, vector, timestamp
+                )
+            else:
+                cluster_id = self._create_new_cluster(
+                    state, event_id, vector, timestamp, is_case=True
+                )
+            self._append_event(state, event_id, vector, timestamp)
+            self._stats["clustered_memcells"] += 1
+            return cluster_id, state
+
+        # No existing case clusters — just create a new one directly
+        if not state.case_cluster_ids:
+            vector = await self._get_embedding(text)
+            cluster_id = self._create_new_cluster(
+                state, event_id, vector, timestamp, is_case=True
+            )
+            self._append_event(state, event_id, vector, timestamp)
+            self._stats["clustered_memcells"] += 1
+            logger.info(
+                f"[LLM Clustering] First case cluster: {event_id} -> {cluster_id}"
+            )
+            return cluster_id, state
+
+        # Stage 1: Embedding recall — find top-K candidate clusters (case only)
+        vector = await self._get_embedding(text)
+        scored_candidates = self._find_top_k_clusters(
+            state, vector,
+            k=self.config.llm_top_k_clusters,
+            only_cids=state.case_cluster_ids,
+        )
+        candidate_ids = [cid for cid, _ in scored_candidates]
+        top1_sim = scored_candidates[0][1] if scored_candidates else -1.0
+        logger.info(
+            f"[LLM Clustering] Embedding recall: {len(candidate_ids)} candidates "
+            f"(top1_sim={top1_sim:.3f}), "
+            f"from {len(state.case_cluster_ids)} case clusters"
+        )
+
+        # Fast path: if top-1 similarity is high enough, skip LLM
+        if top1_sim >= self.config.llm_skip_threshold:
+            cluster_id = scored_candidates[0][0]
+            self._assign_to_cluster(state, event_id, cluster_id, vector, timestamp)
+            self._append_event(state, event_id, vector, timestamp)
+            self._stats["clustered_memcells"] += 1
+            logger.info(
+                f"[LLM Clustering] Fast path: {event_id} -> {cluster_id} "
+                f"(sim={top1_sim:.3f} >= {self.config.llm_skip_threshold})"
+            )
+            return cluster_id, state
+
+        # Stage 2: Fetch recent context for candidates
+        cluster_context = await self._fetch_cluster_context(state, candidate_ids)
+
+        # Stage 3: LLM decision
+        clusters_json = self._build_clusters_json(
+            state, candidate_ids, cluster_context
+        )
+        next_new_id = f"{state.next_cluster_idx:03d}"
+        from memory_layer.prompts import get_prompt_by
+
+        prompt_template = get_prompt_by("AGENT_CLUSTER_LLM_ASSIGN_PROMPT")
+        prompt = prompt_template.format(
+            memcell_text=text,
+            clusters_json=clusters_json,
+            next_new_id=next_new_id,
+        )
+        llm_result = await self._call_llm_for_clustering(prompt)
+
+        if llm_result is None:
+            logger.warning(
+                f"[LLM Clustering] LLM call failed for event {event_id}, "
+                f"falling back to embedding top-1"
+            )
+            # Fall back to embedding: use top-1 candidate if available, else new cluster
+            if scored_candidates and scored_candidates[0][1] >= self.config.similarity_threshold:
+                cluster_id = scored_candidates[0][0]
+                self._assign_to_cluster(
+                    state, event_id, cluster_id, vector, timestamp
+                )
+            else:
+                cluster_id = self._create_new_cluster(
+                    state, event_id, vector, timestamp, is_case=True
+                )
+        else:
+            chosen_id = llm_result.get("cluster_id", "")
+            if chosen_id in state.cluster_counts and chosen_id in state.case_cluster_ids:
+                cluster_id = chosen_id
+                self._assign_to_cluster(
+                    state, event_id, cluster_id, vector, timestamp
+                )
+            else:
+                cluster_id = self._create_new_cluster(
+                    state, event_id, vector, timestamp, is_case=True
+                )
+
+        self._append_event(state, event_id, vector, timestamp)
+        self._stats["clustered_memcells"] += 1
+        reason = llm_result.get("reason", "") if llm_result else ""
+        logger.info(
+            f"[LLM Clustering] 🎯 Event {event_id} -> {cluster_id} "
+            f"| intent: {text} | reason: {reason}"
+        )
+        return cluster_id, state
+
+    def _find_top_k_clusters(
+        self,
+        state: MemSceneState,
+        vector: Optional[np.ndarray],
+        k: int = 10,
+        only_cids: Optional[set] = None,
+    ) -> List[Tuple[str, float]]:
+        """Find top-K candidate clusters by embedding similarity.
+
+        Args:
+            only_cids: If provided, only consider these cluster IDs.
+
+        Returns:
+            List of (cluster_id, similarity) tuples, sorted by similarity desc.
+            Similarity is -1.0 when embedding is unavailable.
+        """
+        all_cids = list(state.cluster_counts.keys())
+        if only_cids is not None:
+            all_cids = [c for c in all_cids if c in only_cids]
+        if not all_cids:
+            return []
+
+        # If no embedding or no centroids, return all with unknown similarity
+        if vector is None or vector.size == 0 or not state.cluster_centroids:
+            return [(c, -1.0) for c in all_cids[:k]]
+
+        # Score each cluster by cosine similarity (ignore time gap for recall stage)
+        vector_norm = np.linalg.norm(vector) + 1e-9
+        scored = []
+        for cid in all_cids:
+            centroid = state.cluster_centroids.get(cid)
+            if centroid is None or centroid.size == 0:
+                scored.append((cid, -1.0))
+                continue
+            centroid_norm = np.linalg.norm(centroid) + 1e-9
+            sim = float((centroid @ vector) / (centroid_norm * vector_norm))
+            scored.append((cid, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:k]
+
+    async def _fetch_cluster_context(
+        self,
+        state: MemSceneState,
+        candidate_ids: List[str],
+    ) -> Dict[str, List[str]]:
+        """Fetch recent context texts for candidate clusters via context_fetcher.
+
+        Returns:
+            Dict mapping cluster_id -> list of recent context texts
+        """
+        if not self._context_fetcher or not candidate_ids:
+            return {}
+
+        max_per = self.config.llm_max_context_per_cluster
+
+        # Collect recent event_ids per candidate cluster
+        from collections import defaultdict
+
+        candidate_set = set(candidate_ids)
+        cluster_event_ids: Dict[str, List[str]] = defaultdict(list)
+        for eid, cid in state.eventid_to_cluster.items():
+            if cid in candidate_set:
+                cluster_event_ids[cid].append(eid)
+
+        # Take last N per cluster, collect all target event_ids
+        cluster_slices: Dict[str, List[str]] = {}
+        all_target_eids: List[str] = []
+        for cid in candidate_ids:
+            eids = cluster_event_ids.get(cid, [])
+            recent = eids[-max_per:]
+            cluster_slices[cid] = recent
+            all_target_eids.extend(recent)
+
+        if not all_target_eids:
+            return {}
+
+        # Call the fetcher: event_ids -> {event_id: episode_text}
+        eid_to_text = await self._context_fetcher(all_target_eids)
+
+        # Assemble per-cluster context
+        result: Dict[str, List[str]] = {}
+        for cid, eids in cluster_slices.items():
+            texts = [eid_to_text[eid] for eid in eids if eid in eid_to_text]
+            if texts:
+                result[cid] = texts
+        return result
+
+    def _build_clusters_json(
+        self,
+        state: MemSceneState,
+        candidate_ids: List[str],
+        cluster_context: Dict[str, List[str]],
+    ) -> str:
+        """Build JSON representation of candidate clusters for LLM prompt."""
+        if not candidate_ids:
+            return "(No existing clusters)"
+
+        clusters = []
+        for cid in candidate_ids:
+            count = state.cluster_counts.get(cid, 0)
+            recent = cluster_context.get(cid, [])
+            clusters.append(
+                {
+                    "cluster_id": cid,
+                    "item_count": count,
+                    "recent_task_intents": recent,
+                }
+            )
+        return json.dumps(clusters, ensure_ascii=False, indent=2)
+
+    async def _call_llm_for_clustering(
+        self, prompt: str
+    ) -> Optional[Dict[str, Any]]:
+        """Call LLM and parse clustering decision."""
+        for attempt in range(3):
+            try:
+                resp = await self._llm_provider.generate(prompt)
+                from common_utils.json_utils import parse_json_response
+
+                data = parse_json_response(resp)
+                if data and "cluster_id" in data:
+                    return data
+                logger.warning(
+                    f"[LLM Clustering] Retry {attempt + 1}/3: invalid response format"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[LLM Clustering] Retry {attempt + 1}/3: {e}"
+                )
+        return None
+
     def _find_best_cluster(
-        self, state: MemSceneState, vector: np.ndarray, timestamp: Optional[float]
+        self,
+        state: MemSceneState,
+        vector: np.ndarray,
+        timestamp: Optional[float],
+        exclude_cids: Optional[set] = None,
     ) -> Optional[str]:
         """Find the best matching cluster for a vector."""
         if not state.cluster_centroids:
@@ -551,6 +687,8 @@ class ClusterManager:
         vector_norm = np.linalg.norm(vector) + 1e-9
 
         for cluster_id, centroid in state.cluster_centroids.items():
+            if exclude_cids and cluster_id in exclude_cids:
+                continue
             if centroid is None or centroid.size == 0:
                 continue
 
@@ -590,31 +728,15 @@ class ClusterManager:
 
         return None
 
-    async def _get_embeddings_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
-        """Get embeddings for multiple texts in a single batched call."""
-        if not self._vectorize_service:
-            logger.warning("Vectorize service not available for batch embedding")
-            return [None] * len(texts)
-
-        try:
-            vectors = await self._vectorize_service.get_embeddings(texts)
-            return [
-                np.array(v, dtype=np.float32) if v is not None else None
-                for v in vectors
-            ]
-        except Exception as e:
-            logger.warning(f"Batch embedding failed, falling back to individual: {e}")
-            # Fallback: call individual embeddings
-            results = []
-            for text in texts:
-                results.append(await self._get_embedding(text))
-            return results
-
     def _extract_text(self, memcell: Dict[str, Any]) -> str:
         """Extract representative text from memcell.
 
-        Priority: episode > original_data
+        Priority: clustering_text > episode > original_data
         """
+        clustering_text = memcell.get("clustering_text")
+        if isinstance(clustering_text, str) and clustering_text.strip():
+            return clustering_text.strip()
+
         episode = memcell.get("episode")
         if isinstance(episode, str) and episode.strip():
             return episode.strip()

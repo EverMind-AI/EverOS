@@ -43,7 +43,7 @@ from infra_layer.adapters.out.persistence.repository.agent_case_raw_repository i
 from infra_layer.adapters.out.persistence.repository.agent_skill_raw_repository import (
     AgentSkillRawRepository,
 )
-from biz_layer.memorize_config import AGENT_DEFAULT_MEMORIZE_CONFIG
+from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +243,7 @@ class GetMemoryService:
         self, mongo_filter: dict, skip: int, limit: int, sort: list
     ) -> GetMemResponse:
         """Query v1_agent_skills via repository and return GetMemResponse."""
-        retire_confidence = AGENT_DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
+        retire_confidence = DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
         mongo_filter.setdefault("confidence", {"$gte": retire_confidence})
         with timed("query_memories"):
             docs, total_count = await self._agent_skill_repo.find_by_query(

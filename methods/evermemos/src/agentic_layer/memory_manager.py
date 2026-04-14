@@ -1077,6 +1077,9 @@ class MemoryManager:
                 round2_results = await asyncio.gather(
                     *[do_search(q) for q in refined_queries], return_exceptions=True
                 )
+            from common_utils.async_utils import reraise_critical_errors
+
+            reraise_critical_errors(round2_results)
             all_round2 = [
                 h for r in round2_results if not isinstance(r, Exception) for h in r
             ]

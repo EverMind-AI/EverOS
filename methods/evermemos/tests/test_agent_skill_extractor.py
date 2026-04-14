@@ -1853,7 +1853,7 @@ class TestSummarizeCaseForPrompt:
         case = _make_case_record(approach=long_approach)
         result = extractor._summarize_case_for_prompt(case, max_approach_chars=100)
         assert len(result["approach"]) == 100
-        assert result["approach"].endswith("...")
+        assert result["approach"].endswith("... [omitted]")
 
     def test_no_approach_omitted(self):
         extractor = _build_extractor()
@@ -1877,9 +1877,9 @@ class TestTruncateText:
         assert AgentSkillExtractor._truncate_text("hello", 5) == "hello"
 
     def test_long_text_truncated_with_ellipsis(self):
-        result = AgentSkillExtractor._truncate_text("abcdefghij", 8)
-        assert len(result) == 8
-        assert result.endswith("...")
+        result = AgentSkillExtractor._truncate_text("a" * 30, 20)
+        assert len(result) == 20
+        assert result.endswith("... [omitted]")
 
     def test_none_returns_empty(self):
         assert AgentSkillExtractor._truncate_text(None, 10) == ""

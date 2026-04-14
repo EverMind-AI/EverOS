@@ -109,7 +109,12 @@ _PROMPT_REGISTRY = {
         "zh": ("memory_layer.prompts.zh.agent_prompts", False),
     },
     # Clustering
-    "CLUSTER_LLM_ASSIGNMENT_PROMPT": {
+    "AGENT_CLUSTER_LLM_ASSIGN_PROMPT": {
+        "en": ("memory_layer.prompts.en.agent_prompts", False),
+        "zh": ("memory_layer.prompts.zh.agent_prompts", False),
+    },
+    # Skill relevance verification
+    "AGENT_SKILL_RELEVANCE_VERIFY_PROMPT": {
         "en": ("memory_layer.prompts.en.agent_prompts", False),
         "zh": ("memory_layer.prompts.zh.agent_prompts", False),
     },

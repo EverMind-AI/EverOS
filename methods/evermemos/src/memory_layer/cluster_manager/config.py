@@ -13,6 +13,9 @@ class ClusterManagerConfig:
         enable_persistence: Whether to persist mem scene state to disk
         persist_dir: Directory for mem scene state persistence (required if enable_persistence=True)
         clustering_algorithm: Algorithm to use ('centroid' or 'nearest')
+        llm_top_k_clusters: Number of candidate clusters pre-filtered by embedding for LLM
+        llm_max_context_per_cluster: Max recent items per cluster in LLM context
+        llm_skip_threshold: Skip LLM if top-1 embedding similarity exceeds this
     """
 
     similarity_threshold: float = 0.65
@@ -20,6 +23,13 @@ class ClusterManagerConfig:
     enable_persistence: bool = False
     persist_dir: str = None
     clustering_algorithm: str = "centroid"  # 'centroid' or 'nearest'
+    # LLM clustering: number of candidate clusters pre-filtered by embedding similarity
+    llm_top_k_clusters: int = 30
+    # LLM clustering: max recent items per cluster to include in LLM context
+    llm_max_context_per_cluster: int = 5
+    # LLM clustering: if top-1 embedding similarity exceeds this threshold,
+    # skip LLM and assign directly (set to 1.0 to always use LLM)
+    llm_skip_threshold: float = 0.85
 
     def __post_init__(self):
         """Validate configuration."""

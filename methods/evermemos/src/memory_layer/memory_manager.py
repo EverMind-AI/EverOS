@@ -44,10 +44,6 @@ from memory_layer.memory_extractor.foresight_extractor import ForesightExtractor
 from memory_layer.memcell_extractor.base_memcell_extractor import StatusResult
 from api_specs.memory_models import MessageSenderRole
 from memory_layer.constants import EXTRACT_SCENES
-from biz_layer.memorize_config import (
-    DEFAULT_MEMORIZE_CONFIG,
-    AGENT_DEFAULT_MEMORIZE_CONFIG,
-)
 
 
 logger = get_logger(__name__)
@@ -161,15 +157,6 @@ class MemoryManager:
         if provider is None:
             provider = self.providers_mapping.get(DEFAULT_PROVIDER_NAME)
         return provider
-
-    @staticmethod
-    def _get_skip_reasoning_extra_body(memcell: MemCell) -> dict | None:
-        """Return extra_body to disable reasoning if config requires it."""
-        is_agent = memcell and memcell.type == RawDataType.AGENTCONVERSATION
-        config = AGENT_DEFAULT_MEMORIZE_CONFIG if is_agent else DEFAULT_MEMORIZE_CONFIG
-        if config.skip_episode_case_reasoning:
-            return {"chat_template_kwargs": {"enable_thinking": False}}
-        return None
 
     # TODO: add username
     async def extract_memcell(
@@ -334,7 +321,6 @@ class MemoryManager:
             self._episode_extractor = EpisodeMemoryExtractor(
                 self._get_provider_for_scene("extraction")
             )
-        self._episode_extractor.extra_body = self._get_skip_reasoning_extra_body(memcell)
 
         # Build extraction request
         from memory_layer.memory_extractor.base_memory_extractor import (
@@ -475,8 +461,7 @@ class MemoryManager:
 
         logger.debug("[MemoryManager] Extracting AgentCase")
         extractor = AgentCaseExtractor(
-            llm_provider=self._get_provider_for_scene("extraction"),
-            extra_body=self._get_skip_reasoning_extra_body(memcell),
+            llm_provider=self._get_provider_for_scene("extraction")
         )
         request = AgentCaseExtractRequest(
             memcell=memcell,

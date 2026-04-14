@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+import random
 import time
+import json
 import traceback
 
 from core.observation.stage_timer import timed, timed_parallel
+from api_specs.memory_types import ScenarioType
 from agentic_layer.metrics.memorize_metrics import (
     record_extraction_stage,
     record_memory_extracted,
@@ -13,11 +16,11 @@ from memory_layer.memory_manager import MemoryManager
 from api_specs.memory_types import (
     MemoryType,
     MemCell,
+    BaseMemory,
     EpisodeMemory,
     RawDataType,
     Foresight,
     AgentCase,
-    ScenarioType,
 )
 from api_specs.memory_types import AtomicFact, get_text_from_content_items
 from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
@@ -35,15 +38,23 @@ from infra_layer.adapters.out.persistence.repository.conversation_status_raw_rep
     ConversationStatusRawRepository,
 )
 from service.settings_service import SettingsService
+from infra_layer.adapters.out.persistence.repository.memcell_raw_repository import (
+    MemCellRawRepository,
+)
 from infra_layer.adapters.out.persistence.repository.conversation_data_raw_repository import (
     ConversationDataRepository,
 )
+from api_specs.memory_types import RawDataType
 from typing import List, Dict, Optional, Any
+from dataclasses import dataclass
+import uuid
 from datetime import datetime, timedelta
+import os
 import asyncio
 from collections import defaultdict
 from common_utils.datetime_utils import get_now_with_timezone, to_iso_format
 from memory_layer.memcell_extractor.base_memcell_extractor import StatusResult
+import traceback
 
 from core.observation.logger import get_logger
 from infra_layer.adapters.out.search.elasticsearch.converter.episodic_memory_converter import (
@@ -78,7 +89,6 @@ class MemoryDocPayload:
 from biz_layer.memorize_config import (
     MemorizeConfig,
     DEFAULT_MEMORIZE_CONFIG,
-    AGENT_DEFAULT_MEMORIZE_CONFIG,
 )
 
 
@@ -96,6 +106,7 @@ def _is_agent_case_quality_sufficient(
     return True
 
 
+
 async def _trigger_clustering(
     group_id: str,
     memcell: MemCell,
@@ -104,415 +115,274 @@ async def _trigger_clustering(
     episode_text: Optional[str] = None,
     agent_case: Optional[AgentCase] = None,
 ) -> None:
-    """Trigger MemCell clustering.
-
-    Accumulates memcells in a pending queue. Once the queue reaches
-    cluster_batch_size, drains it and runs clustering. When
-    cluster_batch_size == 1, this means every memcell is processed
-    immediately. Use flush_clustering() to drain on demand.
+    """Trigger MemCell clustering
 
     Args:
         group_id: Group ID
         memcell: The MemCell just saved
-        scene: Conversation scene ("solo" or "team")
-        config: Memory extraction configuration
-        episode_text: Episode text extracted from this MemCell
-        agent_case: Extracted AgentCase (if agent conversation)
+        scene: Conversation scene (used to determine Profile extraction strategy)
+            - "solo": 1 user + N agents scenario
+            - "team": multi-user + agents scenario
+        episode_text: Episode text extracted from this MemCell (used for clustering similarity)
+        agent_case: Extracted AgentCase (if agent conversation), used for skill extraction
     """
     logger.info(
-        f"[Clustering] Start triggering clustering: group_id={group_id}, "
-        f"event_id={memcell.event_id}, scene={scene}"
+        f"[Clustering] Start triggering clustering: group_id={group_id}, event_id={memcell.event_id}, scene={scene}"
     )
 
-    pending_entry = {
-        "event_id": str(memcell.event_id),
-        "episode": episode_text,
-        "timestamp": memcell.timestamp.timestamp() if memcell.timestamp else None,
-        "participants": memcell.participants or [],
-        "group_id": group_id,
-        "scene": scene,
-    }
-    if agent_case:
-        pending_entry["agent_case"] = {
-            "id": agent_case.id,
-            "task_intent": agent_case.task_intent,
-            "approach": agent_case.approach,
-            "key_insight": getattr(agent_case, "key_insight", None),
-            "quality_score": agent_case.quality_score,
-        }
-
-    await _drain_and_cluster(
-        group_id=group_id,
-        config=config,
-        new_entry=pending_entry,
-    )
-
-
-async def _drain_and_cluster(
-    group_id: str,
-    config: MemorizeConfig,
-    new_entry: Optional[Dict] = None,
-    force_drain: bool = False,
-) -> int:
-    """Core clustering pipeline shared by _trigger_clustering and flush_clustering.
-
-    Acquires the distributed lock, optionally appends a new pending entry,
-    drains the queue when batch_size is reached (or force_drain=True),
-    and runs batch clustering. Skill extraction runs after the lock is released.
-
-    Args:
-        group_id: Group ID
-        config: Memory extraction configuration
-        new_entry: Pending entry dict to append (None for flush)
-        force_drain: If True, drain regardless of batch_size (flush mode)
-
-    Returns:
-        Number of pending memcells that were drained and clustered.
-    """
     try:
-        from memory_layer.cluster_manager import MemSceneState
+        from memory_layer.cluster_manager import (
+            ClusterManager,
+            ClusterManagerConfig,
+            MemSceneState,
+        )
         from infra_layer.adapters.out.persistence.repository.mem_scene_raw_repository import (
             MemSceneRawRepository,
         )
+        from core.di import get_bean_by_type
+
+        logger.info(f"[Clustering] Retrieving MemSceneRawRepository...")
+        # Get MongoDB storage
+        cluster_storage = get_bean_by_type(MemSceneRawRepository)
+        logger.info(
+            f"[Clustering] MemSceneRawRepository retrieved successfully: {type(cluster_storage)}"
+        )
+
+        # Create ClusterManager (pure computation component)
+        has_case = agent_case is not None
+        cluster_config = ClusterManagerConfig(
+            similarity_threshold=config.cluster_similarity_threshold,
+            max_time_gap_days=config.cluster_max_time_gap_days,
+        )
+
+        # Build LLM provider and context fetcher for agent clustering
+        llm_provider = None
+        context_fetcher = None
+        if has_case:
+            from memory_layer.llm.llm_provider import build_default_provider
+            from infra_layer.adapters.out.persistence.repository.agent_case_raw_repository import (
+                AgentCaseRawRepository,
+            )
+
+            llm_provider = build_default_provider()
+            agent_case_repo = get_bean_by_type(AgentCaseRawRepository)
+            context_fetcher = agent_case_repo.fetch_task_intents_by_event_ids
+
+        cluster_manager = ClusterManager(
+            config=cluster_config,
+            llm_provider=llm_provider,
+            context_fetcher=context_fetcher,
+        )
+
+        # Clustering text: task_intent for agent case, episode for normal
+        clustering_text = (
+            agent_case.task_intent if has_case and agent_case.task_intent
+            else episode_text
+        )
+        logger.info(
+            f"[Clustering] ClusterManager created (has_case={has_case})"
+        )
+
+        # Convert MemCell to dictionary format required for clustering
+        memcell_dict = {
+            "event_id": str(memcell.event_id),
+            "episode": episode_text,
+            "clustering_text": clustering_text,
+            "timestamp": memcell.timestamp.timestamp() if memcell.timestamp else None,
+            "participants": memcell.participants or [],
+            "group_id": group_id,
+        }
+
+        logger.debug(
+            f"[Clustering] Start clustering execution: {memcell_dict['event_id']}"
+        )
+
         from core.lock.redis_distributed_lock import distributed_lock
 
-        cluster_storage = get_bean_by_type(MemSceneRawRepository)
-
-        drained_memcells = []
-        cluster_ids = None
-        result = 0
+        # ===== Phase 1 + 2: Clustering + Profile extraction =====
+        # Lock: trigger_clustering:{group_id}
+        #
+        # Protected shared state (read-modify-write):
+        #   - mem_scene_state: loaded from DB, mutated by cluster_memcell(), saved back.
+        #     Concurrent writes without this lock would cause lost updates.
+        #   - Profile extraction (Phase 2) reads mem_scene_state snapshot taken in Phase 1
+        #     and reads/writes user profiles in DB.
+        #
+        # Released before Phase 3 so the next request's Phase 1+2 is not blocked
+        # by a slow LLM skill-extraction call.
+        #
+        # Data flow out of this lock:
+        #   - cluster_id: determined by Phase 1, used as key for Phase 3 lock.
+        #   - agent_case: passed through from caller, not modified here.
+        #   Both are safe to use after lock release because Phase 3 re-reads
+        #   its own shared state (existing_skills) from DB inside its own lock.
+        cluster_id = None
         lock_resource = f"trigger_clustering:{group_id}"
         async with distributed_lock(
-            resource=lock_resource, timeout=1200.0, blocking_timeout=3600.0
+            resource=lock_resource,
+            timeout=config.clustering_lock_timeout,
+            blocking_timeout=config.clustering_lock_blocking_timeout,
         ) as acquired:
             if not acquired:
                 logger.error(
-                    f"[Clustering] Failed to acquire lock for group {group_id}"
+                    f"[Clustering] Failed to acquire lock for group {group_id}, "
+                    f"skipping memcell {memcell.event_id}"
                 )
-                return 0
+                return
 
+            # ===== Phase 1: Clustering =====
             state_dict = await cluster_storage.load_mem_scene(group_id)
             mem_scene_state = (
                 MemSceneState.from_dict(state_dict) if state_dict else MemSceneState()
             )
-
-            # Append new entry if provided (trigger mode)
-            if new_entry:
-                mem_scene_state.pending_clustering.append(new_entry)
-
-            pending_count = len(mem_scene_state.pending_clustering)
-
-            # Check whether to drain
-            should_drain = force_drain or pending_count >= config.cluster_batch_size
-            if not should_drain:
-                await cluster_storage.save_mem_scene(
-                    group_id, mem_scene_state.to_dict()
-                )
-                logger.info(
-                    f"[Clustering] Accumulated {pending_count}/{config.cluster_batch_size} "
-                    f"pending memcells for group {group_id}"
-                )
-                return 0
-
-            if pending_count == 0:
-                logger.info(
-                    f"[Clustering] No pending memcells for group {group_id}"
-                )
-                return 0
-
-            # Drain pending queue
-            drained_memcells = list(mem_scene_state.pending_clustering)
-            mem_scene_state.pending_clustering.clear()
-
             logger.info(
-                f"[Clustering] Draining {len(drained_memcells)} pending memcells "
-                f"(group={group_id}, existing_events={len(mem_scene_state.event_ids)})"
+                f"[Clustering] Loaded clustering state: {len(mem_scene_state.event_ids)} clustered events"
             )
 
-            cluster_ids = await _run_batch_clustering(
-                group_id=group_id,
-                drained_memcells=drained_memcells,
-                mem_scene_state=mem_scene_state,
-                cluster_storage=cluster_storage,
-                config=config,
+            cluster_id, mem_scene_state = await cluster_manager.cluster_memcell(
+                memcell_dict, mem_scene_state, has_case=has_case
             )
 
-            # Profile extraction inside the lock to prevent concurrent
-            # reads/writes to profile data for the same group.
-            if cluster_ids:
-                try:
-                    await _run_profile_extraction_for_batch(
+            await cluster_storage.save_mem_scene(group_id, mem_scene_state.to_dict())
+            logger.info(f"[Clustering] Clustering state saved")
+
+            if cluster_id:
+                logger.debug(
+                    f"[Clustering] ✅ MemCell {memcell.event_id} -> Cluster {cluster_id} (group: {group_id})"
+                )
+            else:
+                logger.warning(
+                    f"[Clustering] ⚠️ MemCell {memcell.event_id} clustering returned None (group: {group_id})"
+                )
+
+            # ===== Phase 2: Profile extraction (with interval-based throttling) =====
+            if cluster_id and not config.skip_profile_extraction:
+                total_memcell_count = sum(mem_scene_state.cluster_counts.values())
+                should_extract = (
+                    config.profile_extraction_interval <= 1
+                    or total_memcell_count % config.profile_extraction_interval == 0
+                )
+
+                if should_extract:
+                    # --- Group-level cluster selection (Layer 1 of 2) ---
+                    # Profile extraction uses a two-layer filtering strategy:
+                    #
+                    # Layer 1 (here): Select which clusters to fetch from DB.
+                    #   Uses min(last_updated_ts) across all users in the group as baseline.
+                    #   This is intentionally broad — it covers the "slowest" user so no
+                    #   cluster is missed for any user. Fetches ALL events from selected
+                    #   clusters in one DB query.
+                    #
+                    # Layer 2 (manager.py, per-user loop): Filters fetched original_data per
+                    #   user based on each user's own last_updated timestamp, so each user's
+                    #   LLM prompt only contains data they haven't seen yet.
+                    #   (Note: the code calls them "episodes" but the actual content is
+                    #   memcell original_data — raw chat messages, not episode summaries.)
+                    #
+                    # For new groups with no profiles, defaults to current memcell timestamp
+                    # to avoid selecting all historical clusters (cold-start protection).
+                    from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository import (
+                        UserProfileRawRepository,
+                    )
+                    from core.di import get_bean_by_type
+
+                    profile_repo = get_bean_by_type(UserProfileRawRepository)
+                    existing_profiles = await profile_repo.get_all_by_group(group_id)
+
+                    current_memcell_ts = memcell.timestamp.timestamp()
+
+                    if existing_profiles:
+                        timestamps = [
+                            p.last_updated_ts
+                            for p in existing_profiles
+                            if p.last_updated_ts is not None
+                        ]
+                        last_profile_ts = (
+                            min(timestamps) if timestamps else current_memcell_ts
+                        )
+                    else:
+                        last_profile_ts = current_memcell_ts
+
+                    target_cluster_ids = [
+                        cid
+                        for cid, ts in mem_scene_state.cluster_last_ts.items()
+                        if ts is not None and ts > last_profile_ts
+                    ]
+                    if cluster_id not in target_cluster_ids:
+                        target_cluster_ids.append(cluster_id)
+
+                    logger.info(
+                        f"[Profile] Timestamp-based selection: last_profile_ts={last_profile_ts}, "
+                        f"target_clusters={target_cluster_ids}"
+                    )
+
+                    await _trigger_profile_extraction(
                         group_id=group_id,
-                        drained_memcells=drained_memcells,
-                        cluster_ids=cluster_ids,
+                        cluster_ids=target_cluster_ids,
                         mem_scene_state=mem_scene_state,
+                        memcell=memcell,
+                        scene=scene,
                         config=config,
-                        force_drain=force_drain,
                     )
-                except Exception as e:
+                else:
+                    logger.debug(
+                        f"[Profile] Skipping extraction: total_memcells={total_memcell_count}, "
+                        f"interval={config.profile_extraction_interval}"
+                    )
+
+        # ===== Phase 3: Agent skill extraction =====
+        # Lock: trigger_agent_skill:{group_id}:{cluster_id}
+        #
+        # Separate lock so Phase 1+2 of the next request is not blocked by this
+        # slow LLM call.
+        #
+        # Data dependencies (all safe after Lock 1 release):
+        #   - cluster_id: immutable identifier, determined in Phase 1.
+        #   - agent_case: this request's own extraction result, not shared state.
+        #   - existing_skills: re-read from DB inside _trigger_agent_skill_extraction,
+        #     so it always reflects the latest state (including writes by prior requests).
+        #
+        # IMPORTANT for future maintainers:
+        #   This function does NOT read memcells or agent_cases from DB. It only uses
+        #   the passed-in agent_case (current request) + existing_skills (from DB).
+        #   If you add logic that reads cluster memcells from DB here, you must
+        #   consider that new memcells may have been added between Lock 1 release
+        #   and Lock 2 acquisition.
+        if cluster_id and agent_case and _is_agent_case_quality_sufficient(agent_case, config):
+            skill_lock_resource = f"trigger_agent_skill:{group_id}:{cluster_id}"
+            async with distributed_lock(
+                resource=skill_lock_resource,
+                timeout=config.skill_extraction_lock_timeout,
+                blocking_timeout=config.skill_extraction_lock_blocking_timeout,
+            ) as skill_acquired:
+                if not skill_acquired:
                     logger.error(
-                        f"[Clustering] Profile extraction failed after clustering "
-                        f"(group={group_id}): {e}",
-                        exc_info=True,
+                        f"[AgentSkill] Failed to acquire lock for group {group_id}, "
+                        f"cluster {cluster_id}, skipping memcell {memcell.event_id}"
                     )
-
-            result = pending_count
-
-        # Lock released — run skill extraction outside the lock
-        if drained_memcells and cluster_ids is not None:
-            try:
-                await _run_skill_extraction_for_batch(
+                    return
+                await _trigger_agent_skill_extraction(
                     group_id=group_id,
-                    drained_memcells=drained_memcells,
-                    cluster_ids=cluster_ids,
+                    cluster_id=cluster_id,
+                    memcell=memcell,
+                    agent_case=agent_case,
                     config=config,
                 )
-            except Exception as e:
-                logger.error(
-                    f"[Clustering] Skill extraction failed after clustering "
-                    f"(group={group_id}): {e}",
-                    exc_info=True,
-                )
-
-        return result
 
     except Exception as e:
         logger.error(
-            f"[Clustering] Clustering failed: {e}", exc_info=True
+            f"[Clustering] ❌ Triggering clustering failed: {e}", exc_info=True
         )
         raise
-
-
-async def _run_batch_clustering(
-    group_id: str,
-    drained_memcells: List[Dict],
-    mem_scene_state,
-    cluster_storage,
-    config: MemorizeConfig,
-) -> List[str]:
-    """Run clustering for drained memcells and return cluster_ids.
-
-    Unified path for both single-memcell and accumulated batch clustering.
-    Uses LLM-based assignment when more than one item;
-    otherwise uses incremental embedding similarity for single items.
-
-    Called from _drain_and_cluster. Caller must hold the distributed lock
-    and have already loaded mem_scene_state.
-
-    Args:
-        group_id: Group ID
-        drained_memcells: List of pending memcell dicts to cluster
-        mem_scene_state: Loaded MemSceneState (mutated in-place)
-        cluster_storage: MemSceneRawRepository instance
-        config: Memory extraction configuration
-
-    Returns:
-        List of cluster_ids corresponding to each entry in drained_memcells.
-    """
-    from memory_layer.cluster_manager import ClusterManager, ClusterManagerConfig
-
-    cluster_config = ClusterManagerConfig(
-        similarity_threshold=config.cluster_similarity_threshold,
-        max_time_gap_days=config.cluster_max_time_gap_days,
-    )
-    cluster_manager = ClusterManager(config=cluster_config)
-
-    if len(drained_memcells) > 1:
-        # LLM-based clustering
-        from memory_layer.llm.llm_provider import build_default_provider
-        from infra_layer.adapters.out.persistence.document.memory.episodic_memory import (
-            EpisodicMemory,
-        )
- 
-        llm_custom_setting = await _load_llm_custom_setting()
-        if llm_custom_setting:
-            from memory_layer.llm.llm_provider import LLMProvider
-            llm_provider = LLMProvider(**llm_custom_setting)
-        else:
-            llm_provider = build_default_provider()
-
-        # Fetch recent episodes per existing cluster from DB
-        existing_cluster_episodes: Dict[str, List[str]] = {}
-        cluster_to_events: Dict[str, List[tuple]] = defaultdict(list)
-        for eid, cid in mem_scene_state.eventid_to_cluster.items():
-            ts = 0.0
-            idx = None
-            try:
-                idx = mem_scene_state.event_ids.index(eid)
-            except ValueError:
-                pass
-            if idx is not None and idx < len(mem_scene_state.timestamps):
-                ts = mem_scene_state.timestamps[idx]
-            cluster_to_events[cid].append((ts, eid))
-
-        # Pick top 3 most recent event_ids per cluster
-        top_event_ids = []
-        cluster_event_map: Dict[str, List[str]] = {}
-        for cid, items in cluster_to_events.items():
-            items.sort(reverse=True)
-            recent_eids = [eid for _, eid in items[:3]]
-            cluster_event_map[cid] = recent_eids
-            top_event_ids.extend(recent_eids)
-
-        if top_event_ids:
-            try:
-                episode_docs = await EpisodicMemory.find(
-                    {"parent_id": {"$in": top_event_ids}}
-                ).to_list()
-                parent_to_episode: Dict[str, str] = {}
-                for doc in episode_docs:
-                    pid = doc.parent_id
-                    if pid and hasattr(doc, "episode") and doc.episode:
-                        parent_to_episode[pid] = doc.episode[:500]
-                for cid, eids in cluster_event_map.items():
-                    episodes = [
-                        parent_to_episode[eid]
-                        for eid in eids
-                        if eid in parent_to_episode
-                    ]
-                    if episodes:
-                        existing_cluster_episodes[cid] = episodes
-            except Exception as e:
-                logger.warning(f"[Clustering] Failed to fetch cluster episodes: {e}")
-
-        clustering_extra_body = None
-        if config.skip_clustering_reasoning:
-            clustering_extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
-
-        cluster_ids, mem_scene_state = await cluster_manager.cluster_memcells_batch_llm(
-            drained_memcells, mem_scene_state,
-            llm_provider=llm_provider,
-            existing_cluster_episodes=existing_cluster_episodes,
-            extra_body=clustering_extra_body,
-        )
-    else:
-        # Incremental embedding-based clustering (single memcell)
-        cluster_id, mem_scene_state = await cluster_manager.cluster_memcell(
-            drained_memcells[0], mem_scene_state
-        )
-        cluster_ids = [cluster_id]
-
-    await cluster_storage.save_mem_scene(group_id, mem_scene_state.to_dict())
-
-    # Log results
-    valid_ids = [cid for cid in cluster_ids if cid is not None]
-    unique_clusters = set(valid_ids)
-    logger.info(
-        f"[Clustering] Batch complete: {len(drained_memcells)} memcells -> "
-        f"{len(unique_clusters)} unique clusters (group={group_id})"
-    )
-
-    return cluster_ids
-
-
-async def _run_profile_extraction_for_batch(
-    group_id: str,
-    drained_memcells: List[Dict],
-    cluster_ids: List[str],
-    mem_scene_state,
-    config: MemorizeConfig,
-    force_drain: bool = False,
-) -> None:
-    """Run profile extraction for the batch of drained memcells.
-
-    Adapts the release/20260306 per-memcell profile extraction logic to work
-    with the batch clustering pipeline.  Runs outside the distributed lock.
-
-    Args:
-        group_id: Group ID
-        drained_memcells: List of pending memcell dicts
-        cluster_ids: Cluster ID for each entry in drained_memcells
-        mem_scene_state: MemSceneState after clustering (read-only here)
-        config: Memory extraction configuration
-    """
-    if config.skip_profile_extraction:
-        return
-
-    total_memcell_count = sum(mem_scene_state.cluster_counts.values())
-    is_batch_mode = config.cluster_batch_size > 1
-    if config.profile_extraction_interval <= 1:
-        should_extract = True
-    elif is_batch_mode or force_drain:
-        should_extract = True
-    else:
-        should_extract = total_memcell_count % config.profile_extraction_interval == 0
-    if not should_extract:
-        logger.debug(
-            f"[Profile] Skipping extraction: total_memcells={total_memcell_count}, "
-            f"interval={config.profile_extraction_interval}"
-        )
-        return
-
-    # Determine scene from the last drained entry
-    scene = None
-    for entry in reversed(drained_memcells):
-        if entry.get("scene"):
-            scene = entry["scene"]
-            break
-
-    # Determine the latest memcell timestamp (used as last_updated_ts on save)
-    latest_ts = 0.0
-    for entry in drained_memcells:
-        ts = entry.get("timestamp")
-        if ts and ts > latest_ts:
-            latest_ts = ts
-
-    from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository import (
-        UserProfileRawRepository,
-    )
-
-    profile_repo = get_bean_by_type(UserProfileRawRepository)
-    existing_profiles = await profile_repo.get_all_by_group(group_id)
-
-    current_memcell_ts = latest_ts or time.time()
-    if existing_profiles:
-        timestamps = [
-            p.last_updated_ts
-            for p in existing_profiles
-            if p.last_updated_ts is not None
-        ]
-        last_profile_ts = min(timestamps) if timestamps else current_memcell_ts
-    else:
-        last_profile_ts = current_memcell_ts
-
-    # Select clusters that have newer data than last profile extraction
-    target_cluster_ids = [
-        cid
-        for cid, ts in mem_scene_state.cluster_last_ts.items()
-        if ts is not None and ts > last_profile_ts
-    ]
-    # Ensure all clusters from this batch are included
-    for cid in cluster_ids:
-        if cid and cid not in target_cluster_ids:
-            target_cluster_ids.append(cid)
-
-    if not target_cluster_ids:
-        return
-
-    logger.info(
-        f"[Profile] Timestamp-based selection: last_profile_ts={last_profile_ts}, "
-        f"target_clusters={target_cluster_ids}"
-    )
-
-    await _trigger_profile_extraction(
-        group_id=group_id,
-        cluster_ids=target_cluster_ids,
-        mem_scene_state=mem_scene_state,
-        latest_memcell_ts=latest_ts,
-        scene=scene,
-        config=config,
-        new_user_max_context=max(config.profile_extraction_interval, len(drained_memcells)),
-    )
 
 
 async def _trigger_profile_extraction(
     group_id: str,
     cluster_ids: List[str],
     mem_scene_state,  # MemSceneState
-    latest_memcell_ts: float,
+    memcell: MemCell,
     scene: Optional[str] = None,
     config: MemorizeConfig = DEFAULT_MEMORIZE_CONFIG,
-    new_user_max_context: int = 0,
 ) -> None:
     """Trigger Profile extraction for one or more clusters.
 
@@ -520,21 +390,18 @@ async def _trigger_profile_extraction(
         group_id: Group ID
         cluster_ids: Cluster IDs to extract profiles from
         mem_scene_state: Current mem scene state
-        latest_memcell_ts: Timestamp of the latest memcell in the batch
-        new_user_max_context: Max cluster context for new users (0 = no limit)
+        memcell: The MemCell currently being processed (appended as new_memcell)
         scene: Conversation scene
         config: Memory extraction configuration
     """
-    user_id_list: List[str] = []
     try:
         from memory_layer.profile_manager import ProfileManager, ProfileManagerConfig
         from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository import (
             UserProfileRawRepository,
         )
-        from infra_layer.adapters.out.persistence.repository.memcell_raw_repository import (
-            MemCellRawRepository,
-        )
         from memory_layer.llm.llm_provider import build_default_provider
+        from core.di import get_bean_by_type
+        import os
 
         total_memcell_count = sum(
             mem_scene_state.cluster_counts.get(cid, 0) for cid in cluster_ids
@@ -571,23 +438,24 @@ async def _trigger_profile_extraction(
         )
 
         # ===== Fetch memcells from all target clusters =====
+        current_event_id = str(memcell.event_id) if memcell.event_id else None
         target_cluster_set = set(cluster_ids)
         target_event_ids = set()
         if mem_scene_state and hasattr(mem_scene_state, 'eventid_to_cluster'):
             for event_id, cid in mem_scene_state.eventid_to_cluster.items():
-                if cid in target_cluster_set:
+                if cid in target_cluster_set and event_id != current_event_id:
                     target_event_ids.add(event_id)
 
         all_memcells = []
         if target_event_ids:
             try:
                 fetched = await memcell_repo.get_by_event_ids(list(target_event_ids))
-                all_memcells = sorted(
-                    fetched.values(),
-                    key=lambda mc: mc.timestamp or datetime.min,
-                )
+                all_memcells = list(fetched.values())
             except Exception as e:
                 logger.warning(f"[Profile] Failed to fetch cluster memcells: {e}")
+
+        # Append current memcell as the last one (new_memcell)
+        all_memcells.append(memcell)
 
         # Merge participants from all memcells (deduplicated)
         all_participants: set = set()
@@ -602,12 +470,12 @@ async def _trigger_profile_extraction(
 
         logger.info(
             f"[Profile] Context: clusters={len(cluster_ids)}, "
-            f"memcells={len(all_memcells)}, users={len(user_id_list)}"
+            f"memcells={len(all_memcells) - 1}, new=1, users={len(user_id_list)}"
         )
 
         # ===== Extract and save profiles =====
-        # Caller (_trigger_clustering) already holds the distributed lock for this group,
-        # so no additional lock is needed here.
+        # Caller (_trigger_clustering) holds trigger_clustering:{group_id} while calling
+        # this function, so concurrent profile writes for the same group are serialized.
 
         # Load old profiles
         old_profiles_dict = await profile_repo.get_all_profiles(group_id=group_id)
@@ -621,7 +489,9 @@ async def _trigger_profile_extraction(
                 logger.info(f"[Profile] Profile for {uid}: keys={keys[:8]}")
 
         # Extract profiles
-        profile_scene = ScenarioType.TEAM if scene == ScenarioType.TEAM.value else ScenarioType.SOLO
+        profile_scene = (
+            ScenarioType.TEAM if scene == ScenarioType.TEAM.value else ScenarioType.SOLO
+        )
         new_profiles = await profile_manager.extract_profiles(
             memcells=all_memcells,
             old_profiles=old_profiles,
@@ -629,13 +499,12 @@ async def _trigger_profile_extraction(
             group_id=group_id,
             max_items=config.profile_max_items,
             scene=profile_scene,
-            new_user_max_context=new_user_max_context,
         )
 
         # Save profiles
-        memcell_ts = latest_memcell_ts if latest_memcell_ts else 0.0
         for profile in new_profiles:
             try:
+                memcell_ts = memcell.timestamp.timestamp() if memcell.timestamp else 0.0
                 user_id = profile.user_id
                 profile_data = profile.to_dict()
                 metadata = {
@@ -663,10 +532,14 @@ async def _trigger_profile_extraction(
         # of the same clusters. The data is "skipped" — acceptable tradeoff vs.
         # getting stuck in a loop retrying the same failing extraction.
         try:
-            memcell_ts = latest_memcell_ts if latest_memcell_ts else 0.0
+            memcell_ts = memcell.timestamp.timestamp() if memcell.timestamp else 0.0
             for uid in user_id_list:
                 existing = await profile_repo.get_by_user_and_group(uid, group_id)
-                profile_data = existing.profile_data if existing else {"explicit_info": [], "implicit_traits": []}
+                profile_data = (
+                    existing.profile_data
+                    if existing
+                    else {"explicit_info": [], "implicit_traits": []}
+                )
                 await profile_repo.upsert(
                     user_id=uid,
                     group_id=group_id,
@@ -678,158 +551,26 @@ async def _trigger_profile_extraction(
                 f"[Profile] Advanced last_updated_ts to {memcell_ts} for {len(user_id_list)} users despite failure"
             )
         except Exception as ts_err:
-            logger.warning(f"[Profile] Failed to advance last_updated_ts on failure: {ts_err}")
-
-
-async def _run_skill_extraction_for_batch(
-    group_id: str,
-    drained_memcells: List[Dict],
-    cluster_ids: List[str],
-    config: MemorizeConfig,
-) -> None:
-    """Run agent skill extraction for clustered drained memcells.
-
-    Called after the clustering lock is released to avoid holding
-    the lock during potentially slow LLM-based skill extraction.
-    Each cluster does its own Milvus/ES writes (without flush),
-    then a single Milvus flush is issued at the end to avoid rate limiting.
-
-    Args:
-        group_id: Group ID
-        drained_memcells: List of pending memcell dicts (same as passed to clustering)
-        cluster_ids: Cluster ID for each entry in drained_memcells
-        config: Memory extraction configuration
-    """
-    if config.skip_skill_extraction:
-        return
-
-    agent_cases = _build_agent_cases_from_batch(drained_memcells) or None
-    if not agent_cases:
-        return
-
-    # Group cases by cluster_id
-    cluster_cases: Dict[str, List[AgentCase]] = defaultdict(list)
-    for i, entry in enumerate(drained_memcells):
-        eid = entry.get("event_id")
-        if not eid or eid not in agent_cases:
-            continue
-        cid = cluster_ids[i] if i < len(cluster_ids) else None
-        if not cid:
-            continue
-        agent_case = agent_cases[eid]
-        if not _is_agent_case_quality_sufficient(agent_case, config):
-            continue
-        cluster_cases[cid].append(agent_case)
-
-    if not cluster_cases:
-        return
-
-    # Resolve user_id from the first agent_case's participants
-    first_case = next(iter(agent_cases.values()))
-    user_id = first_case.user_id or None
-
-    # Run skill extraction for each cluster in parallel (Milvus writes without flush)
-    has_milvus_changes = await asyncio.gather(
-        *(
-            _trigger_agent_skill_extraction(
-                group_id=group_id,
-                cluster_id=cid,
-                user_id=user_id,
-                agent_cases=cases,
-                config=config,
-            )
-            for cid, cases in cluster_cases.items()
-        )
-    )
-
-    # Single Milvus flush after all clusters are done
-    if any(has_milvus_changes):
-        try:
-            from infra_layer.adapters.out.search.repository.agent_skill_milvus_repository import (
-                AgentSkillMilvusRepository,
-            )
-            agent_skill_milvus_repo = get_bean_by_type(AgentSkillMilvusRepository)
-            await agent_skill_milvus_repo.flush()
-        except Exception as milvus_exc:
             logger.warning(
-                f"[AgentSkill] Milvus flush failed (group={group_id}): {milvus_exc}"
+                f"[Profile] Failed to advance last_updated_ts on failure: {ts_err}"
             )
-
-
-async def flush_clustering(
-    user_id: str,
-    config: Optional[MemorizeConfig] = None,
-) -> int:
-    """Public entry point: force-drain all pending memcells and run batch clustering.
-
-    Called by the flush-clustering HTTP endpoint. Reuses the same
-    _drain_and_cluster path as _trigger_clustering with force_drain=True.
-
-    Args:
-        user_id: User ID (used to derive group_id)
-        config: Optional config override. Defaults to AGENT_DEFAULT_MEMORIZE_CONFIG.
-
-    Returns:
-        Number of pending memcells that were drained and clustered.
-    """
-    if config is None:
-        config = AGENT_DEFAULT_MEMORIZE_CONFIG
-
-    from api_specs.id_generator import generate_single_user_group_id
-    group_id = generate_single_user_group_id(user_id)
-
-    return await _drain_and_cluster(
-        group_id=group_id,
-        config=config,
-        force_drain=True,
-    )
-
-
-def _build_agent_cases_from_batch(drained_memcells: List[Dict]) -> Dict[str, AgentCase]:
-    """Reconstruct AgentCase objects from serialized agent_case dicts in pending entries."""
-    agent_cases: Dict[str, AgentCase] = {}
-    for entry in drained_memcells:
-        eid = entry.get("event_id")
-        ac_dict = entry.get("agent_case")
-        if not eid or not ac_dict:
-            continue
-        ts = entry.get("timestamp")
-        participants = entry.get("participants", [])
-        agent_cases[eid] = AgentCase(
-            id=ac_dict.get("id"),
-            memory_type=MemoryType.AGENT_CASE,
-            user_id=participants[0] if participants else "",
-            timestamp=datetime.fromtimestamp(ts) if ts else datetime.now(),
-            task_intent=ac_dict.get("task_intent"),
-            approach=ac_dict.get("approach"),
-            key_insight=ac_dict.get("key_insight"),
-            quality_score=ac_dict.get("quality_score"),
-        )
-    return agent_cases
 
 
 async def _trigger_agent_skill_extraction(
     group_id: str,
     cluster_id: str,
-    user_id: Optional[str],
-    agent_cases: List[AgentCase],
-    config: MemorizeConfig = AGENT_DEFAULT_MEMORIZE_CONFIG,
-) -> bool:
+    memcell: MemCell,
+    agent_case: AgentCase,
+    config: MemorizeConfig = DEFAULT_MEMORIZE_CONFIG,
+) -> None:
     """Trigger incremental AgentSkill extraction for a MemScene cluster.
-
-    Performs DB read-modify-write under a per-cluster lock, then syncs
-    to Milvus/ES without flushing. Caller is responsible for a single
-    Milvus flush after all clusters complete.
 
     Args:
         group_id: Group ID
         cluster_id: The cluster (MemScene) to extract skills for
-        user_id: User ID (agent owner)
-        agent_cases: List of AgentCase BOs to integrate into this cluster
+        memcell: The MemCell currently being processed (for user_id and event_id)
+        agent_case: The extracted AgentCase BO
         config: Memory extraction configuration
-
-    Returns:
-        True if any Milvus writes were made (caller should flush).
     """
     try:
         from infra_layer.adapters.out.persistence.repository.agent_skill_raw_repository import (
@@ -851,113 +592,120 @@ async def _trigger_agent_skill_extraction(
         from infra_layer.adapters.out.search.repository.agent_skill_es_repository import (
             AgentSkillEsRepository,
         )
-        from core.lock.redis_distributed_lock import distributed_lock
 
-        # Per-cluster lock to prevent concurrent skill extraction on the same cluster
-        # when multiple clustering batches finish close together.
-        lock_resource = f"skill_extraction:{group_id}:{cluster_id}"
-        has_milvus_changes = False
+        # Caller (_trigger_clustering) acquires trigger_agent_skill:{group_id}:{cluster_id}
+        # before calling this function, so concurrent skill writes for the same cluster are
+        # serialized while different clusters within the same group can run in parallel.
+        #
+        # Concurrency safety of data used in this function:
+        #   - existing_skills: read from DB below (inside the caller's lock), always fresh.
+        #   - agent_case: passed in from the current request, not shared with other requests.
+        #   - memcell: only used to extract user_id, no shared-state concern.
+        #   - extract_and_save() does NOT read memcells or agent_cases from DB.
+        #     It only merges new_case_records (passed-in) with existing_skill_records (from DB).
+        #     If future changes add DB reads of memcells/cases here, re-evaluate the lock
+        #     boundary — the gap between Lock 1 release and Lock 2 acquisition means
+        #     new memcells may have been clustered in between.
 
-        async with distributed_lock(
-            resource=lock_resource, timeout=1200.0, blocking_timeout=1200.0
-        ) as acquired:
-            if not acquired:
-                logger.warning(
-                    f"[AgentSkill] Failed to acquire lock for cluster={cluster_id}, "
-                    f"group={group_id}, skipping extraction"
-                )
-                return False
+        # Fetch existing skills for incremental merging
+        skill_repo = get_bean_by_type(AgentSkillRawRepository)
+        existing_skills = await skill_repo.get_by_cluster_id(
+            cluster_id, group_id=group_id, min_confidence=config.skill_retire_confidence
+        )
 
-            skill_repo = get_bean_by_type(AgentSkillRawRepository)
-            llm_provider = build_default_provider()
-            extractor = AgentSkillExtractor(
-                llm_provider=llm_provider,
-                maturity_threshold=config.skill_maturity_threshold,
-                retire_confidence=config.skill_retire_confidence,
-                skip_maturity_scoring=config.skip_skill_maturity_scoring,
+        logger.info(
+            f"[AgentSkill] Incremental extraction: cluster={cluster_id}, "
+            f"new_experience=1, existing_skills={len(existing_skills)}"
+        )
+
+        # Resolve user_id from the memcell's original conversation data
+        user_id = _extract_user_id_from_memcell(memcell)
+
+        # Run incremental skill extraction
+        llm_provider = build_default_provider()
+        extractor = AgentSkillExtractor(
+            llm_provider=llm_provider,
+            maturity_threshold=config.skill_maturity_threshold,
+            retire_confidence=config.skill_retire_confidence,
+            skip_maturity_scoring=config.skip_skill_maturity_scoring,
+        )
+        extraction_result = await extractor.extract_and_save(
+            cluster_id=cluster_id,
+            group_id=group_id,
+            new_case_records=[agent_case],
+            existing_skill_records=existing_skills,
+            skill_repo=skill_repo,
+            user_id=user_id,
+        )
+
+        if extraction_result.deleted_ids:
+            logger.info(
+                f"[AgentSkill] Retired skills for cluster={cluster_id}: "
+                f"ids={extraction_result.deleted_ids}"
             )
+        logger.info(
+            f"[AgentSkill] Extraction result for cluster={cluster_id}: "
+            f"added={len(extraction_result.added_records)}, "
+            f"updated={len(extraction_result.updated_records)}, "
+            f"retired={len(extraction_result.deleted_ids)}"
+        )
 
-            # Process cases one by one within this cluster
-            for case_idx, agent_case in enumerate(agent_cases):
-                # Reload existing skills each round (previous round may have changed them)
-                existing_skills = await skill_repo.get_by_cluster_id(
-                    cluster_id, group_id=group_id, min_confidence=config.skill_retire_confidence
-                )
+        # Records that need insert into search engines (added + updated)
+        upsert_records = (
+            extraction_result.added_records + extraction_result.updated_records
+        )
+        # IDs of updated records that need their old entry removed first
+        updated_ids = [str(r.id) for r in extraction_result.updated_records]
+        # IDs to remove from search engines (deleted + updated-old-entries)
+        remove_ids = extraction_result.deleted_ids + updated_ids
 
-                logger.info(
-                    f"[AgentSkill] Incremental extraction: cluster={cluster_id}, "
-                    f"case {case_idx + 1}/{len(agent_cases)}, existing_skills={len(existing_skills)}"
-                )
-
-                extraction_result = await extractor.extract_and_save(
-                    cluster_id=cluster_id,
-                    group_id=group_id,
-                    new_case_records=[agent_case],
-                    existing_skill_records=existing_skills,
-                    skill_repo=skill_repo,
-                    user_id=user_id,
-                )
-
-                if extraction_result.deleted_ids:
-                    logger.info(
-                        f"[AgentSkill] Retired skills for cluster={cluster_id}: "
-                        f"ids={extraction_result.deleted_ids}"
-                    )
-                logger.info(
-                    f"[AgentSkill] Extraction result for cluster={cluster_id} "
-                    f"case {case_idx + 1}/{len(agent_cases)}: "
-                    f"added={len(extraction_result.added_records)}, "
-                    f"updated={len(extraction_result.updated_records)}, "
-                    f"retired={len(extraction_result.deleted_ids)}"
-                )
-
-                # Sync to search engines (without Milvus flush)
-                upsert_records = (
-                    extraction_result.added_records + extraction_result.updated_records
-                )
-                updated_ids = [str(r.id) for r in extraction_result.updated_records]
-                remove_ids = extraction_result.deleted_ids + updated_ids
-
-                if upsert_records or remove_ids:
-                    try:
-                        agent_skill_milvus_repo = get_bean_by_type(AgentSkillMilvusRepository)
-                        for old_id in remove_ids:
-                            await agent_skill_milvus_repo.delete_by_id(old_id)
-                            has_milvus_changes = True
-                        for record in upsert_records:
-                            milvus_entity = AgentSkillMilvusConverter.from_mongo(record)
-                            if milvus_entity.get("vector"):
-                                await agent_skill_milvus_repo.insert(milvus_entity, flush=False)
-                                has_milvus_changes = True
-                            else:
-                                logger.warning(
-                                    f"[AgentSkill] Milvus skip (no vector): record={record.id}"
-                                )
-                    except Exception as milvus_exc:
+        if upsert_records or remove_ids:
+            # Milvus sync: delete stale entries -> insert new/updated
+            try:
+                agent_skill_milvus_repo = get_bean_by_type(AgentSkillMilvusRepository)
+                for old_id in remove_ids:
+                    await agent_skill_milvus_repo.delete_by_id(old_id)
+                inserted_count = 0
+                for record in upsert_records:
+                    milvus_entity = AgentSkillMilvusConverter.from_mongo(record)
+                    if milvus_entity.get("vector"):
+                        await agent_skill_milvus_repo.insert(milvus_entity, flush=False)
+                        inserted_count += 1
+                    else:
                         logger.warning(
-                            f"[AgentSkill] Milvus sync failed for cluster={cluster_id}: {milvus_exc}"
+                            f"[AgentSkill] Milvus skip (no vector): record={record.id}"
                         )
+                logger.info(
+                    f"[AgentSkill] Milvus synced for cluster={cluster_id}: "
+                    f"inserted={inserted_count}, removed={len(remove_ids)}"
+                )
+            except Exception as milvus_exc:
+                logger.warning(
+                    f"[AgentSkill] Milvus sync failed for cluster={cluster_id}: {milvus_exc}"
+                )
 
-                    try:
-                        agent_skill_es_repo = get_bean_by_type(AgentSkillEsRepository)
-                        for old_id in remove_ids:
-                            await agent_skill_es_repo.delete_by_id(old_id)
-                        for record in upsert_records:
-                            es_doc = AgentSkillConverter.from_mongo(record)
-                            await agent_skill_es_repo.create(es_doc)
-                    except Exception as es_exc:
-                        logger.warning(
-                            f"[AgentSkill] ES sync failed for cluster={cluster_id}: {es_exc}"
-                        )
-
-        return has_milvus_changes
+            # ES sync: delete stale entries -> insert new/updated
+            try:
+                agent_skill_es_repo = get_bean_by_type(AgentSkillEsRepository)
+                for old_id in remove_ids:
+                    await agent_skill_es_repo.delete_by_id(old_id)
+                for record in upsert_records:
+                    es_doc = AgentSkillConverter.from_mongo(record)
+                    await agent_skill_es_repo.create(es_doc)
+                logger.info(
+                    f"[AgentSkill] ES synced for cluster={cluster_id}: "
+                    f"inserted={len(upsert_records)}, removed={len(remove_ids)}"
+                )
+            except Exception as es_exc:
+                logger.warning(
+                    f"[AgentSkill] ES sync failed for cluster={cluster_id}: {es_exc}"
+                )
 
     except Exception as e:
         logger.error(
             f"[AgentSkill] Skill extraction failed for cluster={cluster_id}: {e}",
             exc_info=True,
         )
-        return False
 
 
 from biz_layer.mem_db_operations import (
@@ -965,10 +713,12 @@ from biz_layer.mem_db_operations import (
     _convert_foresight_to_doc,
     _convert_atomic_fact_to_docs,
     _convert_agent_case_to_doc,
+    _extract_user_id_from_memcell,
     _save_memcell_to_database,
     _update_status_for_continuing_conversation,
     _update_status_after_memcell_extraction,
 )
+from typing import Tuple
 
 
 def if_memorize(memcell: MemCell) -> bool:
@@ -1124,7 +874,7 @@ async def process_memory_extraction(
             count=1,
         )
 
-    # 3. Fire-and-forget clustering + skill extraction (no data dependency on step 4)
+    # 3. Fire-and-forget clustering + profile extraction (no data dependency on step 4)
     async def _clustering_with_metrics():
         cluster_start = time.perf_counter()
         try:
@@ -1154,12 +904,7 @@ async def process_memory_extraction(
         )
         # Fire-and-forget: extract and save foresight/atomic_fact in background.
         # Solo scenes only; episode_saved confirms parent_doc is available for linking.
-        # Skip for agent conversations when skip_foresight_and_eventlog is enabled.
-        skip_foresight = (
-            is_agent_conversation
-            and AGENT_DEFAULT_MEMORIZE_CONFIG.skip_foresight_and_eventlog
-        )
-        if state.is_solo_scene and state.episode_saved and not skip_foresight:
+        if state.is_solo_scene and state.episode_saved and not DEFAULT_MEMORIZE_CONFIG.skip_foresight_and_eventlog:
             asyncio.create_task(
                 _foresight_and_atomic_facts_with_metrics(state, memory_manager)
             )
@@ -1203,6 +948,9 @@ async def _extract_episodes(state: ExtractionState, memory_manager: MemoryManage
         )
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    from common_utils.async_utils import reraise_critical_errors
+
+    reraise_critical_errors(results)
     _process_episode_results(state, results)
 
 
@@ -1257,11 +1005,7 @@ async def _update_memcell_and_cluster(state: ExtractionState):
         return
 
     try:
-        # Select config based on conversation type
-        is_agent = state.memcell.type == RawDataType.AGENTCONVERSATION
-        cluster_config = (
-            AGENT_DEFAULT_MEMORIZE_CONFIG if is_agent else DEFAULT_MEMORIZE_CONFIG
-        )
+        cluster_config = DEFAULT_MEMORIZE_CONFIG
 
         await _trigger_clustering(
             state.request.group_id,
@@ -1427,13 +1171,6 @@ def _clone_episodes_for_users(state: ExtractionState) -> List[EpisodeMemory]:
     cloned = []
     group_ep = state.group_episode_memories[0]
     for user_id in state.participants:
-        if (
-            "robot" in user_id.lower()
-            or "assistant" in user_id.lower()
-            or "agent" in user_id.lower()
-            or "tool" in user_id.lower()
-        ):
-            continue
         cloned.append(replace(group_ep, user_id=user_id, user_name=user_id))
     logger.info(f"[MemCell Processing] Copied group Episode to {len(cloned)} users")
     return cloned
@@ -1501,13 +1238,7 @@ async def _save_foresight_and_atomic_fact(
 
     # solo scene: copy to each user
     if state.is_solo_scene:
-        user_ids = [
-            u
-            for u in state.participants
-            if "robot" not in u.lower()
-            and "assistant" not in u.lower()
-            and "agent" not in u.lower()
-        ]
+        user_ids = list(state.participants)
         foresight_docs.extend(
             [
                 doc.model_copy(update={"user_id": uid, "user_name": uid})

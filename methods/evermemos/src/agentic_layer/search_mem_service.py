@@ -91,7 +91,7 @@ from agentic_layer.metrics.retrieve_metrics import (
 from service.raw_message_service import RawMessageService
 
 # Memorize config (for skill_retire_confidence threshold)
-from biz_layer.memorize_config import AGENT_DEFAULT_MEMORIZE_CONFIG
+from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
 
 # Constants
 from core.oxm.constants import MAGIC_ALL
@@ -509,6 +509,11 @@ class SearchMemoryService:
         with timed_parallel("concurrent_retrieval"):
             results = await asyncio.gather(*search_tasks, return_exceptions=True)
         search_duration = time.perf_counter() - search_start
+
+        # Propagate critical system errors before processing results
+        from common_utils.async_utils import reraise_critical_errors
+
+        reraise_critical_errors(results)
 
         # Collect results from parallel searches
         has_error = False
@@ -1393,7 +1398,7 @@ class SearchMemoryService:
         id_filter = self._build_mongo_id_filter(skill_ids)
         if not id_filter:
             return {}
-        retire_confidence = AGENT_DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
+        retire_confidence = DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
         id_filter["confidence"] = {"$gte": retire_confidence}
         docs = await AgentSkillRecord.find_many(id_filter).to_list()
         return {str(d.id): d for d in docs}
@@ -1442,7 +1447,7 @@ class SearchMemoryService:
 
         agent_skill_mt = MemoryType.AGENT_SKILL.value
         with timed("agent_skill_search"):
-            retire_confidence = AGENT_DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
+            retire_confidence = DEFAULT_MEMORIZE_CONFIG.skill_retire_confidence
 
             if method == "keyword":
                 stage_start = time.perf_counter()
@@ -1575,107 +1580,15 @@ class SearchMemoryService:
                     query=query, filter_values=filter_values, top_k=top_k
                 )
 
-        if AGENT_DEFAULT_MEMORIZE_CONFIG.enable_skill_llm_verify:
-            if results and query:
-                results = await self._verify_skill_relevance(query, results)
-
-        return results
-
-    # ------------------------------------------------------------------
-    # Agentic retrieval for agent memory types
-    # ------------------------------------------------------------------
-
-    async def _search_agentic_agent_cases(
-        self, query: str, filter_values: Dict[str, Any], top_k: int
-    ) -> List[SearchAgentCaseItem]:
-        """Search agent cases using agentic retrieval (LLM-guided multi-round)."""
-        retrieve_request = RetrieveMemRequest(
-            query=query,
-            user_id=filter_values.get("user_id"),
-            group_ids=filter_values.get("group_ids"),
-            memory_types=[MemoryType.AGENT_CASE],
-            top_k=top_k if top_k > 0 else -1,
-            retrieve_method=RetrieveMethod.AGENTIC,
-            radius=None,
-        )
-
-        response = await self.memory_manager.retrieve_mem_agentic(retrieve_request)
-
-        results: List[SearchAgentCaseItem] = []
-        case_ids = [
-            getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
-            for m in response.memories
-        ]
-        case_ids = [cid for cid in case_ids if cid]
-        cases_dict = await self._fetch_agent_cases_by_ids(case_ids)
-
-        for memory in response.memories:
-            if isinstance(memory, dict):
-                case_id = memory.get("id")
-                score = memory.get("score", 0)
-            else:
-                case_id = getattr(memory, "id", None)
-                score = getattr(memory, "score", 0)
-
-            doc = cases_dict.get(case_id)
-            if doc:
-                results.append(self._agent_case_doc_to_item(doc, score=score))
-
-        return results
-
-    async def _search_agentic_agent_skills(
-        self, query: str, filter_values: Dict[str, Any], top_k: int
-    ) -> List[SearchAgentSkillItem]:
-        """Search agent skills using agentic retrieval (LLM-guided multi-round).
-
-        After retrieval, uses LLM to verify skill relevance to the query.
-        """
-        retrieve_request = RetrieveMemRequest(
-            query=query,
-            user_id=filter_values.get("user_id"),
-            group_ids=filter_values.get("group_ids"),
-            memory_types=[MemoryType.AGENT_SKILL],
-            top_k=top_k if top_k > 0 else -1,
-            retrieve_method=RetrieveMethod.AGENTIC,
-            radius=None,
-        )
-
-        response = await self.memory_manager.retrieve_mem_agentic(retrieve_request)
-
-        results: List[SearchAgentSkillItem] = []
-        skill_ids = [
-            getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
-            for m in response.memories
-        ]
-        skill_ids = [sid for sid in skill_ids if sid]
-        skills_dict = await self._fetch_agent_skills_by_ids(skill_ids)
-
-        for memory in response.memories:
-            if isinstance(memory, dict):
-                skill_id = memory.get("id")
-                score = memory.get("score", 0)
-            else:
-                skill_id = getattr(memory, "id", None)
-                score = getattr(memory, "score", 0)
-
-            doc = skills_dict.get(skill_id)
-            if doc:
-                results.append(self._agent_skill_doc_to_item(doc, score=score))
+        if results and DEFAULT_MEMORIZE_CONFIG.enable_skill_llm_verify:
+            results = await self._verify_skill_relevance(query, results)
 
         return results
 
     async def _verify_skill_relevance(
         self, query: str, skills: List[SearchAgentSkillItem]
     ) -> List[SearchAgentSkillItem]:
-        """Use LLM to post-verify whether retrieved skills are relevant to the query.
-
-        Args:
-            query: The user's search query
-            skills: List of SearchAgentSkillItem results
-
-        Returns:
-            Filtered list containing only helpful skills
-        """
+        """Use LLM to post-verify whether retrieved skills are relevant to the query."""
         import json
         from common_utils.json_utils import parse_json_response
         from memory_layer.prompts import get_prompt_by
@@ -1734,3 +1647,85 @@ class SearchMemoryService:
                 "Skill relevance verification failed, returning all results: %s", e
             )
             return skills
+
+    # ------------------------------------------------------------------
+    # Agentic retrieval for agent memory types
+    # ------------------------------------------------------------------
+
+    async def _search_agentic_agent_cases(
+        self, query: str, filter_values: Dict[str, Any], top_k: int
+    ) -> List[SearchAgentCaseItem]:
+        """Search agent cases using agentic retrieval (LLM-guided multi-round)."""
+        retrieve_request = RetrieveMemRequest(
+            query=query,
+            user_id=filter_values.get("user_id"),
+            group_ids=filter_values.get("group_ids"),
+            memory_types=[MemoryType.AGENT_CASE],
+            top_k=top_k if top_k > 0 else -1,
+            retrieve_method=RetrieveMethod.AGENTIC,
+            radius=None,
+        )
+
+        response = await self.memory_manager.retrieve_mem_agentic(retrieve_request)
+
+        results: List[SearchAgentCaseItem] = []
+        case_ids = [
+            getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
+            for m in response.memories
+        ]
+        case_ids = [cid for cid in case_ids if cid]
+        cases_dict = await self._fetch_agent_cases_by_ids(case_ids)
+
+        for memory in response.memories:
+            if isinstance(memory, dict):
+                case_id = memory.get("id")
+                score = memory.get("score", 0)
+            else:
+                case_id = getattr(memory, "id", None)
+                score = getattr(memory, "score", 0)
+
+            doc = cases_dict.get(case_id)
+            if doc:
+                results.append(self._agent_case_doc_to_item(doc, score=score))
+
+        return results
+
+    async def _search_agentic_agent_skills(
+        self, query: str, filter_values: Dict[str, Any], top_k: int
+    ) -> List[SearchAgentSkillItem]:
+        """Search agent skills using agentic retrieval (LLM-guided multi-round).
+
+        """
+        retrieve_request = RetrieveMemRequest(
+            query=query,
+            user_id=filter_values.get("user_id"),
+            group_ids=filter_values.get("group_ids"),
+            memory_types=[MemoryType.AGENT_SKILL],
+            top_k=top_k if top_k > 0 else -1,
+            retrieve_method=RetrieveMethod.AGENTIC,
+            radius=None,
+        )
+
+        response = await self.memory_manager.retrieve_mem_agentic(retrieve_request)
+
+        results: List[SearchAgentSkillItem] = []
+        skill_ids = [
+            getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
+            for m in response.memories
+        ]
+        skill_ids = [sid for sid in skill_ids if sid]
+        skills_dict = await self._fetch_agent_skills_by_ids(skill_ids)
+
+        for memory in response.memories:
+            if isinstance(memory, dict):
+                skill_id = memory.get("id")
+                score = memory.get("score", 0)
+            else:
+                skill_id = getattr(memory, "id", None)
+                score = getattr(memory, "score", 0)
+
+            doc = skills_dict.get(skill_id)
+            if doc:
+                results.append(self._agent_skill_doc_to_item(doc, score=score))
+
+        return results

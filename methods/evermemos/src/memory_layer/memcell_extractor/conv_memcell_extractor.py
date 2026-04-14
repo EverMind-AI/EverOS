@@ -143,7 +143,9 @@ class ConvMemCellExtractor(MemCellExtractor):
         participant_ids = set()
 
         for raw_data in chat_raw_data_list:
-            if raw_data.get('role') == MessageSenderRole.USER.value and raw_data.get('sender_id'):
+            if raw_data.get('role') == MessageSenderRole.USER.value and raw_data.get(
+                'sender_id'
+            ):
                 participant_ids.add(raw_data['sender_id'])
 
         return list(participant_ids)
@@ -400,50 +402,46 @@ class ConvMemCellExtractor(MemCellExtractor):
         )
 
         with timed("detect_boundaries"):
+            # Retry only when LLM returns unparseable content.
+            # Infrastructure errors (auth, rate-limit, network) are handled
+            # by the lower layer and will propagate as exceptions.
             for i in range(5):
-                try:
-                    resp = await self.llm_provider.generate(prompt)
-                    logger.debug(
-                        f"[ConvMemCellExtractor] === BOUNDARY DETECTION RESPONSE (attempt {i+1}) ===\n"
-                        f"{resp}\n"
-                        f"[ConvMemCellExtractor] === END RESPONSE ==="
-                    )
+                resp = await self.llm_provider.generate(prompt)
+                logger.debug(
+                    f"[ConvMemCellExtractor] === BOUNDARY DETECTION RESPONSE (attempt {i+1}) ===\n"
+                    f"{resp}\n"
+                    f"[ConvMemCellExtractor] === END RESPONSE ==="
+                )
 
-                    result = self._parse_batch_boundary_response(resp)
-                    if result is not None:
-                        # Validate boundary indices
-                        valid_boundaries = [
-                            b for b in result.boundaries if 1 <= b < len(messages)
-                        ]
-                        if len(valid_boundaries) != len(result.boundaries):
-                            logger.warning(
-                                f"[ConvMemCellExtractor] Filtered {len(result.boundaries) - len(valid_boundaries)} "
-                                f"out-of-range boundaries (total messages: {len(messages)})"
-                            )
-                        result.boundaries = sorted(valid_boundaries)
-
-                        # Record metrics for the overall detection
-                        detection_result = (
-                            'should_end' if result.boundaries else 'should_wait'
-                        )
-                        record_boundary_detection(
-                            space_id=get_space_id_for_metrics(),
-                            raw_data_type=self.raw_data_type.value,
-                            result=detection_result,
-                            trigger_type='llm',
-                        )
-                        return result
-                    else:
+                result = self._parse_batch_boundary_response(resp)
+                if result is not None:
+                    # Validate boundary indices
+                    valid_boundaries = [
+                        b for b in result.boundaries if 1 <= b < len(messages)
+                    ]
+                    if len(valid_boundaries) != len(result.boundaries):
                         logger.warning(
-                            f"[ConvMemCellExtractor] Failed to parse JSON from LLM response "
-                            f"(attempt {i + 1}/5), response: {resp[:200]}..."
+                            f"[ConvMemCellExtractor] Filtered {len(result.boundaries) - len(valid_boundaries)} "
+                            f"out-of-range boundaries (total messages: {len(messages)})"
                         )
-                        continue
-                except Exception as e:
-                    logger.warning(
-                        f"[ConvMemCellExtractor] Boundary detection error (attempt {i + 1}/5): {e}"
+                    result.boundaries = sorted(valid_boundaries)
+
+                    # Record metrics for the overall detection
+                    detection_result = (
+                        'should_end' if result.boundaries else 'should_wait'
                     )
-                    continue
+                    record_boundary_detection(
+                        space_id=get_space_id_for_metrics(),
+                        raw_data_type=self.raw_data_type.value,
+                        result=detection_result,
+                        trigger_type='llm',
+                    )
+                    return result
+
+                logger.warning(
+                    f"[ConvMemCellExtractor] Failed to parse JSON from LLM response "
+                    f"(attempt {i + 1}/5), response: {resp[:200]}..."
+                )
 
             # All retries exhausted, raise error to interrupt the flow
             error_msg = (

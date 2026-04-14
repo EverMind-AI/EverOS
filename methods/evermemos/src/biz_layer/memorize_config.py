@@ -4,10 +4,13 @@ Memory retrieval process configuration
 Centralized management of all trigger conditions and thresholds for easy adjustment and maintenance.
 """
 
-import os
+import logging
 from dataclasses import dataclass
+import os
 
 from api_specs.memory_types import ParentType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,6 +43,18 @@ class MemorizeConfig:
     # Default parent type for AtomicFact (memcell or episode)
     default_atomic_fact_parent_type: str = ParentType.MEMCELL.value
 
+    # ===== Clustering lock configuration =====
+    # Timeout (seconds) for acquiring the clustering lock
+    clustering_lock_timeout: float = 600.0
+    # Blocking timeout (seconds) for waiting to acquire the clustering lock
+    clustering_lock_blocking_timeout: float = 2400.0
+
+    # ===== Skill extraction lock configuration =====
+    # Timeout (seconds) for acquiring the skill extraction lock
+    skill_extraction_lock_timeout: float = 600.0
+    # Blocking timeout (seconds) for waiting to acquire the skill extraction lock
+    skill_extraction_lock_blocking_timeout: float = 2400.0
+
     # ===== Agent Skill extraction configuration =====
     # Minimum quality score (0.0-1.0) of the AgentCase required to trigger
     # skill extraction. Cases below this threshold are considered too low
@@ -52,65 +67,33 @@ class MemorizeConfig:
     # (data preserved) but removed from search engines and excluded from
     # future extraction context.
     skill_retire_confidence: float = 0.1
-    # Skip LLM-based maturity scoring for skills. When True, all skills
-    # are assigned maturity_score=1.0 directly, saving one LLM call per
-    # add/update operation.
+
+    # ===== Skip flags =====
+    # Skip skill maturity scoring during skill extraction
     skip_skill_maturity_scoring: bool = False
-    # Skip foresight and atomic_fact extraction for agent conversations.
-    # When True, only episodes and agent_case are extracted, saving LLM
-    # calls that are not needed for the skill extraction pipeline.
+    # Skip foresight and eventlog extraction
     skip_foresight_and_eventlog: bool = False
-
-    # ===== Extraction toggles (for fast evaluation) =====
-    # When True, skip agent skill extraction entirely.
-    skip_skill_extraction: bool = False
-    # When True, skip profile extraction entirely.
+    # Skip profile extraction
     skip_profile_extraction: bool = False
-
-    # ===== Skill retrieval configuration =====
-    # When True, apply LLM-based relevance verification after vector search
-    # for agent skills, filtering out irrelevant results.
+    # Enable LLM-based relevance verification for skill search results
     enable_skill_llm_verify: bool = False
 
-    # ===== LLM request configuration =====
-    # When True, disable reasoning/thinking for episode and agent case
-    # extraction by injecting {"chat_template_kwargs": {"enable_thinking": false}}
-    # into every LLM request body. Useful for reasoning models (e.g. Qwen3.5)
-    # deployed via vLLM or SGLang.
-    skip_episode_case_reasoning: bool = False
-    # When True, disable reasoning/thinking for LLM-based clustering.
-    skip_clustering_reasoning: bool = False
 
-    # ===== Batch clustering configuration =====
-    # Accumulate N memcells before running clustering. 1 = cluster immediately
-    # (current behavior). Values > 1 reduce lock contention and enable batched
-    # embedding calls. Use the flush-clustering API to drain pending items on demand.
-    cluster_batch_size: int = 1
+# Select config based on AGENT_MEMORIZE_MODE env var:
+#   "online" (default) — full pipeline
+#   "fast_skill" — skip profile/foresight/eventlog, skip maturity scoring
+_AGENT_MEMORIZE_MODE = os.getenv("AGENT_MEMORIZE_MODE", "online").strip().lower()
 
-
-
-# Global default configuration (can be overridden via from_env())
-# TODO Move nescessary configurations to ENV. Use default values for now.
-DEFAULT_MEMORIZE_CONFIG = MemorizeConfig()
-
-_agent_cluster_similarity_threshold = float(os.getenv("AGENT_CLUSTER_SIMILARITY_THRESHOLD", "0.5"))
-
-FAST_SKILL_MEMORIZE_CONFIG = MemorizeConfig(
-    cluster_similarity_threshold=_agent_cluster_similarity_threshold,
-    cluster_batch_size=int(os.getenv("AGENT_CLUSTER_BATCH_SIZE", "20")),
-    skip_skill_maturity_scoring=True,
-    skip_foresight_and_eventlog=True,
-    skip_profile_extraction=True,
-    enable_skill_llm_verify=True,
-    skip_episode_case_reasoning=True,
-)
-
-ONLINE_AGENT_MEMORIZE_CONFIG = MemorizeConfig(
-    cluster_similarity_threshold=_agent_cluster_similarity_threshold,
-)
-
-_agent_mode = os.getenv("AGENT_MEMORIZE_MODE", "online").lower()
-if _agent_mode == "fast_skill":
-    AGENT_DEFAULT_MEMORIZE_CONFIG = FAST_SKILL_MEMORIZE_CONFIG
+if _AGENT_MEMORIZE_MODE == "fast_skill":
+    DEFAULT_MEMORIZE_CONFIG = MemorizeConfig(
+        skip_skill_maturity_scoring=True,
+        skip_foresight_and_eventlog=True,
+        skip_profile_extraction=True,
+        clustering_lock_blocking_timeout=4800,
+        skill_extraction_lock_blocking_timeout=4800,
+        enable_skill_llm_verify=True
+    )
 else:
-    AGENT_DEFAULT_MEMORIZE_CONFIG = ONLINE_AGENT_MEMORIZE_CONFIG
+    if _AGENT_MEMORIZE_MODE != "online":
+        logger.warning("Unknown AGENT_MEMORIZE_MODE=%r, falling back to 'online'", _AGENT_MEMORIZE_MODE)
+    DEFAULT_MEMORIZE_CONFIG = MemorizeConfig()

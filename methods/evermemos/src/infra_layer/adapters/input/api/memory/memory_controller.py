@@ -47,12 +47,7 @@ from infra_layer.adapters.input.api.dto.memory_dto import (
     AddResponse,
     FlushResponse,
 )
-from api_specs.dtos.memory import (
-    AgentAddRequest,
-    AgentFlushRequest,
-    AgentFlushClusteringRequest,
-    AgentFlushClusteringResponse,
-)
+from api_specs.dtos.memory import AgentAddRequest, AgentFlushRequest
 from api_specs.dtos.memory_delete import DeleteMemoriesRequest
 from core.request import log_request
 from core.request.app_logic_provider import AppLogicProvider
@@ -142,19 +137,21 @@ class MemoryController(BaseController):
             if session_id and session_id != DEFAULT_SESSION_ID:
                 asyncio.create_task(self._ensure_session_exists(session_id=session_id))
 
-            # Auto-register senders from messages
-            messages = request_data.get("messages", [])
-            self._auto_register_senders(messages)
+            # Auto-register senders from converted data (includes auto-filled sender_ids)
+            self._auto_register_senders(memorize_request.new_raw_data_list)
 
             # Enrich sender_name from DB for messages that didn't provide one
-            await self._enrich_sender_names(
-                messages, memorize_request.new_raw_data_list
-            )
+            messages = request_data.get("messages", [])
+            with timed("enrich_sender_names"):
+                await self._enrich_sender_names(
+                    messages, memorize_request.new_raw_data_list
+                )
 
             # Content enrichment (e.g. multimodal parsing, no-op by default)
             # Must run BEFORE save_request_logs so that parsed multimodal text
             # is included in the flat content saved to RawMessage.
-            await self._content_enrich.enrich(memorize_request.new_raw_data_list)
+            with timed("enrich_content"):
+                await self._content_enrich.enrich(memorize_request.new_raw_data_list)
 
             # Save request logs
             with timed("persist_raw_messages"):
@@ -273,9 +270,9 @@ class MemoryController(BaseController):
 
             group_id = memorize_request.group_id
 
-            # Auto-register group with metadata (only when group_meta is provided)
-            group_meta = request_data.get("group_meta")
-            if group_id and group_meta:
+            # Auto-register group (with optional metadata)
+            if group_id:
+                group_meta = request_data.get("group_meta") or {}
                 asyncio.create_task(
                     self._ensure_group_exists(
                         group_id=group_id,
@@ -284,19 +281,21 @@ class MemoryController(BaseController):
                     )
                 )
 
-            # Auto-register senders
-            messages = request_data.get("messages", [])
-            self._auto_register_senders(messages)
+            # Auto-register senders from converted data (includes sender_ids from request)
+            self._auto_register_senders(memorize_request.new_raw_data_list)
 
             # Enrich sender_name from DB for messages that didn't provide one
-            await self._enrich_sender_names(
-                messages, memorize_request.new_raw_data_list
-            )
+            messages = request_data.get("messages", [])
+            with timed("enrich_sender_names"):
+                await self._enrich_sender_names(
+                    messages, memorize_request.new_raw_data_list
+                )
 
             # Content enrichment (e.g. multimodal parsing, no-op by default)
             # Must run BEFORE save_request_logs so that parsed multimodal text
             # is included in the flat content saved to RawMessage.
-            await self._content_enrich.enrich(memorize_request.new_raw_data_list)
+            with timed("enrich_content"):
+                await self._content_enrich.enrich(memorize_request.new_raw_data_list)
 
             # Save request logs
             with timed("persist_raw_messages"):
@@ -610,72 +609,24 @@ class MemoryController(BaseController):
             ) from e
 
     # =========================================================================
-    # Flush Clustering (POST /memories/agent/flush-clustering)
-    # =========================================================================
-
-    @post(
-        "/agent/flush-clustering",
-        response_model=AgentFlushClusteringResponse,
-        summary="Flush pending clustering",
-        description="Force-drain all pending memcells for a group and run batch clustering. "
-        "Use this when cluster_batch_size > 1 and you want to trigger clustering immediately.",
-    )
-    @log_request()
-    @stage_timed("flush_clustering")
-    async def flush_clustering_endpoint(
-        self, request: FastAPIRequest, request_body: AgentFlushClusteringRequest = None
-    ) -> AgentFlushClusteringResponse:
-        """POST /api/v1/memories/agent/flush-clustering - Force batch clustering."""
-        del request_body
-
-        try:
-            request_data = await request.json()
-            user_id = request_data.get("user_id")
-            if not user_id:
-                raise ValueError("user_id is required")
-
-            logger.info(
-                "Received flush-clustering: user_id=%s",
-                user_id,
-            )
-
-            from biz_layer.mem_memorize import flush_clustering
-
-            pending_count = await flush_clustering(user_id=user_id)
-
-            status = 'clustered' if pending_count > 0 else 'no_clustering'
-            return {
-                "data": {
-                    "request_id": self._app_logic.get_current_request_id(),
-                    "status": status,
-                    "message": "Flush clustering completed",
-                }
-            }
-
-        except ValueError as e:
-            logger.error("Flush-clustering parameter error: %s", e)
-            raise HTTPException(status_code=422, detail=str(e)) from e
-        except Exception as e:
-            logger.error("Flush-clustering failed: %s", e, exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail="Flush clustering failed, please try again later",
-            ) from e
-
-    # =========================================================================
     # Helper Methods
     # =========================================================================
 
-    def _auto_register_senders(self, messages: list) -> None:
-        """Fire-and-forget auto-register senders from message list."""
+    def _auto_register_senders(self, raw_data_list: list) -> None:
+        """Fire-and-forget auto-register senders from converted raw data list.
+
+        Uses the converted RawData objects (not the original request JSON)
+        so that auto-filled sender_ids are included.
+        """
         seen = set()
-        for msg in messages:
-            sender_id = msg.get("sender_id")
+        for raw_data in raw_data_list:
+            content = raw_data.content
+            sender_id = content.get("sender_id")
             if sender_id and sender_id not in seen:
                 seen.add(sender_id)
                 asyncio.create_task(
                     self._ensure_sender_exists(
-                        sender_id=sender_id, sender_name=msg.get("sender_name")
+                        sender_id=sender_id, sender_name=content.get("sender_name")
                     )
                 )
 
@@ -834,17 +785,29 @@ class MemoryController(BaseController):
             if session_id and session_id != DEFAULT_SESSION_ID:
                 asyncio.create_task(self._ensure_session_exists(session_id=session_id))
 
-            # Auto-register senders (skip role=tool as they are not real users)
-            messages = request_data.get("messages", [])
-            for msg in messages:
-                if msg.get("role") != "tool":
-                    sender_id = msg.get("sender_id")
+            # Auto-register senders from converted data (skip role=tool)
+            for raw_data in memorize_request.new_raw_data_list:
+                content = raw_data.content
+                if content.get("role") != "tool":
+                    sender_id = content.get("sender_id")
                     if sender_id:
                         asyncio.create_task(
                             self._ensure_sender_exists(
-                                sender_id=sender_id, sender_name=msg.get("sender_name")
+                                sender_id=sender_id,
+                                sender_name=content.get("sender_name"),
                             )
                         )
+
+            # Enrich sender_name from DB for messages that didn't provide one
+            messages = request_data.get("messages", [])
+            await self._enrich_sender_names(
+                messages, memorize_request.new_raw_data_list
+            )
+
+            # Content enrichment (e.g. multimodal parsing, no-op by default)
+            # Must run BEFORE save_request_logs so that parsed multimodal text
+            # is included in the flat content saved to RawMessage.
+            await self._content_enrich.enrich(memorize_request.new_raw_data_list)
 
             # Save request logs
             with timed("persist_raw_messages"):

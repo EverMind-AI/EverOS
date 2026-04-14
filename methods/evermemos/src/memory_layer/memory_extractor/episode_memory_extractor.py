@@ -75,7 +75,6 @@ class EpisodeMemoryExtractor(MemoryExtractor):
         """
         super().__init__(MemoryType.EPISODIC_MEMORY)
         self.llm_provider = llm_provider
-        self.extra_body: dict | None = None
         self.default_parent_type = DEFAULT_MEMORIZE_CONFIG.default_episode_parent_type
 
         # Use custom prompts or get default via PromptManager
@@ -268,9 +267,7 @@ class EpisodeMemoryExtractor(MemoryExtractor):
             for i in range(5):
                 try:
                     prompt = prompt_template.format(**format_params)
-                    response = await self.llm_provider.generate(
-                        prompt, extra_body=self.extra_body
-                    )
+                    response = await self.llm_provider.generate(prompt)
 
                     # Parse JSON
                     if '```json' in response:

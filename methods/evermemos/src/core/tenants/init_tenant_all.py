@@ -54,7 +54,7 @@ logger = get_logger(__name__)
 TENANT_INIT_STORAGE_INFO_ENV = "TENANT_INIT_STORAGE_INFO"
 
 
-def _setup_tenant_context_from_env() -> str:
+def setup_tenant_context_from_env() -> str:
     """
     Set up tenant context from TENANT_INIT_STORAGE_INFO environment variable.
 
@@ -183,7 +183,7 @@ async def run_tenant_init() -> bool:
     logger.info("*" * 60)
 
     # Set up tenant context
-    tenant_id = _setup_tenant_context_from_env()
+    tenant_id = setup_tenant_context_from_env()
     logger.info("Tenant ID: %s", tenant_id)
     logger.info("*" * 60)
 

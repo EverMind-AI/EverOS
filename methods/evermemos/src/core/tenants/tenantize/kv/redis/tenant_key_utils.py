@@ -9,35 +9,22 @@ from typing import Optional
 from core.tenants.tenant_contextvar import get_current_tenant_id
 
 
-def patch_redis_tenant_key(key: str) -> str:
+def build_tenant_redis_key(prefix: str, tenant_id: str, key: str) -> str:
     """
-    Add tenant prefix to Redis key name
+    Build a tenant-scoped Redis key with an explicit tenant_id.
 
-    Retrieve the tenant ID from the current context and prepend it to the key to achieve multi-tenant data isolation.
-    If no tenant information is set in the current context, return the original key.
-
-    Format: {tenant_id}:{key}
+    Format: {prefix}:{tenant_id}:{key}
 
     Args:
-        key: Original Redis key name
+        prefix: Key namespace prefix (e.g. "task_status")
+        tenant_id: Tenant identifier
+        key: Business key (e.g. task_id, request_id)
 
     Returns:
-        str: Redis key name with tenant prefix; if no tenant, return the original key
+        str: "{prefix}:{tenant_id}:{key}"
 
     Examples:
-        >>> # Assume current tenant ID is "tenant_001"
-        >>> patch_redis_tenant_key("conversation_data:group_123")
-        'tenant_001:conversation_data:group_123'
-
-        >>> # If no tenant is set
-        >>> patch_redis_tenant_key("conversation_data:group_123")
-        'conversation_data:group_123'
+        >>> build_tenant_redis_key("task_status", "t3a7b2c1d9e", "abc123")
+        'task_status:t3a7b2c1d9e:abc123'
     """
-    tenant_id: Optional[str] = get_current_tenant_id()
-
-    if tenant_id:
-        # When tenant ID exists, concatenate tenant prefix
-        return f"{tenant_id}:{key}"
-
-    # When no tenant ID exists, return the original key
-    return key
+    return f"{prefix}:{tenant_id}:{key}"

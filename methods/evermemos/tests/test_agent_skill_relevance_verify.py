@@ -8,7 +8,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from api_specs.dtos.memory import SearchAgentSkillItem as AgentSkillItem
+from api_specs.dtos.memory import AgentSkillItem, SearchAgentSkillItem
 
 
 def _make_service():
@@ -26,9 +26,9 @@ def _make_service():
         return SearchMemoryService()
 
 
-def _make_skill(name: str, description: str = "desc", content: str = "content", score: float = 0.8) -> AgentSkillItem:
-    """Helper to create an AgentSkillItem instance."""
-    return AgentSkillItem(
+def _make_skill(name: str, description: str = "desc", content: str = "content", score: float = 0.8) -> SearchAgentSkillItem:
+    """Helper to create a SearchAgentSkillItem instance."""
+    return SearchAgentSkillItem(
         id=f"skill_{name}",
         user_id="test_user",
         name=name,
@@ -63,7 +63,7 @@ async def test_empty_query_returns_all(service):
 
 @pytest.mark.asyncio
 async def test_filters_irrelevant_skills(service):
-    """LLM gives high score to relevant skill and low score to irrelevant — only high-scoring one is returned."""
+    """LLM marks one skill as helpful and one as not — only helpful one is returned."""
     skills = [
         _make_skill(
             "Database connection pool tuning",
@@ -96,18 +96,17 @@ async def test_filters_irrelevant_skills(service):
 
     assert len(result) == 1
     assert result[0].name == "Database connection pool tuning"
-    assert result[0].score == 0.9
 
 
 @pytest.mark.asyncio
-async def test_all_skills_high_score(service):
-    """When LLM gives all skills high scores, all are returned sorted by score descending."""
+async def test_all_skills_helpful(service):
+    """When LLM says all skills are helpful, all are returned."""
     skills = [_make_skill("skill_a"), _make_skill("skill_b")]
 
     llm_response = json.dumps({
         "results": [
-            {"index": 0, "score": 0.7, "reason": "relevant"},
-            {"index": 1, "score": 0.9, "reason": "very relevant"},
+            {"index": 0, "score": 0.8, "reason": "relevant"},
+            {"index": 1, "score": 0.7, "reason": "also relevant"},
         ]
     })
 
@@ -121,18 +120,16 @@ async def test_all_skills_high_score(service):
         )
 
     assert len(result) == 2
-    assert result[0].name == "skill_b"
-    assert result[1].name == "skill_a"
 
 
 @pytest.mark.asyncio
-async def test_all_skills_low_score(service):
-    """When LLM gives all skills low scores, empty list is returned."""
+async def test_no_skills_helpful(service):
+    """When LLM says no skills are helpful, empty list is returned."""
     skills = [_make_skill("skill_a")]
 
     llm_response = json.dumps({
         "results": [
-            {"index": 0, "score": 0.2, "reason": "not relevant"},
+            {"index": 0, "score": 0.1, "reason": "not relevant"},
         ]
     })
 
@@ -197,7 +194,7 @@ async def test_none_skills_returns_none(service):
 @pytest.mark.asyncio
 async def test_none_fields_in_skill_use_empty_string(service):
     """Skills with None name/description/content are serialised as empty strings in prompt."""
-    skills = [AgentSkillItem(id="s1", user_id="u1", name=None, description=None, content=None, score=0.5)]
+    skills = [SearchAgentSkillItem(id="s1", user_id="u1", name=None, description=None, content=None, score=0.5)]
 
     llm_response = json.dumps({"results": [{"index": 0, "score": 0.8, "reason": "ok"}]})
     mock_provider = AsyncMock()
@@ -229,8 +226,8 @@ async def test_out_of_range_index_ignored(service):
 
     llm_response = json.dumps({
         "results": [
-            {"index": 0, "score": 0.85, "reason": "ok"},
-            {"index": 99, "score": 0.9, "reason": "ghost"},
+            {"index": 0, "score": 0.8, "reason": "ok"},
+            {"index": 99, "score": 0.8, "reason": "ghost"},
         ]
     })
 
@@ -280,13 +277,13 @@ async def test_missing_score_field_defaults_zero(service):
 
 
 @pytest.mark.asyncio
-async def test_partial_indices_only_returns_scored_above_threshold(service):
-    """LLM only returns judgement for some skills — unjudged ones default to 0.0 and are excluded."""
+async def test_partial_indices_only_returns_judged_helpful(service):
+    """LLM only returns judgement for some skills — unjudged ones are excluded."""
     skills = [_make_skill("a"), _make_skill("b"), _make_skill("c")]
 
     llm_response = json.dumps({
         "results": [
-            {"index": 1, "score": 0.75, "reason": "relevant"},
+            {"index": 1, "score": 0.8, "reason": "relevant"},
         ]
     })
     mock_provider = AsyncMock()
@@ -301,15 +298,14 @@ async def test_partial_indices_only_returns_scored_above_threshold(service):
 
 
 @pytest.mark.asyncio
-async def test_results_sorted_by_score_descending(service):
-    """Results are sorted by LLM relevance score in descending order."""
+async def test_filtered_results_sorted_by_score_desc(service):
+    """Filtered results are sorted by score descending."""
     skills = [_make_skill("first"), _make_skill("second"), _make_skill("third")]
 
     llm_response = json.dumps({
         "results": [
-            {"index": 0, "score": 0.6, "reason": "ok"},
-            {"index": 1, "score": 0.9, "reason": "great"},
-            {"index": 2, "score": 0.75, "reason": "good"},
+            {"index": 2, "score": 0.9, "reason": "ok"},
+            {"index": 0, "score": 0.5, "reason": "ok"},
         ]
     })
     mock_provider = AsyncMock()
@@ -319,33 +315,9 @@ async def test_results_sorted_by_score_descending(service):
          patch("memory_layer.prompts.get_prompt_by", return_value="{query}{skills_json}"):
         result = await service._verify_skill_relevance(query="q", skills=skills)
 
-    assert len(result) == 3
-    assert result[0].name == "second"
-    assert result[1].name == "third"
-    assert result[2].name == "first"
-
-
-@pytest.mark.asyncio
-async def test_threshold_boundary(service):
-    """Score exactly at 0.4 passes, score below 0.4 is excluded."""
-    skills = [_make_skill("at_boundary"), _make_skill("below_boundary")]
-
-    llm_response = json.dumps({
-        "results": [
-            {"index": 0, "score": 0.4, "reason": "borderline"},
-            {"index": 1, "score": 0.39, "reason": "just below"},
-        ]
-    })
-    mock_provider = AsyncMock()
-    mock_provider.generate = AsyncMock(return_value=llm_response)
-
-    with patch("memory_layer.llm.llm_provider.build_default_provider", return_value=mock_provider), \
-         patch("memory_layer.prompts.get_prompt_by", return_value="{query}{skills_json}"):
-        result = await service._verify_skill_relevance(query="q", skills=skills)
-
-    assert len(result) == 1
-    assert result[0].name == "at_boundary"
-    assert result[0].score == 0.4
+    assert len(result) == 2
+    assert result[0].name == "third"
+    assert result[1].name == "first"
 
 
 @pytest.mark.asyncio
@@ -353,7 +325,7 @@ async def test_prompt_receives_correct_arguments(service):
     """Verify get_prompt_by is called with correct key and format receives query + skills_json."""
     skills = [_make_skill("db_tuning", "tune db", "step1")]
 
-    llm_response = json.dumps({"results": [{"index": 0, "score": 0.85, "reason": "ok"}]})
+    llm_response = json.dumps({"results": [{"index": 0, "score": 0.8, "reason": "ok"}]})
     mock_provider = AsyncMock()
     mock_provider.generate = AsyncMock(return_value=llm_response)
 

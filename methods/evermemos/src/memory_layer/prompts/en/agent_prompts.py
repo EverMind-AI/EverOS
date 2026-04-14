@@ -163,15 +163,20 @@ Your job: distill **actionable strategies** into reusable **Skills** via increme
 **What makes a GOOD skill:**
 - Reasoning principles WITH concrete patterns: teaches HOW to think, not just what to do
 - Decision branches that cover the different problem variants seen across cases
-- Examples preserve real entity names, numbers, and scenarios from cases
+- A FEW well-chosen examples that illustrate distinct branches — not an exhaustive catalog
 
 **What makes a BAD skill:**
 - Too abstract: "Analyze constraints" without showing what analysis looks like in practice
 - Too narrow: A single solution template that only works for one exact case
+- **Bloated**: Listing dozens of case-specific details (names, dates, institutions, compounds, etc.) inside parentheses or comma-separated lists. Each How/Decision/e.g. field should contain 1-2 illustrative examples, NOT an inventory of every case seen
 
 **Field-level requirements:**
 
-- **description** (max 150 tokens): One-sentence summary of what this skill solves + trigger scenarios. Append `Keywords:` with terms an agent would use when facing this problem class.
+- **description** (HARD LIMIT: max 150 tokens, must be under 500 characters):
+  - One-sentence summary of the **abstract problem class** this skill solves — describe the general pattern, NOT specific cases.
+  - Do NOT list multiple scenarios, entity names, or case-specific details.
+  - Append `Keywords:` with up to 10 general terms (no specific names, numbers, or case-specific phrases).
+  - Example: "Identifies academic researchers by cross-referencing biographical constraints with publication records. Keywords: researcher identification, biographical verification, publication matching, academic search"
 
 - **content** (max 2000 tokens): Markdown format:
   ```markdown
@@ -189,20 +194,21 @@ Your job: distill **actionable strategies** into reusable **Skills** via increme
 
   **HARD RULES for content:**
   - **Max 5 steps.**
-  - **Max 2 examples per step.** Each example MUST illustrate a distinct decision branch, using real entities/numbers/scenarios from the cases.
-  - **Decision branches**: REQUIRED when the next action depends on what was found. For linear steps with no branching, Decision may be omitted.
+  - **Max 2 examples per step.** Each example MUST be a SHORT, single-sentence illustration of a distinct decision branch. Do NOT list multiple sub-examples inside parentheses or comma-separated lists.
+  - **Decision branches**: REQUIRED when the next action depends on what was found. For linear steps with no branching, Decision may be omitted. Each Decision should have at most 3 branches.
   - **Max 4 pitfalls.** When adding a new one beyond 4, replace the most generic existing pitfall.
+  - **No parenthetical catalogs**: FORBIDDEN to stuff dozens of case-specific terms (names, dates, compounds, institutions, etc.) inside a single parenthetical `(e.g., X, Y, Z, ...)`. Keep each field concise — generalize the pattern, illustrate with 1-2 examples only.
 
-【New AgentCase(s) to integrate】
+[New AgentCase(s) to integrate]
 {new_case_json}
 
-【Existing skills for this cluster】(Each item has an index number)
+[Existing skills for this cluster](Each item has an index number)
 {existing_skills_json}
 
-【Task】
+[Task]
 Analyze the new case(s) and output a list of operations (add / update / none).
 
-【Operation Guide — follow in order】
+[Operation Guide — follow in order]
 
 **Step 1: Overlap Check (mandatory before every add/update decision)**
 For each new case, compare against each existing skill:
@@ -221,12 +227,14 @@ For each new case, compare against each existing skill:
 
 - **update**: The new case overlaps an existing skill (coverage >= 60%). Enrich it with new Decision branches, better examples, or sharper How explanations.
   - You MAY substantially rewrite content (restructure steps, replace examples, refine How explanations), but **preserve existing verified content unless the new case directly contradicts it**.
+  - **CRITICAL: The updated content MUST stay within 2000 tokens. Do NOT simply append new content — replace weaker examples with stronger ones, merge redundant steps, and compress prose. If the existing content is already long, aggressively condense it while preserving the core logic.**
+  - **CRITICAL: The updated description MUST stay under 500 characters. Generalize — do NOT accumulate case-specific details.**
   - **Hypothesis promotion rule**: If the existing skill contains `## Potential Steps`, treat this update as a **promotion** — rewrite as `## Steps` using the new case as primary source. confidence = `0.6`.
   - **Confidence-only update**: If the new case merely confirms the existing skill without adding new decision logic or better examples, bump confidence only.
 
 - **none**: Trivially duplicate — no new decision branches, no new examples worth keeping, no confidence change needed.
 
-【Confidence Anchoring Rules】
+[Confidence Anchoring Rules]
 - **New skill (add)**: confidence = `0.5`
 - **Promoted skill (hypothesis → verified)**: confidence = `0.6`
 - **Update with new decision branch**: confidence = existing + `0.1` (cap 0.95)
@@ -235,7 +243,7 @@ For each new case, compare against each existing skill:
 
 **CRITICAL LANGUAGE RULE**: Output in the SAME language as the input conversation content.
 
-【Output Format】
+[Output Format]
 ```json
 {{
   "operations": [
@@ -264,10 +272,10 @@ Your job is to distill **what NOT to do** and **partial progress** from failed c
 
 **Field-level requirements:**
 
-- **description** (max 200 tokens): Must include three parts:
-  1. A one-sentence summary of the problem class and the known failure patterns
-  2. **Use cases**: 2-3 brief trigger scenarios
-  3. **Keywords**: Include concrete case phrases, failure symptom terms, and tool names. Format: `Keywords: term1, term2, term3, ...`
+- **description** (HARD LIMIT: max 150 tokens, must be under 500 characters):
+  - One-sentence summary of the **abstract problem class** and the known failure patterns — describe the general pattern, NOT specific cases.
+  - Do NOT list multiple scenarios, entity names, or case-specific details.
+  - Append `Keywords:` with up to 10 general terms (no specific names, numbers, or case-specific phrases).
 
 - **content**: Output in **Markdown format** using this template:
   ```markdown
@@ -290,23 +298,26 @@ Your job is to distill **what NOT to do** and **partial progress** from failed c
   - **Potential Steps**: Include ONLY steps with demonstrable forward progress. If NO steps clearly progressed, omit the numbered list and keep only the `> Extracted from...` note.
   - **Pitfalls**: MUST be included and populated. Every failed case must contribute at least one specific, traceable pitfall. FORBIDDEN: generic warnings, speculative risks, best-practice reminders not directly traceable to a failure in this case.
 
-【New AgentCase(s) to integrate】
+[New AgentCase(s) to integrate]
 {new_case_json}
 
-【Existing skills for this cluster】(Each item has an index number)
+[Existing skills for this cluster](Each item has an index number)
 {existing_skills_json}
 
-【Task】
+[Task]
 Analyze the failed case(s) and output operations (add / update / none).
 
-【Operation Guide】
+[Operation Guide]
 - **update**: If an existing skill covers the same problem class, integrate failure insights by index:
   - If existing skill has `## Steps` (verified): preserve Steps intact — only append new entries to `## Pitfalls`.
   - If existing skill has `## Potential Steps` (hypothesis): you may also enrich `## Potential Steps` with any steps from this case that demonstrably succeeded, in addition to appending to `## Pitfalls`.
+  - **CRITICAL: The updated content MUST stay within 2000 tokens. Do NOT simply append — if Pitfalls exceed 4 entries, replace the most generic one. If Potential Steps are already sufficient, do NOT add redundant ones. Aggressively condense existing content if it is already long.**
+  - **CRITICAL: The updated description MUST stay under 500 characters. Generalize — do NOT accumulate case-specific details.**
+  - **No parenthetical catalogs**: FORBIDDEN to stuff dozens of case-specific terms (names, dates, compounds, etc.) inside parentheses. Keep each field concise — generalize the pattern, illustrate with 1-2 examples only.
 - **add**: If no existing skill covers this problem class, create a new skill using the Potential Steps + Pitfalls template above.
 - **none**: The case is completely irrelevant to all existing skills and too isolated to form a useful pattern. Use very sparingly.
 
-【Confidence Anchoring Rules】
+[Confidence Anchoring Rules]
 - **New skill (add)**: confidence = `0.5`
 - **Update existing skill with pitfall only**: confidence unchanged (failure insight doesn't validate the SOP steps).
 - **Update existing hypothesis skill with new Potential Steps**: confidence = existing + 0.05 (slight bump for additional partial evidence).
@@ -314,7 +325,7 @@ Analyze the failed case(s) and output operations (add / update / none).
 
 **CRITICAL LANGUAGE RULE**: Output in the SAME language as the input conversation content.
 
-【Output Format】
+[Output Format]
 No operations:
 ```json
 {{"operations": [{{"action": "none"}}], "update_note": "failed case adds no new failure patterns to existing skills"}}
@@ -324,7 +335,7 @@ With operations:
 ```json
 {{
   "operations": [
-    {{"action": "add", "data": {{"name": "Short descriptive name (max 10 words)", "description": "One-sentence summary of problem class. Use when: scenario1; scenario2. Keywords: term1, term2 (max 150 tokens)", "content": "## Potential Steps\\n> Extracted from a failed case. Only steps that demonstrably progressed correctly are listed.\\n1. <action where exploration succeeded>\\n   - How: <method>\\n   - e.g., `<exact command that worked>`\\n   - Check: <what confirmed progress>\\n\\n## Pitfalls\\n- <dead end or failed approach> — <what went wrong and how to avoid>", "confidence": 0.5}}}},
+    {{"action": "add", "data": {{"name": "Short descriptive name (max 10 words)", "description": "One-sentence abstract summary of problem class. Keywords: term1, term2 (max 150 tokens, under 500 chars)", "content": "## Potential Steps\\n> Extracted from a failed case. Only steps that demonstrably progressed correctly are listed.\\n1. <action where exploration succeeded>\\n   - How: <method>\\n   - e.g., `<exact command that worked>`\\n   - Check: <what confirmed progress>\\n\\n## Pitfalls\\n- <dead end or failed approach> — <what went wrong and how to avoid>", "confidence": 0.5}}}},
     {{"action": "update", "index": 0, "data": {{"content": "## Steps\\n<existing steps preserved>\\n\\n## Pitfalls\\n<existing pitfalls>\\n- <new pitfall from this failed case> — <what went wrong and how to avoid>"}}}}
   ],
   "update_note": "added pitfall from failed case to skill[0]; created new skill from partial exploration"
@@ -355,35 +366,6 @@ For each skill, output a JSON object with the skill index and a relevance score.
 Return ONLY valid JSON:
 {{"results": [{{"index": 0, "score": 0.85, "reason": "brief reason"}}, {{"index": 1, "score": 0.15, "reason": "brief reason"}}]}}
 """
-
-CLUSTER_LLM_ASSIGNMENT_PROMPT = """You are a clustering expert. You will receive a batch of new memory items and a list of existing clusters (each described by its most recent episodes). Your task is to assign each new item to either an existing cluster or a new cluster.
-
-Two items belong in the same cluster if they are about the **same topic, domain, or recurring theme**. Focus on WHAT the content is about, not surface-level wording.
-
-【Existing Clusters】
-Each cluster is represented by its cluster_id, item_count, and up to 3 most recent episodes.
-If this list is empty, carefully distinguish the new items below and create different clusters for them.
-{existing_clusters_json}
-
-【New Items to Classify】
-{new_items_json}
-
-【Rules】
-1. For each new item, decide: assign to an existing cluster (by cluster_id) OR create a new cluster.
-2. If multiple new items belong together AND no existing cluster fits, group them into the same NEW cluster.
-3. Use numeric IDs for new clusters starting from {next_new_id} (e.g., "cluster_{next_new_id:03d}", "cluster_{next_new_id_plus1:03d}", ...).
-4. Every item_index must appear in exactly one assignment.
-5. Be specific enough to separate genuinely different topics, but do NOT over-split. Items about slightly different sub-topics within the same domain should share a cluster.
-6. Keep each "reason" field to 20 tokens or fewer.
-
-Return ONLY valid JSON (no markdown fences, no explanation):
-{{
-  "assignments": [
-    {{"item_index": 0, "cluster_id": "<existing_cluster_id>", "reason": "short reason (max 20 tokens)"}},
-    {{"item_index": 1, "cluster_id": "cluster_{next_new_id:03d}", "reason": "new topic not in existing clusters"}},
-    ...
-  ]
-}}"""
 
 AGENT_SKILL_MATURITY_SCORE_PROMPT = """You are a quality evaluator for agent skill documents (SOPs).
 
@@ -434,4 +416,30 @@ Skill to evaluate:
 
 Return ONLY valid JSON (no markdown fences):
 {{"completeness": 1-5, "executability": 1-5, "evidence": 1-5, "clarity": 1-5, "reason": "brief justification for the scores"}}
+"""
+
+AGENT_CLUSTER_LLM_ASSIGN_PROMPT = """You are a clustering expert. Your goal is to group similar and related tasks together so that patterns and reusable strategies can be extracted from each cluster. Assign the new task intent to an existing cluster, or create a new one if no existing cluster fits.
+
+[How to decide]
+The goal of clustering is to group cases that would produce a **specific, actionable skill** — not generic advice. Use this test: "Would an agent who solved one task in this cluster have a **concrete advantage** (reusable tools, domain knowledge, verified strategies) when facing the other tasks?"
+
+1. **Identify two dimensions**: the task's **subject domain** (e.g., medical research, urban planning, e-commerce) and its **problem-solving pattern** (e.g., root cause analysis, constraint satisfaction, data pipeline design).
+2. **Cluster by the more specific dimension**. If the domain is already narrow (e.g., "clinical trial data extraction"), domain alone is enough. If the domain is broad (e.g., "software engineering"), use the problem-solving pattern to differentiate (e.g., "performance profiling" vs. "schema migration").
+3. **Do NOT merge across unrelated domains just because the strategy is similar.** "Diagnose a patient's symptoms via differential diagnosis" and "diagnose a supply chain bottleneck via constraint analysis" both use diagnostic reasoning, but involve completely different domain knowledge and belong in separate clusters.
+4. Scan candidate clusters. Prefer the cluster whose existing items would **benefit most from sharing a skill** with the new task.
+5. Create a new cluster only when no candidate cluster is a good fit.
+
+[Candidate Clusters]
+Each cluster is represented by its cluster_id, item_count, and most recent task intents.
+{clusters_json}
+
+[New Task Intent]
+{memcell_text}
+
+[Rules]
+- Output decision as JSON. Keep "reason" under 50 tokens.
+- To assign: use an existing cluster_id. To create new: use "cluster_{next_new_id}".
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{{"cluster_id": "<existing_cluster_id or cluster_{next_new_id}>", "reason": "short reason"}}
 """

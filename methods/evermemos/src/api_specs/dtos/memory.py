@@ -569,37 +569,6 @@ class FlushResponse(BaseApiResponse[FlushResult]):
 
 
 # =============================================================================
-# Flush Clustering DTOs (POST /api/v1/memories/agent/flush-clustering)
-# =============================================================================
-
-
-class AgentFlushClusteringRequest(BaseModel):
-    """Request to force-drain pending memcells and run batch clustering."""
-
-    user_id: str = Field(
-        ...,
-        description="User ID (used to derive group_id for solo scene)",
-    )
-
-
-class AgentFlushClusteringResult(BaseModel):
-    """Result of flush-clustering operation."""
-
-    request_id: str = Field(default="", description="Request ID")
-    status: str = Field(default="", description="Flush clustering status")
-    message: str = Field(default="", description="Status message")
-
-
-class AgentFlushClusteringResponse(BaseApiResponse[AgentFlushClusteringResult]):
-    """Flush-clustering endpoint response."""
-
-    data: AgentFlushClusteringResult = Field(
-        default_factory=AgentFlushClusteringResult,
-        description="Flush clustering result",
-    )
-
-
-# =============================================================================
 # Search/Retrieve DTOs (GET /api/v1/memories/search)
 # =============================================================================
 

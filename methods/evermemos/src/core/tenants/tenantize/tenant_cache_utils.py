@@ -17,6 +17,7 @@ Use cases:
 """
 
 from typing import TypeVar, Callable, Optional, Union
+from core.constants.exceptions import CriticalError
 from core.observation.logger import get_logger
 from core.tenants.tenant_contextvar import get_current_tenant
 from core.tenants.tenant_config import (
@@ -27,6 +28,16 @@ from core.tenants.tenant_models import TenantPatchKey
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+
+class TenantContextMissingError(CriticalError):
+    """Raised when tenant context is missing after app startup (strict check).
+
+    Inherits from CriticalError so that ``reraise_critical_errors()`` will
+    propagate it out of ``asyncio.gather(return_exceptions=True)`` result processing.
+    """
+
+    pass
 
 
 def get_or_compute_tenant_cache(
@@ -95,7 +106,7 @@ def get_or_compute_tenant_cache(
         if not tenant_info:
             # Strict check mode: after app startup, tenant context must exist in tenant mode
             if config.app_ready:
-                raise RuntimeError(
+                raise TenantContextMissingError(
                     f"🚨 Strict tenant check failed: app is ready but tenant context is missing!"
                     f"This usually indicates a serious code issue, please check the call chain."
                     f"[cache_key={patch_key.value}, cache_description={cache_description}]"
@@ -142,6 +153,8 @@ def get_or_compute_tenant_cache(
 
         return computed_value
 
+    except CriticalError:
+        raise
     except Exception as e:
         # Exception handling: try to use fallback (lazy evaluation)
         fallback_value = _resolve_fallback(fallback, cache_description)
