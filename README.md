@@ -468,32 +468,25 @@ All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automa
 If EverOS helps your research, please cite:
 
 ```bibtex
-@article{everos2025,
-  title   = {everos: A Self-Organizing Memory Operating System for AI Agents},
-  author  = {EverMind Team},
+@article{hu2026evermemos,
+  title   = {EverMemOS: A Self-Organizing Memory Operating System for Structured Long-Horizon Reasoning},
+  author  = {Chuanrui Hu and Xingze Gao and Zuyi Zhou and Dannong Xu and Yi Bai and Xintong Li and Hui Zhang and Tong Li and Chong Zhang and Lidong Bing and Yafeng Deng},
   journal = {arXiv preprint arXiv:2601.02163},
-  year    = {2025}
+  year    = {2026}
 }
 
-@article{hypermem2026,
+@article{yue2026hypermem,
   title   = {HyperMem: Hypergraph Memory for Long-Term Conversations},
-  author  = {Yue, Hu, Sheng, Zhou, Zhang, Liu, Guo, Deng},
+  author  = {Juwei Yue and Chuanrui Hu and Jiawei Sheng and Zuyi Zhou and Wenyuan Zhang and Tingwen Liu and Li Guo and Yafeng Deng},
   journal = {arXiv preprint arXiv:2604.08256},
   year    = {2026}
 }
 
-@article{evermembench2025,
-  title   = {EverMemBench: A Comprehensive Benchmark for Long-Term Memory
-             in Conversational AI},
-  author  = {EverMind Team},
+@article{hu2026evaluating,
+  title   = {Evaluating Long-Horizon Memory for Multi-Party Collaborative Dialogues},
+  author  = {Chuanrui Hu and Tong Li and Xingze Gao and Hongda Chen and Yi Bai and Dannong Xu and Tianwei Lin and Xiaohong Li and Yunyun Han and Jian Pei and Yafeng Deng},
   journal = {arXiv preprint arXiv:2602.01313},
-  year    = {2025}
-}
-
-@article{evoagentbench2025,
-  title   = {EvoAgentBench: The First Objective Benchmark for Agent Self-Evolution},
-  author  = {EverMind Team},
-  year    = {2025}
+  year    = {2026}
 }
 ```
 
