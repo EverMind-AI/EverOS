@@ -606,15 +606,36 @@ class OpenClawAdapter(BaseAdapter):
         """Return a coroutine callable that hits our LLM provider with
         (system_prompt, user_prompt) and returns plain text.
 
-        Built lazily so tests that never hit flush mode never pay the cost
-        of LLMProvider construction.
+        Includes retry-with-backoff because Sophnet (and OpenAI-compat
+        endpoints in general) returns transient 500s under load. Failing
+        an entire LoCoMo run because one out of several thousand flush
+        calls hit a 500 is wasteful; cap the retries so a real outage
+        still surfaces.
         """
+        max_retries = int(self._openclaw_cfg.get("flush_max_retries", 4))
+        base_delay = float(self._openclaw_cfg.get("flush_retry_base_seconds", 2.0))
 
         async def _call(system_prompt: str, user_prompt: str) -> str:
             provider = self._get_llm_provider()
             prompt = f"{system_prompt}\n\n{user_prompt}"
-            result = await provider.generate(prompt=prompt, temperature=0)
-            return result.strip() if isinstance(result, str) else ""
+            last_err: Optional[Exception] = None
+            for attempt in range(max_retries):
+                try:
+                    result = await provider.generate(prompt=prompt, temperature=0)
+                    return result.strip() if isinstance(result, str) else ""
+                except Exception as err:  # noqa: BLE001
+                    last_err = err
+                    if attempt == max_retries - 1:
+                        break
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "flush LLM call failed (attempt %d/%d): %s; retrying in %.1fs",
+                        attempt + 1, max_retries, err, delay,
+                    )
+                    await asyncio.sleep(delay)
+            raise RuntimeError(
+                f"flush LLM exhausted {max_retries} retries: {last_err}"
+            )
 
         return _call
 
