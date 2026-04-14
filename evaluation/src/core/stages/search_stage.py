@@ -96,7 +96,13 @@ async def run_search_stage(
             for attempt in range(max_retries):
                 try:
                     result = await asyncio.wait_for(
-                        adapter.search(qa.question, conv_id, index, conversation=conversation),
+                        adapter.search(
+                            qa.question,
+                            conv_id,
+                            index,
+                            conversation=conversation,
+                            question_id=qa.question_id,
+                        ),
                         timeout=timeout_seconds
                     )
                     break  # Success, exit retry loop

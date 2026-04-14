@@ -12,6 +12,34 @@ from evaluation.src.adapters.base import BaseAdapter
 from evaluation.src.utils.checkpoint import CheckpointManager
 
 
+# Tokenizer is loaded lazily so importing answer_stage stays cheap and the
+# dependency on tiktoken is only paid when tests / pipelines actually call
+# estimate_tokens().
+_TOKEN_ENCODING = None
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count for latency/context diagnostics.
+
+    Uses tiktoken's o200k_base encoding (matches gpt-4o / gpt-4o-mini). Falls
+    back to whitespace splitting if tiktoken is unavailable so the pipeline
+    keeps working in stripped-down environments.
+    """
+    if not text:
+        return 0
+    global _TOKEN_ENCODING
+    if _TOKEN_ENCODING is None:
+        try:
+            import tiktoken
+
+            _TOKEN_ENCODING = tiktoken.get_encoding("o200k_base")
+        except Exception:
+            _TOKEN_ENCODING = "fallback"
+    if _TOKEN_ENCODING == "fallback":
+        return len(text.split())
+    return len(_TOKEN_ENCODING.encode(text))
+
+
 def build_context(search_result: SearchResult) -> str:
     """
     Build context from search results.
@@ -138,18 +166,26 @@ async def run_answer_stage(
     
     async def answer_single_with_tracking(qa, search_result):
         nonlocal completed, failed
-        
+
         async with semaphore:
+            context = ""
+            context_chars = 0
+            context_tokens = 0
+            answer_latency_ms = None
+            answer = "Error: Failed to generate answer"
+
             try:
                 # Build context
                 context = build_context(search_result)
-                
+                context_chars = len(context)
+                context_tokens = estimate_tokens(context)
+
                 # Detect multiple-choice and enhance question if needed
                 query = qa.question
                 if "all_options" in qa.metadata:
                     options = qa.metadata["all_options"]
                     options_text = "\n".join([f"{key} {value}" for key, value in options.items()])
-                    
+
                     # Integrate options and requirements into question
                     query = f"""{qa.question}
 
@@ -157,39 +193,52 @@ OPTIONS:
 {options_text}
 
 IMPORTANT: This is a multiple-choice question. You MUST analyze the context and select the BEST option. In your FINAL ANSWER, return ONLY the option letter like (a), (b), (c), or (d), nothing else."""
-                
+
                 # Call adapter's answer method with timeout and retry
                 max_retries = 3
-                timeout_seconds = 120.0  # 3 minutes timeout per attempt
-                answer = None
-                
+                timeout_seconds = 120.0  # 2 minutes timeout per attempt
+
                 for attempt in range(max_retries):
+                    t_start = time.perf_counter()
                     try:
                         answer = await asyncio.wait_for(
                             adapter.answer(
                                 query=query,
                                 context=context,
                                 conversation_id=search_result.conversation_id,
+                                question_id=qa.question_id,
                             ),
                             timeout=timeout_seconds
                         )
+                        answer_latency_ms = (time.perf_counter() - t_start) * 1000.0
                         answer = answer.strip()
                         break  # Success, exit retry loop
-                        
+
                     except asyncio.TimeoutError:
                         if attempt < max_retries - 1:
-                            tqdm.write(f"  ⏱️  Timeout (180s) for {qa.question_id}, retry {attempt + 1}/{max_retries}...")
+                            tqdm.write(f"  ⏱️  Timeout ({timeout_seconds}s) for {qa.question_id}, retry {attempt + 1}/{max_retries}...")
                             await asyncio.sleep(2)  # Short delay before retry
                         else:
                             tqdm.write(f"  ❌ Timeout after {max_retries} attempts for {qa.question_id}: {qa.question[:50]}...")
                             answer = "Error: Answer generation timeout after retries"
                             failed += 1
-            
+
             except Exception as e:
                 tqdm.write(f"  ⚠️ Answer generation failed for {qa.question_id}: {e}")
                 answer = "Error: Failed to generate answer"
                 failed += 1
-            
+
+            retrieval_meta = search_result.retrieval_metadata or {}
+            metadata = {
+                **qa.metadata,
+                "answer_latency_ms": answer_latency_ms,
+                "final_context_chars": context_chars,
+                "final_context_tokens": context_tokens,
+                "retrieval_latency_ms": retrieval_meta.get("retrieval_latency_ms"),
+                "retrieval_route": retrieval_meta.get("retrieval_route"),
+                "backend_mode": retrieval_meta.get("backend_mode"),
+            }
+
             result = AnswerResult(
                 question_id=qa.question_id,
                 question=qa.question,
@@ -198,9 +247,9 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 category=qa.category,
                 conversation_id=search_result.conversation_id,
                 formatted_context=context,  # Save actual context used
-                metadata=qa.metadata,  # Pass metadata (contains all_options for multiple-choice)
+                metadata=metadata,
             )
-            
+
             # Save result
             all_answer_results[qa.question_id] = {
                 "question_id": result.question_id,
@@ -210,7 +259,7 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 "category": result.category,
                 "conversation_id": result.conversation_id,
                 "formatted_context": result.formatted_context,  # Save formatted_context
-                "metadata": result.metadata,  # Save metadata (contains all_options)
+                "metadata": result.metadata,  # Save metadata (contains all_options + latency)
             }
             
             completed += 1
