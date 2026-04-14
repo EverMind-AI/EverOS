@@ -22,7 +22,10 @@ _ADAPTER_MODULES = {
     "evermemos_api": "evaluation.src.adapters.evermemos_api_adapter",
     "memobase": "evaluation.src.adapters.memobase_adapter",
     "supermemory": "evaluation.src.adapters.supermemory_adapter",
-    
+
+    # OpenClaw memory system (via Node bridge)
+    "openclaw": "evaluation.src.adapters.openclaw_adapter",
+
     # Future systems:
     # "nemori": "evaluation.src.adapters.nemori_adapter",
 }
