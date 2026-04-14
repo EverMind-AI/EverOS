@@ -1,0 +1,36 @@
+adapter: "openclaw"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://api.openai.com/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 30
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "disabled"
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key: "${SOPH_API_KEY:}"
+    base_url: "${SOPH_EMBED_URL:}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:}"
+    output_dimensionality: 1024
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "disabled"
+    answer_mode: "shared"

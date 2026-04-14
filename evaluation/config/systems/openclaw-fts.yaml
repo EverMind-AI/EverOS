@@ -1,0 +1,29 @@
+adapter: "openclaw"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://api.openai.com/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 30
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_only"
+  backend_mode: "fts_only"
+  flush_mode: "native"
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "native"
+    answer_mode: "shared"
