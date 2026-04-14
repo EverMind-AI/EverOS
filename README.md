@@ -3,13 +3,15 @@
 ![banner-gif](https://github.com/user-attachments/assets/c2cef808-3e93-4f81-a194-dffe02ddd984)
 
 <p align="center">
-  <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a>
-  <a href="https://arxiv.org/abs/2604.08256"><img src="https://img.shields.io/badge/arXiv-HyperMem-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: HyperMem"></a>
-  <a href="https://arxiv.org/abs/2602.01313"><img src="https://img.shields.io/badge/arXiv-EverMemBench-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverMemBench"></a>
-  <a href="https://github.com/EverMind-AI/MSA"><img src="https://img.shields.io/badge/arXiv-Memory%20Sparse%20Attention-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: Memory Sparse Attention"></a>
-  <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a>
-  <a href="https://discord.gg/gYep5nQRZJ"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&labelColor=gray&style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeChat-EverMind-07C160?labelColor=gray&style=flat-square&logo=wechat&logoColor=white" alt="WeChat"></a>
+  <!-- <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a> -->
+  <!-- <a href="https://arxiv.org/abs/2604.08256"><img src="https://img.shields.io/badge/arXiv-HyperMem-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: HyperMem"></a> -->
+  <!-- <a href="https://arxiv.org/abs/2602.01313"><img src="https://img.shields.io/badge/arXiv-EverMemBench-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverMemBench"></a> -->
+  <!-- <a href="https://github.com/EverMind-AI/MSA"><img src="https://img.shields.io/badge/arXiv-Memory%20Sparse%20Attention-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: Memory Sparse Attention"></a> -->
+  <!-- <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a> -->
+  <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
+  <a href="https://discord.gg/gYep5nQRZJ"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&labelColor=gray&style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeChat-EverMind-07C160?labelColor=gray&style=for-the-badge&logo=wechat&logoColor=white" alt="WeChat"></a>
+  <a href="https://github.com/EverMind-AI/EverOS/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=gray&style=for-the-badge" alt="License"></a>
 </p>
 
 [Website](https://evermind.ai) · [Documentation](https://docs.evermind.ai) · [Blog](https://evermind.ai/blogs)
@@ -151,71 +153,80 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 
 ## Use Cases
 
-[![EverMind + OpenClaw Agent Memory and Plugin](https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f)](https://github.com/EverMind-AI/everos/tree/agent_memory)
+<table>
+<tr>
+<td width="50%">
 
-**EverMind + OpenClaw Agent Memory and Plugin**
+![banner-gif](https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f)
 
-Imagine a 24/7 agent with continuous learning memory that you can carry with you wherever you go. Check out the [agent_memory](https://github.com/EverMind-AI/everos/tree/agent_memory) branch and the [plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin) for more details.
+#### OpenClaw Agent Memory
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+A 24/7 agent with continuous learning memory that you can carry with you wherever you go.
 
-<br>
+[Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
 
-[![Live2D Character with Memory](https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26)](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
+</td>
+<td width="50%">
 
-**Live2D Character with Memory**
+![banner-gif](https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26)
 
-Add long-term memory to your anime character that can talk to you in real-time powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
-See the [Live2D Character with Memory Example](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos) for more details.
+#### Live2D Character with Memory
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+Add long-term memory to your anime character that can talk to you in real-time, powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
 
-<br>
+[Code](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
 
-[![Computer-Use with Memory](https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727)](https://screenshot-analysis-vercel.vercel.app/)
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-**Computer-Use with Memory**
+![banner-gif](https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727)
+
+#### Computer-Use with Memory
 
 Use computer-use to launch screenshot-based analysis, all stored in your memory.
-See the [live demo](https://screenshot-analysis-vercel.vercel.app/) for more details.
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+[Live Demo](https://screenshot-analysis-vercel.vercel.app/)
 
-<br>
+</td>
+<td width="50%">
 
-[![Game of Thrones Memories](https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449)](https://github.com/EverMind-AI/evermem_got_demo)
+![banner-gif](https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449)
 
-**Game of Thrones Memories**
+#### Game of Thrones Memories
 
 A demonstration of AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones".
-See the [code](https://github.com/EverMind-AI/evermem_got_demo) for more details.
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+[Code](https://github.com/EverMind-AI/evermem_got_demo)
 
-<br>
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-[![EverOS Claude Code Plugin](https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81)](https://github.com/EverMind-AI/evermem-claude-code)
+![banner-gif](https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81)
 
-**EverOS Claude Code Plugin**
+#### Claude Code Plugin
 
 Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
-See the [code](https://github.com/EverMind-AI/evermem-claude-code) for more details.
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+[Code](https://github.com/EverMind-AI/evermem-claude-code)
 
-<br>
+</td>
+<td width="50%">
 
-[![Visualize Memories with Graphs](https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c)](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
+![banner-gif](https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c)
 
-**Visualize Memories with Graphs**
+#### Memory Graph Visualization
 
-Memory Graph view that visualizes your stored entities and how they relate. This is a pure frontend demo which has not been plugged into the backend yet — we are working on it.
-See the [live demo](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html).
+Visualize your stored entities and how they relate. Pure frontend demo — backend integration in progress.
+
+[Live Demo](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
+
+</td>
+</tr>
+</table>
 
 <br>
 <div align="right">
@@ -344,7 +355,7 @@ See the [Demo Guide](docs/usage/DEMOS.md) for details.
 
 ## Evaluation & Benchmarking
 
-EverOS achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming comparable memory systems.
+EverCore achieves **93% overall accuracy** on the LoCoMo benchmark, outperforming comparable memory systems.
 
 ### Benchmark Results
 
