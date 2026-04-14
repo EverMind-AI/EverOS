@@ -1,0 +1,10 @@
+# Omni-Math domain config
+
+data_dir: ../../../data/omnimath/test_set_100
+agent_timeout: 1800
+
+# Verification: "exact" (string match) or "llm" (LLM judge)
+verify_mode: llm
+eval_model_owner: vllm
+eval_model_name: ${JUDGE_MODEL}
+eval_api_base: ${JUDGE_API_BASE}

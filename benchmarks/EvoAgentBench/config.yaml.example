@@ -1,0 +1,40 @@
+# EvoAgentBench configuration
+# Copy to config.yaml and edit for your environment
+#
+# Setup:
+#   1. cp config.yaml.example config.yaml
+#   2. cp .env.example .env && edit .env (fill in API keys)
+#   3. Copy agent yaml.example to yaml and edit (see src/agents/*/*)
+#   4. Edit domain config if needed (data paths, etc.)
+
+# ── Agent configs ────────────────────────────────────────────────
+# Map of agent name -> yaml config path.
+# Copy the .yaml.example to .yaml and edit for your environment.
+agent_configs:
+  nanobot: ./src/agents/nanobot/nanobot.yaml
+  openclaw: ./src/agents/openclaw/openclaw.yaml
+
+# Active agent (must be a key in agent_configs above)
+agent: nanobot
+
+# ── Benchmark ─────────────────────────────────────────────────────
+# REQUIRED: set the domain you want to evaluate.
+# Each domain has its own yaml — check and edit:
+#   - data paths (dataset_file, split_file, index_path)
+#   - judge LLM config (information_retrieval: judge.model, judge.api_base, judge.api_key)
+#   - agent_timeout, MCP server settings
+domain:
+  name: information_retrieval
+  config: ./src/domains/information_retrieval/information_retrieval.yaml
+
+# ── Output ────────────────────────────────────────────────────────
+job_dir: ./jobs
+
+# ── Run settings ──────────────────────────────────────────────────
+trials: 1                            # pass@k: run each task N times
+parallel: 1                          # max concurrent tasks
+max_retries: 2                       # retry on failure
+
+# Docker settings (optional, for swebench)
+# docker: /usr/bin/docker
+# docker_sock: /var/run/docker.sock

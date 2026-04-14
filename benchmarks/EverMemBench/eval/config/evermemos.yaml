@@ -1,0 +1,33 @@
+# EverMemOS (EverMind) Configuration for Multi-Person Group Chat Evaluation
+#
+# Environment variables:
+# - EVERMEMOS_BASE_URL: EverMemOS API base url (required, e.g., http://0.0.0.0)
+# - EVERMEMOS_API_KEY: API key (optional, not needed for local deployment)
+#
+# For local deployment, use --base-url to specify port:
+#   --base-url http://0.0.0.0:19004   (for user 004)
+#   --base-url http://0.0.0.0:19005   (for user 005)
+#
+# Docs: https://docs.evermind.ai/api-reference/endpoint/add_memories
+#
+name: "evermemos"
+version: "1.0"
+description: "EverMemOS adapter for multi-person group chat evaluation"
+
+# API Configuration
+# base_url can be overridden via --base-url CLI argument
+base_url: "${EVERMEMOS_BASE_URL:https://api.evermind.ai}"
+api_key: "${EVERMEMOS_API_KEY:}"  # Optional for local deployment
+
+# Rate/retry
+requests_per_second: 20
+max_retries: 5
+add_interval: 0.0
+
+# Search Configuration
+search:
+  top_k: 10
+  retrieve_method: "hybrid"
+
+# HTTP
+http_timeout: 60

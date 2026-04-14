@@ -1,0 +1,41 @@
+# Shared pipeline settings — used by answerer.py, evaluator.py, pipeline.py
+# regardless of which --system is selected.
+
+# Answer generation (answerer.py)
+answer:
+  model: "openai/gpt-4.1-mini"
+  provider:
+    order: ["openai"]
+    allow_fallbacks: false
+  temperature: 0
+  max_tokens: 1000
+  timeout: 300
+  concurrency: 1
+
+# LLM judge evaluation (evaluator.py)
+evaluate:
+  model: "google/gemini-3-flash-preview"
+  provider:
+    order: ["google-ai-studio"]
+    allow_fallbacks: false
+  concurrency: 20
+
+# Search stage (pipeline.py)
+search:
+  concurrency: 3
+  timeout: 120
+
+# Retry (shared by answerer, evaluator, search)
+retry:
+  max_retries: 20
+  retry_delay: 1.0
+  max_delay: 300
+
+# Debug
+debug:
+  show_usage: false  
+
+# Cache warmup (LLM system only — sends first request, waits, then batch processes)
+warmup:
+  enabled: true
+  delay_seconds: 15

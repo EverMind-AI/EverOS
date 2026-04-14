@@ -1,0 +1,32 @@
+# Memos Configuration for Multi-Person Group Chat Evaluation
+#
+# Environment variables:
+# - MEMOS_API_URL: Memos API endpoint (optional, has default)
+# - MEMOS_API_KEY: Memos API key (required, format: "Token mpg-xxxxx")
+
+name: "memos"
+version: "1.0"
+description: "Memos adapter for multi-person group chat evaluation"
+
+# API Configuration
+api_url: "${MEMOS_BASE_URL:https://memos.memtensor.cn/api/openmem/v1}"
+api_key: "${MEMOS_API_KEY}"
+
+# Batch Configuration
+# Memos limits: ~35,000 characters per request
+batch_size: 20         # Max messages per batch
+char_limit: 30000        # Max characters per batch (conservative)
+max_retries: 5           # Retry count for failed requests
+
+# Rate Limiting
+# Memos limit: 10 requests/second
+requests_per_second: 10
+
+# Search Configuration
+search:
+  top_k: 10
+  preference_limit_number: 6
+
+# HTTP
+http_timeout: 60
+

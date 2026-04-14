@@ -1,0 +1,36 @@
+# Nanobot agent config
+#
+# Copy this file to nanobot.yaml and edit to match your environment.
+#
+# Prerequisites:
+#   1. Install nanobot (`pip install nanobot`) or have local source
+#   2. Verify it works: `nanobot agent --message "hello"`
+#   3. Configure global settings in ~/.nanobot/config.json (search tools, MCP servers, etc.)
+
+# name: agent identifier, used in result.json and job naming
+name: nanobot
+
+# command: CLI executable path
+#   - "nanobot" uses system PATH
+#   - Use nanobot_dev.sh to run from local source: ./src/agents/nanobot/nanobot_dev.sh
+#   - Or specify full path: /path/to/nanobot
+command: nanobot
+
+# LLM settings (passed to nanobot via per-task temp config)
+# If omitted, nanobot uses its global config (~/.nanobot/config.json)
+
+# --- OpenRouter (default) ---
+model: qwen/qwen3.5-27b
+provider: openrouter
+providers:
+  openrouter:
+    apiKey: ${OPENROUTER_API_KEY}
+    apiBase: https://openrouter.ai/api/v1
+
+# --- Local vLLM ---
+# model: custom/YourModel
+# provider: custom
+# providers:
+#   custom:
+#     apiKey: EMPTY
+#     apiBase: http://localhost:8000/v1

@@ -1,0 +1,25 @@
+# Memobase Configuration for Multi-Person Group Chat Evaluation
+#
+# Environment variables:
+# - MEMOBASE_BASE_URL: Memobase base URL (required)
+# - MEMOBASE_API_TOKEN: Memobase API token (required)
+
+name: "memobase"
+version: "1.0"
+description: "Memobase adapter for multi-person group chat evaluation"
+
+# API Configuration
+project_url: "${MEMOBASE_BASE_URL}"
+api_key: "${MEMOBASE_API_TOKEN}"
+
+# Batch Configuration
+# Memobase uses ChatBlob for batch ingestion
+batch_size: 30           # Messages per batch (ChatBlob)
+batch_delay: 2.0         # Seconds to wait between batches (avoid rate limiting)
+max_retries: 5           # Retry count for failed requests
+
+# Search Configuration
+search:
+  max_token_size: 3000
+  event_similarity_threshold: 0.2
+

@@ -1,0 +1,14 @@
+# EverMemOS skill extraction and evaluation config
+
+# EverMemOS API
+api_url: http://localhost:1996
+
+# Job directory with train results ("latest" = auto-detect newest in jobs/)
+job_dir: latest
+
+# Skill output/input directory
+skills_dir: src/skill_evolution/evermemos/skills
+
+# Split settings
+split_extract: train
+split_eval: test

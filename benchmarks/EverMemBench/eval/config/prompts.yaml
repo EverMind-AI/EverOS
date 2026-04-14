@@ -1,0 +1,154 @@
+# Prompts configuration for multi-person group chat evaluation
+# Used by answerer.py and evaluator.py
+
+# Answer Generation Prompts
+answer:
+  # Multiple choice question prompt (adapted for multi-person group chat)
+  multiple_choice: |
+    You are a rigorous question-answering assistant. You will be given retrieved memories from
+    a multi-person group chat and one multiple-choice question with four options.
+    Your task is to choose the single best answer (A/B/C/D) based ONLY on the provided memories.
+
+    Rules:
+    1. Use only information explicitly stated in the memories or directly entailed by them.
+       Do NOT use outside knowledge, assumptions, or guesses beyond the memories.
+    2. The memories come from group chat conversations involving multiple participants.
+       Pay attention to who said what and when.
+    3. If multiple options seem plausible, choose the one most strongly and directly supported
+       by the memories.
+    4. If the memories do not provide enough information to be certain, you MUST still pick one
+       option (A/B/C/D). Choose the option that is least inconsistent with the memories.
+    5. Pay special attention to timestamps to determine when events occurred.
+    6. If memories contain contradictory information, prioritize the most recent memory.
+    7. Do NOT output any reasoning, explanation, punctuation, or extra text.
+
+    Output format (must be followed exactly):
+    Output ONLY a single uppercase letter: A or B or C or D
+
+    [MEMORIES]
+    {context}
+
+    [QUESTION]
+    {question}
+
+    [OPTIONS]
+    {options}
+
+  # Open-ended question prompt (adapted for multi-person group chat)
+  open_ended: |
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories. You will be given retrieved memories from a multi-person group chat and one open-ended question.
+    Your task is to answer the question using ONLY the information in the memories.
+
+    # INSTRUCTIONS:
+    1. Carefully analyze all provided memories from the group chat.
+    2. Pay special attention to timestamps to determine when events occurred.
+    3. If the question asks about a specific event or fact, look for direct evidence in the memories.
+    4. If memories contain contradictory information, prioritize the most recent memory.
+    5. If the question involves time references (like "last year", "two months ago"), calculate the actual date based on the memory's timestamp.
+    6. Always convert relative time references to specific dates, months, or years in your answer.
+    7. Pay attention to who said what - the memories may involve multiple participants.
+    8. The answer should be concise and specific (under 5-6 words when possible).
+    9. Do NOT output any reasoning steps, explanations, or extra text beyond the final answer.
+
+    # APPROACH (Think step by step internally):
+    1. Examine all memories that contain information related to the question.
+    2. Examine timestamps and content carefully.
+    3. Look for explicit mentions of dates, times, locations, or events that answer the question.
+    4. If the answer requires calculation (e.g., converting relative time references), do so.
+    5. Formulate a precise, concise answer based solely on the evidence in the memories.
+
+    Output format (must be followed exactly):
+    Output ONLY the answer text
+
+    [MEMORIES]
+    {context}
+
+    [QUESTION]
+    {question}
+
+# LLM System Answer Prompts (for --system llm)
+# Uses FULL DIALOGUE as context instead of retrieved memories
+# These prompts are used when evaluating LLM directly without memory systems
+llm_answer:
+  # Multiple choice question prompt for LLM system (uses full dialogue)
+  multiple_choice: |
+    You are a rigorous question-answering assistant. You will be given a very long dialogue transcript and one multiple-choice question with four options. Your task is to choose the single best answer (A/B/C/D) based ONLY on the dialogue.
+
+    Rules:
+    1. Use only information explicitly stated in the dialogue or directly entailed by it. Do NOT use outside knowledge, assumptions, or guesses beyond the dialogue.
+    2. If multiple options seem plausible, choose the one most strongly and directly supported by the dialogue.
+    3. If the dialogue does not provide enough information to be certain, you MUST still pick one option (A/B/C/D). Choose the option that is least inconsistent with the dialogue.
+    4. Do NOT output any reasoning, explanation, punctuation, or extra text.
+
+    Output format (must be followed exactly):
+    Output ONLY a single uppercase letter: A or B or C or D
+
+    [DIALOGUE]
+    {context}
+
+    [QUESTION]
+    {question}
+
+    [OPTIONS]
+    {options}
+
+  # Open-ended question prompt for LLM system (uses full dialogue)
+  open_ended: |
+    You are a rigorous question-answering assistant. You will be given a very long dialogue transcript and one open-ended question. Your task is to answer the question using ONLY the information in the dialogue.
+
+    Rules:
+    1. Use only information explicitly stated in the dialogue or directly entailed by it. Do NOT use outside knowledge, assumptions, or speculation.
+    2. If the dialogue does not contain enough information to answer, output exactly: NOT ENOUGH INFORMATION
+    3. Keep the answer concise, specific, and aligned with the dialogue. Do not add commentary.
+    4. Do NOT output any reasoning steps, explanations, or extra text beyond the final answer.
+
+    Output format (must be followed exactly):
+    Output ONLY the answer text (or exactly: NOT ENOUGH INFORMATION)
+
+    [DIALOGUE]
+    {context}
+
+    [QUESTION]
+    {question}
+
+# LLM Judge Prompts for evaluation
+llm_judge:
+  system_prompt: |
+    You are an expert grader that determines if answers to questions match a gold standard answer.
+
+  user_prompt: |
+    Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will be given:
+        (1) a question (about a multi-person group chat),
+        (2) a 'gold' (ground truth) answer,
+        (3) a generated answer
+    which you will score as CORRECT/WRONG.
+
+    The questions are about events, facts, or details mentioned in multi-person group chat conversations.
+    The gold answer is usually a concise answer that includes the key information.
+
+    For example:
+    Question: What project was announced on January 9th?
+    Gold answer: Carbon Emission Accounting Platform
+
+    The generated answer might be longer, but you should be generous with your grading -
+    as long as it contains the same key information as the gold answer, it should be CORRECT.
+
+    For time-related questions, the gold answer will be a specific date/time.
+    The generated answer might use different formats (e.g., "May 7th" vs "7 May" vs "2025-05-07"),
+    but as long as it refers to the same date/time, it should be CORRECT.
+
+    For the specific window of date, a +/- 1 day difference is acceptable due to timezone processing variations.
+
+    For multiple choice questions where the gold answer is a letter (A/B/C/D),
+    the generated answer should match exactly to be CORRECT.
+
+    Now grade this:
+    Question: {question}
+    Gold answer: {golden_answer}
+    Generated answer: {generated_answer}
+
+    First, provide a short (one sentence) explanation of your reasoning,
+    then finish with CORRECT or WRONG.
+    Do NOT include both CORRECT and WRONG in your response.
+
+    Return the label in JSON format with the key "label": {{"label": "CORRECT"}} or {{"label": "WRONG"}}

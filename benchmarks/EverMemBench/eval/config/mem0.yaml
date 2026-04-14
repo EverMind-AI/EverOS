@@ -1,0 +1,26 @@
+# Mem0 Configuration for Multi-Person Group Chat Evaluation
+#
+# Environment variables:
+# - MEM0_API_KEY: Mem0 API key (required)
+
+name: "mem0"
+version: "1.0"
+description: "Mem0 adapter for multi-person group chat evaluation"
+
+# API Configuration
+api_key: "${MEM0_API_KEY}"
+
+enable_graph_add: true
+enable_graph_search: true
+
+# Batch Configuration
+# Mem0 recommends smaller batches for reliability
+batch_size: 30            # Messages per batch
+max_retries: 5           # Retry count for failed requests
+add_interval: 0.5        # Interval between batches (seconds)
+
+# Search Configuration
+search:
+  top_k: 10
+  group_ids: ["1", "2", "3"]
+

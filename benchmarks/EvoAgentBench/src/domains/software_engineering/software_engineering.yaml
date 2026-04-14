@@ -1,0 +1,5 @@
+parquet_file: ../../../data/swebench/test-00000-of-00001.parquet
+tar_dir: ../../../data/swebench/images
+split_file: ../../../data/swebench/task_split.json
+agent_timeout: 1800
+verify_timeout: 1800

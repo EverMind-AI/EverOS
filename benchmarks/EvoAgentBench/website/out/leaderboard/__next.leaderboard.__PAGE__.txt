@@ -1,0 +1,6 @@
+1:"$Sreact.fragment"
+2:I[38193,["/_next/static/chunks/13h-0fd.p-1ga.js","/_next/static/chunks/0d3shmwh5_nmn.js","/_next/static/chunks/0k0_zs099ibfo.js"],"Leaderboard"]
+3:I[97367,["/_next/static/chunks/13h-0fd.p-1ga.js","/_next/static/chunks/0d3shmwh5_nmn.js"],"OutletBoundary"]
+4:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"flex-1","children":["$","section",null,{"className":"mx-auto max-w-6xl px-6 py-12","children":[["$","div",null,{"className":"mb-8","children":[["$","h1",null,{"className":"text-3xl font-bold mb-2","children":"Agent Performance"}],["$","p",null,{"className":"text-sm text-muted-foreground","children":["Pass rates on"," ",["$","span",null,{"className":"font-semibold text-foreground","children":"EvoAgentBench"}]," ","· 5 domains · EverOS skill extraction"]}]]}],["$","$L2",null,{}]]}]}],[["$","script","script-0",{"src":"/_next/static/chunks/0k0_zs099ibfo.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"wfwy4kp7fUsbZtcncQnlY"}
+5:null

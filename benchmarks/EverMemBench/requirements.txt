@@ -1,0 +1,12 @@
+# Core dependencies
+aiohttp>=3.9
+aiolimiter>=1.1
+openai>=1.0
+python-dotenv>=1.0
+PyYAML>=6.0
+rich>=13.0
+
+# Memory system SDKs (install as needed)
+mem0ai       # For Mem0
+memobase     # For Memobase
+zep-cloud    # For Zep

@@ -1,0 +1,41 @@
+# BrowseComp-Plus config
+# Data preparation: python src/utils/browsecomp-plus-tools/setup_data.py
+
+dataset_file: ../../../data/BrowseComp-Plus/browsecomp_plus_decrypted.jsonl
+split_file: ../../../data/BrowseComp-Plus/task_split.json
+agent_timeout: 3000
+
+disabled_tools:
+  - read_file
+  - write_file
+  - edit_file
+  - list_dir
+  - exec
+  - web_search
+  - web_fetch
+  - message
+  - spawn
+  - cron
+
+# MCP search server (FAISS + Qwen3-Embedding-8B)
+# Build index first: python src/utils/browsecomp-plus-tools/setup_data.py
+# model_name: local path to Qwen3-Embedding-8B, or HuggingFace model ID
+mcp_server:
+  auto_start: true
+  startup_timeout: 300
+  port: 9100
+  searcher_type: faiss
+  index_path: ../../../data/BrowseComp-Plus/indexes/qwen3-embedding-8b/corpus.*.pkl
+  model_name: Qwen/Qwen3-Embedding-8B
+  k: 5
+  snippet_max_tokens: 512
+
+# LLM Judge for answer verification
+# Set model + api_base to your LLM endpoint; disable_thinking recommended for vLLM
+judge:
+  model: ${JUDGE_MODEL}
+  api_base: ${JUDGE_API_BASE}
+  api_key: ${JUDGE_API_KEY}
+  max_tokens: 4096
+  temperature: 0.7
+  disable_thinking: true

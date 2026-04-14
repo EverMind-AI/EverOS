@@ -1,0 +1,21 @@
+# LiveCodeBench domain config
+
+# LiveCodeBench 源码路径（用于导入 evaluation 模块）
+# git clone https://github.com/LiveCodeBench/LiveCodeBench.git
+lcb_repo: ./LiveCodeBench
+
+# 数据集版本
+release_version: release_v6
+
+# 本地数据缓存目录（首次运行自动从 HuggingFace 下载）
+cache_dir: ../../../data/livecode
+
+# Train/Test 划分文件
+# 支持统一 cluster 格式和扁平格式，详见 README.md
+split_file: ../../../data/livecode/task_split.json
+
+# Agent 超时（秒）
+agent_timeout: 900
+
+# 代码测试超时（秒/每个测试用例）
+test_timeout: 6

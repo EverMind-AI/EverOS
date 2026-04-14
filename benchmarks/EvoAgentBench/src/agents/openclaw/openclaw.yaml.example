@@ -1,0 +1,56 @@
+# OpenClaw agent config (requires >= 2026.3.24)
+#
+# Copy this file to openclaw.yaml and edit to match your environment.
+#
+# Prerequisites:
+#   1. Install openclaw (`npm install -g openclaw`) or have local source
+#   2. Verify it works: `openclaw agent --message "hello" --json`
+#   3. Configure global settings in ~/.openclaw/openclaw.json (search tools, web, etc.)
+
+# name: agent identifier, used in result.json and job naming
+name: openclaw
+
+# command: CLI executable path
+#   - "openclaw" uses system PATH
+#   - Use openclaw_dev.sh to run from local source: ./src/agents/openclaw/openclaw_dev.sh
+command: openclaw
+
+# max_concurrent: max concurrent sub-agents within openclaw (default: 16)
+# max_concurrent: 16
+
+# retry_timeout: don't retry if agent elapsed time exceeds this in seconds (default: 3000)
+# retry_timeout: 3000
+
+# LLM settings (passed to openclaw via per-task temp OPENCLAW_HOME)
+# If omitted, openclaw uses its global config (~/.openclaw/openclaw.json)
+
+# --- OpenRouter (default) ---
+model: openrouter/qwen/qwen3.5-27b
+providers:
+  openrouter:
+    baseUrl: https://openrouter.ai/api/v1
+    apiKey: ${OPENROUTER_API_KEY}
+    api: openai-completions
+    models:
+      - id: qwen/qwen3.5-27b
+        name: qwen/qwen3.5-27b
+        reasoning: true
+        contextWindow: 128000
+        maxTokens: 96000
+
+# --- Local vLLM ---
+# model: local/YourModel
+# providers:
+#   local:
+#     baseUrl: http://localhost:8000/v1
+#     apiKey: EMPTY
+#     api: openai-completions
+#     models:
+#       - id: YourModel
+#         name: YourModel
+#         reasoning: true
+#         input: [text]
+#         contextWindow: 128000
+#         maxTokens: 96000
+#         compat:
+#           thinkingFormat: qwen

@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Environments
+.env
+.venv
+venv/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# IDE / editor
+.vscode/
+.cursor/
+.DS_Store
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Logs
+*.log
+nohup.out
+logs/
+
+# Project outputs
+outputs/
+results/
+*.duckdb
+
+# Archives
+*.tar
+*.zip
+
+# dataset
+dataset/

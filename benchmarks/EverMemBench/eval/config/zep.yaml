@@ -1,0 +1,30 @@
+# Zep Configuration for Multi-Person Group Chat Evaluation
+#
+# Environment variables:
+# - ZEP_API_KEY: Zep API key (required)
+#
+# Uses Graph API (graph.add) for multi-person support.
+# Note: Graph API doesn't support native timestamp,
+# so timestamp is included as prefix in content:
+# [2025-01-09T09:32:15][Group: X][Speaker: Y]content
+
+name: "zep"
+version: "1.0"
+description: "Zep adapter for multi-person group chat evaluation (Graph API)"
+
+# API Configuration
+api_key: "${ZEP_API_KEY}"
+
+# Batch Configuration
+# Graph API is per-message, batches control async concurrency
+batch_size: 20          # Messages per batch (async)
+max_retries: 5           # Retry count for failed requests
+add_interval: 0.1        # Interval between messages (seconds)
+
+# Search Configuration
+search:
+  top_k: 10
+  reranker_edges: "cross_encoder"
+  reranker_nodes: "rrf"
+  max_query_length: 400
+
