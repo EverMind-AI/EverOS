@@ -119,7 +119,8 @@ async function handleIndex(input, launcher) {
     cwd
   );
   if (code !== 0) {
-    return { ok: false, command: "index", error: stderr || stdout || `exit ${code}` };
+    const tail = [stderr, stdout].filter((s) => s && s.trim()).join("\n---\n");
+    return { ok: false, command: "index", error: tail || `exit ${code}` };
   }
   return {
     ok: true,
@@ -158,7 +159,8 @@ async function handleStatus(input, launcher) {
     cwd
   );
   if (code !== 0) {
-    return { ok: false, command: "status", error: stderr || stdout || `exit ${code}` };
+    const tail = [stderr, stdout].filter((s) => s && s.trim()).join("\n---\n");
+    return { ok: false, command: "status", error: tail || `exit ${code}` };
   }
   const parsed = extractJsonTail(stdout);
   if (!parsed) {
@@ -202,7 +204,8 @@ async function handleSearch(input, launcher) {
   ];
   const { code, stdout, stderr } = await runLauncher(launcher, args, env, cwd);
   if (code !== 0) {
-    return { ok: false, command: "search", error: stderr || stdout || `exit ${code}` };
+    const tail = [stderr, stdout].filter((s) => s && s.trim()).join("\n---\n");
+    return { ok: false, command: "search", error: tail || `exit ${code}` };
   }
   const parsed = extractJsonTail(stdout);
   if (!parsed) {

@@ -26,7 +26,7 @@ openclaw:
   embedding:
     provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
     model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
-    api_key: "${SOPH_API_KEY:}"
+    api_key: "${SOPH_API_KEY}"
     base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/6RT1wCDeN59dVd1L10UMRz/easyllms/embeddings}"
     easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
     output_dimensionality: 1024

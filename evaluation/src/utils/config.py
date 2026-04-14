@@ -40,8 +40,8 @@ def _replace_env_vars(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [_replace_env_vars(item) for item in obj]
     elif isinstance(obj, str):
-        # Match ${VAR_NAME} or ${VAR_NAME:default}
-        pattern = r'\$\{([^:}]+)(?::([^}]+))?\}'
+        # Match ${VAR_NAME}, ${VAR_NAME:default}, or ${VAR_NAME:} (empty default)
+        pattern = r'\$\{([^:}]+)(?::([^}]*))?\}'
         
         def replacer(match):
             var_name = match.group(1)
