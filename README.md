@@ -238,7 +238,7 @@ cd EverOS
 
 Then navigate to the component you need:
 
-| | Use Case | Entry Point |
+| | Component | Entry Point |
 | :-- | :--- | :--- |
 | **EverCore** | Build agents with long-term memory | [methods/everos/](methods/everos/) |
 | **HyperMem** | Use the hypergraph memory architecture | [methods/HyperMem/](methods/HyperMem/) |
@@ -247,7 +247,7 @@ Then navigate to the component you need:
 
 > Each component has its own installation guide, dependency configuration, and usage examples.
 
-### everos Quick Start
+### EverCore Quick Start
 
 ```bash
 cd methods/everos
@@ -314,7 +314,7 @@ for memory_group in result.get("memories", []):
 
 </div>
 
-## Demo
+<!-- ## Demo
 
 ### Run the Demo
 
@@ -345,7 +345,7 @@ See the [Demo Guide][interactive-demos] for details.
 
 [![][back-to-top]][readme-top]
 
-</div>
+</div> -->
 
 ## Evaluation & Benchmarking
 
@@ -386,7 +386,7 @@ cat evaluation/results/locomo-everos/report.txt
 
 </div>
 
-## Documentation
+<!-- ## Documentation
 
 | Guide | Description |
 | ----- | ----------- |
@@ -410,9 +410,9 @@ cat evaluation/results/locomo-everos/report.txt
 
 [![][back-to-top]][readme-top]
 
-</div>
+</div> -->
 
-## GitHub Codespaces
+<!-- ## GitHub Codespaces
 
 EverOS supports [GitHub Codespaces][codespaces-link] for cloud-based development — no Docker setup or local environment configuration needed.
 
@@ -442,7 +442,7 @@ All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automa
 
 [![][back-to-top]][readme-top]
 
-</div>
+</div> -->
 
 
 ## Citation
@@ -481,7 +481,7 @@ If EverOS helps your research, please cite:
 
 ## Contributing
 
-Browse [Issues][issues-link] to find your entry point, join [Discussions][discussions] to share ideas, or connect with maintainers — [@elliotchen200][elliot-x-link] on X and [@cyfyifanchen][cyfyifanchen-link] on GitHub.
+Browse [Issues][issues-link] to find your entry point or connect with maintainers — [@elliotchen200][elliot-x-link] on X and [@cyfyifanchen][cyfyifanchen-link] on GitHub.
 
 ![divider][divider-light]
 ![divider][divider-dark]
@@ -490,21 +490,17 @@ Browse [Issues][issues-link] to find your entry point, join [Discussions][discus
 
 [![EverOS Contributors][contributors-image]][contributors]
 
-### Contribution Guidelines
+<!-- ### Contribution Guidelines
 
-Read our [Contribution Guidelines][contributing-doc] for code standards and Git workflow.
+Read our [Contribution Guidelines][contributing-doc] for code standards and Git workflow. -->
+
+![divider][divider-light]
+![divider][divider-dark]
+
 
 ### License
 
 [Apache 2.0][license]
-
----
-
-<div align="center">
-
-<a href="https://evermind.ai"><strong>EverMind</strong></a> · Keep in Mind. Evolve over Time.
-
-</div>
 
 <!-- Navigation -->
 [readme-top]: #readme-top
@@ -521,7 +517,7 @@ Read our [Contribution Guidelines][contributing-doc] for code standards and Git 
 [usecase-got-image]: https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449
 [usecase-claude-image]: https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81
 [usecase-graph-image]: https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c
-[benchmark-image]: figs/benchmark_2.png
+[benchmark-image]: methods/evermemos/figs/benchmark_2.png
 
 <!-- Badges -->
 [back-to-top]: https://img.shields.io/badge/-Back_to_top-gray?style=flat-square
