@@ -14,6 +14,7 @@ import {
   leaderboardData,
   AGENTS,
   DOMAINS,
+  SKILL_METHODS,
   AGENT_COLORS,
   AGENT_BAR_COLORS,
   DOMAIN_LABELS,
@@ -21,6 +22,7 @@ import {
   SKILL_METHOD_TAG_COLORS,
   type Agent,
   type Domain,
+  type SkillMethod,
   type LeaderboardEntry,
 } from "@/data/leaderboard-data";
 
@@ -88,6 +90,7 @@ function buildOverallRows(data: LeaderboardEntry[]): DisplayRow[] {
 export function Leaderboard({ compact = false }: { compact?: boolean }) {
   const [agentFilter, setAgentFilter] = useState<Agent | "All">("All");
   const [domainFilter, setDomainFilter] = useState<Domain | "All" | "Overall">("All");
+  const [methodFilter, setMethodFilter] = useState<SkillMethod | "All">("All");
   const [sortBy, setSortBy] = useState<SortKey>("withSkills");
 
   const filtered = useMemo(() => {
@@ -97,6 +100,9 @@ export function Leaderboard({ compact = false }: { compact?: boolean }) {
     }
     if (domainFilter !== "All" && domainFilter !== "Overall") {
       data = data.filter((d) => d.domain === domainFilter);
+    }
+    if (methodFilter !== "All") {
+      data = data.filter((d) => d.skillMethod === methodFilter);
     }
 
     // Build display rows
@@ -129,7 +135,7 @@ export function Leaderboard({ compact = false }: { compact?: boolean }) {
     }
 
     return all;
-  }, [agentFilter, domainFilter, sortBy]);
+  }, [agentFilter, domainFilter, methodFilter, sortBy]);
 
   const maxScore = Math.max(...filtered.map((d) => d.withSkills), 1);
 
@@ -220,6 +226,30 @@ export function Leaderboard({ compact = false }: { compact?: boolean }) {
           </div>
         </div>
 
+        {/* Method filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground uppercase tracking-widest font-medium">
+            Filter · Self-Evolving
+          </span>
+          <div className="flex gap-1.5 flex-wrap">
+            <FilterButton
+              active={methodFilter === "All"}
+              onClick={() => setMethodFilter("All")}
+            >
+              All
+            </FilterButton>
+            {SKILL_METHODS.map((method) => (
+              <FilterButton
+                key={method}
+                active={methodFilter === method}
+                onClick={() => setMethodFilter(method)}
+              >
+                {method}
+              </FilterButton>
+            ))}
+          </div>
+        </div>
+
         {/* Sort */}
         <div className="flex items-center gap-2 ml-auto">
           <span className="text-[11px] text-muted-foreground uppercase tracking-widest font-medium">
@@ -257,14 +287,14 @@ export function Leaderboard({ compact = false }: { compact?: boolean }) {
               <TableHead>Agent</TableHead>
               <TableHead>Base Model</TableHead>
               <TableHead>Domain</TableHead>
-              <TableHead>Skill Method</TableHead>
+              <TableHead>Self-Evolving</TableHead>
               <TableHead className="text-right">Without</TableHead>
               <TableHead className="text-right font-semibold">
                 With Skills
               </TableHead>
               <TableHead className="text-right">Δ</TableHead>
               <TableHead className="w-24"></TableHead>
-              <TableHead className="text-right">Efficiency</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

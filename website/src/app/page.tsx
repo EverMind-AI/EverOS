@@ -91,6 +91,9 @@ export default function Home() {
               02 — RESULTS
             </p>
             <h2 className="text-2xl font-bold">Agent Performance</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Partial results shown below. More agents, domains, and methods coming soon.
+            </p>
           </div>
           <Link
             href="/leaderboard"

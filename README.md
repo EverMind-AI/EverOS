@@ -19,7 +19,7 @@ EvoAgentBench enables standardized comparison of agent self-evolution methods �
   <img src="assets/res1.png" width="800" alt="EvoAgentBench Results">
 </p>
 
-*Evaluation results: pass rate with and without skill injection across domains and agents. "Δ gain" shows absolute improvement from self-evolution methods.*
+*Partial evaluation results: pass rate with and without skill injection across domains and agents. "Δ gain" shows absolute improvement from self-evolution methods. More results coming soon.*
 
 ## Table of Contents
 

@@ -18,6 +18,9 @@ export default function LeaderboardPage() {
             <span className="font-semibold text-foreground">EvoAgentBench</span>{" "}
             · 5 domains · EverOS skill extraction
           </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Partial results. More agents, domains, and methods coming soon.
+          </p>
         </div>
         <Leaderboard />
       </section>
