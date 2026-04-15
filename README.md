@@ -49,7 +49,7 @@ EverOS/
 
 ## Methods
 
-Our methods are production-ready memory architectures that give agents persistent, structured long-term memory. Each can be used standalone or composed together depending on your use case.
+Methods are production-ready memory architectures that give agents persistent, structured long-term memory. Each can be used standalone or composed together depending on your use case.
 
 <table>
 <tr>
@@ -83,7 +83,7 @@ A hypergraph-based hierarchical memory architecture that captures high-order ass
 
 ## Benchmarks
 
-Our benchmarks are designed as **open public standards**. Any memory architecture or agent framework can be evaluated under the same ruler.
+Benchmarks are designed as **open public standards**. Any memory architecture or agent framework can be evaluated under the same ruler.
 
 <table>
 <tr>
@@ -154,6 +154,52 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 ## Use Cases
 
 <table>
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/ec95c135-1228-450a-9e93-d3279a6ac306)
+
+#### Earth Online Memory Game
+
+Earth Online is a memory-aware productivity game that turns everyday planning into a living quest log. 
+
+<!-- [Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin) -->
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/a702efdc-91ad-4cbe-8f66-3267985e535f)
+
+#### Multi‑Agent Orchestration Platform
+
+Golutra is pitched as “beyond the IDE,” a multi-agent workforce rather than a single assistant for engineering teams.
+
+</td>
+</tr>
+<tr>
+<tr>
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/a1771eb1-f2cd-4620-9fde-93e6ccceb100)
+
+#### Mobi Is a Companion
+
+An iOS app that lets users create, nurture, and live with a personalized AI “lifeform” companion called Mobi.
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/dd0585b0-3b3a-4f02-933a-3ec0c9f510be)
+
+#### LAI Wearable with Memory
+
+A context-native empathic AI wearable that listens to everyday life
+and converts conversations into memory.
+
+</td>
+</tr>
+<tr>
 <tr>
 <td width="50%" valign="top">
 
@@ -256,7 +302,7 @@ Then navigate to the component you need:
 ### EverCore Quick Start
 
 ```bash
-cd methods/everos
+cd methods/evermemos
 
 # Start Docker services
 docker compose up -d
