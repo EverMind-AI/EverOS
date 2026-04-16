@@ -62,7 +62,7 @@ This guide covers the Docker installation method. For manual installation, see [
 
 ```bash
 git clone https://github.com/EverMind-AI/EverMemOS.git
-cd EverMemOS
+cd EverMemOS/methods/evermemos
 ```
 
 ### Step 2: Start Docker Services
