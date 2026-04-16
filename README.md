@@ -55,7 +55,7 @@ Methods are production-ready memory architectures that give agents persistent, s
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/ab451d3c-1050-44ad-8f9e-26e59506cfd2)
+![banner-gif](https://github.com/user-attachments/assets/1bbead72-7a6b-4b19-88f2-5bfc8433e3aa)
 
 
 #### EverCore
@@ -67,7 +67,7 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/17c2adbd-a28f-4a9b-bcbb-7632ef1a1e16)
+![banner-gif](https://github.com/user-attachments/assets/b63d8735-ea94-4ed6-9c0c-a11b55b1a2a4)
 
 #### HyperMem
 
@@ -89,7 +89,7 @@ Benchmarks are designed as **open public standards**. Any memory architecture or
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/262b46d3-f05d-48e9-8d05-61a4f6105232)
+![banner-gif](https://github.com/user-attachments/assets/f6f11c3c-7977-4c3b-8c2b-f7cf13e8f93a)
 
 #### EverMemBench
 
@@ -100,7 +100,7 @@ Three-layer memory quality evaluation: factual recall, applied reasoning, and pe
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/d82d5d78-82d7-4525-9693-4c96148035ca)
+![banner-gif](https://github.com/user-attachments/assets/79fd03fe-cd6d-4b92-88d7-d66886d31799)
 
 #### EvoAgentBench
 
