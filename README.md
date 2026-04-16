@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![banner-gif](https://github.com/user-attachments/assets/c2cef808-3e93-4f81-a194-dffe02ddd984)
+![banner-gif](https://github.com/user-attachments/assets/49616157-f22c-4f1b-82c1-96b201016608)
 
 <p align="center">
   <!-- <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a> -->
@@ -55,7 +55,7 @@ Methods are production-ready memory architectures that give agents persistent, s
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/2d45227d-6817-48f5-83eb-8422d7cb989d)
+![banner-gif](https://github.com/user-attachments/assets/ab451d3c-1050-44ad-8f9e-26e59506cfd2)
 
 
 #### EverCore
@@ -67,7 +67,7 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/b68d354a-3de6-4dea-9656-6113a0a12786)
+![banner-gif](https://github.com/user-attachments/assets/17c2adbd-a28f-4a9b-bcbb-7632ef1a1e16)
 
 #### HyperMem
 
@@ -89,7 +89,7 @@ Benchmarks are designed as **open public standards**. Any memory architecture or
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/06b4f598-73e6-44d8-b9cc-8b5483cc363e)
+![banner-gif](https://github.com/user-attachments/assets/262b46d3-f05d-48e9-8d05-61a4f6105232)
 
 #### EverMemBench
 
@@ -100,7 +100,7 @@ Three-layer memory quality evaluation: factual recall, applied reasoning, and pe
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/3573198d-b4ac-4fd2-b101-d14018c75e39)
+![banner-gif](https://github.com/user-attachments/assets/d82d5d78-82d7-4525-9693-4c96148035ca)
 
 #### EvoAgentBench
 
@@ -157,7 +157,7 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/ec95c135-1228-450a-9e93-d3279a6ac306)
+![banner-gif](https://github.com/user-attachments/assets/9dcb3dd4-4402-45fa-ae13-e6782f42c7ea)
 
 #### Earth Online Memory Game
 
@@ -168,7 +168,7 @@ Earth Online is a memory-aware productivity game that turns everyday planning in
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/a702efdc-91ad-4cbe-8f66-3267985e535f)
+![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)
 
 #### Multi‑Agent Orchestration Platform
 
@@ -181,7 +181,7 @@ Golutra is pitched as “beyond the IDE,” a multi-agent workforce rather tha
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/a1771eb1-f2cd-4620-9fde-93e6ccceb100)
+![banner-gif](https://github.com/user-attachments/assets/e6eaf308-a874-483f-8874-6934bf95a78f)
 
 #### Mobi Is a Companion
 
@@ -190,9 +190,9 @@ An iOS app that lets users create, nurture, and live with a personalized AI “l
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/dd0585b0-3b3a-4f02-933a-3ec0c9f510be)
+![banner-gif](https://github.com/user-attachments/assets/9aabcaa9-f97a-49d2-9109-0b5bb696ed41)
 
-#### LAI Wearable with Memory
+#### AI Wearable with Memory
 
 A context-native empathic AI wearable that listens to everyday life
 and converts conversations into memory.
@@ -203,7 +203,7 @@ and converts conversations into memory.
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/0e06da2b-0236-430f-89b4-980b8b6a855f)
+![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)
 
 #### OpenClaw Agent Memory
 
@@ -214,7 +214,7 @@ A 24/7 agent with continuous learning memory that you can carry with you whereve
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26)
+![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)
 
 #### Live2D Character with Memory
 
@@ -227,7 +227,7 @@ Add long-term memory to your anime character that can talk to you in real-time, 
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727)
+![banner-gif](https://github.com/user-attachments/assets/c36bdc04-97d3-4fe9-97d9-4b93b475595a)
 
 #### Computer-Use with Memory
 
@@ -238,7 +238,7 @@ Use computer-use to launch screenshot-based analysis, all stored in your memory.
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449)
+![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)
 
 #### Game of Thrones Memories
 
@@ -251,7 +251,7 @@ A demonstration of AI memory infrastructure through an interactive Q&A experienc
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81)
+![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)
 
 #### Claude Code Plugin
 
@@ -262,7 +262,7 @@ Persistent memory for Claude Code. Automatically saves and recalls context from 
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c)
+![banner-gif](https://github.com/user-attachments/assets/d521d28c-0ccd-44ff-aecc-828245e2f973)
 
 #### Memory Graph Visualization
 
