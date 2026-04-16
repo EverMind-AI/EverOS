@@ -206,7 +206,7 @@ class SimpleMemoryManager:
             return False
 
     async def search(
-        self, query: str, top_k: int = 3, mode: str = "vector", show_details: bool = True
+        self, query: str, top_k: int = 3, mode: str = "hybrid", show_details: bool = True
     ) -> List[Dict[str, Any]]:
         """Search memories
 
