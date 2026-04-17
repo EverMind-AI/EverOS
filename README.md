@@ -24,7 +24,7 @@
 >
 > ### Project Structure Update
 >
-> We've unified [EverCore](methods/evermemos/), [HyperMem](methods/HyperMem/), [EverMemBench](benchmarks/EverMemBench/), and [EvoAgentBench](benchmarks/EvoAgentBench/) with usecases into a single repository.
+> We've unified [EverCore](methods/evermemos/), [HyperMem](methods/HyperMem/), [EverMemBench](benchmarks/EverMemBench/), and [EvoAgentBench](benchmarks/EvoAgentBench/) with [ use-cases ](use-cases/) into a single repository.
 >
 > EverOS gives developers one place to build, evaluate, and integrate long-term memory into their self-evolving agents. 🎉
 
@@ -42,7 +42,9 @@ EverOS/
 ├── benchmarks/
 │   ├── EverMemBench/        # Memory quality evaluation
 │   └── EvoAgentBench/       # Agent self-evolution evaluation
-└── usecases/                # Example applications
+└── use-cases/               # Example use cases
+    ├── claude-code-plugin/        
+    └── game-of-throne-demo/            
 ```
 
 <br>
