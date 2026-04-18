@@ -13,7 +13,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'openai/gpt-5.2';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const USE_EVERMEMOS = process.env.USE_EVERMEMOS === 'true';
-const EVERMEMOS_URL = process.env.EVERMEMOS_URL || 'http://localhost:8001';
+const EVERMEMOS_URL = process.env.EVERMEMOS_URL || 'http://localhost:1995';
 const EVERMEMOS_API_KEY = process.env.EVERMEMOS_API_KEY || '';
 const EVERMEMOS_GROUP_ID = process.env.EVERMEMOS_GROUP_ID || 'asoiaf';
 
