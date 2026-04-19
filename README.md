@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![banner-gif](https://github.com/user-attachments/assets/49616157-f22c-4f1b-82c1-96b201016608)
+![banner-gif](https://github.com/user-attachments/assets/0bf97efd-580f-4a53-a2a2-58d6daea7290)
 
 <p align="center">
   <!-- <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a> -->
