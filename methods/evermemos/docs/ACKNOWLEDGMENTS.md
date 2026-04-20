@@ -62,7 +62,7 @@ See the full list of contributors on [GitHub](https://github.com/EverMind-AI/Eve
 Thanks to our community for their valuable feedback, bug reports, and feature suggestions:
 
 - **GitHub Issues & Discussions** - For bug reports and feature requests
-- **Discord** - [Join our Discord server](https://discord.gg/pfwwskxp)
+- **Discord** - [Join our Discord server](https://discord.gg/gYep5nQRZJ)
 - **Reddit Community** - [r/EverMindAI](https://www.reddit.com/r/EverMindAI/)
 - **X/Twitter** - [@EverMindAI](https://x.com/EverMindAI)
 
