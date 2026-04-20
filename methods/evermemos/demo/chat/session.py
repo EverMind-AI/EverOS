@@ -267,7 +267,7 @@ class ChatSession:
         self,
         query: str,
         memory_types: List[str] = None,
-        retrieve_method: str = None,
+        method: str = None,
         top_k: int = None,
         user_id: str = None,
         group_id: str = None,
@@ -276,7 +276,7 @@ class ChatSession:
         """Unified search API call (same as test_v1api_search.test_search_memories)."""
         params = {
             "query": query,
-            "retrieve_method": retrieve_method or self.retrieval_mode,
+            "method": method or self.retrieval_mode,
             "top_k": top_k or self.config.top_k_memories,
         }
         if user_id:

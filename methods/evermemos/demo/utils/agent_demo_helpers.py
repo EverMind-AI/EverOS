@@ -304,7 +304,7 @@ class AgentDemoRunner:
         query: str,
         memory_type: str,
         top_k: int = 5,
-        retrieve_method: str = "hybrid",
+        method: str = "hybrid",
     ) -> list | dict:
         """Search memories via POST /api/v1/memories/search.
 
@@ -312,7 +312,7 @@ class AgentDemoRunner:
             query: Search query text.
             memory_type: One of "agent_memory", "episodic_memory", "profile", "raw_message".
             top_k: Max results.
-            retrieve_method: Retrieval method.
+            method: Retrieval method.
 
         Returns:
             For agent_memory: dict with "cases" and "skills" lists.
@@ -320,7 +320,7 @@ class AgentDemoRunner:
         """
         payload = {
             "query": query,
-            "method": retrieve_method,
+            "method": method,
             "memory_types": [memory_type],
             "top_k": top_k,
             "filters": {

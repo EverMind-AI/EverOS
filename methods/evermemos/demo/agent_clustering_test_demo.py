@@ -700,7 +700,7 @@ async def main():
         print(f"\n--- Agentic Search: Agent Memory ({label}) ---")
         print(f'  Query: "{query}"')
         result = await runner.search_memories(
-            query, "agent_memory", retrieve_method="agentic"
+            query, "agent_memory", method="agentic"
         )
         cases = result.get("cases", [])
         skills = result.get("skills", [])

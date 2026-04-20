@@ -190,16 +190,21 @@ When storing a single message, you can include group and sender metadata:
 import requests
 
 response = requests.post(
-    "http://localhost:1995/api/v0/memories",
+    "http://localhost:1995/api/v1/memories",
     json={
-        "message_id": "msg_001",
-        "create_time": "2025-02-01T10:00:00+00:00",
-        "sender": "user_123",
-        "sender_name": "John",  # Optional display name
-        "content": "I prefer Python for backend development",
+        "user_id": "user_123",
         "group_id": "team_engineering",
         "group_name": "Engineering Team",
-        "role": "user"
+        "messages": [
+            {
+                "message_id": "msg_001",
+                "timestamp": 1738404000000,  # Unix epoch in milliseconds
+                "sender_id": "user_123",
+                "sender_name": "John",  # Optional display name
+                "content": "I prefer Python for backend development",
+                "role": "user"
+            }
+        ]
     }
 )
 ```
@@ -210,15 +215,17 @@ Filter search results by user or group:
 
 ```python
 # Search within a specific group
-response = requests.get(
-    "http://localhost:1995/api/v0/memories/search",
+response = requests.post(
+    "http://localhost:1995/api/v1/memories/search",
     json={
         "query": "What programming languages are preferred?",
-        "group_id": "team_engineering",
-        "user_id": "user_123",  # Optional: filter to specific user
-        "retrieve_method": "rrf",
-        "start_time": "2025-01-01T00:00:00+00:00",
-        "end_time": "2025-02-01T00:00:00+00:00"
+        "method": "rrf",
+        "filters": {
+            "group_id": "team_engineering",
+            "user_id": "user_123",  # Optional: filter to specific user
+            "start_time": "2025-01-01T00:00:00+00:00",
+            "end_time": "2025-02-01T00:00:00+00:00"
+        }
     }
 )
 ```
@@ -269,10 +276,12 @@ response = requests.put(
 ```python
 # Delete all memories for a specific user in a group
 response = requests.delete(
-    "http://localhost:1995/api/v0/memories",
+    "http://localhost:1995/api/v1/memories",
     json={
-        "user_id": "user_123",
-        "group_id": "team_engineering"
+        "filters": {
+            "user_id": "user_123",
+            "group_id": "team_engineering"
+        }
     }
 )
 ```
@@ -344,14 +353,14 @@ Even for simple conversations, providing `user_details` improves memory quality:
 
 ### 2. Use Consistent User IDs
 
-Use the same `sender` ID across all messages from the same person. The ID in messages must match keys in `user_details`.
+Use the same `sender_id` across all messages from the same person. The ID in messages must match keys in `user_details`.
 
-### 3. Include Timezone Information
+### 3. Use Millisecond Timestamps
 
-Always include timezone in message timestamps or set `timezone` in settings:
+The v1 API expects `timestamp` as a Unix epoch in milliseconds. Set `timezone` in settings for timezone-aware display:
 
 ```json
-"create_time": "2025-02-01T10:00:00-05:00"
+"timestamp": 1738404000000
 ```
 
 ### 4. Use Appropriate Scene Types

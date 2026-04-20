@@ -66,14 +66,20 @@ class LLMSwitchingE2ETest:
     def send_message(self, group_id: str, content: str, msg_id: str) -> bool:
         """Send a message to trigger LLM processing"""
         data = {
-            "message_id": msg_id,
-            "create_time": datetime.now(timezone.utc).isoformat(),
-            "sender": "user_001",
-            "sender_name": "Test User",
-            "content": content,
+            "user_id": "user_001",
             "group_id": group_id,
+            "messages": [
+                {
+                    "message_id": msg_id,
+                    "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                    "sender_id": "user_001",
+                    "sender_name": "Test User",
+                    "content": content,
+                    "role": "user",
+                }
+            ],
         }
-        response = self.api_request("POST", "/api/v0/memories", data)
+        response = self.api_request("POST", "/api/v1/memories", data)
         return response.status_code in [200, 201, 202]
 
     def setup_global_config(self, llm_config: Dict) -> bool:

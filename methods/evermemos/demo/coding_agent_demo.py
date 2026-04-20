@@ -5,7 +5,7 @@ Demonstrates how the agent memory system works with a coding agent:
 2. Wait for memory extraction (MemCell segmentation + AgentCase extraction)
 3. The second trajectory triggers MemScene clustering -> AgentSkill extraction
 4. Fetch extracted agent experiences AND agent skills
-5. Hybrid search over agent_case and agent_skill (retrieve_method=hybrid)
+5. Hybrid search over agent_case and agent_skill (method=hybrid)
 
 The mock trajectories simulate a coding agent that:
 - Trajectory 1: Adds input validation to a FastAPI endpoint, then adds custom error messages
@@ -708,7 +708,7 @@ async def main():
         print(f"\n--- Agentic Search: Agent Memory ---")
         print(f"  Query: \"{query}\"")
         result = await runner.search_memories(
-            query, "agent_memory", retrieve_method="agentic"
+            query, "agent_memory", method="agentic"
         )
         cases = result.get("cases", [])
         skills = result.get("skills", [])

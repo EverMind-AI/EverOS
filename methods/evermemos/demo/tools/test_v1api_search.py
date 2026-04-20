@@ -58,7 +58,7 @@ class V1APITester:
         self,
         user_id: str = None,
         query: str = None,
-        retrieve_method: str = "keyword",
+        method: str = "keyword",
         top_k: int = 5,
         memory_types: list = None,
         group_id: str = None,
@@ -70,7 +70,7 @@ class V1APITester:
         group_id: Group ID, required for group memories
         """
         url = f"{self.base_url}/api/v1/memories/search"
-        params = {"query": query, "retrieve_method": retrieve_method, "top_k": top_k}
+        params = {"query": query, "method": method, "top_k": top_k}
         # user_id and group_id are mutually exclusive
         if user_id:
             params["user_id"] = user_id

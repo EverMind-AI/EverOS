@@ -5,7 +5,7 @@ Demonstrates how the agent memory system works with a search/research agent:
 2. Wait for memory extraction (MemCell segmentation + AgentCase extraction)
 3. The second trajectory triggers MemScene clustering -> AgentSkill extraction
 4. Fetch extracted agent experiences AND agent skills
-5. Hybrid search over agent_case and agent_skill (retrieve_method=hybrid)
+5. Hybrid search over agent_case and agent_skill (method=hybrid)
 
 The mock trajectories simulate a research agent that:
 - Trajectory 1: Compares Python web frameworks, then deploys FastAPI with Docker
@@ -429,7 +429,7 @@ async def main():
         printer(memories)
 
     # Step 7: Keyword search demo (BM25)
-    print("\nStep 7: Keyword search (agent_memory, retrieve_method=keyword)")
+    print("\nStep 7: Keyword search (agent_memory, method=keyword)")
 
     search_queries = [
         "how to evaluate and compare tech solutions with benchmarks",
@@ -445,7 +445,7 @@ async def main():
         print(f"\n--- Keyword Search: Agent Memory ---")
         print(f"  Query: \"{query}\"")
         result = await runner.search_memories(
-            query, "agent_memory", retrieve_method="keyword"
+            query, "agent_memory", method="keyword"
         )
         cases = result.get("cases", [])
         skills = result.get("skills", [])
@@ -458,13 +458,13 @@ async def main():
             print_search_skill_results(skills)
 
     # Step 8: Vector search demo (embedding similarity)
-    print("\nStep 8: Vector search (agent_memory, retrieve_method=vector)")
+    print("\nStep 8: Vector search (agent_memory, method=vector)")
 
     for query in search_queries:
         print(f"\n--- Vector Search: Agent Memory ---")
         print(f"  Query: \"{query}\"")
         result = await runner.search_memories(
-            query, "agent_memory", retrieve_method="vector"
+            query, "agent_memory", method="vector"
         )
         cases = result.get("cases", [])
         skills = result.get("skills", [])

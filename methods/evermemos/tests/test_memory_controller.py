@@ -1,6 +1,6 @@
 """
 Memory Controller API Test Script
-Verify input and output structures of all endpoints under /api/v0/memories
+Verify input and output structures of all endpoints under /api/v1/memories
 
 Usage:
     # Run all tests
@@ -78,7 +78,7 @@ class MemoryControllerTester:
             sync_mode: Whether to enable sync mode (default: True, server default is also True so param is only sent when False)
         """
         self.base_url = base_url
-        self.api_prefix = "/api/v0/memories"
+        self.api_prefix = "/api/v1/memories"
         self.user_id = user_id
         self.group_id = group_id
         self.organization_id = organization_id or self.DEFAULT_ORGANIZATION_ID
@@ -176,10 +176,10 @@ class MemoryControllerTester:
         Returns:
             (status_code, response_json)
         """
-        # If it's the memorize endpoint and sender is not provided, generate one randomly
-        if endpoint == "" and "sender" not in data:
-            data["sender"] = f"user_{uuid.uuid4().hex[:12]}"
-            print(f"⚠️  Sender not provided, auto-generated: {data['sender']}")
+        # v1 memorize: ensure top-level user_id is present
+        if endpoint == "" and "user_id" not in data:
+            data["user_id"] = f"user_{uuid.uuid4().hex[:12]}"
+            print(f"⚠️  user_id not provided, auto-generated: {data['user_id']}")
 
         url = f"{self.base_url}{self.api_prefix}{endpoint}"
         headers = self.get_tenant_headers()
@@ -326,8 +326,8 @@ class MemoryControllerTester:
             return None, None
 
     def test_memorize_single_message(self):
-        """Test 1: POST /api/v0/memories - Store conversation memory (send multiple messages to trigger boundary detection)"""
-        self.print_section("Test 1: POST /api/v0/memories - Store Conversation Memory")
+        """Test 1: POST /api/v1/memories - Store conversation memory (send multiple messages to trigger boundary detection)"""
+        self.print_section("Test 1: POST /api/v1/memories - Store Conversation Memory")
 
         # Prepare a simple conversation to simulate user and assistant interaction
         # Sending multiple messages can trigger boundary detection and extract memories
@@ -339,43 +339,43 @@ class MemoryControllerTester:
         # Build conversation sequence, triggering boundary detection through:
         # 1. First scenario: Discussion about coffee preferences (4 messages)
         # 2. Second scenario: Start new topic (trigger boundary via time gap + topic switch)
-        messages = [
+        def _ms(dt):
+            return int(dt.timestamp() * 1000)
+
+        # v1 message entries: sender_id + timestamp (ms epoch) + role
+        message_entries = [
             # Scenario 1: Discuss coffee preferences (complete conversation episode)
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_001",
-                "create_time": base_time.isoformat(),
-                "sender": self.user_id,
+                "timestamp": _ms(base_time),
+                "sender_id": self.user_id,
                 "sender_name": "Test User",
                 "content": "I recently want to develop a habit of drinking coffee, do you have any suggestions?",
+                "role": "user",
                 "refer_list": [],
             },
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_002",
-                "create_time": (base_time + timedelta(seconds=30)).isoformat(),
-                "sender": "assistant_001",
+                "timestamp": _ms(base_time + timedelta(seconds=30)),
+                "sender_id": "assistant_001",
                 "sender_name": "AI Assistant",
                 "content": "Of course! Coffee comes in many varieties, from strong espresso to mild Americano. You can choose based on your taste. I suggest starting with Americano.",
                 "role": "assistant",
                 "refer_list": [],
             },
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_003",
-                "create_time": (base_time + timedelta(minutes=1)).isoformat(),
-                "sender": self.user_id,
+                "timestamp": _ms(base_time + timedelta(minutes=1)),
+                "sender_id": self.user_id,
                 "sender_name": "Test User",
                 "content": "I like drinking Americano, no sugar, no milk, the stronger the better.",
+                "role": "user",
                 "refer_list": [],
             },
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_004",
-                "create_time": (
-                    base_time + timedelta(minutes=1, seconds=30)
-                ).isoformat(),
-                "sender": "assistant_001",
+                "timestamp": _ms(base_time + timedelta(minutes=1, seconds=30)),
+                "sender_id": "assistant_001",
                 "sender_name": "AI Assistant",
                 "content": "I understand your preference! Black Americano can fully experience the flavor of coffee beans. I suggest choosing dark roasted beans for a stronger taste.",
                 "role": "assistant",
@@ -384,26 +384,33 @@ class MemoryControllerTester:
             # Scenario 2: Start new topic (trigger boundary via longer time gap + topic switch)
             # According to boundary detection rules: time gap over 4 hours and content unrelated will trigger boundary
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_005",
-                "create_time": (base_time + timedelta(hours=24)).isoformat(),
-                "sender": self.user_id,
+                "timestamp": _ms(base_time + timedelta(hours=24)),
+                "sender_id": self.user_id,
                 "sender_name": "Test User",
                 "content": "By the way, how is the weekend project progressing?",
                 "role": "user",
                 "refer_list": [],
             },
             {
-                "group_id": self.group_id,
                 "message_id": f"msg_{msg_prefix}_006",
-                "create_time": (
-                    base_time + timedelta(hours=24, seconds=30)
-                ).isoformat(),
-                "sender": "assistant_001",
+                "timestamp": _ms(base_time + timedelta(hours=24, seconds=30)),
+                "sender_id": "assistant_001",
                 "sender_name": "AI Assistant",
                 "content": "The project is progressing smoothly, main features are 80% complete, expected to submit for testing next week.",
+                "role": "assistant",
                 "refer_list": [],
             },
+        ]
+
+        # v1 API shape: one POST per message, wrapped in {user_id, group_id, messages: [...]}
+        messages = [
+            {
+                "user_id": self.user_id,
+                "group_id": self.group_id,
+                "messages": [entry],
+            }
+            for entry in message_entries
         ]
 
         # Send messages one by one
@@ -492,7 +499,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_episodic(self):
-        """Test 2: GET /api/v0/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)
+        """Test 2: GET /api/v1/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -501,7 +508,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 2: GET /api/v0/memories - Fetch User Episodic Memory")
+        self.print_section("Test 2: GET /api/v1/memories - Fetch User Episodic Memory")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -702,7 +709,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_foresight(self):
-        """Test 3: GET /api/v0/memories - Fetch foresight (foresight type, pass parameters via body)
+        """Test 3: GET /api/v1/memories - Fetch foresight (foresight type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -711,7 +718,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 3: GET /api/v0/memories - Fetch Foresight")
+        self.print_section("Test 3: GET /api/v1/memories - Fetch Foresight")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -911,7 +918,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_atomic_fact(self):
-        """Test 4: GET /api/v0/memories - Fetch user atomic fact (atomic_fact type, pass parameters via body)
+        """Test 4: GET /api/v1/memories - Fetch user atomic fact (atomic_fact type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -920,7 +927,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 4: GET /api/v0/memories - Fetch User Atomic Fact")
+        self.print_section("Test 4: GET /api/v1/memories - Fetch User Atomic Fact")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -1124,8 +1131,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_group_filter(self):
-        """Test: GET /api/v0/memories - Fetch memories with group_id filter"""
-        self.print_section("Test: GET /api/v0/memories - Fetch with group_id Filter")
+        """Test: GET /api/v1/memories - Fetch memories with group_id filter"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with group_id Filter")
 
         # Test different memory types with group_id filter
         memory_types = ["episodic_memory", "atomic_fact", "foresight"]
@@ -1169,8 +1176,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_time_range(self):
-        """Test: GET /api/v0/memories - Fetch memories with time range filter"""
-        self.print_section("Test: GET /api/v0/memories - Fetch with Time Range Filter")
+        """Test: GET /api/v1/memories - Fetch memories with time range filter"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with Time Range Filter")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=30)).isoformat()
@@ -1223,8 +1230,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_combined_filters(self):
-        """Test: GET /api/v0/memories - Fetch memories with combined filters (user_id + group_id + time_range)"""
-        self.print_section("Test: GET /api/v0/memories - Fetch with Combined Filters")
+        """Test: GET /api/v1/memories - Fetch memories with combined filters (user_id + group_id + time_range)"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with Combined Filters")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=7)).isoformat()
@@ -1268,7 +1275,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_profile_memory(self):
-        """Test: GET /api/v0/memories - Fetch user profile memory
+        """Test: GET /api/v1/memories - Fetch user profile memory
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided)
@@ -1277,7 +1284,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test: GET /api/v0/memories - Fetch User Profile Memory")
+        self.print_section("Test: GET /api/v1/memories - Fetch User Profile Memory")
 
         # Scenario 1: Only user_id, group_id NOT provided
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -1426,7 +1433,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_all_memory_types(self):
-        """Test: GET /api/v0/memories - Fetch all supported memory types
+        """Test: GET /api/v1/memories - Fetch all supported memory types
 
         Memory types that support group_id are tested separately in:
         - test_fetch_episodic() for episodic_memory
@@ -1434,7 +1441,7 @@ class MemoryControllerTester:
         - test_fetch_foresight() for foresight
         - test_fetch_profile_memory() for profile
         """
-        self.print_section("Test: GET /api/v0/memories - Fetch All Memory Types")
+        self.print_section("Test: GET /api/v1/memories - Fetch All Memory Types")
 
         # All supported memory types
         memory_types = ["episodic_memory", "atomic_fact", "foresight", "profile"]
@@ -1647,7 +1654,7 @@ class MemoryControllerTester:
         print(f"    [Debug] Checked {memories_checked} memories in {scenario_name}")
 
     def test_search_memories_keyword(self):
-        """Test 5: GET /api/v0/memories/search - Keyword search (pass parameters via body)
+        """Test 5: GET /api/v1/memories/search - Keyword search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -1659,7 +1666,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 5: GET /api/v0/memories/search - Keyword Search")
+        self.print_section("Test 5: GET /api/v1/memories/search - Keyword Search")
 
         # =================================================================
         # Scenario 1: Neither user_id nor group_id provided - should return 400 error
@@ -1671,7 +1678,7 @@ class MemoryControllerTester:
         data = {
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
             # user_id and group_id are NOT in the request at all
         }
 
@@ -1702,7 +1709,7 @@ class MemoryControllerTester:
             "user_id": self.user_id,
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
             # group_id is NOT in the request at all
         }
 
@@ -1741,7 +1748,7 @@ class MemoryControllerTester:
             "group_id": "",  # Empty string, equivalent to None
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -1779,7 +1786,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -1819,7 +1826,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -1853,7 +1860,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee",
             "top_k": 10,
-            "retrieve_method": "keyword",
+            "method": "keyword",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -1880,7 +1887,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_search_memories_vector(self):
-        """Test 6: GET /api/v0/memories/search - Vector search (pass parameters via body)
+        """Test 6: GET /api/v1/memories/search - Vector search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -1892,7 +1899,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 6: GET /api/v0/memories/search - Vector Search")
+        self.print_section("Test 6: GET /api/v1/memories/search - Vector Search")
 
         # =================================================================
         # Scenario 1: Neither user_id nor group_id provided - should return 400 error
@@ -1903,7 +1910,7 @@ class MemoryControllerTester:
         data = {
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
             # user_id and group_id are NOT in the request at all
         }
 
@@ -1934,7 +1941,7 @@ class MemoryControllerTester:
             "user_id": self.user_id,
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
             # group_id is NOT in the request at all
         }
 
@@ -1972,7 +1979,7 @@ class MemoryControllerTester:
             "group_id": "",  # Empty string, equivalent to None
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -2009,7 +2016,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -2049,7 +2056,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -2083,7 +2090,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "user's dietary preferences",
             "top_k": 10,
-            "retrieve_method": "vector",
+            "method": "vector",
         }
 
         status_code, response = self.call_get_with_body_api("/search", data)
@@ -2110,7 +2117,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_search_memories_hybrid(self):
-        """Test 7: GET /api/v0/memories/search - Hybrid search (pass parameters via body)
+        """Test 7: GET /api/v1/memories/search - Hybrid search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -2122,7 +2129,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 7: GET /api/v0/memories/search - Hybrid Search")
+        self.print_section("Test 7: GET /api/v1/memories/search - Hybrid Search")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=60)).isoformat()
@@ -2137,7 +2144,7 @@ class MemoryControllerTester:
         data = {
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
             # user_id and group_id are NOT in the request at all
@@ -2170,7 +2177,7 @@ class MemoryControllerTester:
             "user_id": self.user_id,
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
             # group_id is NOT in the request at all
@@ -2210,7 +2217,7 @@ class MemoryControllerTester:
             "group_id": "",  # Empty string, equivalent to None
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
         }
@@ -2249,7 +2256,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
         }
@@ -2291,7 +2298,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
         }
@@ -2327,7 +2334,7 @@ class MemoryControllerTester:
             "group_id": self.group_id,
             "query": "coffee preference",
             "top_k": 10,
-            "retrieve_method": "hybrid",
+            "method": "hybrid",
             "start_time": start_time,
             "end_time": end_time,
         }

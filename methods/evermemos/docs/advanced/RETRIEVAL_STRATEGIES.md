@@ -54,7 +54,7 @@ Pure keyword-based search using Elasticsearch BM25.
 ```python
 {
     "query": "soccer weekend",
-    "retrieve_method": "keyword"
+    "method": "keyword"
 }
 ```
 
@@ -77,7 +77,7 @@ Pure vector-based search using Milvus.
 ```python
 {
     "query": "What sports does the user enjoy?",
-    "retrieve_method": "vector"
+    "method": "vector"
 }
 ```
 
@@ -100,7 +100,7 @@ Reciprocal Rank Fusion of BM25 and Embedding results.
 ```python
 {
     "query": "What are the user's weekend activities?",
-    "retrieve_method": "rrf"
+    "method": "rrf"
 }
 ```
 
@@ -204,56 +204,56 @@ Default choice → Use RRF
 ### Lightweight - Keyword
 
 ```bash
-curl -X GET http://localhost:1995/api/v0/memories/search \
+curl -X POST http://localhost:1995/api/v1/memories/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "soccer",
-    "user_id": "user_001",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "keyword",
-    "top_k": 5
+    "method": "keyword",
+    "top_k": 5,
+    "filters": {"user_id": "user_001"}
   }'
 ```
 
 ### Lightweight - Vector
 
 ```bash
-curl -X GET http://localhost:1995/api/v0/memories/search \
+curl -X POST http://localhost:1995/api/v1/memories/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What sports does the user like?",
-    "user_id": "user_001",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "vector",
-    "top_k": 5
+    "method": "vector",
+    "top_k": 5,
+    "filters": {"user_id": "user_001"}
   }'
 ```
 
 ### Lightweight - RRF (Recommended)
 
 ```bash
-curl -X GET http://localhost:1995/api/v0/memories/search \
+curl -X POST http://localhost:1995/api/v1/memories/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Tell me about the user hobbies",
-    "user_id": "user_001",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "rrf",
-    "top_k": 5
+    "method": "rrf",
+    "top_k": 5,
+    "filters": {"user_id": "user_001"}
   }'
 ```
 
 ### Agentic Retrieval
 
 ```bash
-curl -X GET http://localhost:1995/api/v0/memories/search \
+curl -X POST http://localhost:1995/api/v1/memories/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What is my work-life balance like?",
-    "user_id": "user_001",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "agentic",
-    "top_k": 10
+    "method": "agentic",
+    "top_k": 10,
+    "filters": {"user_id": "user_001"}
   }'
 ```
 
