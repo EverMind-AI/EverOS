@@ -819,6 +819,16 @@ class Pipeline:
                         report_lines.append(f"  {key}: n/a")
                     elif isinstance(value, (int, float)):
                         report_lines.append(f"  {key}: {value:.2f}")
+                    elif isinstance(value, dict) and key.endswith("_stats"):
+                        # Render latency distributions compactly.
+                        parts = []
+                        for stat_key in ("n", "mean", "p50", "p95", "max"):
+                            if stat_key in value and value[stat_key] is not None:
+                                if stat_key == "n":
+                                    parts.append(f"{stat_key}={value[stat_key]}")
+                                else:
+                                    parts.append(f"{stat_key}={value[stat_key]:.2f}")
+                        report_lines.append(f"  {key}: {{{', '.join(parts)}}}")
                     else:
                         report_lines.append(f"  {key}: {value}")
                 report_lines.append("")

@@ -43,15 +43,19 @@ def build_benchmark_summary(
             f"ndcg_at_{k}": _get(retrieval_metrics, "ndcg_at_k_mean"),
         },
         "diagnostics": {
-            # add_latency covers the full add() span: ingest markdown +
-            # openclaw memory index --force + status settle wait. We do
-            # NOT alias it as time_to_visible because the two are not
-            # separately measured; a future change can split them if
-            # needed. For now, the single field honestly described is
-            # better than a fake dual-report.
+            # Legacy scalar means — kept for backward compat with reports
+            # that only print single numbers. p50/p95/max live in *_stats.
             "add_latency_ms_mean": _get(diagnostics, "add_latency_ms_mean"),
             "retrieval_latency_ms_mean": _get(diagnostics, "retrieval_latency_ms_mean"),
             "answer_latency_ms_mean": _get(diagnostics, "answer_latency_ms_mean"),
             "final_context_tokens_mean": _get(diagnostics, "final_context_tokens_mean"),
+            "add_latency_ms_stats": _get(diagnostics, "add_latency_ms_stats"),
+            "retrieval_latency_ms_stats": _get(diagnostics, "retrieval_latency_ms_stats"),
+            "answer_latency_ms_stats": _get(diagnostics, "answer_latency_ms_stats"),
+            "final_context_tokens_stats": _get(diagnostics, "final_context_tokens_stats"),
+            "add_retry_rate": _get(diagnostics, "add_retry_rate"),
+            "add_fallback_rate": _get(diagnostics, "add_fallback_rate"),
+            "add_failed_rate": _get(diagnostics, "add_failed_rate"),
+            "add_samples": _get(diagnostics, "add_samples"),
         },
     }
