@@ -24,6 +24,65 @@ def test_normalize_gold_sessions_fails_on_unknown_format():
         normalize_gold_sessions(["session_1"])
 
 
+def test_normalize_gold_sessions_splits_compound_evidence():
+    """LoCoMo ships a small number of evidence strings with multiple
+    message ids glued together by ``; ``, ``,``, or spaces
+    (e.g. 'D8:6; D9:17', 'D21:18 D21:22 D11:15'). Projection must split
+    first, not fail-closed on the whole run."""
+    assert normalize_gold_sessions(["D8:6; D9:17"]) == ["S8", "S9"]
+    assert normalize_gold_sessions(["D1:1,D2:2"]) == ["S1", "S2"]
+    assert normalize_gold_sessions(["D21:18 D21:22 D11:15 D11:19"]) == [
+        "S11",
+        "S21",
+    ]
+    # mixed with well-formed entries, still deduped and sorted
+    assert normalize_gold_sessions(["S3", "D3:1; D3:2", "D1:0"]) == [
+        "S1",
+        "S3",
+    ]
+
+
+def test_normalize_gold_sessions_recovers_locomo_typos():
+    """Two concrete LoCoMo annotator typos exist in locomo10.json:
+       * a bare ``'D'`` token mixed in with valid entries (conv3/qa88),
+       * ``'D:11:26'`` with a leading colon (conv4/qa18) meaning ``'D11:26'``.
+    Both are recoverable without guessing: skip the bare ``D`` and
+    tolerate one extra ``:`` right after ``D``. Any other malformed
+    token still fails closed."""
+    # bare 'D' is dropped; the rest resolve normally
+    assert normalize_gold_sessions(["D1:18", "D", "D1:20"]) == ["S1"]
+    # 'D:11:26' is interpreted as 'D11:26'
+    assert normalize_gold_sessions(["D:11:26"]) == ["S11"]
+    # mixed: typo + clean tokens
+    assert normalize_gold_sessions(
+        ["D1:14", "D:11:26", "D20:21"]
+    ) == ["S1", "S11", "S20"]
+
+
+def test_batch_quarantines_questions_with_corrupt_evidence():
+    """When evidence contains a genuinely unrecognised token (not a bare
+    'D' typo, not ``D:N:M`` - those are recovered), the question is
+    quarantined into ``unresolved_question_ids`` so the rest of the
+    run still reports metrics."""
+    qas = [
+        QAPair(question_id="q_good", question="", answer="",
+               evidence=["D0:0"], metadata={"conversation_id": "c0"}),
+        QAPair(question_id="q_bad", question="", answer="",
+               evidence=["bogus_xyz"], metadata={"conversation_id": "c0"}),
+    ]
+    srs = [
+        SearchResult("", "c0", [{"metadata": {"source_sessions": ["S0"]}}],
+                     {"question_id": "q_good"}),
+        SearchResult("", "c0", [{"metadata": {"source_sessions": ["S9"]}}],
+                     {"question_id": "q_bad"}),
+    ]
+    metrics = evaluate_retrieval_metrics(qas, srs, k=1)
+    assert "q_bad" in metrics["unresolved_question_ids"]
+    assert [p["question_id"] for p in metrics["per_question"]] == ["q_good"]
+    # mean should be taken over the 1 successful question, not diluted
+    assert metrics["evidence_hit_at_k_mean"] == 1.0
+
+
 def test_retrieval_metrics_use_session_level_projection():
     qa = QAPair(
         question_id="q1",
@@ -222,8 +281,13 @@ def test_build_benchmark_summary_shape():
     assert summary["answer_level"]["accuracy"] == 0.6
     assert summary["answer_level"]["f1_mean"] == 0.4
     assert summary["answer_level"]["bleu1_mean"] == 0.2
-    assert summary["retrieval_level"]["evidence_hit_at_5"] == 0.5
-    assert summary["retrieval_level"]["mrr"] == 0.5
+    # Session-level metrics moved under adapter_specific_retrieval in
+    # Phase 6 (content_overlap@k became the canonical cross-adapter
+    # metric). retrieval_level now only carries content_overlap fields;
+    # evidence_hit / mrr etc. live in the adapter-specific section.
+    assert summary["adapter_specific_retrieval"]["evidence_hit_at_5"] == 0.5
+    assert summary["adapter_specific_retrieval"]["mrr"] == 0.5
+    assert summary["retrieval_level"]["content_overlap_at_5"] is None  # no content_overlap passed
     assert summary["diagnostics"]["retrieval_latency_ms_mean"] == 30.0
     # Summary no longer aliases time_to_visible - field absent entirely.
     assert "time_to_visible_ms_mean" not in summary["diagnostics"]
@@ -243,6 +307,7 @@ def test_build_benchmark_summary_preserves_none_for_missing_sources():
     )
     assert summary["answer_level"]["accuracy"] is None
     assert summary["answer_level"]["f1_mean"] is None
-    assert summary["retrieval_level"]["evidence_hit_at_5"] is None
-    assert summary["retrieval_level"]["mrr"] is None
+    assert summary["retrieval_level"]["content_overlap_at_5"] is None
+    assert summary["adapter_specific_retrieval"]["evidence_hit_at_5"] is None
+    assert summary["adapter_specific_retrieval"]["mrr"] is None
     assert summary["diagnostics"]["retrieval_latency_ms_mean"] is None

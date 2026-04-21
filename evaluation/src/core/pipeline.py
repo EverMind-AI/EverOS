@@ -32,6 +32,7 @@ from evaluation.src.core.stages.evaluate_stage import run_evaluate_stage
 
 # Benchmark-extension metrics (used by *_artifact helpers below)
 from evaluation.src.metrics.retrieval_metrics import evaluate_retrieval_metrics
+from evaluation.src.metrics.content_overlap import evaluate_content_overlap
 from evaluation.src.metrics.answer_aux_metrics import build_answer_aux_metrics
 from evaluation.src.metrics.diagnostics import aggregate_diagnostics
 from evaluation.src.metrics.benchmark_summary import build_benchmark_summary
@@ -334,7 +335,19 @@ class Pipeline:
             )
             results["search_results"] = search_results
 
-            # Benchmark-extension: session-level retrieval metrics
+            # Benchmark-extension: retrieval quality metrics.
+            # content_overlap@k is the canonical cross-adapter metric
+            # (only needs qa.answer + search_result.results[*].content).
+            # Session-level metrics run too but are emitted as
+            # adapter-specific diagnostics; see benchmark_summary.py.
+            try:
+                results["content_overlap"] = self._write_content_overlap_artifact(
+                    dataset.qa_pairs, search_results
+                )
+            except Exception as err:  # noqa: BLE001
+                self.logger.warning(
+                    "content_overlap write failed (non-fatal): %s", err
+                )
             try:
                 results["retrieval_metrics"] = self._write_retrieval_metrics_artifact(
                     dataset.qa_pairs, search_results
@@ -488,6 +501,7 @@ class Pipeline:
                     retrieval_metrics=results.get("retrieval_metrics") or {},
                     answer_aux_metrics=results.get("answer_aux_metrics") or {},
                     index=results.get("index"),
+                    content_overlap=results.get("content_overlap"),
                 )
             except Exception as err:  # noqa: BLE001
                 self.logger.warning(
@@ -731,6 +745,14 @@ class Pipeline:
         self.saver.save_json(metrics, "retrieval_metrics.json")
         return metrics
 
+    def _write_content_overlap_artifact(
+        self, qa_pairs: List[QAPair], search_results: List[SearchResult], k: Optional[int] = None
+    ) -> dict:
+        k = k or self._benchmark_k()
+        metrics = evaluate_content_overlap(qa_pairs, search_results, k=k)
+        self.saver.save_json(metrics, "content_overlap.json")
+        return metrics
+
     def _write_answer_aux_metrics_artifact(
         self, answer_results: List[AnswerResult]
     ) -> dict:
@@ -750,6 +772,7 @@ class Pipeline:
         answer_aux_metrics: dict,
         index: Optional[dict] = None,
         k: Optional[int] = None,
+        content_overlap: Optional[dict] = None,
     ) -> dict:
         k = k or self._benchmark_k()
         answer_metadata = [ar.metadata or {} for ar in answer_results]
@@ -770,6 +793,7 @@ class Pipeline:
             answer_aux_metrics=answer_aux_metrics,
             diagnostics=diagnostics,
             k=k,
+            content_overlap=content_overlap,
         )
         self.saver.save_json(summary, "benchmark_summary.json")
         return summary
@@ -801,8 +825,26 @@ class Pipeline:
         if benchmark_summary:
             retrieval = benchmark_summary.get("retrieval_level") or {}
             if retrieval:
-                report_lines.append("Retrieval-level:")
+                report_lines.append("Retrieval-level (canonical, cross-adapter):")
                 for key, value in retrieval.items():
+                    if value is None:
+                        report_lines.append(f"  {key}: n/a")
+                    elif isinstance(value, (int, float)):
+                        report_lines.append(f"  {key}: {value:.4f}")
+                    else:
+                        report_lines.append(f"  {key}: {value}")
+                report_lines.append("")
+
+            adapter_retrieval = (
+                benchmark_summary.get("adapter_specific_retrieval") or {}
+            )
+            # Only render the section if at least one value is populated,
+            # otherwise it's noise for adapters without source_sessions.
+            if any(v is not None for v in adapter_retrieval.values()):
+                report_lines.append(
+                    "Adapter-specific retrieval (diagnostic, NOT cross-adapter):"
+                )
+                for key, value in adapter_retrieval.items():
                     if value is None:
                         report_lines.append(f"  {key}: n/a")
                     elif isinstance(value, (int, float)):
