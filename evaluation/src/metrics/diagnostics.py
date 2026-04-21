@@ -7,6 +7,14 @@ files, and emits averages / distributions.
 
 Every aggregation ignores None values so adapters that don't emit the field
 (e.g. mem0/memos on latency) don't poison the mean.
+
+SCOPE CAVEAT (pre-Phase-1): the ``*_latency_ms`` fields currently come
+from adapter-reported metadata, so their measurement boundary differs
+between adapters (EverMemOS includes on-disk index load, OpenClaw only
+covers the backend RPC, etc.). They should be read as *within-adapter*
+trend signals, not cross-adapter comparisons. Phase 1 of the
+latency-alignment plan (docs/latency-alignment.md) replaces this with
+harness-owned measurement for a canonical, apples-to-apples scope.
 """
 from __future__ import annotations
 
@@ -38,8 +46,17 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
 
 
 def _stats(values: Iterable[float | None]) -> Optional[dict]:
-    """Return mean/p50/p95/max/n over numeric values, or None if empty."""
-    valid = [float(v) for v in values if isinstance(v, (int, float))]
+    """Return mean/p50/p95/max/n over numeric values, or None if empty.
+
+    bool is a subclass of int in Python; exclude it explicitly so a
+    field accidentally set to True/False cannot poison the distribution
+    with 1.0/0.0 datapoints.
+    """
+    valid = [
+        float(v)
+        for v in values
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    ]
     if not valid:
         return None
     valid.sort()
