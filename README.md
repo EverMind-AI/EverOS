@@ -65,7 +65,9 @@ EverOS/
 
 ## Methods
 
-Methods are production-ready memory architectures that give agents persistent, structured long-term memory. Each can be used standalone or composed together depending on your use case.
+Methods are memory architectures you can choose from — production-ready implementations that give agents persistent, structured long-term memory. Pick the one that fits your use case, or compose them together.
+
+Full benchmark numbers live in the [Evaluation & Benchmarking](#evaluation--benchmarking) section and in each method's paper.
 
 <table>
 <tr>
@@ -78,6 +80,8 @@ Methods are production-ready memory architectures that give agents persistent, s
 
 A self-organizing memory operating system inspired by biological imprinting. Extracts, structures, and retrieves long-term knowledge from conversations — enabling agents to remember, understand, and continuously evolve.
 
+LoCoMo **93.05%** · LongMemEval **83.00%**
+
 [Paper](https://arxiv.org/abs/2601.02163) · [Docs](methods/EverCore/)
 
 </td>
@@ -87,7 +91,9 @@ A self-organizing memory operating system inspired by biological imprinting. Ext
 
 #### HyperMem
 
-A hypergraph-based hierarchical memory architecture that captures high-order associations through hyperedges. Organizes memory into topic, event, and fact layers for coarse-to-fine long-term conversation retrieval. LoCoMo 92.73%.
+A hypergraph-based hierarchical memory architecture that captures high-order associations through hyperedges. Organizes memory into topic, event, and fact layers for coarse-to-fine long-term conversation retrieval.
+
+LoCoMo **92.73%**
 
 [Paper](https://arxiv.org/abs/2604.08256) · [Docs](methods/HyperMem/)
 
