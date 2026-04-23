@@ -22,6 +22,7 @@
 <br>
 
 <details open>
+<br>
   <summary><kbd>Table of Contents</kbd></summary>
 
 - [Project Overview](#project-overview)
@@ -42,19 +43,22 @@
 
 **EverOS** brings together long-term memory **methods**, **benchmarks**, and **use cases** for building self-evolving agents.
 
-Start with the **use cases** — working templates you can clone, run, and tweak to get a feel for what memory-powered agents can do. Once something is up and running, plug in different **methods** to explore how each memory architecture changes your agent's behavior. When you are ready to go deeper, put it all to the test with the **benchmarks** and see how well your agent actually remembers, reasons, and evolves.
+At the heart of EverOS is **EverCore** — a long-term memory operating system for agents. Follow the [Quick Start](#quick-start) to spin it up in a few minutes. From there, plug it into one of the **use cases** as a template and watch your agent come alive with persistent memory you can actually see and feel. When you are ready to know how good it really is, run the **benchmarks** to measure how your agent remembers, reasons, and evolves.
 
 ```
 EverOS/
-├── use-cases/              # Working templates — start here
-│   ├── claude-code-plugin/
-│   └── game-of-throne-demo/
-├── methods/                # Memory architectures
-│   ├── EverCore/           # Long-term memory operating system
-│   └── HyperMem/           # Hypergraph memory architecture
-└── benchmarks/             # Evaluation suites
-    ├── EverMemBench/       # Memory quality evaluation
-    └── EvoAgentBench/      # Agent self-evolution evaluation
+├── benchmarks/                # Evaluation suites
+│   ├── EverMemBench/          # Memory quality evaluation
+│   └── EvoAgentBench/         # Agent self-evolution evaluation
+├── methods/                   # Memory architectures
+│   ├── EverCore/              # Long-term memory operating system
+│   └── HyperMem/              # Hypergraph memory architecture
+└── use-cases/                 # Templates to plug the core into
+    ├── openher/               # OpenHer — AI companion with memory
+    ├── claude-code-plugin/    # Claude Code Plugin — memory-enhanced code plugin
+    ├── game-of-throne-demo/   # Game of Thrones Demo — a memory-enabled game
+    ├── ...
+    └── ...
 ```
 
 <br>
