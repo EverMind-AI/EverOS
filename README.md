@@ -233,18 +233,24 @@ API_BASE = "http://localhost:1995/api/v1"
 
 # 1. Store a conversation memory
 requests.post(f"{API_BASE}/memories", json={
-    "message_id": "msg_001",
-    "create_time": "2025-02-01T10:00:00+00:00",
-    "sender": "user_001",
-    "content": "I love playing soccer on weekends"
+    "user_id": "user_001",
+    "messages": [
+        {
+            "message_id": "msg_001",
+            "timestamp": 1738404000000,
+            "sender_id": "user_001",
+            "content": "I love playing soccer on weekends",
+            "role": "user",
+        }
+    ],
 })
 
 # 2. Search for relevant memories
-response = requests.get(f"{API_BASE}/memories/search", json={
+response = requests.post(f"{API_BASE}/memories/search", json={
     "query": "What sports does the user like?",
-    "user_id": "user_001",
+    "method": "hybrid",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "hybrid"
+    "filters": {"user_id": "user_001"},
 })
 
 result = response.json().get("result", {})
