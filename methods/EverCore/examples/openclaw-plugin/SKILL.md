@@ -314,8 +314,8 @@ Base: `http://localhost:1995`
 | --- | --- | --- |
 | GET | `/health` | Health check |
 | POST | `/api/v1/memories` | Save memory |
-| GET | `/api/v1/memories/search` | Search memory |
-| DELETE | `/api/v1/memories` | Delete memory |
+| POST | `/api/v1/memories/search` | Search memory |
+| POST | `/api/v1/memories/delete` | Delete memory |
 
 ---
 
