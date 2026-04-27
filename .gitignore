@@ -220,3 +220,6 @@ evaluation/locomo_evaluation/results_ref/demo/results/
 # i18n translation progress
 .translation_progress.json
 .review_progress.json
+
+# Use-cases: exclude lock files to keep repo lean
+use-cases/**/package-lock.json

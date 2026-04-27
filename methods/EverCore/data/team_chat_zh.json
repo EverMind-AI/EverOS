@@ -1,0 +1,4685 @@
+{
+  "version": "1.0.0",
+  "session_meta": {
+    "scene": "team",
+    "scene_desc": {},
+    "name": "智能销售助手项目组",
+    "description": "智能销售助手项目的开发讨论群",
+    "default_timezone": "UTC",
+    "user_details": {
+      "user_103": {
+        "full_name": "Chen",
+        "role": "user",
+        "custom_role": "产品负责人/项目发起人",
+        "department": "管理层",
+        "email": "chen@example.com",
+        "extra": {
+          "description": "产品负责人或业务方代表，驱动项目方向，关注ROI和落地效果",
+          "responsibilities": [
+            "提出核心需求",
+            "做关键决策",
+            "要求交付物"
+          ]
+        }
+      },
+      "user_102": {
+        "full_name": "Betty",
+        "role": "user",
+        "custom_role": "产品经理",
+        "department": "产品部",
+        "email": "betty@example.com",
+        "extra": {
+          "description": "专职产品经理，负责需求细化、验收标准、跨职能协调和效果度量",
+          "responsibilities": [
+            "明确需求边界",
+            "制定验收标准",
+            "编写需求文档"
+          ]
+        }
+      },
+      "user_101": {
+        "full_name": "Alex",
+        "role": "user",
+        "custom_role": "算法/技术负责人",
+        "department": "技术部",
+        "email": "alex@example.com",
+        "extra": {
+          "description": "算法或AI工程负责人，主导模型与智能功能的技术实现",
+          "responsibilities": [
+            "提出技术方案",
+            "负责模型训练、评估、优化",
+            "主导核心模块实现",
+            "关注性能指标"
+          ]
+        }
+      },
+      "user_104": {
+        "full_name": "Dylan",
+        "role": "user",
+        "custom_role": "后端/基础设施工程师",
+        "department": "技术部",
+        "email": "dylan@example.com",
+        "extra": {
+          "description": "后端或MLOps工程师，支撑模型服务化、数据管道和系统可靠性",
+          "responsibilities": [
+            "负责服务化、部署、接口",
+            "搭建存储与检索系统",
+            "优化系统稳定性",
+            "关注延迟与扩展性"
+          ]
+        }
+      },
+      "user_105": {
+        "full_name": "Emily",
+        "role": "user",
+        "custom_role": "前端/UX设计师",
+        "department": "技术部",
+        "email": "emily@example.com",
+        "extra": {
+          "description": "前端开发兼UX设计师，负责用户界面、交互逻辑和体验优化",
+          "responsibilities": [
+            "设计交互与视觉",
+            "提供文案方案",
+            "收集领域知识",
+            "响应用户反馈"
+          ]
+        }
+      }
+    },
+    "tags": [],
+    "group_id": "group_sales_ai_2025",
+    "created_at": "2025-02-01T02:00:00Z"
+  },
+  "conversation_list": [
+    {
+      "message_id": "msg_0001",
+      "create_time": "2025-02-01T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "大家早，“智能销售助手”现在进展如何？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0002",
+      "create_time": "2025-02-01T02:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "早。先对齐下目标？是能用于内测的MVP，还是直接客户试点？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0003",
+      "create_time": "2025-02-01T02:01:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "先MVP，3月出能跑的，4月底收尾。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0004",
+      "create_time": "2025-02-01T02:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "技术建议RAG为主。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0005",
+      "create_time": "2025-02-01T02:02:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "当前的方法：BM25（ES）+向量检索（bge-base-zh，HNSW，topK=8）+交叉编码重排（先base版），温度0.3，长度512。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0006",
+      "create_time": "2025-02-01T02:03:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "前两周做数据清洗+索引，预计下周出个demo。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0007",
+      "create_time": "2025-02-01T02:03:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "指标先定：- 有效命中率≥0.8；- 首次响应P95≤1.5s；- 幻觉率≤8%。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0008",
+      "create_time": "2025-02-01T02:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "OK。源头数据：产品手册v3.2、价格政策Q1、交付SLA文档。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0009",
+      "create_time": "2025-02-01T02:05:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我搭FastAPI服务，HTTP先行；日志打到ES。Redis做LRU。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0010",
+      "create_time": "2025-02-01T02:05:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "信息架构我来：会话主区+右侧“关键字段标签”+底部建议问法。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0011",
+      "create_time": "2025-02-01T02:06:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "周三给我进度小结。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0012",
+      "create_time": "2025-02-02T10:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天有进度吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0013",
+      "create_time": "2025-02-02T10:21:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "今天主要是数据口径对齐。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0014",
+      "create_time": "2025-02-02T10:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "清洗规则初版完成，emoji、无意义前后缀都处理了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0015",
+      "create_time": "2025-02-03T01:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "标了100条客服历史问答，格式不统一，我再出标注规范。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0016",
+      "create_time": "2025-02-03T01:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0017",
+      "create_time": "2025-02-03T01:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我会安排人去做去重+归一化，数值、单位统一。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0018",
+      "create_time": "2025-02-03T01:32:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "空白状态引导做三条建议问法？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0019",
+      "create_time": "2025-02-03T01:32:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "可以，偏销售转化的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0020",
+      "create_time": "2025-02-03T01:33:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我也试下用热度动态生成一版，先A/B。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0021",
+      "create_time": "2025-02-04T04:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "午间问一下，我们现在有风险点吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0022",
+      "create_time": "2025-02-04T04:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "重排器时延有风险。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0023",
+      "create_time": "2025-02-04T04:06:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "目前我们先用base，必要时量化或降档。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0024",
+      "create_time": "2025-02-04T04:06:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "合规词表我来收敛，应该可以避免误伤。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0025",
+      "create_time": "2025-02-05T03:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "本周卡点？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0026",
+      "create_time": "2025-02-05T03:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "价格策略多版本，我需要最新的生效版。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0027",
+      "create_time": "2025-02-05T03:01:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我催财务给价表+折扣边界。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0028",
+      "create_time": "2025-02-05T03:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "日志通了：请求、检索topk、重排分、token数。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0029",
+      "create_time": "2025-02-05T03:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI草稿在群文件。文案先保守。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0030",
+      "create_time": "2025-02-06T09:50:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天稳定？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0031",
+      "create_time": "2025-02-06T09:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "稳定。标注规范初稿发布了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0032",
+      "create_time": "2025-02-06T09:51:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我晚些再跑一版离线评估。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0033",
+      "create_time": "2025-02-09T10:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "周末简单说下进展。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0034",
+      "create_time": "2025-02-09T10:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "数据清洗80%，问法模板成型。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0035",
+      "create_time": "2025-02-09T10:01:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "索引pipeline通了，今晚构建第一版。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0036",
+      "create_time": "2025-02-10T02:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "问下，SKU层级要不要拆更细？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0037",
+      "create_time": "2025-02-10T02:41:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "可以，但先保证召回稳定，再细化。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0038",
+      "create_time": "2025-02-12T02:09:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "混合检索+交叉重排，离线NDCG@10=0.84。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0039",
+      "create_time": "2025-02-12T02:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "下午内网demo？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0040",
+      "create_time": "2025-02-12T02:10:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "3点给链接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0041",
+      "create_time": "2025-02-12T02:11:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "冷热路由就绪。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0042",
+      "create_time": "2025-02-12T02:12:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "demo页加了引导tips。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0043",
+      "create_time": "2025-02-13T08:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "demo里“竞品对比”问法命中一般。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0044",
+      "create_time": "2025-02-13T08:19:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我加下领域词表，重排权重偏置。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0045",
+      "create_time": "2025-02-14T01:55:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "下周目标？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0046",
+      "create_time": "2025-02-14T01:56:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "意图跟踪、slot抽取优先。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0047",
+      "create_time": "2025-02-14T01:56:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "轻量序列标注（biLSTM-CRF），不够再上更重。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0048",
+      "create_time": "2025-02-15T08:40:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "看了demo，缺口？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0049",
+      "create_time": "2025-02-15T08:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "价格相关不够确定；“交付周期”有一次说模糊范围。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0050",
+      "create_time": "2025-02-15T08:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "金额/时限类必须有来源引用；无来源拒答+引导人工。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0051",
+      "create_time": "2025-02-15T08:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "同意。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0052",
+      "create_time": "2025-02-16T12:22:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "提示词加入“引用来源”硬约束；温度维持0.3。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0053",
+      "create_time": "2025-02-18T02:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "slot清单准备中：预算、决策人、行业、采购周期、竞品对比。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0054",
+      "create_time": "2025-02-18T02:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。我先做预算与行业的规则兜底。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0055",
+      "create_time": "2025-02-20T01:00:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "下周计划：1）知识库结构化；2）多轮意图跟踪；3）对话安全策略。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0056",
+      "create_time": "2025-02-20T01:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "意图跟踪优先，我把销售脚本整理成slot列表。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0057",
+      "create_time": "2025-02-20T01:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "状态持久化用Redis，短期够用。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0058",
+      "create_time": "2025-02-20T01:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "关键信息做高亮。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0059",
+      "create_time": "2025-02-20T01:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "周五合评。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0060",
+      "create_time": "2025-02-23T06:27:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "slot清单发了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0061",
+      "create_time": "2025-02-23T06:28:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "抽取模型上线前先蒸馏，压延迟。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0062",
+      "create_time": "2025-02-24T11:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今晚还改吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0063",
+      "create_time": "2025-02-24T11:12:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我调权重，半小时搞定。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0064",
+      "create_time": "2025-02-24T11:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我顺手补两条边界用例。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0065",
+      "create_time": "2025-02-26T01:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "引导问法有人看不见，我提高对比度。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0066",
+      "create_time": "2025-02-26T01:04:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我改了两处文案，更直接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0067",
+      "create_time": "2025-02-27T09:25:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "上线无告警。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0068",
+      "create_time": "2025-02-27T09:26:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "意图/slot延迟1.1s，符合目标。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0069",
+      "create_time": "2025-02-27T10:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好的",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0070",
+      "create_time": "2025-02-28T10:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "意图/slot内测通过，P95=1.1s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0071",
+      "create_time": "2025-02-28T10:06:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "吞吐平稳。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0072",
+      "create_time": "2025-02-28T10:06:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "右侧小标签上线。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0073",
+      "create_time": "2025-02-28T10:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "预算数额格式统一为两位小数。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0074",
+      "create_time": "2025-02-28T10:07:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0075",
+      "create_time": "2025-03-01T01:15:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "3月中外发MVP没问题吧？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0076",
+      "create_time": "2025-03-01T01:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "可以。需补：冷启动问法+合规提醒显性化。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0077",
+      "create_time": "2025-03-01T01:16:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "冷启动先静态模板+热门问题组合。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0078",
+      "create_time": "2025-03-01T01:17:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "提醒做黄条可收起。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0079",
+      "create_time": "2025-03-01T01:17:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "记上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0080",
+      "create_time": "2025-03-02T12:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天怎么样？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0081",
+      "create_time": "2025-03-02T12:30:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "正常推进。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0082",
+      "create_time": "2025-03-02T12:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我把行业模板再清了下。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0083",
+      "create_time": "2025-03-03T02:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "知识库更新频率较高，能否增量索引？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0084",
+      "create_time": "2025-03-03T02:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "可以，按doc_id增量。重排权重同步更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0085",
+      "create_time": "2025-03-03T02:14:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我接入增量任务，cron每10分钟。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0086",
+      "create_time": "2025-03-04T00:55:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "早。有没有我需要看的东西？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0087",
+      "create_time": "2025-03-04T00:56:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "今天下午有一个阶段小结，我发你。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0088",
+      "create_time": "2025-03-04T00:56:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我准备了三条标准演示路径。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0089",
+      "create_time": "2025-03-05T02:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "“互联网/IT/软件”分不清。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0090",
+      "create_time": "2025-03-05T02:23:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "行业词表有重叠，我加模糊匹配惩罚，优先主类。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0091",
+      "create_time": "2025-03-05T02:24:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "先保守。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0092",
+      "create_time": "2025-03-06T08:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "空白态提示增加快捷键说明。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0093",
+      "create_time": "2025-03-06T08:03:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我今晚调阈值，召回更稳。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0094",
+      "create_time": "2025-03-06T08:03:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我预留点资源，避免波动。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0095",
+      "create_time": "2025-03-08T13:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "提示对比度+20%，阅读好一些。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0096",
+      "create_time": "2025-03-08T13:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "文案我改两处。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0097",
+      "create_time": "2025-03-08T13:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "阈值今晚会动一下。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0098",
+      "create_time": "2025-03-08T13:04:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "留意日志波动。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0099",
+      "create_time": "2025-03-09T02:20:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "发现一个问题：回答引用的“来源链接”偶尔错位（内容对，但链接指到旧文档）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0100",
+      "create_time": "2025-03-09T02:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我看。可能是重排后位置变了，但UI按索引顺序取链接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0101",
+      "create_time": "2025-03-09T02:22:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "对，我拿的是重排后的第1项链接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0102",
+      "create_time": "2025-03-09T02:22:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "解决思路：返回结构带稳定doc_id+offset，UI按doc_id渲染，不依赖位置。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0103",
+      "create_time": "2025-03-09T02:23:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "分配：A定义响应schema；D更新接口；E改UI渲染；我补验收用例。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0104",
+      "create_time": "2025-03-09T02:24:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "收到，我加doc_id和片段offset。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0105",
+      "create_time": "2025-03-09T02:24:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI跟进，hover展开详情保留。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0106",
+      "create_time": "2025-03-09T02:25:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "今天内修好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0107",
+      "create_time": "2025-03-10T03:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "schema+接口上线；示例响应里含doc_id、offset、source_url。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0108",
+      "create_time": "2025-03-10T03:41:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "前端跟上了，错位不再出现。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0109",
+      "create_time": "2025-03-10T03:41:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我再抽样验证一轮。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0110",
+      "create_time": "2025-03-10T07:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "抽样200条正常。这个问题收尾。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0111",
+      "create_time": "2025-03-11T01:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "更正：有一条仍错位，是缓存击中旧格式响应。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0112",
+      "create_time": "2025-03-11T01:19:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我清理了老缓存，并把key加上schema_version。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0113",
+      "create_time": "2025-03-11T01:20:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我在服务端也做了兼容处理。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0114",
+      "create_time": "2025-03-11T01:20:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "再看一天。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0115",
+      "create_time": "2025-03-11T10:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "今天没再复现。关闭。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0116",
+      "create_time": "2025-03-12T03:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "市场部演示下周二上午。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0117",
+      "create_time": "2025-03-12T03:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我写演示脚本（3条主路径+2条边界）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0118",
+      "create_time": "2025-03-12T03:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "提示词锁一版，确保可复现。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0119",
+      "create_time": "2025-03-12T03:32:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "“讲解模式”小注释会标关键节点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0120",
+      "create_time": "2025-03-12T03:33:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "演示环境资源加大。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0121",
+      "create_time": "2025-03-13T09:48:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "边界用例里“合同起算日”问法较怪。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0122",
+      "create_time": "2025-03-13T09:49:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我加正则和规则词典适配日期表达。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0123",
+      "create_time": "2025-03-15T02:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "演示反馈：1）“折扣上限”回答稳；2）“交付周期”一次给了模糊范围；3）另发现：价表引用的是Q1旧版。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0124",
+      "create_time": "2025-03-15T02:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "问题2原因：源数据有两版；我按生效日期兜底。问题3：索引里新版没设“生效优先”标记。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0125",
+      "create_time": "2025-03-15T02:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "解决方案：- 价表加effective_date；- 重排特征加“生效优先”；- UI显著展示“引用来源+生效期”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0126",
+      "create_time": "2025-03-15T02:04:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我加字段与数据迁移脚本，跑完回报。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0127",
+      "create_time": "2025-03-15T02:05:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "来源放回答首行右侧，hover展开详情。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0128",
+      "create_time": "2025-03-15T02:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "今晚出新模型参数与权重。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0129",
+      "create_time": "2025-03-16T04:20:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "迁移完成；索引已补effective_date。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0130",
+      "create_time": "2025-03-16T04:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "重排权重生效；涉及金额/时限类回答强制短引用+链接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0131",
+      "create_time": "2025-03-16T04:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "回归200条通过。问题闭环。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0132",
+      "create_time": "2025-03-17T02:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "监控报警：P95延迟飙到1.9s（10:00-10:10）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0133",
+      "create_time": "2025-03-17T02:13:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "日志显示重排耗时占比上升；并发突刺，CPU压到90%。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0134",
+      "create_time": "2025-03-17T02:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "初判：cross-encoder过重+冷启动。第一步：降档到base、int8量化、TopK从8→6。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0135",
+      "create_time": "2025-03-17T02:15:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "SLO守住优先，命中率少量回退可接受。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0136",
+      "create_time": "2025-03-17T02:16:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "骨架我今天就上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0137",
+      "create_time": "2025-03-18T01:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "量化+降档已上；P95降到1.6s；命中率-0.01。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0138",
+      "create_time": "2025-03-18T01:41:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "并发限流在生效，错误率低。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0139",
+      "create_time": "2025-03-18T01:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "能接受，继续压一压。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0140",
+      "create_time": "2025-03-19T06:05:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "仍有抖动到1.7s。还能做什么？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0141",
+      "create_time": "2025-03-19T06:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "方案二：流式生成（server-sent或gRPC streaming）；短问快路（FAQ命中直接返回）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0142",
+      "create_time": "2025-03-19T06:06:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我做gRPC streaming，HTTP保留兼容；加连接池keep-alive。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0143",
+      "create_time": "2025-03-19T06:07:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI支持流式逐字展示。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0144",
+      "create_time": "2025-03-19T06:08:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好，今明两天观测。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0145",
+      "create_time": "2025-03-20T05:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "是否接外部CRM？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0146",
+      "create_time": "2025-03-20T05:21:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "第一期不接，先内置“客户档案”模拟。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0147",
+      "create_time": "2025-03-20T05:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "同意，跨会话持久化先不做。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0148",
+      "create_time": "2025-03-20T05:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "就这样。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0149",
+      "create_time": "2025-03-21T03:30:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "gRPC已灰度；流式有效，尾延迟更稳。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0150",
+      "create_time": "2025-03-21T03:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "短问快路命中率0.42，平均延迟-25%。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0151",
+      "create_time": "2025-03-21T03:32:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "不错。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0152",
+      "create_time": "2025-03-22T09:55:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "缓存+降档后P95=1.35s，吞吐+18%。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0153",
+      "create_time": "2025-03-22T09:55:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "很好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0154",
+      "create_time": "2025-03-22T09:56:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "上线无告警。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0155",
+      "create_time": "2025-03-22T09:56:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "loading骨架上线，体感好些。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0156",
+      "create_time": "2025-03-24T01:02:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天有关键事情吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0157",
+      "create_time": "2025-03-24T01:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "没有大改，主要是稳定性与回归。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0158",
+      "create_time": "2025-03-24T01:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我微调重排阈值。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0159",
+      "create_time": "2025-03-25T01:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "话术风格有人想更“销售”一点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0160",
+      "create_time": "2025-03-25T01:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "风格模板：咨询型/销售型两档，提示词切换。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0161",
+      "create_time": "2025-03-25T01:12:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI加开关，默认咨询型。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0162",
+      "create_time": "2025-03-25T01:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "先内部灰度。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0163",
+      "create_time": "2025-03-26T08:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "延迟再次抖动到1.6s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0164",
+      "create_time": "2025-03-26T08:41:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "网络抖动，连接重建频繁。把连接池与DNS缓存调大。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0165",
+      "create_time": "2025-03-26T08:42:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我减小重排batch，避免队头阻塞。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0166",
+      "create_time": "2025-03-26T08:42:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "今晚再看。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0167",
+      "create_time": "2025-03-27T03:05:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "连接池调整生效，重连降低30%。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0168",
+      "create_time": "2025-03-27T03:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "重排队头阻塞缓解；P95=1.33s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0169",
+      "create_time": "2025-03-27T03:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记录为“多次尝试”问题的阶段性解决。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0170",
+      "create_time": "2025-03-28T08:33:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "月底里程碑汇报。还有风险？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0171",
+      "create_time": "2025-03-28T08:34:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "知识库更新频率高，可能滞后。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0172",
+      "create_time": "2025-03-28T08:34:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "变更需群内通报，2小时内入库。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0173",
+      "create_time": "2025-03-28T08:35:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "增量索引已支持快速更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0174",
+      "create_time": "2025-03-28T08:36:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "延迟问题这轮基本收束，P95=1.28s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0175",
+      "create_time": "2025-03-29T12:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "晚间问一下，状态？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0176",
+      "create_time": "2025-03-29T12:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "稳定。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0177",
+      "create_time": "2025-03-29T12:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我正在补长尾问法。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0178",
+      "create_time": "2025-03-30T02:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "发现问题：日志面板里采样数据有手机号明文。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0179",
+      "create_time": "2025-03-30T02:23:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我立刻加脱敏（手机号/邮箱mask），并回填历史样本。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0180",
+      "create_time": "2025-03-30T02:24:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我加服务端拦截器，写日志前统一mask。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0181",
+      "create_time": "2025-03-30T02:25:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "合规项我更新到清单，必须级。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0182",
+      "create_time": "2025-03-30T03:50:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "数据回填完成。新日志不含PII。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0183",
+      "create_time": "2025-03-30T03:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "抽样确认OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0184",
+      "create_time": "2025-04-01T02:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "四月目标：体验+稳定性，准备对外小范围试用。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0185",
+      "create_time": "2025-04-01T02:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "技术侧：检索稳定、抗幻觉、指标面板。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0186",
+      "create_time": "2025-04-01T02:01:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Grafana+Prometheus挂上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0187",
+      "create_time": "2025-04-01T02:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "“引导任务”组件：如“帮我准备一份报价”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0188",
+      "create_time": "2025-04-02T01:15:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天有什么阻碍吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0189",
+      "create_time": "2025-04-02T01:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "无阻碍。我们持续压幻觉。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0190",
+      "create_time": "2025-04-02T01:16:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "规则抽取加入硬约束。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0191",
+      "create_time": "2025-04-03T06:26:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "确认：“禁忌词”先提醒，不拦截？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0192",
+      "create_time": "2025-04-03T06:27:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "对，回答自动规避敏感词，必要时拒答。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0193",
+      "create_time": "2025-04-03T06:27:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我把清单再收紧。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0194",
+      "create_time": "2025-04-04T03:05:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "回答自动分段+目录锚点做了个版本。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0195",
+      "create_time": "2025-04-04T03:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我接“行动建议卡片”，从意图和slot推断。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0196",
+      "create_time": "2025-04-04T03:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "体验上更顺滑。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0197",
+      "create_time": "2025-04-05T12:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "检索权重+来源多源聚合更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0198",
+      "create_time": "2025-04-05T12:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "周一我跑评估。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0199",
+      "create_time": "2025-04-05T12:11:20Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "发布成功。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0200",
+      "create_time": "2025-04-05T12:11:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "移动端适配初版完成。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0201",
+      "create_time": "2025-04-06T02:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天有东西给我看吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0202",
+      "create_time": "2025-04-06T02:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "有，我下午发你体验录像。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0203",
+      "create_time": "2025-04-06T02:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我把指标面板截图也一起给。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0204",
+      "create_time": "2025-04-08T01:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "下周客户内部演示，要“可复制路径”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0205",
+      "create_time": "2025-04-08T01:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "三条标准路径：收集预算→比价→报价。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0206",
+      "create_time": "2025-04-08T01:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "对应提示词锁定。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0207",
+      "create_time": "2025-04-08T01:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "浅引导已上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0208",
+      "create_time": "2025-04-08T01:03:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "演示环境独立实例。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0209",
+      "create_time": "2025-04-09T09:20:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "小问题：预算金额自动识别对“10万+”写法误判。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0210",
+      "create_time": "2025-04-09T09:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "正则补充范围表达；数值归一化兼容“万/千”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0211",
+      "create_time": "2025-04-09T09:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我回归下。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0212",
+      "create_time": "2025-04-10T07:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "评估：命中率0.86，幻觉4.1%，合规0.98，P95=1.32s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0213",
+      "create_time": "2025-04-10T07:43:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "再压幻觉，我把规则抽取变成硬门限。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0214",
+      "create_time": "2025-04-10T07:44:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0215",
+      "create_time": "2025-04-11T01:50:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天的风险点？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0216",
+      "create_time": "2025-04-11T01:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "长尾问法覆盖度再提一点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0217",
+      "create_time": "2025-04-11T01:51:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我做few-shot模板扩展。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0218",
+      "create_time": "2025-04-12T10:20:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "访谈反馈：需要明显“下一步建议”；长回答自动分段。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0219",
+      "create_time": "2025-04-12T10:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "行动建议卡片今晚上线。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0220",
+      "create_time": "2025-04-12T10:21:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我出组件。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0221",
+      "create_time": "2025-04-12T10:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "阅读性确实更好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0222",
+      "create_time": "2025-04-13T06:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "行动卡片里“下一步”按钮能否直接创建工单？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0223",
+      "create_time": "2025-04-13T06:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "第一期不接外部系统，先弹“复制到剪贴板”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0224",
+      "create_time": "2025-04-13T06:11:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0225",
+      "create_time": "2025-04-14T11:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "晚上还上线吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0226",
+      "create_time": "2025-04-14T11:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "不上线，只更提示词。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0227",
+      "create_time": "2025-04-14T11:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "明天UAT不受影响。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0228",
+      "create_time": "2025-04-15T01:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "UAT安排？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0229",
+      "create_time": "2025-04-15T01:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "周三到周五，3个小组，覆盖度>80%为过线。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0230",
+      "create_time": "2025-04-15T01:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "准备Log标注模板。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0231",
+      "create_time": "2025-04-15T01:32:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "采样展示加索引，查得快。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0232",
+      "create_time": "2025-04-15T01:32:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UAT页面有“反馈按钮”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0233",
+      "create_time": "2025-04-16T09:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "UAT前夕，指引文案我再减字。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0234",
+      "create_time": "2025-04-16T09:31:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "收到，我同步更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0235",
+      "create_time": "2025-04-17T08:05:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "UAT第一天：1）报价格式偶漏小数位；2）“次月生效”理解有误。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0236",
+      "create_time": "2025-04-17T08:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "1）金额统一两位小数；2）正则+规则字典识别生效时间。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0237",
+      "create_time": "2025-04-17T08:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我更新验收用例。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0238",
+      "create_time": "2025-04-18T02:22:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天怎么样？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0239",
+      "create_time": "2025-04-18T02:23:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "问题按计划修，下午回归。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0240",
+      "create_time": "2025-04-18T02:23:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我加了生效期的解析优先级。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0241",
+      "create_time": "2025-04-19T03:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "更新已上；生效时间识别准确率0.78→0.91。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0242",
+      "create_time": "2025-04-19T03:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0243",
+      "create_time": "2025-04-19T03:41:20Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "无错误日志。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0244",
+      "create_time": "2025-04-19T03:41:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "金额本地化显示已上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0245",
+      "create_time": "2025-04-20T01:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "周末简单同步。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0246",
+      "create_time": "2025-04-20T01:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "稳定推进。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0247",
+      "create_time": "2025-04-20T01:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我补了两类边界问法。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0248",
+      "create_time": "2025-04-21T02:50:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "问下：跨会话“已承诺事项”目前会丢，对吧？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0249",
+      "create_time": "2025-04-21T02:51:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "对，只在当次上下文里。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0250",
+      "create_time": "2025-04-21T02:51:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记为后续需求。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0251",
+      "create_time": "2025-04-21T02:52:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "等MVP稳定再看。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0252",
+      "create_time": "2025-04-22T01:01:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "今天有我需要决定的事情吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0253",
+      "create_time": "2025-04-22T01:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "没有，需要的是持续压幻觉与体验细节。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0254",
+      "create_time": "2025-04-22T01:02:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我今天主要做评估与小修。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0255",
+      "create_time": "2025-04-23T05:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "上线前风险：数据更新、合规、长尾问法。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0256",
+      "create_time": "2025-04-23T05:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "长尾问法我收集补齐；合规再加一层兜底。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0257",
+      "create_time": "2025-04-23T05:16:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "“提交→审核→入库”流水线已通。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0258",
+      "create_time": "2025-04-23T05:17:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "提醒显著性提高但不打断。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0259",
+      "create_time": "2025-04-24T10:45:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "风格模板的销售型反馈不错。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0260",
+      "create_time": "2025-04-24T10:46:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我把阈值再往销售型偏一点点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0261",
+      "create_time": "2025-04-24T10:46:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI保留切换。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0262",
+      "create_time": "2025-04-25T11:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "月底汇报材料别忘了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0263",
+      "create_time": "2025-04-25T11:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我写：指标页+A的技术方案+E的界面图+D的系统图。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0264",
+      "create_time": "2025-04-25T11:06:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "系统图确认：检索、重排、生成、规则层、日志层。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0265",
+      "create_time": "2025-04-25T11:07:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我贴架构源文件。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0266",
+      "create_time": "2025-04-25T11:07:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "截图今晚给。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0267",
+      "create_time": "2025-04-26T03:10:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "周末轻问一句，OK吧？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0268",
+      "create_time": "2025-04-26T03:10:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0269",
+      "create_time": "2025-04-26T03:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "没问题。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0270",
+      "create_time": "2025-04-27T01:25:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "灰度试用反馈：1）“下一步建议”受欢迎；2）有人希望“记住报价偏好”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0271",
+      "create_time": "2025-04-27T01:26:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "记“偏好”需要跨会话记忆，后续加。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0272",
+      "create_time": "2025-04-27T01:26:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "同意。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0273",
+      "create_time": "2025-04-27T01:27:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "先稳核心体验。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0274",
+      "create_time": "2025-04-28T07:50:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "MVP功能冻结：检索、生成、规则、意图/slot、合规提醒、行动卡片。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0275",
+      "create_time": "2025-04-28T07:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "验收口径锁定：命中≥0.85、幻觉≤5%、合规≥0.98、P95≤1.4s。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0276",
+      "create_time": "2025-04-28T07:52:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "报警阈值设置完成。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0277",
+      "create_time": "2025-04-28T07:52:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI边距收一版，明天上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0278",
+      "create_time": "2025-04-29T12:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "回归通过，边界无阻断。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0279",
+      "create_time": "2025-04-29T12:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "技术侧OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0280",
+      "create_time": "2025-04-29T12:04:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "稳定。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0281",
+      "create_time": "2025-04-29T12:04:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "体验OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0282",
+      "create_time": "2025-04-30T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "按时完成？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0283",
+      "create_time": "2025-04-30T02:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "完成。MVP达标，指标在文档。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0284",
+      "create_time": "2025-04-30T02:01:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "上线版本锁定，模型和提示词打tag。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0285",
+      "create_time": "2025-04-30T02:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "灰度到50%，观察一周。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0286",
+      "create_time": "2025-04-30T02:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "最终界面稿已发。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0287",
+      "create_time": "2025-04-30T02:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "辛苦。今晚材料发我。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0288",
+      "create_time": "2025-04-30T02:03:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0289",
+      "create_time": "2025-04-30T02:03:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "补充：本期未做跨会话持久化（偏好/承诺），后续可规划。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0290",
+      "create_time": "2025-04-30T02:04:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "先把当前版本推稳定，后续再加。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0291",
+      "create_time": "2025-05-04T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "大家早。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0292",
+      "create_time": "2025-05-04T02:01:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "我们需要在“智能销售助手”里加情绪识别，尽快上线试点。能不能两周内搞个可用版本？@all",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0293",
+      "create_time": "2025-05-04T02:01:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "两周能实现的工作有限，是否有明确的客户需求。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0294",
+      "create_time": "2025-05-04T02:01:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "暂时没有，实现一个基本情绪识别功能就好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0295",
+      "create_time": "2025-05-04T02:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "两周的限制下只能定义一个较小的情绪分类。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0296",
+      "create_time": "2025-05-04T02:02:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我们定义一个较小范围：我们只识别文本情绪，先分5类：开心/愤怒/沮丧/困惑/中性。可以吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0297",
+      "create_time": "2025-05-04T02:02:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK，越快越好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0298",
+      "create_time": "2025-05-04T02:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "技术上可行。我想了想，基本思路可以这样：用中文RoBERTa微调一个情绪分类头，目标推理延迟<70ms/条；先做轻量级蒸馏版防止拖慢对话。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0299",
+      "create_time": "2025-05-04T02:04:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "D来做服务化和部署，A10一张卡够用。gRPC接口给对话流插入。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0300",
+      "create_time": "2025-05-04T02:04:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0301",
+      "create_time": "2025-05-04T02:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "前端相关需要E来提供一些帮助。E，可以吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0302",
+      "create_time": "2025-05-04T02:05:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "可以的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0303",
+      "create_time": "2025-05-04T02:06:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我用标签+颜色标注：开心绿、愤怒红、沮丧橙、困惑紫、中性灰；危险情绪加提醒。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0304",
+      "create_time": "2025-05-04T02:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "验收口径先定：- 宏平均F1≥0.75；- 单条延迟P95≤80ms；- 置信度阈值默认0.55；- 对愤怒/沮丧触发提醒。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0305",
+      "create_time": "2025-05-04T02:10:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "时间点？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0306",
+      "create_time": "2025-05-04T02:12:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "本周做模型+离线评测，下周前半联调，5月15日提交。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0307",
+      "create_time": "2025-05-04T02:12:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "B写个相关的材料给我。你们交流好@A @B。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0308",
+      "create_time": "2025-05-04T02:12:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我补个需求文档，今天出初稿。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0309",
+      "create_time": "2025-05-04T02:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。哦对，我先用GoEmotions中文版和我们客服对话语料混合训练，类间不平衡我会调权重。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0310",
+      "create_time": "2025-05-04T02:15:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "接口规格给我一版proto？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0311",
+      "create_time": "2025-05-04T02:15:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "下午给。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0312",
+      "create_time": "2025-05-04T02:15:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "提示文案我先走两套版本，保守/积极各一套。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0313",
+      "create_time": "2025-05-05T07:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我问一句，情绪识别的类别里面困惑和沮丧容易混？@A",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0314",
+      "create_time": "2025-05-05T07:10:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "是的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0315",
+      "create_time": "2025-05-05T07:10:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我们计划用混淆矩阵看，必要时把困惑判定阈值调高0.05。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0316",
+      "create_time": "2025-05-05T07:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "别过度优化，先做对。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0317",
+      "create_time": "2025-05-05T07:12:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0318",
+      "create_time": "2025-05-07T06:06:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "补个新需求：我们要做一个“记忆系统”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0319",
+      "create_time": "2025-05-07T06:06:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "我们的销售助手要记得客户的偏好、历史承诺、禁忌词等，后续自动提醒。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0320",
+      "create_time": "2025-05-07T06:06:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我们做到什么程度？记忆颗粒度如何？只记事实，还是也记情绪轨迹？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0321",
+      "create_time": "2025-05-07T06:07:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "目前只需要帮助销售助手实现记忆功能。后续我们需要把整个系统应用推广到更大场景。@A 你们对记忆这种东西有所了解吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0322",
+      "create_time": "2025-05-07T06:07:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "是的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0323",
+      "create_time": "2025-05-07T06:08:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我最近了解了一些相关的方法。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0324",
+      "create_time": "2025-05-07T06:08:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "针对我们的需求，我建议“三段式”：短期记忆（最近N轮上下文）、中期记忆（会话级摘要+主题）、长期记忆（跨会话的稳定事实/偏好）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0325",
+      "create_time": "2025-05-07T06:08:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "存储选啥？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0326",
+      "create_time": "2025-05-07T06:09:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "向量检索+KV。向量库用ChromaDB。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0327",
+      "create_time": "2025-05-07T06:10:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我做“记忆面板”，分组：客户信息/禁忌/偏好/承诺/风险。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0328",
+      "create_time": "2025-05-07T06:10:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "合规要注意，PII可清空。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0329",
+      "create_time": "2025-05-07T06:11:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "这周先把短期+中期雏形跑起来。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0330",
+      "create_time": "2025-05-07T06:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "短期我用环形缓冲，角色拆分+时间衰减；中期做结构化摘要。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0331",
+      "create_time": "2025-05-07T06:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我先建Chroma库和collection。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0332",
+      "create_time": "2025-05-07T06:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "写入策略先事件驱动：偏好/禁忌/承诺/联系人/预算/行业特征。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0333",
+      "create_time": "2025-05-07T06:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "OK。我今晚先打通短期链路。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0334",
+      "create_time": "2025-05-07T06:13:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI先折叠，关键事件弹小卡片。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0335",
+      "create_time": "2025-05-07T06:14:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "推进。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0336",
+      "create_time": "2025-05-07T06:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "过期策略后面再细化？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0337",
+      "create_time": "2025-05-07T06:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "中期TTL先定14天，长期合并不删；细节明天补。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0338",
+      "create_time": "2025-05-07T06:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记上了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0339",
+      "create_time": "2025-05-07T09:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "问下，记忆过期有打算吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0340",
+      "create_time": "2025-05-07T09:12:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "临时想法：中期记忆设TTL 14天，长期记忆永久但可合并；我们明天早会再细化。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0341",
+      "create_time": "2025-05-07T09:12:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "行，我记在需求里。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0342",
+      "create_time": "2025-05-13T02:32:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "更新：短期记忆已接入，按角色拆分存最近40轮，按时间衰减；中期摘要我做了首版摘要prompt，按会话结束/超时写入。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0343",
+      "create_time": "2025-05-13T02:32:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "ChromaDB库已建，collection按客户ID分片；embedding我挂了`text-embedding-3-large`，batch写入OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0344",
+      "create_time": "2025-05-13T02:33:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记忆类型我再明确：- 偏好（如“喜欢对比表”）；- 禁忌（如“别打电话早上9点前”）；- 承诺（“下周给报价”）；- 联系人/角色；- 预算区间；- 行业特征。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0345",
+      "create_time": "2025-05-13T02:34:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI那边：记忆面板默认折叠，只在关键事件时弹出“小卡片”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0346",
+      "create_time": "2025-05-13T02:34:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "上线节奏？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0347",
+      "create_time": "2025-05-13T02:34:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "这周内把中期摘要可检索，topK=6，rerank用BM25+语义score融合，recency权重0.7；长期记忆先打通写入但不默认展示。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0348",
+      "create_time": "2025-05-13T02:35:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "TTL先按你昨天说的：中期14天，短期仅在会话内，长期无TTL但做相似度>0.85合并。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0349",
+      "create_time": "2025-05-13T02:35:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我加一条写入幂等校验，避免抖动重复。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0350",
+      "create_time": "2025-05-13T02:36:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "卡片文案我先用保守版，避免过度“贴脸”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0351",
+      "create_time": "2025-05-13T02:36:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "好的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0352",
+      "create_time": "2025-05-13T02:37:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "注：还缺两块：PII脱敏、手动修正面板，后面补。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0353",
+      "create_time": "2025-05-13T02:37:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记上了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0354",
+      "create_time": "2025-05-13T02:38:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "记忆系统还在路上，先别宣发。情绪识别别耽误。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0355",
+      "create_time": "2025-05-13T02:38:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "明白。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0356",
+      "create_time": "2025-05-13T02:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "先这样，后面有坑我们群里说。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0357",
+      "create_time": "2025-05-15T10:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "提交：宏F1=0.78；愤怒召回+4%；P95=62ms；默认阈值0.55。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0358",
+      "create_time": "2025-05-15T10:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "验收通过。提醒策略也OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0359",
+      "create_time": "2025-05-15T10:06:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "灰度到10%流量，监控正常。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0360",
+      "create_time": "2025-05-15T10:07:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "文案走保守版。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0361",
+      "create_time": "2025-05-15T10:07:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "辛苦，情绪识别做的不错。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0362",
+      "create_time": "2025-05-15T10:07:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "接下来重心放在记忆系统中。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0363",
+      "create_time": "2025-05-20T03:00:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "简单测了下：能拉回“上次承诺”和“预算”。topK=6还行。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0364",
+      "create_time": "2025-05-20T03:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我把触发规则加一条：当本轮主题与上次摘要余弦>0.6就尝试注入。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0365",
+      "create_time": "2025-05-20T03:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "写入异步化了，避免阻塞。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0366",
+      "create_time": "2025-05-20T03:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "面板加“编辑/删除”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0367",
+      "create_time": "2025-05-20T03:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "误报要有兜底。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0368",
+      "create_time": "2025-05-20T03:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "做了门控：score<0.35不注入；“禁忌”类必须>0.5。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0369",
+      "create_time": "2025-05-20T03:04:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "先给两位内部销售试用。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0370",
+      "create_time": "2025-05-20T03:04:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "同意。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0371",
+      "create_time": "2025-05-20T03:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我补下日志埋点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0372",
+      "create_time": "2025-05-20T03:05:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0373",
+      "create_time": "2025-05-27T07:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "法务来信：手机号/邮箱必须脱敏；用户可一键清空记忆。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0374",
+      "create_time": "2025-05-27T07:10:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "好的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0375",
+      "create_time": "2025-05-27T07:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我在写入pipeline加PII检测和mask（手机号中四位）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0376",
+      "create_time": "2025-05-27T07:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "清空操作我加审计日志。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0377",
+      "create_time": "2025-05-27T07:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "清空后提示“可撤销30秒”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0378",
+      "create_time": "2025-05-27T07:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "这块优先。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0379",
+      "create_time": "2025-05-27T07:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0380",
+      "create_time": "2025-05-27T07:14:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "还有，记忆合并最好可解释。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0381",
+      "create_time": "2025-05-27T07:14:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我做“来源对齐”入口，显示来自哪条对话。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0382",
+      "create_time": "2025-05-27T07:15:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "加个traceID就能串起来。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0383",
+      "create_time": "2025-05-27T07:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "行，安排。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0384",
+      "create_time": "2025-05-29T01:30:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "小样本评估：mAP@6=0.71。“禁忌”精准度高，“行业特征”召回偏低。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0385",
+      "create_time": "2025-05-29T01:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "行业特征扩下同义词库？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0386",
+      "create_time": "2025-05-29T01:31:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我来整理术语表：制造/物流/医疗先做。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0387",
+      "create_time": "2025-05-29T01:32:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "HNSW的efSearch我从128提到256，延迟+3ms。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0388",
+      "create_time": "2025-05-29T01:32:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "注入再加条策略：若情绪“愤怒/强沮丧”，更保守。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0389",
+      "create_time": "2025-05-29T01:33:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "赞同，别火上浇油。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0390",
+      "create_time": "2025-05-29T01:33:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "阈值这块先别乱动，先看词表的效果。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0391",
+      "create_time": "2025-05-29T01:34:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0392",
+      "create_time": "2025-05-29T01:35:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "词表我今晚先出v0.1。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0393",
+      "create_time": "2025-05-29T01:35:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "👍",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0394",
+      "create_time": "2025-06-03T02:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "试用反馈：有条“预算50-80万”被误合并到“30-60万”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0395",
+      "create_time": "2025-06-03T02:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "数值类要更严格。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0396",
+      "create_time": "2025-06-03T02:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我把合并阈值0.85→0.90，数值范围单独处理。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0397",
+      "create_time": "2025-06-03T02:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我做了回放工具，可重放对话看注入轨迹。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0398",
+      "create_time": "2025-06-03T02:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "解释面板加“为何命中”一句话。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0399",
+      "create_time": "2025-06-03T02:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "何时扩大试点？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0400",
+      "create_time": "2025-06-03T02:13:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "6/10拉到12位销售。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0401",
+      "create_time": "2025-06-03T02:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我把recency权重0.7→0.6，避免老事实过强。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0402",
+      "create_time": "2025-06-03T02:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "记上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0403",
+      "create_time": "2025-06-03T02:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我稍后发变更说明。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0404",
+      "create_time": "2025-06-03T02:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0405",
+      "create_time": "2025-06-10T06:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "beta开始。两点：1) 禁忌来电时间提醒很有用；2) 联系人角色偶尔漏记。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0406",
+      "create_time": "2025-06-10T06:41:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "联系人我改NER+规则双通道，优先实名/职位词。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0407",
+      "create_time": "2025-06-10T06:41:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "topK动态化：遇到“联系人/预算”强制topK=8，其他保持6。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0408",
+      "create_time": "2025-06-10T06:42:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI把“联系人”移到最上。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0409",
+      "create_time": "2025-06-10T06:42:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "能量化下价值吗？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0410",
+      "create_time": "2025-06-10T06:43:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "先看三项：省时间、避免触雷、跟进及时率，一周后给数据。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0411",
+      "create_time": "2025-06-10T06:43:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "埋点已加。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0412",
+      "create_time": "2025-06-10T06:44:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0413",
+      "create_time": "2025-06-10T06:44:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我晚点把NER模型热更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0414",
+      "create_time": "2025-06-10T06:45:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我配合。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0415",
+      "create_time": "2025-06-10T06:45:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我先去收集术语里的职位别名。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0416",
+      "create_time": "2025-06-17T09:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "有个风险：客户说“别再提A方案”，系统被旧记忆误导。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0417",
+      "create_time": "2025-06-17T09:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "嗯，这种要更谨慎。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0418",
+      "create_time": "2025-06-17T09:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我加了反事实更新：出现否定时，对冲旧记忆权重；若叠加强情绪，直接屏蔽24h。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0419",
+      "create_time": "2025-06-17T09:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我做黑名单缓存，热更新。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0420",
+      "create_time": "2025-06-17T09:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI显示“此记忆暂时隐藏（因用户否定）”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0421",
+      "create_time": "2025-06-17T09:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "这个很关键。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0422",
+      "create_time": "2025-06-17T09:13:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "再加产品策略：出现“否定+强情绪”组合，记忆注入默认关闭。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0423",
+      "create_time": "2025-06-17T09:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0424",
+      "create_time": "2025-06-17T09:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "小提醒：别影响5/8那套合并策略的稳定性。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0425",
+      "create_time": "2025-06-17T09:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我会做回退开关。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0425",
+      "create_time": "2025-06-24T02:15:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "beta阶段的数据初步出来了：触雷事件下降42%，跟进及时率+18%，人均节省大概9分钟/天。效果比预期好一点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0426",
+      "create_time": "2025-06-24T02:16:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "注入覆盖率现在在62%，误注入率3.1%。目标是 <2.5%。我准备做两件事：1) 行业特征同义扩展；2) 轻量级重排序。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0427",
+      "create_time": "2025-06-24T02:17:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "延迟这边稳定在 P95 = 74ms（检索 + 注入），还可以再压几毫秒。看起来 I/O 瓶颈在向量索引那块。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0428",
+      "create_time": "2025-06-24T02:17:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "销售那边提了个需求：“记忆卡片”能不能一键转任务？他们觉得现在还要截图发给运营太麻烦。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0429",
+      "create_time": "2025-06-24T02:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好的，我把这个需求加上。这个星期内我先写到需求池里。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0430",
+      "create_time": "2025-06-24T02:18:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "不错，数据有说服力。继续推进。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0431",
+      "create_time": "2025-06-24T02:19:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我这边先验证重排序效果，看看能不能把误注入再压下去。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0432",
+      "create_time": "2025-06-24T02:19:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "有结果随手扔群里，我帮你标记版本。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0433",
+      "create_time": "2025-06-24T02:20:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "行。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0434",
+      "create_time": "2025-07-01T03:40:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "各位这段时间辛苦了！",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0435",
+      "create_time": "2025-07-01T03:40:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "当前阶段目标基本达成：情绪识别模块稳定，记忆系统 beta 验证有效。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0436",
+      "create_time": "2025-07-01T03:40:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "接下来我们记忆系统的计划要尽快给我，对外我们需要一个 demo。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0437",
+      "create_time": "2025-07-01T03:41:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "这段时间大家辛苦了，今天中午聚个餐，想吃什么可以告诉我。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0438",
+      "create_time": "2025-07-01T03:42:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我都可以，没问题。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0439",
+      "create_time": "2025-07-01T03:42:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "随便，大家都吃得开心就行。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0440",
+      "create_time": "2025-07-01T03:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Alex 提个建议。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0441",
+      "create_time": "2025-07-01T03:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "不如去上次那家北京烤鸭？大家评价都挺好。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0442",
+      "create_time": "2025-07-01T03:43:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "好，就烤鸭吧。大家12点公司门口集合。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0443",
+      "create_time": "2025-07-01T04:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "demo 的话，我这边主要看两块：1) “任务化联动”——记忆直接触发任务/提醒；2) “合规模板化导出”——导出记录时带上来源追溯。两周左右能成型。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0444",
+      "create_time": "2025-07-01T04:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "demo 我们这边需要负责三件事：行业特征召回优化、反事实回退（修正错误注入）、长期记忆实体归并（公司、品牌别名）。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0445",
+      "create_time": "2025-07-01T04:41:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "嗯，你们规划好。Dylan 和 Emily，你们的计划是什么？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0446",
+      "create_time": "2025-07-01T04:42:15Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "多租户和索引冷热分层我来搞，预计 7 月中给出方案。顺便把日志检索那边也统一掉。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0447",
+      "create_time": "2025-07-01T04:42:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我建议做一轮小型可用性测试，重点放在“误注入时的纠错”交互上。现在用户一旦看到错误记忆会比较慌张。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0448",
+      "create_time": "2025-07-01T04:43:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK，7 月中旬我们再看一版整体数据。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0449",
+      "create_time": "2025-07-01T04:43:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "A（@Alex），长期记忆默认不展示但保留，对吗？先在后台保留一份，但前台先不展示。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0450",
+      "create_time": "2025-07-01T04:44:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "对。误注入率降到 2.5% 以下前，先锁一部分“稳定事实”。不展示但不丢数据。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0451",
+      "create_time": "2025-07-01T04:44:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "明白，我把需求写进文档里并标注验收标准。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0452",
+      "create_time": "2025-07-01T04:45:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我这边先收口一版变更日志，晚点发群里。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0453",
+      "create_time": "2025-07-01T04:45:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "辛苦大家～💪",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0454",
+      "create_time": "2025-07-03T04:10:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "冷热分层那块我跑了个 benchmark，索引切分后延迟再降了 7ms。但写入时有点抖动，我在加缓存队列缓冲写入。 ",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0455",
+      "create_time": "2025-07-03T04:12:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我看了下重排序的结果，误注入降到了 2.6%，基本到线。但召回下降了 1.5%，我们得再调一下阈值。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0456",
+      "create_time": "2025-07-03T04:13:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "阈值我建议别动太猛，怕影响最终稳定性指标。我们下周 review 时再看效果。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0457",
+      "create_time": "2025-07-03T04:15:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "新的任务化联动交互我画好了：1) 卡片右上角多一个“转任务”图标；2) 自动带上记忆内容和来源。晚点我发 Figma 链接。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0458",
+      "create_time": "2025-07-03T04:53:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "👍好，等下我带销售那边看一眼。如果他们直接能用上，记忆系统这块就能闭环。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0459",
+      "create_time": "2025-07-08T04:17:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "最终指标更新：注入覆盖率 68%，误注入率 2.3%（✅），延迟 P95 = 66ms。这个阶段可以收尾 beta 了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0460",
+      "create_time": "2025-07-08T04:17:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "很棒，这个版本可以对外展示。我建议做个内部 demo 汇报，下周五前。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0461",
+      "create_time": "2025-07-08T04:18:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我来组织汇报文档和视频，Dylan 帮我录一下后台流程，Emily 把前端 demo 补上 loading 动画。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0462",
+      "create_time": "2025-07-08T04:18:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "各位，先停一下，一起去食堂吃个饭吧，咱们边吃边聊。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0463",
+      "create_time": "2025-07-08T04:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "好的，咱们先吃饭吧。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0464",
+      "create_time": "2025-07-08T04:18:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "你们去吃饭吧，我去隔壁诊所一趟，喉咙不太舒服。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0465",
+      "create_time": "2025-07-08T04:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "最近比较辛苦，注意身体。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0466",
+      "create_time": "2025-07-08T06:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "收到，前端 demo 我会搞定。我顺便加个“记忆触发历史”的小弹窗，看起来效果不错。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0467",
+      "create_time": "2025-07-08T06:05:10Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "好的，后台流程我会录制一段供文档使用。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0468",
+      "create_time": "2025-07-08T06:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "汇报文档我起了个草稿，主题定为“EverCore Beta 收尾 & 下一步规划”。各自部分我标了 TODO。@Alex @Dylan 记得帮我填下数据和系统图。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0469",
+      "create_time": "2025-07-08T06:23:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "收到，我晚点加上误注入修正部分。我顺便画个技术路径图，一图能看全流程。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0470",
+      "create_time": "2025-07-08T06:24:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我这边补性能曲线和资源占用图。GPU 用量现在稳定在 25% 左右，挺健康的。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0471",
+      "create_time": "2025-07-08T06:25:20Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Figma 版面我更新完了，新增“记忆触发历史”动画，用户能更直观地理解系统“记得了什么”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0472",
+      "create_time": "2025-07-08T06:26:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "好的，下周五演示我来定场。这次我们让业务那边也看看，争取直接对接客户试点。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0473",
+      "create_time": "2025-07-09T01:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我刚整理了内部测试反馈：1) 用户最关心“记忆准确性”；2) 其次是“记忆出现的逻辑（为什么它会出现）”。Alex，这块可能要给点解释层提示。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0474",
+      "create_time": "2025-07-09T01:12:50Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "嗯，我考虑加个“记忆来源可视化”小标签，比如：“由最近三次对话生成”。不动逻辑，只加标注，帮助用户理解来源。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0475",
+      "create_time": "2025-07-09T01:13:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "好啊，我这边能配个浅灰标签，类似：“Source: Chat #1432 / User Feedback”，显示方式不会太突兀。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0476",
+      "create_time": "2025-07-09T01:14:10Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "👍 就是要这种解释性。我们现在不是做功能，而是在建立“信任”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0477",
+      "create_time": "2025-07-09T01:15:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我补充一下，记忆读写频率这几天激增。我会加个分布式锁，防止并发写时出现竞争。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0478",
+      "create_time": "2025-07-09T01:16:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "嗯，尤其是并发回写那块，有时候写入晚于召回。我看日志里有两条错序的记录，需要对齐时间戳。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0479",
+      "create_time": "2025-07-09T01:17:10Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "对，我在做事件时间戳对齐，这个问题比较隐蔽但会影响体验。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0480",
+      "create_time": "2025-07-10T03:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "demo 前我有个问题：我们“长期记忆”现在策略是不是太保守了？有用户反馈感觉它“不记东西”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0481",
+      "create_time": "2025-07-10T03:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "嗯，保守是故意的。如果现在开放太多，不可控的记忆反而会引发“幻觉强化”。建议等稳定版再放宽策略。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0482",
+      "create_time": "2025-07-10T03:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我理解 Alex 的顾虑。但我们可以在 UI 层让用户知道“系统其实记得，只是暂不展示”。Emily，可以考虑一个“记忆中…”的小提示？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0483",
+      "create_time": "2025-07-10T03:23:10Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "可以，我放个半透明的小记忆图标，悬停后提示“系统已记录，但尚未展示”，用户就不会误会“它没学会”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0484",
+      "create_time": "2025-07-10T03:24:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "行，这个折中方案我认同。别给用户太强的“黑盒感”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0485",
+      "create_time": "2025-07-11T08:45:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "汇报 PPT 初稿放这：[link]。请大家今晚前过一遍，明早我们定稿。我在“未来展望”页重点写了“记忆系统向 EverAgent 过渡”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0486",
+      "create_time": "2025-07-11T08:46:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "那部分我明天补一句：“长期记忆 + 短期上下文融合策略探索中”。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0487",
+      "create_time": "2025-07-11T08:47:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "我会在 demo 环境上开个静态沙箱，防止演示时写入污染正式数据。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0488",
+      "create_time": "2025-07-11T08:48:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "很好，准备充分点。我打算让战略部那边也看看，可能会上年度总结会。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0489",
+      "create_time": "2025-07-15T10:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "demo 很成功。战略部的反馈是：“第一次看到 AI 真的能‘记得事儿’”。👍",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0490",
+      "create_time": "2025-07-15T10:21:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "太好了😭 有没有收到具体疑虑？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0491",
+      "create_time": "2025-07-15T10:21:50Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "有，两个主要点：1) 数据安全怎么隔离？2) 用户误触发的“非授权记忆”怎么处理？",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0492",
+      "create_time": "2025-07-15T10:22:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "前者我们用租户隔离解决了大半；后者可以在写入链路加一个“用户确认写入”层。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0493",
+      "create_time": "2025-07-15T10:23:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我同意，但不能太打断用户流程。可能要智能识别“风险内容”才提示确认。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0494",
+      "create_time": "2025-07-15T10:24:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "可以加个轻量分类器判断语义类别，比如涉及人名或敏感信息时才触发确认。我这边有现成模型可以用。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0495",
+      "create_time": "2025-07-15T10:25:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK，这个直接列入 v1.0 backlog。我们终于要进正式版了。🎯",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0496",
+      "create_time": "2025-07-15T10:25:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "我们是不是也该改个更“有记忆感”的 logo？现在那个小脑图标看起来太像医疗 App 了 😂",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0497",
+      "create_time": "2025-07-15T10:26:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "哈哈哈同感。下周我拉个小会专门改视觉。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0498",
+      "create_time": "2025-07-15T10:26:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "可以，咱这产品确实该“有点灵魂”了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0499",
+      "create_time": "2025-07-16T01:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "我昨晚跑了个回归：长期记忆召回率 +6.3%，误注入率暂时没变。看起来归并逻辑优化生效了。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0500",
+      "create_time": "2025-07-16T01:03:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "👍 日志这次干净了，数据一致性比上周好很多。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0501",
+      "create_time": "2025-07-16T01:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "各位，来茶水间吧，我给大家买了咖啡和小零食。大家可以边喝边聊。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0502",
+      "create_time": "2025-07-16T01:05:15Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "OK，我马上来。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0503",
+      "create_time": "2025-07-16T01:05:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "好的，感谢老板。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0504",
+      "create_time": "2025-07-16T01:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "谢谢老板。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0505",
+      "create_time": "2025-07-16T01:25:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "@Betty 来 A 会议室看看我昨晚的回归结果吧。@Dylan 也请一并过来。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0506",
+      "create_time": "2025-07-16T01:34:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "@Chen 我看了下回归效果不错，Dylan 带我看了日志，数据看起来干净。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0507",
+      "create_time": "2025-07-16T01:34:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "我们差不多可以准备写 v1.0 发布说明了。我来负责起草发布说明。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0508",
+      "create_time": "2025-07-16T01:35:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "好。记得结尾那句我来写：EverCore，让 AI 真正拥有可控的记忆。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0509",
+      "create_time": "2025-07-20T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "各位辛苦了！EverCore v1.0 项目到此圆满结束。感谢大家这几个月的辛勤付出和协作，我们成功交付了一个优秀的产品。现在项目正式结项，今天的讨论到此结束。再次感谢大家！",
+      "refer_list": []
+    }
+  ]
+}

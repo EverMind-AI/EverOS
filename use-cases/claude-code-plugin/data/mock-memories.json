@@ -1,0 +1,104 @@
+{
+  "memories": [
+    {
+      "text": "We decided to use JWT tokens with 15-minute expiry for authentication. Refresh tokens are stored in httpOnly cookies to prevent XSS attacks. This was chosen over session-based auth for better scalability across our microservices.",
+      "timestamp": "2026-01-15T08:30:00Z"
+    },
+    {
+      "text": "Fixed the token refresh race condition bug. When multiple API calls detected an expired token simultaneously, they all tried to refresh, causing 401 cascades. Added a mutex lock around the refresh logic and a queue for pending requests.",
+      "timestamp": "2026-01-14T15:45:00Z"
+    },
+    {
+      "text": "Implemented rate limiting using Redis with a sliding window algorithm. Set to 100 requests per minute per user. Chose sliding window over fixed window to prevent burst attacks at window boundaries.",
+      "timestamp": "2026-01-10T09:00:00Z"
+    },
+    {
+      "text": "Switched from MongoDB to PostgreSQL for the user service. The relational model better fits our data with complex joins. Using Prisma as the ORM for type safety.",
+      "timestamp": "2026-01-02T14:20:00Z"
+    },
+    {
+      "text": "Added retry logic with exponential backoff for all external API calls. Max 3 retries, starting at 100ms, doubling each time. Includes jitter to prevent thundering herd.",
+      "timestamp": "2025-12-28T11:30:00Z"
+    },
+    {
+      "text": "Decided on GraphQL for the mobile API, REST for internal services. GraphQL reduces over-fetching for mobile clients with limited bandwidth. REST is simpler for service-to-service communication.",
+      "timestamp": "2025-12-20T16:00:00Z"
+    },
+    {
+      "text": "Fixed memory leak in the WebSocket connection handler. Connections weren't being cleaned up on client disconnect. Added proper event listeners for 'close' and 'error' events.",
+      "timestamp": "2026-01-13T08:15:00Z"
+    },
+    {
+      "text": "Implemented database connection pooling with a max of 20 connections per service instance. This resolved the connection exhaustion issues during traffic spikes.",
+      "timestamp": "2025-12-15T10:45:00Z"
+    },
+    {
+      "text": "Added request correlation IDs for distributed tracing. Every incoming request gets a UUID that propagates through all downstream service calls. Makes debugging much easier.",
+      "timestamp": "2025-12-10T13:00:00Z"
+    },
+    {
+      "text": "Chose bcrypt with cost factor 12 for password hashing. Argon2 was considered but bcrypt has better library support across our stack. Cost factor 12 gives ~250ms hash time.",
+      "timestamp": "2025-11-25T09:30:00Z"
+    },
+    {
+      "text": "Implemented graceful shutdown for the API server. On SIGTERM, stop accepting new connections, wait for in-flight requests (max 30s), then exit. Prevents dropped requests during deploys.",
+      "timestamp": "2025-12-05T14:00:00Z"
+    },
+    {
+      "text": "Fixed the N+1 query problem in the orders endpoint. Was making a separate DB call for each order's items. Switched to a single query with JOIN and manual result mapping.",
+      "timestamp": "2026-01-08T11:20:00Z"
+    },
+    {
+      "text": "Added circuit breaker pattern for the payment service integration. Opens after 5 failures in 30 seconds, half-open after 60 seconds. Prevents cascade failures.",
+      "timestamp": "2025-12-18T15:30:00Z"
+    },
+    {
+      "text": "Decided to use UUIDs for all public-facing IDs instead of auto-increment integers. Prevents enumeration attacks and makes sharding easier in the future.",
+      "timestamp": "2025-11-15T10:00:00Z"
+    },
+    {
+      "text": "Implemented API versioning via URL path (/v1/, /v2/). Header-based versioning was considered but URL is more explicit and easier to debug. Old versions sunset after 6 months.",
+      "timestamp": "2025-11-20T16:45:00Z"
+    },
+    {
+      "text": "Fixed timezone bug in date filtering. All dates now stored as UTC in database, converted to user's timezone only in the API response layer. Using date-fns-tz for conversions.",
+      "timestamp": "2026-01-12T09:00:00Z"
+    },
+    {
+      "text": "Added structured logging with JSON format. Each log entry includes timestamp, level, correlation_id, service_name, and message. Enables better log aggregation in Elasticsearch.",
+      "timestamp": "2025-12-01T11:15:00Z"
+    },
+    {
+      "text": "Implemented soft deletes for user data using a deleted_at timestamp. Required for GDPR compliance - we need to retain some data for audit purposes even after user requests deletion.",
+      "timestamp": "2025-11-10T14:30:00Z"
+    },
+    {
+      "text": "Switched from REST polling to WebSockets for real-time notifications. Reduced server load significantly. Using Socket.io for automatic reconnection and room-based broadcasting.",
+      "timestamp": "2025-12-22T13:00:00Z"
+    },
+    {
+      "text": "Added input validation using Zod schemas. All API endpoints validate request body, query params, and path params. Returns 400 with detailed error messages on validation failure.",
+      "timestamp": "2026-01-05T10:30:00Z"
+    },
+    {
+      "text": "Implemented file upload using pre-signed S3 URLs. Client uploads directly to S3, then notifies our API with the object key. Keeps large files off our servers.",
+      "timestamp": "2025-12-08T15:00:00Z"
+    },
+    {
+      "text": "Fixed race condition in inventory updates. Two concurrent orders could both see available stock and both succeed. Added optimistic locking with version numbers.",
+      "timestamp": "2026-01-11T14:45:00Z"
+    },
+    {
+      "text": "Decided on feature flags using LaunchDarkly. Allows gradual rollouts and instant kill switches. All new features wrapped in flags by default.",
+      "timestamp": "2025-11-28T09:00:00Z"
+    },
+    {
+      "text": "Added health check endpoint at /health that verifies database connectivity, Redis connectivity, and critical external service availability. Used by load balancer and Kubernetes probes.",
+      "timestamp": "2025-12-12T16:30:00Z"
+    },
+    {
+      "text": "Implemented request rate limiting per API key, not just per IP. Prevents abuse from authenticated users. Limits stored in Redis with sliding window counters.",
+      "timestamp": "2026-01-03T11:00:00Z"
+    }
+  ]
+}

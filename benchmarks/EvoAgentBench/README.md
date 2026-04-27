@@ -56,7 +56,7 @@ EvoAgentBench provides a standardized protocol for evaluating agent self-evoluti
 
 | Method | Approach | Link |
 |--------|----------|------|
-| **EverMemOS** | Memory-based skill extraction from trajectories | [github.com/EverMind-AI/EverOS](https://github.com/EverMind-AI/EverOS) |
+| **EverCore** | Memory-based skill extraction from trajectories | [github.com/EverMind-AI/EverOS](https://github.com/EverMind-AI/EverOS) |
 | **EvoSkill** | Two-step proposer-generator self-improving loop | [github.com/sentient-agi/EvoSkill](https://github.com/sentient-agi/EvoSkill) |
 | **Memento** | Case-based retrieval with similarity search | [github.com/Agent-on-the-Fly/Memento](https://github.com/Agent-on-the-Fly/Memento) |
 | **OpenSpace** | Skill accumulation via analyze-evolve pipeline | [github.com/HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace) |
@@ -150,13 +150,13 @@ python src/run.py --agent nanobot --domain code_implementation --task 1873_A --l
 python src/run.py --agent nanobot --domain reasoning --split test --task omni_917 --live
 ```
 
-### EverMemOS Usage
+### EverCore Usage
 
 ```bash
 # Step 1: Baseline — run agent on train split
 python src/run.py --domain information_retrieval --split train --parallel 4
 
-# Step 2: Extract skills from train sessions (requires EverMemOS service)
+# Step 2: Extract skills from train sessions (requires EverCore service)
 python src/skill_evolution/evermemos/extract_skills.py --domain information_retrieval
 
 # Step 3: Evaluate test with skills injected
@@ -235,7 +235,7 @@ evoagentbench/
 │       ├── docker.py               #   Docker + tmux utilities
 │       └── browsecomp-plus-tools/  #   BrowseComp-Plus MCP server + data prep
 ├── src/skill_evolution/                           # Self-evolution method evaluation
-│   └── evermemos/                  #   EverMemOS skill extraction + evaluation
+│   └── evermemos/                  #   EverCore skill extraction + evaluation
 ├── data/                           # Benchmark data (gitignored)
 └── jobs/                           # Evaluation output (gitignored)
 ```

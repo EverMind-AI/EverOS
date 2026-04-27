@@ -44,7 +44,7 @@ Two formats are supported:
 
 | Directory | Method | Mode | Description |
 |-----------|--------|------|-------------|
-| `evermemos/` | EverMemOS | Offline / Online | Extract skills via EverMemOS API, inject into prompt |
+| `evermemos/` | EverCore | Offline / Online | Extract skills via EverCore API, inject into prompt |
 | More methods | Coming soon | — | — |
 
 ## Adding a New Method

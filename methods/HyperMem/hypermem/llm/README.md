@@ -34,7 +34,7 @@ export OPENROUTER_MAX_TOKENS="16384"
 
 # Optional: Site attribution
 export OPENROUTER_SITE_URL="your_site_url"
-export OPENROUTER_APP_NAME="EverMemOS"
+export OPENROUTER_APP_NAME="EverCore"
 ```
 
 ### 3. Get OpenRouter API Key

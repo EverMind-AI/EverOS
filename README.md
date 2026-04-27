@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![banner-gif](https://github.com/user-attachments/assets/49616157-f22c-4f1b-82c1-96b201016608)
+![banner-gif](https://github.com/user-attachments/assets/0bf97efd-580f-4a53-a2a2-58d6daea7290)
 
 <p align="center">
   <!-- <a href="https://arxiv.org/abs/2601.02163"><img src="https://img.shields.io/badge/arXiv-EverOS-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white" alt="arXiv: EverOS"></a> -->
@@ -10,7 +10,7 @@
   <!-- <a href="https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic"><img src="https://img.shields.io/badge/🤗_HuggingFace-EverMemBench--Dynamic-F5C842?labelColor=gray&style=flat-square" alt="HuggingFace: EverMemBench-Dynamic"></a> -->
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
   <a href="https://discord.gg/gYep5nQRZJ"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=404EED&labelColor=gray&style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeChat-EverMind-07C160?labelColor=gray&style=for-the-badge&logo=wechat&logoColor=white" alt="WeChat"></a>
+  <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeCom-EverMind_社区-07C160?labelColor=gray&style=for-the-badge&logo=wechat&logoColor=white" alt="WeChat"></a>
   <a href="https://github.com/EverMind-AI/EverOS/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=gray&style=for-the-badge" alt="License"></a>
 </p>
 
@@ -18,60 +18,85 @@
 
 </div>
 
-<br>
-
-> [!IMPORTANT]
->
-> ### Project Structure Update
->
-> We've unified [EverCore](methods/evermemos/), [HyperMem](methods/HyperMem/), [EverMemBench](benchmarks/EverMemBench/), and [EvoAgentBench](benchmarks/EvoAgentBench/) with usecases into a single repository.
->
-> EverOS gives developers one place to build, evaluate, and integrate long-term memory into their self-evolving agents. 🎉
 
 <br>
+
+<details open>
+  <summary><kbd>Table of Contents</kbd></summary>
+
+<br>
+
+- [Project Overview](#project-overview)
+- [Methods](#methods)
+- [Benchmarks](#benchmarks)
+- [Quick Start](#quick-start)
+- [Evaluation & Benchmarking](#evaluation--benchmarking)
+- [Use Cases](#use-cases)
+- [Citation](#citation)
+- [Stay Tuned](#-stay-tuned)
+- [Contributing](#contributing)
+
+<br>
+
+</details>
+
+
 
 ## Project Overview
 
-**EverOS** is a collection of long-term memory **methods**, **benchmarks**, and **usecases** for building self-evolving agents.
+**EverOS** brings together long-term memory **methods**, **benchmarks**, and **use cases** for building self-evolving agents.
+
+At the heart of EverOS is **EverCore** — a long-term memory operating system for agents. Follow the [Quick Start](#quick-start) to spin it up in a few minutes. From there, plug it into one of the **use cases** as a template and watch your agent come alive with persistent memory you can actually see and feel. When you are ready to know how good it really is, run the **benchmarks** to measure how your agent remembers, reasons, and evolves.
 
 ```
 EverOS/
-└── methods/
-    ├── EverCore/            # Long-term memory operating system
-    └── HyperMem/            # Hypergraph memory architecture
-├── benchmarks/
-│   ├── EverMemBench/        # Memory quality evaluation
-│   └── EvoAgentBench/       # Agent self-evolution evaluation
-└── usecases/                # Example applications
+├── benchmarks/                # Evaluation suites
+│   ├── EverMemBench/          # Memory quality evaluation
+│   └── EvoAgentBench/         # Agent self-evolution evaluation
+├── methods/                   # Memory architectures
+│   ├── EverCore/              # Long-term memory operating system
+│   └── HyperMem/              # Hypergraph memory architecture
+└── use-cases/                 # Templates to plug the core into
+    ├── openher/               # OpenHer — AI companion with memory
+    ├── claude-code-plugin/    # Claude Code Plugin — memory-enhanced code plugin
+    ├── game-of-throne-demo/   # Game of Thrones Demo — a memory-enabled game
+    ├── ...
+    └── ...
 ```
 
 <br>
 
 ## Methods
 
-Methods are production-ready memory architectures that give agents persistent, structured long-term memory. Each can be used standalone or composed together depending on your use case.
+Methods are memory architectures you can choose from — production-ready implementations that give agents persistent, structured long-term memory. Pick the one that fits your use case, or compose them together.
+
+Full benchmark numbers live in the [Evaluation & Benchmarking](#evaluation--benchmarking) section and in each method's paper.
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/1bbead72-7a6b-4b19-88f2-5bfc8433e3aa)
+<!-- ![banner-gif](https://github.com/user-attachments/assets/1bbead72-7a6b-4b19-88f2-5bfc8433e3aa) -->
 
 
 #### EverCore
 
 A self-organizing memory operating system inspired by biological imprinting. Extracts, structures, and retrieves long-term knowledge from conversations — enabling agents to remember, understand, and continuously evolve.
 
-[Paper](https://arxiv.org/abs/2601.02163) · [Docs](methods/evermemos/)
+LoCoMo **93.05%** · LongMemEval **83.00%**
+
+[Paper](https://arxiv.org/abs/2601.02163) · [Docs](methods/EverCore/)
 
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/b63d8735-ea94-4ed6-9c0c-a11b55b1a2a4)
+<!-- ![banner-gif](https://github.com/user-attachments/assets/b63d8735-ea94-4ed6-9c0c-a11b55b1a2a4) -->
 
 #### HyperMem
 
-A hypergraph-based hierarchical memory architecture that captures high-order associations through hyperedges. Organizes memory into topic, event, and fact layers for coarse-to-fine long-term conversation retrieval. LoCoMo 92.73%.
+A hypergraph-based hierarchical memory architecture that captures high-order associations through hyperedges. Organizes memory into topic, event, and fact layers for coarse-to-fine long-term conversation retrieval.
+
+LoCoMo **92.73%**
 
 [Paper](https://arxiv.org/abs/2604.08256) · [Docs](methods/HyperMem/)
 
@@ -89,7 +114,7 @@ Benchmarks are designed as **open public standards**. Any memory architecture or
 <tr>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/f6f11c3c-7977-4c3b-8c2b-f7cf13e8f93a)
+<!-- ![banner-gif](https://github.com/user-attachments/assets/f6f11c3c-7977-4c3b-8c2b-f7cf13e8f93a) -->
 
 #### EverMemBench
 
@@ -100,7 +125,7 @@ Three-layer memory quality evaluation: factual recall, applied reasoning, and pe
 </td>
 <td width="50%" valign="top">
 
-![banner-gif](https://github.com/user-attachments/assets/79fd03fe-cd6d-4b92-88d7-d66886d31799)
+<!-- ![banner-gif](https://github.com/user-attachments/assets/79fd03fe-cd6d-4b92-88d7-d66886d31799) -->
 
 #### EvoAgentBench
 
@@ -151,136 +176,6 @@ Agent self-evolution evaluation — not static snapshots, but longitudinal growt
 
 </div> -->
 
-## Use Cases
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/9dcb3dd4-4402-45fa-ae13-e6782f42c7ea)
-
-#### Earth Online Memory Game
-
-Earth Online is a memory-aware productivity game that turns everyday planning into a living quest log. 
-
-<!-- [Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin) -->
-
-</td>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)
-
-#### Multi‑Agent Orchestration Platform
-
-Golutra is pitched as “beyond the IDE,” a multi-agent workforce rather than a single assistant for engineering teams.
-
-</td>
-</tr>
-<tr>
-<tr>
-<tr>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/e6eaf308-a874-483f-8874-6934bf95a78f)
-
-#### Mobi Is a Companion
-
-An iOS app that lets users create, nurture, and live with a personalized AI “lifeform” companion called Mobi.
-
-</td>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/9aabcaa9-f97a-49d2-9109-0b5bb696ed41)
-
-#### AI Wearable with Memory
-
-A context-native empathic AI wearable that listens to everyday life
-and converts conversations into memory.
-
-</td>
-</tr>
-<tr>
-<tr>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)
-
-#### OpenClaw Agent Memory
-
-A 24/7 agent with continuous learning memory that you can carry with you wherever you go.
-
-[Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
-
-</td>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)
-
-#### Live2D Character with Memory
-
-Add long-term memory to your anime character that can talk to you in real-time, powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
-
-[Code](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/c36bdc04-97d3-4fe9-97d9-4b93b475595a)
-
-#### Computer-Use with Memory
-
-Use computer-use to launch screenshot-based analysis, all stored in your memory.
-
-[Live Demo](https://screenshot-analysis-vercel.vercel.app/)
-
-</td>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)
-
-#### Game of Thrones Memories
-
-A demonstration of AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones".
-
-[Code](https://github.com/EverMind-AI/evermem_got_demo)
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)
-
-#### Claude Code Plugin
-
-Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
-
-[Code](https://github.com/EverMind-AI/evermem-claude-code)
-
-</td>
-<td width="50%" valign="top">
-
-![banner-gif](https://github.com/user-attachments/assets/d521d28c-0ccd-44ff-aecc-828245e2f973)
-
-#### Memory Graph Visualization
-
-Visualize your stored entities and how they relate. Pure frontend demo — backend integration in progress.
-
-[Live Demo](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
-
-</td>
-</tr>
-</table>
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
 ## Quick Start
 
 ```bash
@@ -292,17 +187,17 @@ Then navigate to the component you need:
 
 | | Component | Entry Point |
 | :-- | :--- | :--- |
-| **EverCore** | Build agents with long-term memory | [methods/everos/](methods/everos/) |
+| **EverCore** | Build agents with long-term memory | [methods/EverCore/](methods/EverCore/) |
 | **HyperMem** | Use the hypergraph memory architecture | [methods/HyperMem/](methods/HyperMem/) |
 | **EverMemBench** | Evaluate memory system quality | [benchmarks/EverMemBench/](benchmarks/EverMemBench/) |
 | **EvoAgentBench** | Measure agent self-evolution | [benchmarks/EvoAgentBench/](benchmarks/EvoAgentBench/) |
 
 > Each component has its own installation guide, dependency configuration, and usage examples.
 
-### EverCore Quick Start
+### EverCore
 
 ```bash
-cd methods/evermemos
+cd methods/EverCore
 
 # Start Docker services
 docker compose up -d
@@ -411,7 +306,7 @@ EverCore achieves **93% overall accuracy** on the LoCoMo benchmark, outperformin
 
 ### Benchmark Results
 
-![EverOS Benchmark Results](https://github.com/user-attachments/assets/824ac1a6-4bf2-4019-9316-ea7ba7d03142)
+![EverOS Benchmark Results](https://github.com/user-attachments/assets/41b656e7-6f82-41b7-891d-d6079d10dd39)
 
 ### Supported Benchmarks
 
@@ -469,39 +364,135 @@ cat evaluation/results/locomo-everos/report.txt
 [![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
 
 </div> -->
+## Use Cases
 
-<!-- ## GitHub Codespaces
+<table>
+<tr>
+<td width="50%" valign="top">
 
-EverOS supports [GitHub Codespaces](https://github.com/features/codespaces) for cloud-based development — no Docker setup or local environment configuration needed.
+![banner-gif](https://github.com/user-attachments/assets/9dcb3dd4-4402-45fa-ae13-e6782f42c7ea)
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/EverMind-AI/EverOS)
+#### Earth Online Memory Game
 
-| Machine Type | Status | Notes |
-| ------------ | ------ | ----- |
-| 2-core (Free tier) | Not supported | Insufficient resources for infrastructure services |
-| 4-core | Minimum | Works but may be slow under load |
-| 8-core | Recommended | Good performance with all services |
-| 16-core+ | Optimal | Best for heavy development workloads |
+Earth Online is a memory-aware productivity game that turns everyday planning into a living quest log. 
 
-> **Note:** If your company provides GitHub Codespaces, hardware limitations typically will not be an issue since enterprise plans often include access to larger machine types.
+<!-- [Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin) -->
 
-### Getting Started with Codespaces
+</td>
+<td width="50%" valign="top">
 
-1. Click the "Open in GitHub Codespaces" button above
-2. Select a **4-core or larger** machine when prompted
-3. Wait for the container to build and services to start
-4. Update API keys in `.env` (`LLM_API_KEY`, `VECTORIZE_API_KEY`, etc.)
-5. Run `make run` to start the server
+![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)
 
-All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automatically and are pre-configured to work together.
+#### Multi‑Agent Orchestration Platform
+
+Golutra is pitched as “beyond the IDE,” a multi-agent workforce rather than a single assistant for engineering teams.
+
+</td>
+</tr>
+<tr>
+<tr>
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/e6eaf308-a874-483f-8874-6934bf95a78f)
+
+#### Mobi Is a Companion
+
+An iOS app that lets users create, nurture, and live with a personalized AI “lifeform” companion called Mobi.
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/9aabcaa9-f97a-49d2-9109-0b5bb696ed41)
+
+#### AI Wearable with Memory
+
+A context-native empathic AI wearable that listens to everyday life
+and converts conversations into memory.
+
+</td>
+</tr>
+<tr>
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)
+
+#### OpenClaw Agent Memory
+
+A 24/7 agent with continuous learning memory that you can carry with you wherever you go.
+
+[Agent Memory](https://github.com/EverMind-AI/everos/tree/agent_memory) · [Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)
+
+#### Live2D Character with Memory
+
+Add long-term memory to your anime character that can talk to you in real-time, powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
+
+[Code](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/c36bdc04-97d3-4fe9-97d9-4b93b475595a)
+
+#### Computer-Use with Memory
+
+Use computer-use to launch screenshot-based analysis, all stored in your memory.
+
+[Live Demo](https://screenshot-analysis-vercel.vercel.app/)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)](use-cases/game-of-throne-demo)
+
+#### Game of Thrones Memories
+
+A demonstration of AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones".
+
+[Code](use-cases/game-of-throne-demo)
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)](use-cases/claude-code-plugin)
+
+#### Claude Code Plugin
+
+Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
+
+[Code](use-cases/claude-code-plugin)
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/d521d28c-0ccd-44ff-aecc-828245e2f973)
+
+#### Memory Graph Visualization
+
+Visualize your stored entities and how they relate. Pure frontend demo — backend integration in progress.
+
+[Live Demo](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
+
+</td>
+</tr>
+</table>
 
 <br>
 <div align="right">
 
 [![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
 
-</div> -->
-
+</div>
 
 ## Citation
 
@@ -574,14 +565,14 @@ We love open-source energy! Whether you are squashing bugs, shipping features, s
 
 ### Contribution Guidelines
 
-Read our [Contribution Guidelines](methods/evermemos/CONTRIBUTING.md) for code standards and Git workflow.
+Read our [Contribution Guidelines](methods/EverCore/CONTRIBUTING.md) for code standards and Git workflow.
 
 ![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
 ![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
 
 ### License & Citation & Acknowledgments
 
-[Apache 2.0](https://github.com/EverMind-AI/EverOS/blob/main/LICENSE) • [Acknowledgments](methods/evermemos/docs/ACKNOWLEDGMENTS.md)
+[Apache 2.0](https://github.com/EverMind-AI/EverOS/blob/main/LICENSE) • [Acknowledgments](methods/EverCore/docs/ACKNOWLEDGMENTS.md)
 
 <br>
 

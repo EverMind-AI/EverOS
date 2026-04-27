@@ -44,7 +44,7 @@
 
 | 目录 | 方法 | 模式 | 说明 |
 |------|------|------|------|
-| `evermemos/` | EverMemOS | 离线/在线 | 通过 EverMemOS API 提取 skill，注入到 prompt |
+| `evermemos/` | EverCore | 离线/在线 | 通过 EverCore API 提取 skill，注入到 prompt |
 | 更多方法 | Coming soon | — | — |
 
 ## 添加新方法

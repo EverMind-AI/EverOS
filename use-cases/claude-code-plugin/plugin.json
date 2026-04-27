@@ -1,0 +1,9 @@
+{
+  "name": "evermem",
+  "version": "0.2.0",
+  "description": "Automatically recalls relevant memories from past sessions and injects them into Claude's context",
+  "author": {
+    "name": "EverMem"
+  },
+  "keywords": ["memory", "context", "recall", "persistence"]
+}

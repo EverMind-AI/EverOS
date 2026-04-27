@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EverMem - Memory Hub (Preview)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      min-height: 100vh;
+    }
+    #header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: rgba(13, 17, 23, 0.95);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      flex-wrap: wrap;
+    }
+    #header h1 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    #header .stats { font-size: 13px; color: #8b949e; margin-left: auto; }
+    .preview-badge {
+      background: #FFC53D22;
+      color: #FFC53D;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    #main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px) { .stats-grid { grid-template-columns: 1fr; } }
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .stat-card .label { font-size: 12px; color: #8b949e; text-transform: uppercase; margin-bottom: 8px; }
+    .stat-card .value { font-size: 32px; font-weight: 600; color: #f0f6fc; }
+    .stat-card .sub { font-size: 12px; color: #FFC53D; margin-top: 4px; }
+
+    /* Groups Section */
+    .section-title { font-size: 16px; font-weight: 600; color: #f0f6fc; margin-bottom: 16px; }
+    .groups-container { display: flex; flex-direction: column; gap: 16px; }
+
+    /* Group Card */
+    .group-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .group-header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .group-header:hover { background: #1c2128; }
+    .group-icon { font-size: 24px; }
+    .group-info { flex: 1; min-width: 0; }
+    .group-name { font-size: 15px; font-weight: 600; color: #f0f6fc; margin-bottom: 4px; }
+    .group-path {
+      font-size: 11px;
+      color: #8b949e;
+      font-family: monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-id {
+      font-size: 10px;
+      color: #6e7681;
+      font-family: monospace;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-id-label {
+      color: #484f58;
+      margin-right: 4px;
+    }
+    .group-stats {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #8b949e;
+    }
+    .group-stats span { display: flex; align-items: center; gap: 4px; }
+    .group-stats .count { color: #FFC53D; font-weight: 600; }
+    .group-expand {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #8b949e;
+      transition: transform 0.2s;
+    }
+    .group-card.expanded .group-expand { transform: rotate(180deg); }
+
+    /* Memories List */
+    .memories-container {
+      display: none;
+      border-top: 1px solid #30363d;
+      background: #0d1117;
+    }
+    .group-card.expanded .memories-container { display: block; }
+
+    /* Timeline within group */
+    .group-timeline { padding: 16px 20px; }
+    .timeline-day-section { margin-bottom: 20px; }
+    .timeline-day-section:last-child { margin-bottom: 0; }
+    .timeline-day-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+    .timeline-day-dot {
+      width: 10px;
+      height: 10px;
+      background: #FFC53D;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .timeline-day-dot.today { box-shadow: 0 0 8px rgba(255, 197, 61, 0.6); }
+    .timeline-day-date { font-size: 13px; font-weight: 600; color: #f0f6fc; }
+    .timeline-day-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      background: #FFC53D22;
+      color: #FFC53D;
+      border-radius: 10px;
+    }
+    .timeline-day-count { font-size: 11px; color: #8b949e; margin-left: auto; }
+    .timeline-memories { display: flex; flex-direction: column; gap: 8px; padding-left: 22px; }
+
+    .memory-item {
+      padding: 12px 16px;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .memory-item:hover { border-color: #FFC53D; background: #161b22; }
+    .memory-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .memory-emoji { font-size: 14px; }
+    .memory-subject { font-size: 13px; font-weight: 500; color: #f0f6fc; flex: 1; }
+    .memory-time { font-size: 11px; color: #8b949e; }
+    .memory-preview { font-size: 12px; color: #8b949e; line-height: 1.5; max-height: 60px; overflow: hidden; }
+
+    .load-more {
+      padding: 12px 20px;
+      text-align: center;
+      border-top: 1px solid #21262d;
+    }
+    .load-more-btn {
+      padding: 8px 16px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .load-more-btn:hover { background: #30363d; }
+
+    /* Charts Row */
+    .charts-row {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 900px) { .charts-row { flex-direction: column; } }
+
+    /* Heatmap - GitHub style */
+    .heatmap-section {
+      flex: 2;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px;
+      overflow-x: auto;
+    }
+    .heatmap-months {
+      position: relative;
+      font-size: 11px;
+      color: #8b949e;
+      margin-bottom: 8px;
+      margin-left: 36px;
+      height: 16px;
+    }
+    .heatmap-months span { position: absolute; }
+    .heatmap-body { display: flex; gap: 4px; }
+    .heatmap-days {
+      display: flex;
+      flex-direction: column;
+      font-size: 11px;
+      color: #8b949e;
+      width: 32px;
+      padding-top: 2px;
+    }
+    .heatmap-days span { height: 13px; line-height: 13px; }
+    .heatmap-grid { display: flex; gap: 3px; }
+    .heatmap-week { display: flex; flex-direction: column; gap: 3px; }
+    .heatmap-cell {
+      width: 13px;
+      height: 13px;
+      border-radius: 2px;
+      background: #161b22;
+      border: 1px solid #21262d;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    .heatmap-cell:hover { transform: scale(1.3); z-index: 10; }
+    .heatmap-cell.level-1 { background: #4d3a10; border-color: #4d3a10; }
+    .heatmap-cell.level-2 { background: #806200; border-color: #806200; }
+    .heatmap-cell.level-3 { background: #cc9a00; border-color: #cc9a00; }
+    .heatmap-cell.level-4 { background: #FFC53D; border-color: #FFC53D; }
+    .heatmap-tooltip {
+      position: fixed;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #c9d1d9;
+      pointer-events: none;
+      z-index: 1000;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      display: none;
+    }
+    .heatmap-tooltip strong { color: #f0f6fc; }
+    .heatmap-legend {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+      margin-top: 12px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    .heatmap-legend-cell { width: 12px; height: 12px; border-radius: 2px; }
+
+    /* Growth Chart */
+    .growth-section {
+      flex: 1;
+      min-width: 280px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .growth-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      height: 120px;
+      padding: 0 4px;
+    }
+    .chart-bar-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+    }
+    .chart-bar-wrapper {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      align-items: flex-end;
+    }
+    .chart-bar {
+      width: 100%;
+      background: linear-gradient(to top, #e6b038, #FFC53D);
+      border-radius: 4px 4px 0 0;
+      min-height: 4px;
+      transition: height 0.3s ease;
+      position: relative;
+    }
+    .chart-bar:hover { filter: brightness(1.2); }
+    .chart-bar .bar-tooltip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #0d1117;
+      border: 1px solid #30363d;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 10;
+    }
+    .chart-bar:hover .bar-tooltip { opacity: 1; }
+    .chart-label { font-size: 10px; color: #8b949e; margin-top: 8px; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+    }
+    .modal-overlay.visible { opacity: 1; visibility: visible; }
+    .modal {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      max-width: 700px;
+      width: 90%;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transform: scale(0.95);
+      transition: transform 0.2s;
+    }
+    .modal-overlay.visible .modal { transform: scale(1); }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .modal-header-content { flex: 1; }
+    .modal-title { font-size: 16px; font-weight: 600; color: #f0f6fc; margin-bottom: 4px; }
+    .modal-meta { font-size: 12px; color: #8b949e; }
+    .modal-close {
+      background: none;
+      border: none;
+      color: #8b949e;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    .modal-close:hover { color: #f0f6fc; background: #30363d; }
+    .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+    .modal-content { font-size: 14px; color: #c9d1d9; line-height: 1.7; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>
+      <span style="font-weight: 700;">EverMind</span> Memory Hub
+    </h1>
+    <span class="preview-badge">PREVIEW MODE</span>
+    <span class="stats" id="stats">247 memories across 5 projects</span>
+  </div>
+
+  <div id="main">
+    <div id="content"></div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="modal-overlay" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-header-content">
+          <div class="modal-title" id="modal-title"></div>
+          <div class="modal-meta" id="modal-meta"></div>
+        </div>
+        <button class="modal-close" onclick="closeModal()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-content" id="modal-content"></div>
+      </div>
+    </div>
+  </div>
+  <div class="heatmap-tooltip" id="heatmap-tooltip"></div>
+
+  <script>
+    // ========== FAKE DATA ==========
+    const fakeGroups = [
+      { id: 'grp_evermem_001', name: 'evermem-claude-code', path: '/Users/admin/Desktop/evermem-claude-code', sessionCount: 42 },
+      { id: 'grp_webapp_002', name: 'my-react-app', path: '/Users/admin/Projects/my-react-app', sessionCount: 28 },
+      { id: 'grp_api_003', name: 'backend-api', path: '/Users/admin/Projects/backend-api', sessionCount: 19 },
+      { id: 'grp_docs_004', name: 'documentation-site', path: '/Users/admin/Projects/documentation-site', sessionCount: 8 },
+      { id: 'grp_tools_005', name: 'dev-tools', path: '/Users/admin/Projects/dev-tools', sessionCount: 5 },
+    ];
+
+    const fakeMemoriesData = {
+      'grp_evermem_001': generateFakeMemories('evermem-claude-code', 87, [
+        { subject: 'Fixed heatmap rendering bug', keywords: ['fix', 'debug'] },
+        { subject: 'Added session summary feature', keywords: ['add', 'create'] },
+        { subject: 'Refactored memory injection hooks', keywords: ['refactor'] },
+        { subject: 'Updated API endpoint to v0', keywords: ['update', 'api'] },
+        { subject: 'Debugged groups-store loading', keywords: ['debug', 'fix'] },
+        { subject: 'Created dashboard preview page', keywords: ['create', 'ui'] },
+        { subject: 'Optimized memory search performance', keywords: ['optimize'] },
+        { subject: 'Added error handling for API calls', keywords: ['add', 'error'] },
+        { subject: 'Fixed authentication flow', keywords: ['fix', 'auth'] },
+        { subject: 'Updated documentation', keywords: ['docs', 'update'] },
+      ]),
+      'grp_webapp_002': generateFakeMemories('my-react-app', 72, [
+        { subject: 'Implemented user dashboard', keywords: ['create', 'ui'] },
+        { subject: 'Fixed navigation bug on mobile', keywords: ['fix', 'bug'] },
+        { subject: 'Added dark mode support', keywords: ['add', 'style'] },
+        { subject: 'Refactored state management', keywords: ['refactor'] },
+        { subject: 'Updated React to v18', keywords: ['update'] },
+        { subject: 'Created reusable button component', keywords: ['create', 'ui'] },
+        { subject: 'Fixed form validation errors', keywords: ['fix', 'error'] },
+        { subject: 'Added unit tests for auth', keywords: ['test', 'auth'] },
+      ]),
+      'grp_api_003': generateFakeMemories('backend-api', 48, [
+        { subject: 'Created REST API endpoints', keywords: ['create', 'api'] },
+        { subject: 'Fixed database connection pool', keywords: ['fix', 'database'] },
+        { subject: 'Added rate limiting middleware', keywords: ['add', 'security'] },
+        { subject: 'Optimized query performance', keywords: ['optimize', 'database'] },
+        { subject: 'Implemented JWT authentication', keywords: ['auth', 'security'] },
+        { subject: 'Added API documentation', keywords: ['docs', 'api'] },
+      ]),
+      'grp_docs_004': generateFakeMemories('documentation-site', 25, [
+        { subject: 'Created getting started guide', keywords: ['create', 'docs'] },
+        { subject: 'Updated API reference', keywords: ['update', 'docs', 'api'] },
+        { subject: 'Added code examples', keywords: ['add', 'docs'] },
+        { subject: 'Fixed broken links', keywords: ['fix'] },
+      ]),
+      'grp_tools_005': generateFakeMemories('dev-tools', 15, [
+        { subject: 'Created CLI tool scaffold', keywords: ['create', 'build'] },
+        { subject: 'Added config file support', keywords: ['add', 'config'] },
+        { subject: 'Fixed path resolution bug', keywords: ['fix', 'bug'] },
+      ]),
+    };
+
+    function generateFakeMemories(projectName, count, templates) {
+      const memories = [];
+      const today = new Date();
+
+      for (let i = 0; i < count; i++) {
+        const template = templates[i % templates.length];
+        const daysAgo = Math.floor(Math.random() * 60);
+        const date = new Date(today);
+        date.setDate(date.getDate() - daysAgo);
+        date.setHours(Math.floor(Math.random() * 12) + 8, Math.floor(Math.random() * 60));
+
+        const contentVariations = [
+          `Working on ${projectName}: ${template.subject}. Made progress on the implementation and tested the changes locally.`,
+          `${template.subject} in ${projectName}. Updated related tests and verified everything works correctly.`,
+          `Completed task: ${template.subject}. The changes have been verified and are ready for review.`,
+          `${template.subject}. Investigated the issue, identified root cause, and implemented the fix.`,
+          `Session focus: ${template.subject}. Collaborated with the team on the approach and finalized implementation.`,
+        ];
+
+        memories.push({
+          id: `mem_${projectName}_${i}`,
+          subject: template.subject + (i > templates.length ? ` (iteration ${Math.floor(i / templates.length) + 1})` : ''),
+          content: contentVariations[i % contentVariations.length],
+          timestamp: date.toISOString(),
+          date: formatLocalDate(date),
+          time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          keywords: template.keywords
+        });
+      }
+
+      return memories.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    }
+
+    function formatLocalDate(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+
+    // ========== RENDERING ==========
+    function renderDashboard() {
+      const totalMemories = Object.values(fakeMemoriesData).reduce((sum, mems) => sum + mems.length, 0);
+      const activeGroups = fakeGroups.length;
+
+      // Collect all memories for charts
+      const allMemories = Object.values(fakeMemoriesData).flat();
+      const memoriesByDate = {};
+      allMemories.forEach(mem => {
+        memoriesByDate[mem.date] = (memoriesByDate[mem.date] || 0) + 1;
+      });
+
+      const activeDays = Object.keys(memoriesByDate).length;
+      const avgPerDay = activeDays > 0 ? (totalMemories / activeDays).toFixed(1) : 0;
+
+      let html = `
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="label">Total Memories</div>
+            <div class="value">${totalMemories}</div>
+            <div class="sub">Across all projects</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Projects</div>
+            <div class="value">${fakeGroups.length}</div>
+            <div class="sub">${activeGroups} with memories</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Active Days</div>
+            <div class="value">${activeDays}</div>
+            <div class="sub">Days with memories</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Avg / Day</div>
+            <div class="value">${avgPerDay}</div>
+            <div class="sub">Memories per active day</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Avg / Project</div>
+            <div class="value">${Math.round(totalMemories / activeGroups)}</div>
+            <div class="sub">Memories per project</div>
+          </div>
+        </div>
+
+        <div class="charts-row">
+          <div class="heatmap-section">
+            <div class="section-title">Memory Activity (6 months)</div>
+            <div class="heatmap-months" id="heatmap-months"></div>
+            <div class="heatmap-body">
+              <div class="heatmap-days">
+                <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+              </div>
+              <div class="heatmap-grid" id="heatmap"></div>
+            </div>
+            <div class="heatmap-legend">
+              <span>Less</span>
+              <div class="heatmap-legend-cell" style="background: #161b22; border: 1px solid #21262d;"></div>
+              <div class="heatmap-legend-cell" style="background: #4d3a10;"></div>
+              <div class="heatmap-legend-cell" style="background: #806200;"></div>
+              <div class="heatmap-legend-cell" style="background: #cc9a00;"></div>
+              <div class="heatmap-legend-cell" style="background: #FFC53D;"></div>
+              <span>More</span>
+            </div>
+          </div>
+          <div class="growth-section">
+            <div class="section-title">Last 7 Days</div>
+            <div class="growth-chart" id="growth-chart"></div>
+          </div>
+        </div>
+
+        <div class="section-title">Your Projects</div>
+        <div class="groups-container">
+      `;
+
+      window._memoriesByDate = memoriesByDate;
+
+      // Sort groups by memory count
+      const sortedGroups = [...fakeGroups].sort((a, b) => {
+        const countA = fakeMemoriesData[a.id]?.length || 0;
+        const countB = fakeMemoriesData[b.id]?.length || 0;
+        return countB - countA;
+      });
+
+      for (const group of sortedGroups) {
+        const memories = fakeMemoriesData[group.id] || [];
+        html += renderGroupCard(group, memories);
+      }
+
+      html += '</div>';
+      document.getElementById('content').innerHTML = html;
+
+      buildHeatmap(memoriesByDate);
+      buildGrowthChart(memoriesByDate);
+    }
+
+    function renderGroupCard(group, memories) {
+      const memCount = memories.length;
+
+      return `
+        <div class="group-card" id="group-${encodeId(group.id)}" data-group-id="${escapeHtml(group.id)}">
+          <div class="group-header" onclick="toggleGroup('${escapeHtml(group.id)}')">
+            <span class="group-icon">📁</span>
+            <div class="group-info">
+              <div class="group-name">${escapeHtml(group.name)}</div>
+              <div class="group-path">${escapeHtml(group.path)}</div>
+              <div class="group-id"><span class="group-id-label">ID:</span>${escapeHtml(group.id)}</div>
+            </div>
+            <div class="group-stats">
+              <span><span class="count">${memCount}</span> memories</span>
+              <span>${group.sessionCount} sessions</span>
+            </div>
+            <div class="group-expand">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </div>
+          </div>
+          <div class="memories-container" id="memories-${encodeId(group.id)}">
+            ${renderMemoriesList(group.id, memories)}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMemoriesList(groupId, memories) {
+      if (memories.length === 0) {
+        return '<div style="padding: 20px; text-align: center; color: #8b949e;">No memories yet</div>';
+      }
+
+      // Group memories by date
+      const byDate = {};
+      memories.forEach(mem => {
+        if (!byDate[mem.date]) byDate[mem.date] = [];
+        byDate[mem.date].push(mem);
+      });
+
+      const sortedDates = Object.keys(byDate).sort().reverse();
+      const todayStr = formatLocalDate(new Date());
+
+      let html = '<div class="group-timeline">';
+
+      for (const date of sortedDates.slice(0, 5)) { // Show only first 5 days
+        const dayMemories = byDate[date].sort((a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        const isToday = date === todayStr;
+
+        const dateDisplay = new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+          weekday: 'short', month: 'short', day: 'numeric'
+        });
+
+        html += `
+          <div class="timeline-day-section">
+            <div class="timeline-day-header">
+              <div class="timeline-day-dot${isToday ? ' today' : ''}"></div>
+              <span class="timeline-day-date">${dateDisplay}</span>
+              ${isToday ? '<span class="timeline-day-badge">Today</span>' : ''}
+              <span class="timeline-day-count">${dayMemories.length} ${dayMemories.length === 1 ? 'memory' : 'memories'}</span>
+            </div>
+            <div class="timeline-memories">
+        `;
+
+        for (const mem of dayMemories.slice(0, 3)) { // Show max 3 per day
+          const emoji = getEmojiForContent(mem.subject);
+          const preview = mem.content.length > 120 ? mem.content.slice(0, 120) + '...' : mem.content;
+
+          html += `
+            <div class="memory-item" onclick='openModal(${JSON.stringify(mem).replace(/'/g, "&#39;")})'>
+              <div class="memory-header">
+                <span class="memory-emoji">${emoji}</span>
+                <span class="memory-subject">${escapeHtml(mem.subject)}</span>
+                <span class="memory-time">${mem.time}</span>
+              </div>
+              <div class="memory-preview">${escapeHtml(preview)}</div>
+            </div>
+          `;
+        }
+
+        html += '</div></div>';
+      }
+
+      html += '</div>';
+
+      if (sortedDates.length > 5) {
+        html += `
+          <div class="load-more">
+            <button class="load-more-btn" onclick="alert('This is a preview - connect to API for full functionality')">
+              Load more (${memories.length - 15} remaining)
+            </button>
+          </div>
+        `;
+      }
+
+      return html;
+    }
+
+    function buildHeatmap(memoriesByDate) {
+      const heatmapContainer = document.getElementById('heatmap');
+      const monthsContainer = document.getElementById('heatmap-months');
+      if (!heatmapContainer) return;
+
+      const today = new Date();
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - 182);
+      while (startDate.getDay() !== 0) {
+        startDate.setDate(startDate.getDate() - 1);
+      }
+
+      const weeks = [];
+      let currentWeek = [];
+      const months = new Map();
+      let currentDate = new Date(startDate);
+
+      while (currentDate <= today) {
+        const dateStr = formatLocalDate(currentDate);
+        const monthKey = currentDate.toLocaleDateString('en-US', { month: 'short' });
+
+        if (!months.has(monthKey)) {
+          months.set(monthKey, weeks.length);
+        }
+
+        currentWeek.push({
+          date: dateStr,
+          count: memoriesByDate[dateStr] || 0,
+          dayOfWeek: currentDate.getDay()
+        });
+
+        if (currentDate.getDay() === 6) {
+          weeks.push(currentWeek);
+          currentWeek = [];
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      if (currentWeek.length > 0) {
+        weeks.push(currentWeek);
+      }
+
+      // Render month labels
+      monthsContainer.innerHTML = '';
+      const weekWidth = 16;
+      months.forEach((weekIndex, monthName) => {
+        const span = document.createElement('span');
+        span.textContent = monthName;
+        span.style.left = `${weekIndex * weekWidth}px`;
+        monthsContainer.appendChild(span);
+      });
+
+      // Calculate thresholds
+      const counts = Object.values(memoriesByDate);
+      const maxCount = Math.max(...counts, 1);
+      const q1 = Math.max(1, Math.ceil(maxCount * 0.25));
+      const q2 = Math.max(2, Math.ceil(maxCount * 0.5));
+      const q3 = Math.max(3, Math.ceil(maxCount * 0.75));
+
+      // Render weeks
+      heatmapContainer.innerHTML = '';
+      weeks.forEach((week, weekIndex) => {
+        const weekDiv = document.createElement('div');
+        weekDiv.className = 'heatmap-week';
+
+        if (weekIndex === 0 && week[0].dayOfWeek !== 0) {
+          for (let i = 0; i < week[0].dayOfWeek; i++) {
+            const emptyCell = document.createElement('div');
+            emptyCell.className = 'heatmap-cell';
+            emptyCell.style.visibility = 'hidden';
+            weekDiv.appendChild(emptyCell);
+          }
+        }
+
+        week.forEach(day => {
+          const cell = document.createElement('div');
+          cell.className = 'heatmap-cell';
+          cell.dataset.date = day.date;
+          cell.dataset.count = day.count;
+
+          if (day.count >= q3) cell.classList.add('level-4');
+          else if (day.count >= q2) cell.classList.add('level-3');
+          else if (day.count >= q1) cell.classList.add('level-2');
+          else if (day.count >= 1) cell.classList.add('level-1');
+
+          cell.addEventListener('mouseenter', showHeatmapTooltip);
+          cell.addEventListener('mouseleave', hideHeatmapTooltip);
+          weekDiv.appendChild(cell);
+        });
+
+        if (weekIndex === weeks.length - 1 && week[week.length - 1].dayOfWeek !== 6) {
+          for (let i = week[week.length - 1].dayOfWeek + 1; i <= 6; i++) {
+            const emptyCell = document.createElement('div');
+            emptyCell.className = 'heatmap-cell';
+            emptyCell.style.visibility = 'hidden';
+            weekDiv.appendChild(emptyCell);
+          }
+        }
+
+        heatmapContainer.appendChild(weekDiv);
+      });
+    }
+
+    function showHeatmapTooltip(e) {
+      const tooltip = document.getElementById('heatmap-tooltip');
+      const cell = e.target;
+      const date = cell.dataset.date;
+      const count = parseInt(cell.dataset.count);
+
+      const dateObj = new Date(date + 'T12:00:00');
+      const formattedDate = dateObj.toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+      });
+
+      tooltip.innerHTML = `<strong>${count} ${count === 1 ? 'memory' : 'memories'}</strong> on ${formattedDate}`;
+      tooltip.style.display = 'block';
+
+      const rect = cell.getBoundingClientRect();
+      tooltip.style.left = `${rect.left + rect.width / 2}px`;
+      tooltip.style.top = `${rect.top - 40}px`;
+      tooltip.style.transform = 'translateX(-50%)';
+    }
+
+    function hideHeatmapTooltip() {
+      document.getElementById('heatmap-tooltip').style.display = 'none';
+    }
+
+    function buildGrowthChart(memoriesByDate) {
+      const chartContainer = document.getElementById('growth-chart');
+      if (!chartContainer) return;
+
+      const today = new Date();
+      const dailyData = [];
+
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const dateStr = formatLocalDate(date);
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+        dailyData.push({ date: dayName, count: memoriesByDate[dateStr] || 0 });
+      }
+
+      const maxCount = Math.max(...dailyData.map(d => d.count), 1);
+
+      chartContainer.innerHTML = '';
+      dailyData.forEach(day => {
+        const barContainer = document.createElement('div');
+        barContainer.className = 'chart-bar-container';
+
+        const barWrapper = document.createElement('div');
+        barWrapper.className = 'chart-bar-wrapper';
+
+        const bar = document.createElement('div');
+        bar.className = 'chart-bar';
+        bar.style.height = day.count > 0 ? `${(day.count / maxCount) * 100}%` : '4px';
+        bar.style.opacity = day.count > 0 ? '1' : '0.2';
+
+        const barTooltip = document.createElement('div');
+        barTooltip.className = 'bar-tooltip';
+        barTooltip.textContent = `${day.count} memories`;
+        bar.appendChild(barTooltip);
+
+        const label = document.createElement('div');
+        label.className = 'chart-label';
+        label.textContent = day.date;
+
+        barWrapper.appendChild(bar);
+        barContainer.appendChild(barWrapper);
+        barContainer.appendChild(label);
+        chartContainer.appendChild(barContainer);
+      });
+    }
+
+    function toggleGroup(groupId) {
+      const card = document.getElementById(`group-${encodeId(groupId)}`);
+      if (card) card.classList.toggle('expanded');
+    }
+
+    function openModal(memory) {
+      const dateStr = new Date(memory.timestamp).toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+
+      document.getElementById('modal-title').textContent = memory.subject || 'Memory';
+      document.getElementById('modal-meta').textContent = dateStr;
+      document.getElementById('modal-content').textContent = memory.content;
+
+      document.getElementById('modal-overlay').classList.add('visible');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('modal-overlay').classList.remove('visible');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    // Helpers
+    function encodeId(str) {
+      return btoa(str).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c]));
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Emoji mapping
+    const emojiKeywords = [
+      ['debug', '🐛'], ['bug', '🐛'], ['fix', '🔧'], ['error', '❌'],
+      ['test', '🧪'], ['add', '➕'], ['create', '✨'], ['new', '🆕'],
+      ['remove', '🗑️'], ['delete', '🗑️'], ['update', '✏️'], ['change', '📝'],
+      ['refactor', '♻️'], ['optimize', '⚡'], ['deploy', '🚀'], ['release', '📦'],
+      ['api', '🔌'], ['database', '🗄️'], ['auth', '🔐'], ['security', '🛡️'],
+      ['ui', '🎨'], ['style', '💅'], ['docs', '📖'], ['config', '⚙️'],
+      ['build', '🏗️'], ['merge', '🔀'], ['review', '👀'], ['commit', '📝'],
+    ];
+
+    function getEmojiForContent(text) {
+      if (!text) return '💭';
+      const lower = text.toLowerCase();
+      for (const [keyword, emoji] of emojiKeywords) {
+        if (lower.includes(keyword)) return emoji;
+      }
+      return '💭';
+    }
+
+    // Initialize
+    renderDashboard();
+  </script>
+</body>
+</html>

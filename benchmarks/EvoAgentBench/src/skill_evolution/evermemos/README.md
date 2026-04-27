@@ -1,6 +1,6 @@
-# EverMemOS Skill Evaluation
+# EverCore Skill Evaluation
 
-Extract reusable skills from agent training sessions via EverMemOS, inject them into test evaluation, and measure accuracy improvement.
+Extract reusable skills from agent training sessions via EverCore, inject them into test evaluation, and measure accuracy improvement.
 
 Works with any domain. Adding a new domain requires one line in `domain_info.py`.
 
@@ -8,7 +8,7 @@ Works with any domain. Adding a new domain requires one line in `domain_info.py`
 
 ```
 domain_info.py     # Registry: per-domain query field + injection strategy
-extract_skills.py     # Send sessions → EverMemOS v1 API → save SKILL.md files
+extract_skills.py     # Send sessions → EverCore v1 API → save SKILL.md files
 eval_with_skills.py   # Load skills (API search / static files / cache) → inject → run
 ```
 
@@ -32,7 +32,7 @@ Domains without a split file (gdpval, officeqa) are loaded directly from the dom
 
 ```
 Step 1  Run train split → collect agent sessions
-Step 2  Extract skills from sessions via EverMemOS
+Step 2  Extract skills from sessions via EverCore
 Step 3  Evaluate test split with skills injected
 Step 4  Compare against baseline (test without skills)
 ```
@@ -40,7 +40,7 @@ Step 4  Compare against baseline (test without skills)
 ## Prerequisites
 
 - Domain data prepared (see each domain's README)
-- EverMemOS v1 API server running (default: `http://localhost:1997`)
+- EverCore v1 API server running (default: `http://localhost:1997`)
 
 ## Step 1: Run Train Split
 
@@ -64,7 +64,7 @@ python src/skill_evolution/evermemos/extract_skills.py \
 | `--config` | Path to config.yaml | `config.yaml` |
 | `--split-file` | Path to split file | from domain config |
 | `--output-dir` | Skill output directory | `src/skill_evolution/evermemos/skills` |
-| `--api-url` | EverMemOS v1 API address | `http://localhost:1997` |
+| `--api-url` | EverCore v1 API address | `http://localhost:1997` |
 | `--clusters` | Process only specified clusters | all |
 | `--split` | Which split to extract from | `train` |
 | `--parallel` | Concurrent session sends | `16` |
@@ -77,11 +77,11 @@ python src/skill_evolution/evermemos/extract_skills.py \
 Both nanobot and openclaw session formats are supported. Reasoning/thinking content is handled automatically:
 
 - **Multi-turn sessions** (has tool calls): thinking is dropped — it's about tool selection, not domain knowledge.
-- **Single-turn sessions** (no tools, e.g. omnimath): thinking is the core content, chunked into 1000-char simulated tool_call/tool_result pairs for EverMemOS extraction.
+- **Single-turn sessions** (no tools, e.g. omnimath): thinking is the core content, chunked into 1000-char simulated tool_call/tool_result pairs for EverCore extraction.
 
 ### Output
 
-Skills saved as SKILL.md files, grouped by EverMemOS cluster:
+Skills saved as SKILL.md files, grouped by EverCore cluster:
 
 ```
 src/skill_evolution/evermemos/skills/
@@ -99,7 +99,7 @@ Three skill sources (mutually exclusive):
 
 ### API Search (recommended)
 
-Query EverMemOS per task — dynamically finds relevant skills:
+Query EverCore per task — dynamically finds relevant skills:
 
 ```bash
 python src/skill_evolution/evermemos/eval_with_skills.py \
@@ -140,8 +140,8 @@ A `skill_cache.json` is saved in the job directory after every run.
 |-----------|-------------|---------|
 | `--domain` | Domain name | from config.yaml |
 | `--config` | Path to config.yaml | `config.yaml` |
-| `--api-url` | EverMemOS API (enables search mode) | `http://localhost:1997` |
-| `--user-id` | EverMemOS user_id (from extract output) | auto-detected |
+| `--api-url` | EverCore API (enables search mode) | `http://localhost:1997` |
+| `--user-id` | EverCore user_id (from extract output) | auto-detected |
 | `--top-k` | Max skills per task (search mode) | `5` |
 | `--search-method` | vector / hybrid | `vector` |
 | `--skills-dir` | Skills directory (static mode) | `src/skill_evolution/evermemos/skills` |
@@ -182,7 +182,7 @@ That's it. `extract_skills.py` and `eval_with_skills.py` will handle the rest.
 | File | Description |
 |------|-------------|
 | `domain_info.py` | Per-domain registry (query field, injection strategy) |
-| `extract_skills.py` | Extract skills via EverMemOS v1 API |
+| `extract_skills.py` | Extract skills via EverCore v1 API |
 | `eval_with_skills.py` | Evaluate with skills (API search / static / cache) |
 | `config.yaml` | Default API URL, skill directory, split settings |
 | `skills/` | Extracted skill files |

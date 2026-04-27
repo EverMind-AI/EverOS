@@ -1,4 +1,4 @@
-"""Per-domain metadata for EverMemOS integration.
+"""Per-domain metadata for EverCore integration.
 
 New domain? Add one entry to BENCHMARK_DESCRIPTORS — everything else adapts.
 """
@@ -9,7 +9,7 @@ from typing import Callable
 
 @dataclass
 class DomainInfo:
-    # --- Query extraction (for EverMemOS search) ---
+    # --- Query extraction (for EverCore search) ---
     query_field: str | None = "problem"
     query_extractor: Callable | None = None  # overrides query_field
 

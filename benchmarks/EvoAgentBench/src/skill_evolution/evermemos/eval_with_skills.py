@@ -4,7 +4,7 @@
 Three skill sources (mutually exclusive):
 
 1. **Skill cache** (--skill-cache): reuse previously searched/saved skills JSON.
-2. **API search** (--api-url + --user-id): query EverMemOS v1 search API per task.
+2. **API search** (--api-url + --user-id): query EverCore v1 search API per task.
 3. **Static files** (--skills-dir): load SKILL.md files from disk.
 
 Injection strategy is determined by domain_info:
@@ -99,7 +99,7 @@ def load_skills_from_files(skills_dir: Path, task_clusters: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Skill source: EverMemOS v1 search API
+# Skill source: EverCore v1 search API
 # ---------------------------------------------------------------------------
 
 async def _search_one(client, api_url, user_id, tid, question, top_k, method):
@@ -234,7 +234,7 @@ def main():
         print(f"Skill source: cache ({args.skill_cache}), {len(task_skills)} tasks")
 
     elif use_api:
-        print(f"Skill source: EverMemOS search ({args.search_method}, top_k={args.top_k})")
+        print(f"Skill source: EverCore search ({args.search_method}, top_k={args.top_k})")
         bench_cfg = {}
         try:
             from config import get_domain_config

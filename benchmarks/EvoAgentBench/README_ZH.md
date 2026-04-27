@@ -56,7 +56,7 @@ EvoAgentBench 提供标准化的自进化方法评测协议 —— 从 agent 历
 
 | 方法 | 说明 | 链接 |
 |------|------|------|
-| **EverMemOS** | 基于记忆的轨迹 skill 提取 | [github.com/EverMind-AI/EverOS](https://github.com/EverMind-AI/EverOS) |
+| **EverCore** | 基于记忆的轨迹 skill 提取 | [github.com/EverMind-AI/EverOS](https://github.com/EverMind-AI/EverOS) |
 | **EvoSkill** | 两步式 proposer-generator 自改进循环 | [github.com/sentient-agi/EvoSkill](https://github.com/sentient-agi/EvoSkill) |
 | **Memento** | 基于案例检索的相似度搜索 | [github.com/Agent-on-the-Fly/Memento](https://github.com/Agent-on-the-Fly/Memento) |
 | **OpenSpace** | 通过 analyze-evolve 管线积累 skill | [github.com/HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace) |
@@ -150,13 +150,13 @@ python src/run.py --agent nanobot --domain code_implementation --task 1873_A --l
 python src/run.py --agent nanobot --domain reasoning --split test --task omni_917 --live
 ```
 
-### EverMemOS 使用流程
+### EverCore 使用流程
 
 ```bash
 # 第一步：跑训练任务（baseline，无 skill）
 python src/run.py --domain information_retrieval --split train --parallel 4
 
-# 第二步：从训练 session 中提取 skill（需要 EverMemOS 服务）
+# 第二步：从训练 session 中提取 skill（需要 EverCore 服务）
 python src/skill_evolution/evermemos/extract_skills.py --domain information_retrieval
 
 # 第三步：带 skill 注入评估测试集
@@ -234,7 +234,7 @@ evoagentbench/
 │       ├── docker.py               #   Docker + tmux 工具
 │       └── browsecomp-plus-tools/  #   BrowseComp-Plus MCP server + 数据准备
 ├── src/skill_evolution/                           # 自进化方法评估
-│   └── evermemos/                  #   EverMemOS skill 提取 + 评估
+│   └── evermemos/                  #   EverCore skill 提取 + 评估
 ├── data/                           # 评测数据（gitignored）
 └── jobs/                           # 评测输出（gitignored）
 ```

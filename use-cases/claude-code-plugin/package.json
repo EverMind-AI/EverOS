@@ -1,0 +1,18 @@
+{
+  "name": "evermem-claude-code",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "EverMem Plugin for Claude Code - automatic memory recall from past sessions",
+  "scripts": {
+    "test:save": "node scripts/test-save-memories.js",
+    "test:retrieve": "node scripts/test-retrieve-memories.js",
+    "test": "npm run test:save && npm run test:retrieve"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.76",
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

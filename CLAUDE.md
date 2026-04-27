@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Refer to [AGENTS.md](methods/evermemos/AGENTS.md) for comprehensive project documentation including:
+Refer to [AGENTS.md](methods/EverCore/AGENTS.md) for comprehensive project documentation including:
 - Project architecture and structure
 - Tech stack and dependencies
 - Code conventions and patterns
@@ -11,7 +11,7 @@ Refer to [AGENTS.md](methods/evermemos/AGENTS.md) for comprehensive project docu
 ## Quick Commands
 
 ```bash
-cd methods/evermemos
+cd methods/EverCore
 docker-compose up -d          # Start infrastructure
 uv sync                       # Install dependencies
 make run                      # Run application
@@ -22,12 +22,12 @@ pyright                       # Type check
 
 ## Key Entry Points
 
-- `methods/evermemos/src/run.py` - Application entry
-- `methods/evermemos/src/agentic_layer/memory_manager.py` - Core memory manager
-- `methods/evermemos/src/infra_layer/adapters/input/api/` - REST API controllers
+- `methods/EverCore/src/run.py` - Application entry
+- `methods/EverCore/src/agentic_layer/memory_manager.py` - Core memory manager
+- `methods/EverCore/src/infra_layer/adapters/input/api/` - REST API controllers
 
 ## Remember
 
 - All I/O is async - use `await`
 - Multi-tenant system - data is tenant-scoped
-- Prompts in `methods/evermemos/src/memory_layer/prompts/` (EN/ZH)
+- Prompts in `methods/EverCore/src/memory_layer/prompts/` (EN/ZH)

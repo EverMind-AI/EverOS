@@ -1,6 +1,6 @@
-# EverMemOS Skill Evaluation
+# EverCore Skill Evaluation
 
-使用 EverMemOS 从 agent session 中自动提取 skills，注入到测试集评测中，验证 skills 对准确率的提升效果。
+使用 EverCore 从 agent session 中自动提取 skills，注入到测试集评测中，验证 skills 对准确率的提升效果。
 
 支持所有已注册的 domain，通过 `--domain` 参数指定。
 
@@ -32,7 +32,7 @@
 
 ```
 Step 1  跑训练集，收集 agent session
-Step 2  用 EverMemOS 按簇提取 skills
+Step 2  用 EverCore 按簇提取 skills
 Step 3  跑测试集 baseline（无 skill）
 Step 4  跑测试集（注入 skill）
 Step 5  对比结果
@@ -42,7 +42,7 @@ Step 5  对比结果
 
 - 已完成对应 domain 的环境安装和数据准备
 - 对应 domain 的 split file 已准备好（统一格式）
-- EverMemOS 服务已部署并可访问
+- EverCore 服务已部署并可访问
 
 ## Step 1: 跑训练集
 
@@ -54,7 +54,7 @@ python src/run.py --domain <name> --split train --parallel 8
 
 ## Step 2: 提取 Skills
 
-启动 EverMemOS API server：
+启动 EverCore API server：
 
 ```bash
 cd evermemos-opensource
@@ -78,7 +78,7 @@ python src/skill_evolution/evermemos/extract_skills.py \
 | `--domain` | Domain 名称 | config.yaml 中的值 |
 | `--split-file` | Split file 路径 | domain config 中的值 |
 | `--output-dir` | skill 输出目录 | `src/skill_evolution/evermemos/skills` |
-| `--api-url` | EverMemOS API 地址 | `http://localhost:1995` |
+| `--api-url` | EverCore API 地址 | `http://localhost:1995` |
 | `--clusters` | 只处理指定簇（空格分隔） | 全部 |
 | `--split` | 使用哪个 split | `train` |
 
@@ -148,7 +148,7 @@ cat jobs/evermemos-with-skills-{domain}/summary.json | python -m json.tool
 
 | 文件 | 说明 |
 |------|------|
-| `extract_skills.py` | 从 train session 提取 skills（调 EverMemOS API） |
+| `extract_skills.py` | 从 train session 提取 skills（调 EverCore API） |
 | `eval_with_skills.py` | 按簇自动分配 skills，注入 prompt 跑 test split |
 | `skills/` | 提取的 skill 文件，按 `{cluster}/{skill_name}/SKILL.md` 组织 |
 | `skills_sample/` | 手写 skill 样例（供参考） |

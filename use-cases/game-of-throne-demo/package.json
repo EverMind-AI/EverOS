@@ -1,0 +1,27 @@
+{
+  "name": "qa-book-demo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "bun run --filter frontend dev & bun run --filter backend dev",
+    "dev:frontend": "bun run --filter frontend dev",
+    "dev:backend": "bun run --filter backend dev",
+    "build": "bun run --filter frontend build && bun run --filter backend build",
+    "type-check": "bun run --filter frontend type-check && bun run --filter backend type-check",
+    "lint": "bun run --filter frontend lint && bun run --filter backend lint",
+    "load-novel": "bun run scripts/load-novel.ts",
+    "load-novel-cloud": "bun run scripts/load-novel-cloud.ts",
+    "clear-memories": "bun run scripts/clear-memories.ts",
+    "clear-memories-cloud": "bun run scripts/clear-memories-cloud.ts",
+    "get-memories-cloud": "bun run scripts/get-memories-cloud.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.3.3"
+  }
+}

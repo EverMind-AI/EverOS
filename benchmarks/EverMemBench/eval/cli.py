@@ -166,7 +166,7 @@ Supported Systems:
     memos       - Memos memory system (env: MEMOS_API_KEY, MEMOS_BASE_URL)
     mem0        - Mem0 memory system (env: MEM0_API_KEY)
     memobase    - Memobase memory system (env: MEMOBASE_PROJECT_URL, MEMOBASE_API_KEY)
-    evermemos   - EverMemOS memory system (env: EVERMEMOS_BASE_URL, EVERMEMOS_API_KEY)
+    evermemos   - EverCore memory system (env: EVERMEMOS_BASE_URL, EVERMEMOS_API_KEY)
     zep         - Zep Graph memory system (env: ZEP_API_KEY)
     llm         - Direct LLM evaluation using full dialogue (env: LLM_API_KEY)
 
@@ -184,7 +184,7 @@ Examples:
     python -m eval.cli --dataset dataset/004/dialogue.json --qa dataset/004/qa_004.json \\
         --system mem0 --user-id 004 --stages search answer evaluate --top-k 10
     
-    # EverMemOS local deployment (specify port via --base-url)
+    # EverCore local deployment (specify port via --base-url)
     python -m eval.cli --dataset dataset/004/dialogue.json --system evermemos \\
         --user-id 004 --base-url http://0.0.0.0:19004 --stages add
     

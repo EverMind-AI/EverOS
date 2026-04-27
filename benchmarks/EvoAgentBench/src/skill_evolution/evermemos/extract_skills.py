@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Extract skills from train sessions using EverMemOS (v1 API).
+"""Extract skills from train sessions using EverCore (v1 API).
 
-Sends session trajectories to EverMemOS, triggers clustering, waits for skill
+Sends session trajectories to EverCore, triggers clustering, waits for skill
 stabilization, and saves extracted skills as SKILL.md files.
 
 Supports split files in two formats:
@@ -93,7 +93,7 @@ def load_session_messages(path: Path) -> list:
     Reasoning/thinking handling:
       - Multi-turn (has tool calls): reasoning dropped (tool selection noise).
       - Single-turn (no tools): reasoning chunked into simulated tool_call/
-        tool_result pairs so EverMemOS can extract MemCells from them.
+        tool_result pairs so EverCore can extract MemCells from them.
     """
     messages = []
     with open(path) as f:
@@ -286,7 +286,7 @@ def _format_feedback(fb: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# EverMemOS v1 API
+# EverCore v1 API
 # ---------------------------------------------------------------------------
 
 async def send_session_v1(client, messages, session_id, user_id, base_url):
@@ -430,13 +430,13 @@ def _resolve_job_dir(job_dir_str: str, global_cfg: dict) -> Path:
 async def main():
     eval_cfg = _load_eval_config()
 
-    parser = argparse.ArgumentParser(description="Extract skills via EverMemOS (v1 API)")
+    parser = argparse.ArgumentParser(description="Extract skills via EverCore (v1 API)")
     parser.add_argument("--config", default=None, help="Path to config.yaml")
     parser.add_argument("--job-dir", default=None)
     parser.add_argument("--domain", default=None)
     parser.add_argument("--split-file", default=None)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--api-url", default=None, help="EverMemOS API (default: http://localhost:1997)")
+    parser.add_argument("--api-url", default=None, help="EverCore API (default: http://localhost:1997)")
     parser.add_argument("--clusters", nargs="*")
     parser.add_argument("--split", default=None, help="Which split (default: train)")
     parser.add_argument("--parallel", type=int, default=16, help="Concurrent session sends")
@@ -488,7 +488,7 @@ async def main():
             "job_dir": str(job_dir), "sessions": len(all_sessions),
         }, f, indent=2)
 
-    print(f"EverMemOS Skill Extraction (v1 API)")
+    print(f"EverCore Skill Extraction (v1 API)")
     print(f"  Domain: {domain_name}")
     print(f"  API: {api_url}")
     print(f"  Job: {job_dir}")
@@ -503,7 +503,7 @@ async def main():
                 "filters": {"user_id": "health_check"},
             })
         except Exception as e:
-            print(f"\n  ERROR: Cannot connect to EverMemOS at {api_url}: {e}")
+            print(f"\n  ERROR: Cannot connect to EverCore at {api_url}: {e}")
             sys.exit(1)
 
         print(f"\n  Phase 1: Sending {len(all_sessions)} sessions...")

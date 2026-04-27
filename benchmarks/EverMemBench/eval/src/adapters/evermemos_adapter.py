@@ -1,13 +1,13 @@
 """
-EverMemOS (EverMind) Adapter for multi-person group chat evaluation.
+EverCore (EverMind) Adapter for multi-person group chat evaluation.
 
-Implements Add functionality using EverMemOS Cloud API:
+Implements Add functionality using EverCore Cloud API:
 POST /api/v1/memories
 
 Docs reference:
 https://docs.evermind.ai/api-reference/endpoint/add_memories
 
-We ingest *single messages* (EverMemOS endpoint is single-message payload).
+We ingest *single messages* (EverCore endpoint is single-message payload).
 To preserve multi-person group chat information we map:
 - role: always "user" (dataset is human-only)
 - sender: speaker id (we use speaker name)
@@ -39,7 +39,7 @@ from eval.src.utils.logger import get_console, print_success, print_warning
 
 class EverMemosAdapter(BaseAdapter):
     """
-    EverMemOS adapter.
+    EverCore adapter.
 
     Config example:
     ```yaml
@@ -57,7 +57,7 @@ class EverMemosAdapter(BaseAdapter):
 
         self.base_url = (config.get("base_url") or "").rstrip("/")
         if not self.base_url:
-            raise ValueError("EverMemOS base_url is required. Set 'base_url' in config or EVERMEMOS_BASE_URL env var.")
+            raise ValueError("EverCore base_url is required. Set 'base_url' in config or EVERMEMOS_BASE_URL env var.")
 
         api_key = config.get("api_key", "")
         
@@ -108,7 +108,7 @@ class EverMemosAdapter(BaseAdapter):
         **kwargs,
     ) -> AddResult:
         self.console.print(f"\n{'='*60}", style="bold cyan")
-        self.console.print("Stage: Add (EverMemOS)", style="bold cyan")
+        self.console.print("Stage: Add (EverCore)", style="bold cyan")
         self.console.print(f"{'='*60}", style="bold cyan")
         self.console.print(f"User ID (logical): {user_id}")
         self.console.print(f"Dataset: {dataset.name}")
@@ -168,7 +168,7 @@ class EverMemosAdapter(BaseAdapter):
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
 
-        # EverMemOS expects ISO 8601 string with timezone offset
+        # EverCore expects ISO 8601 string with timezone offset
         create_time = ts.isoformat()
 
         # Simplified group id: ${user_id}_${groupId} (e.g. 004_1)
@@ -236,14 +236,14 @@ class EverMemosAdapter(BaseAdapter):
         **kwargs
     ) -> SearchResult:
         """
-        Search episodic memories in EverMemOS.
+        Search episodic memories in EverCore.
 
         Uses GET /api/v1/memories/search with JSON body.
         Searches all groups for the given user.
 
         Args:
             query: Search query (usually question text)
-            user_id: User ID for EverMemOS
+            user_id: User ID for EverCore
             top_k: Number of memories to retrieve
             **kwargs: Additional parameters:
                 - retrieve_method: "keyword", "vector", "hybrid", "agentic" (default: "hybrid")

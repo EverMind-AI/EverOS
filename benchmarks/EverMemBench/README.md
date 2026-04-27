@@ -3,7 +3,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2602.01313-b31b1b.svg)](https://arxiv.org/pdf/2602.01313)
 [![Dataset](https://img.shields.io/badge/🤗%20Dataset-EverMemBench--Dynamic-yellow)](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic)
 
-A comprehensive evaluation framework for multi-person group chat datasets, supporting **Memory Systems** (Memos, Mem0, Memobase, EverMemOS, Zep) and **LLM Long-Context Evaluation**.
+A comprehensive evaluation framework for multi-person group chat datasets, supporting **Memory Systems** (Memos, Mem0, Memobase, EverCore, Zep) and **LLM Long-Context Evaluation**.
 
 📄 **Paper**: [EverMemBench: A Comprehensive Benchmark for Long-Term Memory in Conversational AI](https://arxiv.org/pdf/2602.01313)
 
@@ -12,7 +12,7 @@ A comprehensive evaluation framework for multi-person group chat datasets, suppo
 ## Features
 
 - **Multi-person group chat support**: Handles datasets with multiple speakers across multiple groups and days
-- **5 Memory Systems**: Memos, Mem0, Memobase, EverMemOS, Zep
+- **5 Memory Systems**: Memos, Mem0, Memobase, EverCore, Zep
 - **LLM Long-Context Evaluation**: Direct LLM evaluation using full dialogue as context
 - **Full Evaluation Pipeline**: Add → Search → Answer → Evaluate
 - **Two Question Types**: Multiple choice (direct comparison) and open-ended (LLM judge)
@@ -49,7 +49,7 @@ A comprehensive evaluation framework for multi-person group chat datasets, suppo
 | **Memos** | Native `chat_time` | `[Group: X][Speaker: Y]content` | `MEMOS_API_KEY`, `MEMOS_BASE_URL` |
 | **Mem0** | Native `timestamp` (Unix, per-batch) | `run_id="${user_id}_${groupId}"`, `name=<Speaker>` | `MEM0_API_KEY` |
 | **Memobase** | Native `created_at` | `[Group: X][Speaker: Y]content`, `alias=<Speaker>` | `MEMOBASE_BASE_URL`, `MEMOBASE_API_TOKEN` |
-| **EverMemOS** | Native `create_time` | `sender=<Speaker>`, `group_id=${user_id}_${groupId}` | `EVERMEMOS_BASE_URL`, `EVERMEMOS_API_KEY` |
+| **EverCore** | Native `create_time` | `sender=<Speaker>`, `group_id=${user_id}_${groupId}` | `EVERMEMOS_BASE_URL`, `EVERMEMOS_API_KEY` |
 | **Zep** | Native `created_at` | `[Group: X][Speaker: Y]content` | `ZEP_API_KEY` |
 
 ### LLM System
@@ -79,7 +79,7 @@ eval/
 │   ├── memos.yaml           # Memos configuration (connection + add + search)
 │   ├── mem0.yaml            # Mem0 configuration (connection + add + search)
 │   ├── memobase.yaml        # Memobase configuration (connection + add + search)
-│   ├── evermemos.yaml       # EverMemOS configuration (connection + add + search)
+│   ├── evermemos.yaml       # EverCore configuration (connection + add + search)
 │   └── zep.yaml             # Zep configuration (connection + add + search)
 ├── src/
 │   ├── core/
@@ -94,7 +94,7 @@ eval/
 │   │   ├── memos_adapter.py # Memos implementation
 │   │   ├── mem0_adapter.py  # Mem0 implementation
 │   │   ├── memobase_adapter.py   # Memobase implementation
-│   │   ├── evermemos_adapter.py  # EverMemOS implementation
+│   │   ├── evermemos_adapter.py  # EverCore implementation
 │   │   ├── zep_adapter.py   # Zep Graph API implementation
 │   │   └── llm_adapter.py   # LLM system adapter (full dialogue as context)
 │   └── utils/
@@ -287,10 +287,10 @@ python -m eval.cli \
     --stages search answer evaluate
 ```
 
-#### EverMemOS
+#### EverCore
 
-EverMemOS requires **separate data isolation per batch** (user ID):
-- **Cloud service**: Create a new memspace for each batch via the EverMemOS dashboard, then use the corresponding `--base-url`.
+EverCore requires **separate data isolation per batch** (user ID):
+- **Cloud service**: Create a new memspace for each batch via the EverCore dashboard, then use the corresponding `--base-url`.
 - **Local deployment**: Start a separate service instance per batch, each on its own port (e.g., port `19004` for user `004`, port `19005` for user `005`). API key is not required for local deployment.
 
 ```bash

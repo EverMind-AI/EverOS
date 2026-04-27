@@ -1,0 +1,4676 @@
+{
+  "version": "1.0.0",
+  "session_meta": {
+    "scene": "team",
+    "scene_desc": {},
+    "name": "Intelligent Sales Assistant Project Team",
+    "description": "Development Discussion Group for the Intelligent Sales Assistant Project",
+    "default_timezone": "UTC",
+    "user_details": {
+      "user_103": {
+        "full_name": "Chen",
+        "role": "user",
+        "custom_role": "Product Owner/Project Initiator",
+        "department": "Management",
+        "email": "chen@example.com",
+        "extra": {
+          "description": "Product owner or business representative, driving the project direction, focusing on ROI and implementation effectiveness",
+          "responsibilities": [
+            "Raise core requirements",
+            "Make key decisions",
+            "Deliverables"
+          ]
+        }
+      },
+      "user_102": {
+        "full_name": "Betty",
+        "role": "user",
+        "custom_role": "Product Manager",
+        "department": "Product Department",
+        "email": "betty@example.com",
+        "extra": {
+          "description": "Full-time product manager responsible for requirement detailing, acceptance criteria, cross-functional coordination, and performance measurement.",
+          "responsibilities": [
+            "Clarify the scope of requirements",
+            "Establish acceptance criteria",
+            "Write a requirements document"
+          ]
+        }
+      },
+      "user_101": {
+        "full_name": "Alex",
+        "role": "user",
+        "custom_role": "Algorithm/Technical Lead",
+        "department": "Technical Department",
+        "email": "alex@example.com",
+        "extra": {
+          "description": "Algorithm or AI Engineering Lead, responsible for leading the technical implementation of models and intelligent features",
+          "responsibilities": [
+            "Propose a technical solution",
+            "Responsible for model training, evaluation, and optimization",
+            "Lead the implementation of core modules",
+            "Focus on performance metrics"
+          ]
+        }
+      },
+      "user_104": {
+        "full_name": "Dylan",
+        "role": "user",
+        "custom_role": "Backend/Infrastructure Engineer",
+        "department": "Technical Department",
+        "email": "dylan@example.com",
+        "extra": {
+          "description": "Backend or MLOps engineer, supporting model deployment, data pipelines, and system reliability",
+          "responsibilities": [
+            "Responsible for service implementation, deployment, and interfaces",
+            "Building Storage and Retrieval Systems",
+            "Optimize system stability",
+            "Focus on latency and scalability"
+          ]
+        }
+      },
+      "user_105": {
+        "full_name": "Emily",
+        "role": "user",
+        "custom_role": "Frontend/UX Designer",
+        "department": "Technical Department",
+        "email": "emily@example.com",
+        "extra": {
+          "description": "Front-end developer and UX designer, responsible for user interface, interaction logic, and experience optimization.",
+          "responsibilities": [
+            "Interaction Design and Visuals",
+            "Provide copywriting solutions",
+            "Collect domain knowledge",
+            "Respond to user feedback"
+          ]
+        }
+      }
+    },
+    "tags": [],
+    "group_id": "group_sales_ai_2025",
+    "created_at": "2025-02-01T02:00:00Z"
+  },
+  "conversation_list": [
+    {
+      "message_id": "msg_0001",
+      "create_time": "2025-02-01T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Good morning everyone, how is the progress of the \"Intelligent Sales Assistant\" going now?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0002",
+      "create_time": "2025-02-01T02:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Good morning. Shall we first align on the goal? Is it an MVP for internal testing, or a pilot directly with customers?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0003",
+      "create_time": "2025-02-01T02:01:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "First the MVP, have something running by March, and wrap up by the end of April.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0004",
+      "create_time": "2025-02-01T02:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Technical advice mainly based on RAG.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0005",
+      "create_time": "2025-02-01T02:02:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Current method: BM25 (ES) + vector retrieval (bge-base-zh, HNSW, topK=8) + cross-encoder re-ranking (starting with the base version), temperature 0.3, length 512.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0006",
+      "create_time": "2025-02-01T02:03:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Did data cleaning and indexing in the past two weeks, planning to release a demo next week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0007",
+      "create_time": "2025-02-01T02:03:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Set the metrics first: - Effective hit rate ≥ 0.8; - First response P95 ≤ 1.5s; - Hallucination rate ≤ 8%.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0008",
+      "create_time": "2025-02-01T02:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "OK. Source data: Product Manual v3.2, Pricing Policy Q1, Delivery SLA Document.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0009",
+      "create_time": "2025-02-01T02:05:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I set up a FastAPI service, with HTTP as the priority; logs are sent to Elasticsearch. Redis is used for LRU (Least Recently Used) caching.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0010",
+      "create_time": "2025-02-01T02:05:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I'll handle the information architecture: main conversation area + right side 'key field tags' + suggested questions at the bottom.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0011",
+      "create_time": "2025-02-01T02:06:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Give me a progress summary on Wednesday.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0012",
+      "create_time": "2025-02-02T10:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there any progress today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0013",
+      "create_time": "2025-02-02T10:21:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Today, the main focus is on aligning the data standards.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0014",
+      "create_time": "2025-02-02T10:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The initial version of the cleaning rules is complete, and emojis as well as meaningless prefixes and suffixes have been handled.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0015",
+      "create_time": "2025-02-03T01:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I have labeled 100 customer service historical Q&A entries, but the formats are inconsistent. I will set annotation standards again.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0016",
+      "create_time": "2025-02-03T01:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0017",
+      "create_time": "2025-02-03T01:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will arrange for someone to handle deduplication and normalization, unifying the values and units.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0018",
+      "create_time": "2025-02-03T01:32:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "What are three suggested questions to guide someone in a blank state?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0019",
+      "create_time": "2025-02-03T01:32:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Sure, focused on sales conversion.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0020",
+      "create_time": "2025-02-03T01:33:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I'll also try generating a version dynamically based on popularity, starting with A/B testing.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0021",
+      "create_time": "2025-02-04T04:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Quick question at noon, do we have any risk points now?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0022",
+      "create_time": "2025-02-04T04:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The reordering delay carries risks.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0023",
+      "create_time": "2025-02-04T04:06:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "For now, we will use the base; quantization or downgrading will be done if necessary.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0024",
+      "create_time": "2025-02-04T04:06:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will refine the compliance vocabulary list, which should help avoid false positives.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0025",
+      "create_time": "2025-02-05T03:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Checkpoint this week?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0026",
+      "create_time": "2025-02-05T03:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "There are multiple versions of the pricing strategy; I need the latest effective version.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0027",
+      "create_time": "2025-02-05T03:01:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I urged the finance department to provide the price list and discount boundaries.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0028",
+      "create_time": "2025-02-05T03:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Logs are working: requests, top-k retrieval, reranking scores, token count.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0029",
+      "create_time": "2025-02-05T03:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The UI draft is in the group files. Keep the copy conservative for now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0030",
+      "create_time": "2025-02-06T09:50:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Stable today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0031",
+      "create_time": "2025-02-06T09:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Stable. The first draft of the annotation guidelines has been released.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0032",
+      "create_time": "2025-02-06T09:51:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will run another offline evaluation later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0033",
+      "create_time": "2025-02-09T10:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "A brief update on the progress over the weekend.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0034",
+      "create_time": "2025-02-09T10:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Data cleaning 80%, question template formed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0035",
+      "create_time": "2025-02-09T10:01:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The indexing pipeline is up and running; the first version will be built tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0036",
+      "create_time": "2025-02-10T02:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "May I ask if the SKU hierarchy needs to be broken down further?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0037",
+      "create_time": "2025-02-10T02:41:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "That's possible, but first ensure recall stability, then refine it.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0038",
+      "create_time": "2025-02-12T02:09:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Hybrid retrieval + cross re-ranking, offline NDCG@10 = 0.84.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0039",
+      "create_time": "2025-02-12T02:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Intranet demo in the afternoon?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0040",
+      "create_time": "2025-02-12T02:10:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Send the link at 3 o'clock.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0041",
+      "create_time": "2025-02-12T02:11:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Hot and cold routing ready.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0042",
+      "create_time": "2025-02-12T02:12:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Added guiding tips to the demo page.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0043",
+      "create_time": "2025-02-13T08:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The approach to \"competitive product comparison\" in the demo is generally hit or miss.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0044",
+      "create_time": "2025-02-13T08:19:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will add the domain vocabulary and rearrange the weight biases.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0045",
+      "create_time": "2025-02-14T01:55:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Goals for next week?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0046",
+      "create_time": "2025-02-14T01:56:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Intent tracking and slot extraction take priority.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0047",
+      "create_time": "2025-02-14T01:56:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Lightweight sequence labeling (biLSTM-CRF), use heavier models if not sufficient.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0048",
+      "create_time": "2025-02-15T08:40:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "After watching the demo, is there a gap?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0049",
+      "create_time": "2025-02-15T08:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Price-related aspects are not sufficiently certain; the \"delivery cycle\" was once mentioned with a vague range.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0050",
+      "create_time": "2025-02-15T08:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Amount/Time limit must have source citations; if no source is provided, refuse to answer and guide to human assistance.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0051",
+      "create_time": "2025-02-15T08:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Agreed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0052",
+      "create_time": "2025-02-16T12:22:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Add a \"source citation\" hard constraint to the prompt; keep the temperature at 0.3.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0053",
+      "create_time": "2025-02-18T02:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Slot checklist preparation: budget, decision-makers, industry, procurement cycle, competitor comparison.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0054",
+      "create_time": "2025-02-18T02:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Got it. I'll start by setting the budget and industry rule fallback.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0055",
+      "create_time": "2025-02-20T01:00:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Next week's plan: 1) Structuring the knowledge base; 2) Multi-turn intent tracking; 3) Dialogue security strategy.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0056",
+      "create_time": "2025-02-20T01:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Intent tracking is the priority, so I organized the sales script into a slot list.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0057",
+      "create_time": "2025-02-20T01:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Use Redis for state persistence; it's sufficient for the short term.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0058",
+      "create_time": "2025-02-20T01:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Highlight the key information.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0059",
+      "create_time": "2025-02-20T01:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Joint review on Friday.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0060",
+      "create_time": "2025-02-23T06:27:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The slot list has been sent.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0061",
+      "create_time": "2025-02-23T06:28:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Perform distillation before deploying the extraction model to reduce latency.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0062",
+      "create_time": "2025-02-24T11:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Are we still changing it tonight?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0063",
+      "create_time": "2025-02-24T11:12:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I adjusted the weights and finished it in half an hour.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0064",
+      "create_time": "2025-02-24T11:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I'll conveniently add two boundary test cases.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0065",
+      "create_time": "2025-02-26T01:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Some people can't see the guided questions, so I increased the contrast.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0066",
+      "create_time": "2025-02-26T01:04:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I changed two pieces of copy to be more direct.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0067",
+      "create_time": "2025-02-27T09:25:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "No alerts upon going live.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0068",
+      "create_time": "2025-02-27T09:26:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Intent/slot delay 1.1s, meets the target.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0069",
+      "create_time": "2025-02-27T10:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0070",
+      "create_time": "2025-02-28T10:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Intent/slot internal testing passed, P95=1.1s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0071",
+      "create_time": "2025-02-28T10:06:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Smooth throughput.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0072",
+      "create_time": "2025-02-28T10:06:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The small tabs on the right side are now live.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0073",
+      "create_time": "2025-02-28T10:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The budget amount format is standardized to two decimal places.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0074",
+      "create_time": "2025-02-28T10:07:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0075",
+      "create_time": "2025-03-01T01:15:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there no problem with sending MVP domestically and internationally in March?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0076",
+      "create_time": "2025-03-01T01:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay. Need to add: Cold start questioning + explicit compliance reminders.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0077",
+      "create_time": "2025-03-01T01:16:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Cold start first combines static templates with popular questions.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0078",
+      "create_time": "2025-03-01T01:17:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Remind to make yellow strips collapsible.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0079",
+      "create_time": "2025-03-01T01:17:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Noted.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0080",
+      "create_time": "2025-03-02T12:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "How are you today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0081",
+      "create_time": "2025-03-02T12:30:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Proceeding normally.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0082",
+      "create_time": "2025-03-02T12:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I cleared the industry templates again.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0083",
+      "create_time": "2025-03-03T02:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The knowledge base is updated frequently. Is it possible to implement incremental indexing?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0084",
+      "create_time": "2025-03-03T02:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Okay, increment by doc_id. Reorder weights and sync updates.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0085",
+      "create_time": "2025-03-03T02:14:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I have integrated an incremental task, with the cron set to every 10 minutes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0086",
+      "create_time": "2025-03-04T00:55:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Good morning. Is there anything I need to look at?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0087",
+      "create_time": "2025-03-04T00:56:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "There is a phase summary this afternoon, I will send it to you.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0088",
+      "create_time": "2025-03-04T00:56:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I have prepared three standard demonstration paths.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0089",
+      "create_time": "2025-03-05T02:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Can't tell the difference between \"Internet/IT/Software.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0090",
+      "create_time": "2025-03-05T02:23:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "There is overlap in the industry vocabulary list, so I add a fuzzy matching penalty, prioritizing the main category.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0091",
+      "create_time": "2025-03-05T02:24:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Let's be cautious for now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0092",
+      "create_time": "2025-03-06T08:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Add shortcut key instructions to the blank state prompt.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0093",
+      "create_time": "2025-03-06T08:03:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will adjust the threshold tonight for more stable recall.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0094",
+      "create_time": "2025-03-06T08:03:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I'll reserve some resources to avoid fluctuations.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0095",
+      "create_time": "2025-03-08T13:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Increase the contrast by 20%, it's easier to read.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0096",
+      "create_time": "2025-03-08T13:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will make two changes to the copy.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0097",
+      "create_time": "2025-03-08T13:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The threshold will move a bit tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0098",
+      "create_time": "2025-03-08T13:04:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Watch for fluctuations in the logs.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0099",
+      "create_time": "2025-03-09T02:20:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Found an issue: the \"source links\" cited in the answers occasionally misalign (the content is correct, but the links point to old documents).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0100",
+      "create_time": "2025-03-09T02:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I see. It might be that after rearranging, the positions changed, but the UI fetches the links based on the index order.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0101",
+      "create_time": "2025-03-09T02:22:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Yes, I took the first link after rearrangement.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0102",
+      "create_time": "2025-03-09T02:22:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Solution approach: Return a structure with a stable doc_id + offset, and the UI renders based on the doc_id without relying on position.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0103",
+      "create_time": "2025-03-09T02:23:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Assignment: A defines the response schema; D updates the interface; E modifies the UI rendering; I will handle the acceptance test cases.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0104",
+      "create_time": "2025-03-09T02:24:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Got it, I will add doc_id and segment offset.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0105",
+      "create_time": "2025-03-09T02:24:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI follow-up, keep details expanded on hover.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0106",
+      "create_time": "2025-03-09T02:25:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Repaired within today.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0107",
+      "create_time": "2025-03-10T03:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Schema+ interface online; example response includes doc_id, offset, source_url.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0108",
+      "create_time": "2025-03-10T03:41:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The front end is now up to date, and the misalignment no longer occurs.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0109",
+      "create_time": "2025-03-10T03:41:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will conduct another round of sampling verification.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0110",
+      "create_time": "2025-03-10T07:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Sampling 200 entries is fine. This issue is now closed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0111",
+      "create_time": "2025-03-11T01:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Correction: There is still one misalignment, which is caused by the cache hitting the old format response.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0112",
+      "create_time": "2025-03-11T01:19:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I cleared the old cache and added schema_version to the key.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0113",
+      "create_time": "2025-03-11T01:20:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I have also implemented compatibility handling on the server side.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0114",
+      "create_time": "2025-03-11T01:20:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Watch one more day.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0115",
+      "create_time": "2025-03-11T10:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "It didn't reproduce today. Closing.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0116",
+      "create_time": "2025-03-12T03:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "The marketing department presentation is on Tuesday morning next week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0117",
+      "create_time": "2025-03-12T03:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I am writing a demonstration script (3 main paths + 2 boundary paths).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0118",
+      "create_time": "2025-03-12T03:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The prompt is locked to one version to ensure reproducibility.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0119",
+      "create_time": "2025-03-12T03:32:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "\"Explanation mode\" little notes will mark key points.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0120",
+      "create_time": "2025-03-12T03:33:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Increased demonstration environment resources.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0121",
+      "create_time": "2025-03-13T09:48:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The way \"Contract Start Date\" is asked in the boundary test cases is somewhat awkward.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0122",
+      "create_time": "2025-03-13T09:49:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I added regex and rule dictionaries to adapt date expressions.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0123",
+      "create_time": "2025-03-15T02:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Demo feedback: 1) The answer regarding the “discount cap” was solid; 2) The “delivery timeline” was given as a vague range once; 3) Additionally, it was found that the price list referenced the old version from Q1.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0124",
+      "create_time": "2025-03-15T02:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Issue 2 cause: There are two versions of the source data; I fallback according to the effective date. Issue 3: In the index, the new version does not have the \"Effective Priority\" flag set.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0125",
+      "create_time": "2025-03-15T02:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Solution: \n- Add effective_date to the price list;\n- Add \"effective priority\" to reorder features;\n- Clearly display \"reference source + effective period\" on the UI.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0126",
+      "create_time": "2025-03-15T02:04:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I will add the fields and the data migration script. I'll report back after running it.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0127",
+      "create_time": "2025-03-15T02:05:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Place the source on the right side of the first line of the answer, with details shown on hover.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0128",
+      "create_time": "2025-03-15T02:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "New model parameters and weights will be released tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0129",
+      "create_time": "2025-03-16T04:20:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Migration completed; the index has been supplemented with effective_date.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0130",
+      "create_time": "2025-03-16T04:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Rearrangement weights take effect; responses involving amounts/time limits must include mandatory short citations + links.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0131",
+      "create_time": "2025-03-16T04:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "200 regressions passed. Issue closed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0132",
+      "create_time": "2025-03-17T02:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Monitoring Alert: P95 latency spiked to 1.9s (10:00-10:10).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0133",
+      "create_time": "2025-03-17T02:13:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "The logs show an increase in the proportion of time spent on reordering; concurrent bursts caused the CPU usage to spike to 90%.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0134",
+      "create_time": "2025-03-17T02:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Initial judgment: cross-encoder is too heavy + cold start. First step: downgrade to base, apply int8 quantization, reduce TopK from 8 to 6.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0135",
+      "create_time": "2025-03-17T02:15:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Prioritize maintaining SLO; a slight rollback in accuracy is acceptable.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0136",
+      "create_time": "2025-03-17T02:16:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will work on the skeleton today.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0137",
+      "create_time": "2025-03-18T01:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Quantization + downshifting already applied; P95 reduced to 1.6s; hit rate decreased by 0.01.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0138",
+      "create_time": "2025-03-18T01:41:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Concurrent rate limiting is effective, with a low error rate.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0139",
+      "create_time": "2025-03-18T01:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Acceptable, continue to apply some pressure.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0140",
+      "create_time": "2025-03-19T06:05:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "There is still jitter up to 1.7 seconds. What else can be done?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0141",
+      "create_time": "2025-03-19T06:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Plan 2: Streamed generation (server-sent or gRPC streaming); quick short Q&A (direct return if FAQ matches).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0142",
+      "create_time": "2025-03-19T06:06:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I am implementing gRPC streaming while maintaining HTTP compatibility; adding a connection pool with keep-alive.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0143",
+      "create_time": "2025-03-19T06:07:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The UI supports streaming word-by-word display.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0144",
+      "create_time": "2025-03-19T06:08:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay, observe for the next two days.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0145",
+      "create_time": "2025-03-20T05:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Does it connect to external CRM?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0146",
+      "create_time": "2025-03-20T05:21:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The first phase will not be accepted; first, an internal \"Customer Profile\" simulation will be built in.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0147",
+      "create_time": "2025-03-20T05:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Agreed, let's not implement cross-session persistence for now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0148",
+      "create_time": "2025-03-20T05:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "That's it.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0149",
+      "create_time": "2025-03-21T03:30:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "gRPC has been gradually rolled out; streaming is effective, with more stable tail latency.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0150",
+      "create_time": "2025-03-21T03:31:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Short query fast path hit rate is 0.42, average latency is -25%.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0151",
+      "create_time": "2025-03-21T03:32:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Not bad.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0152",
+      "create_time": "2025-03-22T09:55:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "After caching and downgrading, P95 = 1.35s, throughput +18%.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0153",
+      "create_time": "2025-03-22T09:55:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Very good.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0154",
+      "create_time": "2025-03-22T09:56:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "No alarms upon going live.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0155",
+      "create_time": "2025-03-22T09:56:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Loading skeleton is online, the experience feels better.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0156",
+      "create_time": "2025-03-24T01:02:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there anything important today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0157",
+      "create_time": "2025-03-24T01:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "No major changes, mainly stability and regression fixes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0158",
+      "create_time": "2025-03-24T01:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I fine-tune the rearrangement threshold.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0159",
+      "create_time": "2025-03-25T01:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Some people want the tone to be a bit more \"sales-oriented.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0160",
+      "create_time": "2025-03-25T01:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Style templates: two modes, Consulting and Sales, with prompt switching.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0161",
+      "create_time": "2025-03-25T01:12:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Add a switch to the UI, default is consultation mode.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0162",
+      "create_time": "2025-03-25T01:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "First, internal gray-scale testing.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0163",
+      "create_time": "2025-03-26T08:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Delay the jitter again to 1.6s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0164",
+      "create_time": "2025-03-26T08:41:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Network jitter, frequent connection reconnections. Increase the connection pool and DNS cache size.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0165",
+      "create_time": "2025-03-26T08:42:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I reduced the reordering batch size to avoid head-of-line blocking.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0166",
+      "create_time": "2025-03-26T08:42:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Watch it again tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0167",
+      "create_time": "2025-03-27T03:05:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Connection pool adjustment is effective, reducing reconnections by 30%.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0168",
+      "create_time": "2025-03-27T03:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Rearranged head-of-line blocking mitigation; P95 = 1.33s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0169",
+      "create_time": "2025-03-27T03:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Documenting the phased resolution of the \"multiple attempts\" issue.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0170",
+      "create_time": "2025-03-28T08:33:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "End-of-month milestone report. Any risks?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0171",
+      "create_time": "2025-03-28T08:34:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The knowledge base is updated frequently, but there may be delays.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0172",
+      "create_time": "2025-03-28T08:34:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Changes must be notified within the group and recorded in the database within 2 hours.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0173",
+      "create_time": "2025-03-28T08:35:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Incremental indexing now supports fast updates.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0174",
+      "create_time": "2025-03-28T08:36:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The delay issue has basically been resolved in this round, P95=1.28s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0175",
+      "create_time": "2025-03-29T12:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Just checking in the evening, how are things?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0176",
+      "create_time": "2025-03-29T12:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Stable.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0177",
+      "create_time": "2025-03-29T12:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I am working on supplementing long-tail question phrasing.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0178",
+      "create_time": "2025-03-30T02:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Issue found: The log panel contains sampled data with phone numbers in plain text.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0179",
+      "create_time": "2025-03-30T02:23:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I will immediately add desensitization (phone number/email masking) and backfill historical samples.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0180",
+      "create_time": "2025-03-30T02:24:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I added a server-side interceptor to uniformly mask data before logging.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0181",
+      "create_time": "2025-03-30T02:25:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I have updated the compliance items in the checklist; they are mandatory.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0182",
+      "create_time": "2025-03-30T03:50:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Data backfill completed. The new logs do not contain PII.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0183",
+      "create_time": "2025-03-30T03:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Sampling confirmation OK.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0184",
+      "create_time": "2025-04-01T02:00:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "April Goals: Experience + Stability, preparing for a small-scale external trial.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0185",
+      "create_time": "2025-04-01T02:01:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Technical side: stable retrieval, hallucination resistance, metric dashboard.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0186",
+      "create_time": "2025-04-01T02:01:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Grafana+Prometheus have been set up.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0187",
+      "create_time": "2025-04-01T02:02:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "\"Guided Task\" component: such as \"Help me prepare a quotation.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0188",
+      "create_time": "2025-04-02T01:15:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there anything obstructing today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0189",
+      "create_time": "2025-04-02T01:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "No obstacles. We keep suppressing the hallucinations.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0190",
+      "create_time": "2025-04-02T01:16:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Rule extraction is incorporated as a hard constraint.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0191",
+      "create_time": "2025-04-03T06:26:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Confirm: \"Taboo words\" first give a warning, but do not block?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0192",
+      "create_time": "2025-04-03T06:27:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Yes, the responses automatically avoid sensitive words, and refuse to answer when necessary.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0193",
+      "create_time": "2025-04-03T06:27:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I'll tighten the list further.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0194",
+      "create_time": "2025-04-04T03:05:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "A version has been made for automatic answer segmentation + table of contents anchors.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0195",
+      "create_time": "2025-04-04T03:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I handle the \"Action Suggestion Card,\" inferring from intent and slots.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0196",
+      "create_time": "2025-04-04T03:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Smoother experience.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0197",
+      "create_time": "2025-04-05T12:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Retrieval weighting + multi-source aggregation updates.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0198",
+      "create_time": "2025-04-05T12:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will run the evaluation on Monday.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0199",
+      "create_time": "2025-04-05T12:11:20Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Published successfully.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0200",
+      "create_time": "2025-04-05T12:11:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The first version of the mobile adaptation has been completed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0201",
+      "create_time": "2025-04-06T02:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there something for me to see today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0202",
+      "create_time": "2025-04-06T02:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Yes, I'll send you the experience video this afternoon.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0203",
+      "create_time": "2025-04-06T02:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will also provide a screenshot of the dashboard.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0204",
+      "create_time": "2025-04-08T01:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Next week there will be an internal client presentation, and a \"copyable path\" is required.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0205",
+      "create_time": "2025-04-08T01:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Three standard paths: Collect budget → Compare prices → Quotation.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0206",
+      "create_time": "2025-04-08T01:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Corresponding prompt word lock.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0207",
+      "create_time": "2025-04-08T01:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The shallow guide has been given above.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0208",
+      "create_time": "2025-04-08T01:03:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Demonstration environment independent instance.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0209",
+      "create_time": "2025-04-09T09:20:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Minor issue: The budget amount auto-recognition misinterprets the \"100,000+\" notation.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0210",
+      "create_time": "2025-04-09T09:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Regex supplementary range expression; numeric normalization compatible with \"ten thousand/thousand\".",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0211",
+      "create_time": "2025-04-09T09:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I'm coming back.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0212",
+      "create_time": "2025-04-10T07:42:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Assessment: Hit rate 0.86, hallucination 4.1%, compliance 0.98, P95=1.32s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0213",
+      "create_time": "2025-04-10T07:43:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "To suppress hallucinations, I turn rule extraction into a hard threshold.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0214",
+      "create_time": "2025-04-10T07:44:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0215",
+      "create_time": "2025-04-11T01:50:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Today's risk points?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0216",
+      "create_time": "2025-04-11T01:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Please increase the coverage of long-tail queries a bit more.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0217",
+      "create_time": "2025-04-11T01:51:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I am doing few-shot template expansion.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0218",
+      "create_time": "2025-04-12T10:20:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Interview feedback: Clear \"next step recommendations\" are needed; long answers should be automatically divided into paragraphs.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0219",
+      "create_time": "2025-04-12T10:21:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The action recommendation cards will be launched tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0220",
+      "create_time": "2025-04-12T10:21:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will provide the components.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0221",
+      "create_time": "2025-04-12T10:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The readability is indeed better.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0222",
+      "create_time": "2025-04-13T06:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Can the \"Next Step\" button in the action card directly create a work order?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0223",
+      "create_time": "2025-04-13T06:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "The first phase will not connect to external systems; it will first pop up \"Copy to Clipboard.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0224",
+      "create_time": "2025-04-13T06:11:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0225",
+      "create_time": "2025-04-14T11:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Will you be online tonight?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0226",
+      "create_time": "2025-04-14T11:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Not going online, only updating prompts.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0227",
+      "create_time": "2025-04-14T11:06:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Tomorrow's UAT will not be affected.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0228",
+      "create_time": "2025-04-15T01:30:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "UAT schedule?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0229",
+      "create_time": "2025-04-15T01:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "From Wednesday to Friday, 3 groups; coverage >80% is the passing line.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0230",
+      "create_time": "2025-04-15T01:31:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Prepare the Log annotation template.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0231",
+      "create_time": "2025-04-15T01:32:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Sampling display with indexing for faster queries.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0232",
+      "create_time": "2025-04-15T01:32:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The UAT page has a \"Feedback button.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0233",
+      "create_time": "2025-04-16T09:30:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "On the eve of UAT, I will shorten the guideline copy again.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0234",
+      "create_time": "2025-04-16T09:31:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Received, I will update it accordingly.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0235",
+      "create_time": "2025-04-17T08:05:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "UAT Day 1: 1) The quotation format occasionally misses decimal places; 2) Misunderstanding of \"effective next month.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0236",
+      "create_time": "2025-04-17T08:06:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "1) Amounts unified to two decimal places; 2) Effective date recognized by regex + rule dictionary.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0237",
+      "create_time": "2025-04-17T08:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I updated the acceptance test cases.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0238",
+      "create_time": "2025-04-18T02:22:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "How are you today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0239",
+      "create_time": "2025-04-18T02:23:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The issue is being fixed as planned, and there will be a regression test in the afternoon.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0240",
+      "create_time": "2025-04-18T02:23:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I added the parsing priority for the validity period.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0241",
+      "create_time": "2025-04-19T03:40:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Update completed; the accuracy of effective time recognition improved from 0.78 to 0.91.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0242",
+      "create_time": "2025-04-19T03:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0243",
+      "create_time": "2025-04-19T03:41:20Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "No error logs.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0244",
+      "create_time": "2025-04-19T03:41:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The amount localization display is as shown above.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0245",
+      "create_time": "2025-04-20T01:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Simple update for the weekend.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0246",
+      "create_time": "2025-04-20T01:13:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Steady progress.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0247",
+      "create_time": "2025-04-20T01:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I have added two types of boundary questions.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0248",
+      "create_time": "2025-04-21T02:50:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Just to ask: cross-session \"committed items\" are currently lost, right?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0249",
+      "create_time": "2025-04-21T02:51:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Yes, only within the current context.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0250",
+      "create_time": "2025-04-21T02:51:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Recorded for future requirements.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0251",
+      "create_time": "2025-04-21T02:52:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Wait until the MVP is stable before taking a look.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0252",
+      "create_time": "2025-04-22T01:01:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Is there anything I need to decide today?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0253",
+      "create_time": "2025-04-22T01:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "No, what is needed is continuous suppression of hallucinations and attention to experiential details.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0254",
+      "create_time": "2025-04-22T01:02:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Today I primarily focused on assessment and minor repairs.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0255",
+      "create_time": "2025-04-23T05:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Pre-launch risks: data updates, compliance, long-tail queries.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0256",
+      "create_time": "2025-04-23T05:16:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will collect and complete the long-tail question formulations; add an additional layer of compliance as a safety net.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0257",
+      "create_time": "2025-04-23T05:16:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "\"Submit → Review → Storage\" pipeline is operational.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0258",
+      "create_time": "2025-04-23T05:17:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Increase reminder salience without interruption.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0259",
+      "create_time": "2025-04-24T10:45:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The sales-oriented feedback on the style template is quite positive.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0260",
+      "create_time": "2025-04-24T10:46:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will adjust the threshold slightly more towards the sales-oriented side.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0261",
+      "create_time": "2025-04-24T10:46:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI retention toggle.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0262",
+      "create_time": "2025-04-25T11:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Don't forget the end-of-month report materials.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0263",
+      "create_time": "2025-04-25T11:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I am writing: the technical plan for the indicator page + A, the interface diagram for E, and the system diagram for D.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0264",
+      "create_time": "2025-04-25T11:06:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "System diagram confirmation: retrieval, reranking, generation, rule layer, log layer.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0265",
+      "create_time": "2025-04-25T11:07:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I am posting the architecture source file.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0266",
+      "create_time": "2025-04-25T11:07:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will send the screenshot tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0267",
+      "create_time": "2025-04-26T03:10:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Just a light question for the weekend, is that OK?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0268",
+      "create_time": "2025-04-26T03:10:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0269",
+      "create_time": "2025-04-26T03:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "No problem.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0270",
+      "create_time": "2025-04-27T01:25:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Grayscale trial feedback: 1) \"Next step suggestions\" are popular; 2) Some users hope to \"remember quote preferences.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0271",
+      "create_time": "2025-04-27T01:26:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Remembering \"preferences\" requires cross-session memory, to be added later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0272",
+      "create_time": "2025-04-27T01:26:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Agreed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0273",
+      "create_time": "2025-04-27T01:27:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "First, stabilize the core experience.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0274",
+      "create_time": "2025-04-28T07:50:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "MVP feature freeze: Retrieval, Generation, Rules, Intent/slot, Compliance reminders, Action cards.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0275",
+      "create_time": "2025-04-28T07:51:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Acceptance criteria locked: Hit rate ≥ 0.85, Hallucination ≤ 5%, Compliance ≥ 0.98, P95 ≤ 1.4s.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0276",
+      "create_time": "2025-04-28T07:52:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Alarm threshold setting completed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0277",
+      "create_time": "2025-04-28T07:52:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI margin adjustments are done, will be uploaded tomorrow.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0278",
+      "create_time": "2025-04-29T12:03:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Return passes successfully, boundary unobstructed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0279",
+      "create_time": "2025-04-29T12:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Technical side is OK.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0280",
+      "create_time": "2025-04-29T12:04:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Stable.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0281",
+      "create_time": "2025-04-29T12:04:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The experience is OK.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0282",
+      "create_time": "2025-04-30T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Finish on time?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0283",
+      "create_time": "2025-04-30T02:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Completed. MVP met the standards, the metrics are in the document.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0284",
+      "create_time": "2025-04-30T02:01:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Lock the release version, tag the model and prompt words.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0285",
+      "create_time": "2025-04-30T02:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Set the grayscale to 50% and observe for one week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0286",
+      "create_time": "2025-04-30T02:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The final interface draft has been sent.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0287",
+      "create_time": "2025-04-30T02:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Thanks for your hard work. Send me the materials tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0288",
+      "create_time": "2025-04-30T02:03:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0289",
+      "create_time": "2025-04-30T02:03:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Supplement: No cross-session persistence (preferences/commitments) was implemented in this phase; it can be planned for future development.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0290",
+      "create_time": "2025-04-30T02:04:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "First push the current version to stable, then add more later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0291",
+      "create_time": "2025-05-04T02:00:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Good morning, everyone.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0292",
+      "create_time": "2025-05-04T02:01:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "We need to add emotion recognition to the \"Smart Sales Assistant\" and launch a pilot as soon as possible. Can we have a usable version within two weeks? @all",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0293",
+      "create_time": "2025-05-04T02:01:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The work that can be accomplished in two weeks is limited. Is there a clear client requirement?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0294",
+      "create_time": "2025-05-04T02:01:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Not for now, just implementing a basic emotion recognition feature is fine.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0295",
+      "create_time": "2025-05-04T02:02:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Under the two-week constraint, only a smaller set of emotion categories can be defined.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0296",
+      "create_time": "2025-05-04T02:02:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Let's define a narrower scope: we will only recognize the sentiment of the text, initially classifying it into 5 categories: happy/angry/frustrated/confused/neutral. Is that okay?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0297",
+      "create_time": "2025-05-04T02:02:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK, the faster the better.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0298",
+      "create_time": "2025-05-04T02:04:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Technically feasible. After some thought, the basic idea could be: fine-tune a Chinese RoBERTa with an emotion classification head, targeting an inference latency of <70ms per input; start with a lightweight distilled version to avoid slowing down the conversation.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0299",
+      "create_time": "2025-05-04T02:04:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "D handles service orientation and deployment, and one A10 card is sufficient. The gRPC interface is used to insert into the dialogue flow.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0300",
+      "create_time": "2025-05-04T02:04:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0301",
+      "create_time": "2025-05-04T02:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "We need E to provide some help related to the front end. E, is that okay?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0302",
+      "create_time": "2025-05-04T02:05:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Sure.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0303",
+      "create_time": "2025-05-04T02:06:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I use tags + colors to mark: Happy Green, Angry Red, Frustrated Orange, Confused Purple, Neutral Gray; add alerts for dangerous emotions.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0304",
+      "create_time": "2025-05-04T02:07:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Acceptance criteria set first:\n- Macro-average F1 ≥ 0.75;\n- P95 latency per request ≤ 80ms;\n- Default confidence threshold 0.55;\n- Trigger alerts for anger/frustration.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0305",
+      "create_time": "2025-05-04T02:10:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Time point?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0306",
+      "create_time": "2025-05-04T02:12:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "This week we will work on modeling and offline evaluation. The first half of next week will be for joint debugging, with submission on May 15th.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0307",
+      "create_time": "2025-05-04T02:12:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "B, write me some related materials. You two communicate well @A @B.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0308",
+      "create_time": "2025-05-04T02:12:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I'll add a requirements document and release the first draft today.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0309",
+      "create_time": "2025-05-04T02:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Got it. Oh right, I'll first use the Chinese version of GoEmotions mixed with our customer service conversation corpus for training. For the class imbalance, I'll adjust the weights.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0310",
+      "create_time": "2025-05-04T02:15:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Can you provide me with a version of the interface specification in proto?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0311",
+      "create_time": "2025-05-04T02:15:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I'll give it in the afternoon.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0312",
+      "create_time": "2025-05-04T02:15:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will first come up with two versions of the prompt text, one conservative and one optimistic.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0313",
+      "create_time": "2025-05-05T07:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Let me ask, are confusion and frustration easily confused within the categories of emotion recognition? @A",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0314",
+      "create_time": "2025-05-05T07:10:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Yes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0315",
+      "create_time": "2025-05-05T07:10:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "We plan to use a confusion matrix and adjust the confusion decision threshold upward by 0.05 if necessary.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0316",
+      "create_time": "2025-05-05T07:12:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Don't over-optimize, do it right first.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0317",
+      "create_time": "2025-05-05T07:12:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0318",
+      "create_time": "2025-05-07T06:06:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Add a new requirement: we need to create a \"memory system.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0319",
+      "create_time": "2025-05-07T06:06:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Our sales assistant needs to remember the customer's preferences, past commitments, taboo words, etc., and provide automatic reminders later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0320",
+      "create_time": "2025-05-07T06:06:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "To what extent do we achieve? What is the granularity of memory? Do we only remember facts, or also track emotional trajectories?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0321",
+      "create_time": "2025-05-07T06:07:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Currently, we only need to help the sales assistant implement memory functionality. Later, we plan to expand the application of the entire system to larger scenarios. @A, do you have any understanding of memory-related concepts?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0322",
+      "create_time": "2025-05-07T06:07:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Yes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0323",
+      "create_time": "2025-05-07T06:08:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I have recently learned some related methods.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0324",
+      "create_time": "2025-05-07T06:08:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "For our needs, I suggest a \"three-tiered approach\": short-term memory (the most recent N rounds of context), mid-term memory (conversation-level summaries + topics), and long-term memory (stable facts/preferences across sessions).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0325",
+      "create_time": "2025-05-07T06:08:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Which storage option to choose?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0326",
+      "create_time": "2025-05-07T06:09:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Vector search + KV. The vector database uses ChromaDB.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0327",
+      "create_time": "2025-05-07T06:10:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I am creating a \"Memory Panel\" with groups: Customer Information / Taboo / Preferences / Commitment / Risks.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0328",
+      "create_time": "2025-05-07T06:10:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Compliance must be observed, and PII can be cleared.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0329",
+      "create_time": "2025-05-07T06:11:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Get the initial versions of the short-term and mid-term up and running this week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0330",
+      "create_time": "2025-05-07T06:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "In the short term, I use a circular buffer, role splitting, and time decay; in the medium term, I work on structured summarization.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0331",
+      "create_time": "2025-05-07T06:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I will first create the Chroma database and collection.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0332",
+      "create_time": "2025-05-07T06:12:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Write strategy first event-driven: preferences/taboos/commitments/contacts/budget/industry characteristics.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0333",
+      "create_time": "2025-05-07T06:13:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "OK. I will first establish the short-term link tonight.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0334",
+      "create_time": "2025-05-07T06:13:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The UI is initially collapsed, and key events pop up as small cards.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0335",
+      "create_time": "2025-05-07T06:14:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Advance.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0336",
+      "create_time": "2025-05-07T06:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Will the expiration policy be further detailed later?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0337",
+      "create_time": "2025-05-07T06:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Set the mid-term TTL to 14 days first; do not delete the long-term merged data; details will be provided tomorrow.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0338",
+      "create_time": "2025-05-07T06:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Noted.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0339",
+      "create_time": "2025-05-07T09:12:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "May I ask, is there any plan to expire memory?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0340",
+      "create_time": "2025-05-07T09:12:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Temporary idea: Set the TTL of mid-term memory to 14 days, and long-term memory is permanent but can be merged; we will refine it further in tomorrow's morning meeting.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0341",
+      "create_time": "2025-05-07T09:12:40Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Alright, I'll note it down in the requirements.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0342",
+      "create_time": "2025-05-13T02:32:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Update: Short-term memory has been integrated, storing the most recent 40 rounds split by role with time decay; I have created the first version of the summary prompt for mid-term summaries, written at the end of the conversation or on timeout.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0343",
+      "create_time": "2025-05-13T02:32:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "The ChromaDB database has been created, and collections are sharded by customer ID; I used `text-embedding-3-large` for the embeddings, and batch writing works fine.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0344",
+      "create_time": "2025-05-13T02:33:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I will clarify the types of memory again:\n- Preferences (e.g., \"likes comparison tables\");\n- Taboos (e.g., \"don't call before 9 AM\");\n- Commitments (\"provide a quote next week\");\n- Contacts/Roles;\n- Budget range;\n- Industry characteristics.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0345",
+      "create_time": "2025-05-13T02:34:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI side: The memory panel is collapsed by default and only pops up a \"small card\" during key events.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0346",
+      "create_time": "2025-05-13T02:34:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Launch schedule?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0347",
+      "create_time": "2025-05-13T02:34:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Make the mid-term summary searchable within this week, with topK=6, rerank using BM25+semantic score fusion, and a recency weight of 0.7; establish the long-term memory write-in first but do not display it by default.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0348",
+      "create_time": "2025-05-13T02:35:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "TTL first follows what you said yesterday: medium-term is 14 days, short-term only within the conversation, long-term has no TTL but merges if similarity >0.85.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0349",
+      "create_time": "2025-05-13T02:35:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I will add an idempotency check for writes to avoid jitter-induced duplication.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0350",
+      "create_time": "2025-05-13T02:36:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will use a conservative version of the card copy first to avoid being too \"close to the skin\".",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0351",
+      "create_time": "2025-05-13T02:36:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0352",
+      "create_time": "2025-05-13T02:37:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Note: Two parts are still missing: PII desensitization and manual correction panel, to be added later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0353",
+      "create_time": "2025-05-13T02:37:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Noted.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0354",
+      "create_time": "2025-05-13T02:38:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "The memory system is still in progress, so don't announce it yet. Don't delay the emotion recognition.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0355",
+      "create_time": "2025-05-13T02:38:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Understood.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0356",
+      "create_time": "2025-05-13T02:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Let's leave it like this for now. If there are any issues later, we'll discuss them in the group.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0357",
+      "create_time": "2025-05-15T10:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Submission: Macro F1=0.78; Anger recall +4%; P95=62ms; Default threshold 0.55.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0358",
+      "create_time": "2025-05-15T10:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Acceptance passed. Reminder strategy is also OK.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0359",
+      "create_time": "2025-05-15T10:06:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Grayscale rollout at 10% traffic, monitoring is normal.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0360",
+      "create_time": "2025-05-15T10:07:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The copywriting takes a conservative approach.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0361",
+      "create_time": "2025-05-15T10:07:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Well done, the emotion recognition is done nicely.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0362",
+      "create_time": "2025-05-15T10:07:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Next, focus on the memory system.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0363",
+      "create_time": "2025-05-20T03:00:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Did a simple test: can retrieve \"last promise\" and \"budget.\" topK=6 works okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0364",
+      "create_time": "2025-05-20T03:01:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I added one more trigger rule: when the cosine similarity between this round's topic and the last summary is greater than 0.6, then try to inject.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0365",
+      "create_time": "2025-05-20T03:02:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "The writing has been made asynchronous to avoid blocking.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0366",
+      "create_time": "2025-05-20T03:02:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Add \"Edit/Delete\" to the panel.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0367",
+      "create_time": "2025-05-20T03:03:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "False positives must have a fallback mechanism.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0368",
+      "create_time": "2025-05-20T03:03:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Applied gating: score < 0.35 means no injection; \"taboo\" category must be > 0.5.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0369",
+      "create_time": "2025-05-20T03:04:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "First let the two internal sales staff try it out.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0370",
+      "create_time": "2025-05-20T03:04:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Agreed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0371",
+      "create_time": "2025-05-20T03:05:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I'll add the log tracking.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0372",
+      "create_time": "2025-05-20T03:05:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0373",
+      "create_time": "2025-05-27T07:10:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Legal Notice: Phone numbers and email addresses must be anonymized; users can clear memory with one click.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0374",
+      "create_time": "2025-05-27T07:10:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Okay.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0375",
+      "create_time": "2025-05-27T07:11:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I am writing a pipeline to add PII detection and masking (the middle four digits of a phone number).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0376",
+      "create_time": "2025-05-27T07:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I added audit logs for the clear operation.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0377",
+      "create_time": "2025-05-27T07:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "After clearing, a prompt says 'Undo available for 30 seconds.'",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0378",
+      "create_time": "2025-05-27T07:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Give this priority.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0379",
+      "create_time": "2025-05-27T07:13:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Got it.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0380",
+      "create_time": "2025-05-27T07:14:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Also, it is best if memory merging is explainable.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0381",
+      "create_time": "2025-05-27T07:14:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I created the \"Source Alignment\" entry to show which conversation it comes from.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0382",
+      "create_time": "2025-05-27T07:15:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Just add a traceID to link them together.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0383",
+      "create_time": "2025-05-27T07:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Okay, arranged.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0384",
+      "create_time": "2025-05-29T01:30:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Few-shot evaluation: mAP@6 = 0.71. \"Taboo\" has high precision, while \"industry features\" have relatively low recall.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0385",
+      "create_time": "2025-05-29T01:31:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Expand the synonym database for industry characteristics?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0386",
+      "create_time": "2025-05-29T01:31:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I will start organizing the glossary: manufacturing/logistics/medical first.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0387",
+      "create_time": "2025-05-29T01:32:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I increased HNSW's efSearch from 128 to 256, resulting in a latency increase of +3ms.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0388",
+      "create_time": "2025-05-29T01:32:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Inject another strategy: If the emotion is \"angry/very frustrated,\" be more conservative.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0389",
+      "create_time": "2025-05-29T01:33:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Agreed, don't add fuel to the fire.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0390",
+      "create_time": "2025-05-29T01:33:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Don't mess with the threshold for now; first, look at the effect of the vocabulary list.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0391",
+      "create_time": "2025-05-29T01:34:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0392",
+      "create_time": "2025-05-29T01:35:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I'll release vocabulary version 0.1 tonight first.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0393",
+      "create_time": "2025-05-29T01:35:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "👍",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0394",
+      "create_time": "2025-06-03T02:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Trial feedback: A line item labeled \"Budget 500,000-800,000\" was mistakenly merged into \"300,000-600,000.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0395",
+      "create_time": "2025-06-03T02:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Numerical values need to be more strict.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0396",
+      "create_time": "2025-06-03T02:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I changed the merge threshold from 0.85 to 0.90 and handled the numerical range separately.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0397",
+      "create_time": "2025-06-03T02:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I created a playback tool that can replay conversations to observe the injection trace.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0398",
+      "create_time": "2025-06-03T02:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Add the phrase \"Why it was hit\" to the explanation panel.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0399",
+      "create_time": "2025-06-03T02:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "When will the pilot be expanded?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0400",
+      "create_time": "2025-06-03T02:13:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "On 6/10, pulled in 12 sales.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0401",
+      "create_time": "2025-06-03T02:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I changed the recency weight from 0.7 to 0.6 to avoid giving too much importance to old facts.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0402",
+      "create_time": "2025-06-03T02:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Noted.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0403",
+      "create_time": "2025-06-03T02:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will send the change description later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0404",
+      "create_time": "2025-06-03T02:15:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0405",
+      "create_time": "2025-06-10T06:40:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Beta begins. Two points: 1) The taboo call time reminder is very useful; 2) The contact roles are occasionally missed.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0406",
+      "create_time": "2025-06-10T06:41:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "For contacts, I changed to a dual-channel approach combining NER + rules, prioritizing real names and job titles.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0407",
+      "create_time": "2025-06-10T06:41:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Dynamic topK: When encountering \"Contacts/Budget,\" force topK=8; others remain 6.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0408",
+      "create_time": "2025-06-10T06:42:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Move \"Contacts\" to the top in the UI.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0409",
+      "create_time": "2025-06-10T06:42:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Can the value be quantified?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0410",
+      "create_time": "2025-06-10T06:43:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "First, look at three items: time savings, avoiding pitfalls, and the timeliness of follow-ups. Data will be provided after one week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0411",
+      "create_time": "2025-06-10T06:43:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Tracking points have been added.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0412",
+      "create_time": "2025-06-10T06:44:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "OK。",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0413",
+      "create_time": "2025-06-10T06:44:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will perform a hot update of the NER model later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0414",
+      "create_time": "2025-06-10T06:45:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I'm cooperating.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0415",
+      "create_time": "2025-06-10T06:45:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I'll first go collect the position aliases from the terminology.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0416",
+      "create_time": "2025-06-17T09:10:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "There is a risk: the client says \"Don't mention Plan A anymore,\" but the system is misled by old memories.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0417",
+      "create_time": "2025-06-17T09:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Hmm, this kind requires more caution.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0418",
+      "create_time": "2025-06-17T09:11:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I added counterfactual updates: when negations appear, hedge the old memory weights; if strong emotions accumulate, block them directly for 24 hours.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0419",
+      "create_time": "2025-06-17T09:12:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I am implementing blacklist caching and hot updates.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0420",
+      "create_time": "2025-06-17T09:12:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "UI displays \"This memory is temporarily hidden (due to user rejection)\".",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0421",
+      "create_time": "2025-06-17T09:13:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "This is very crucial.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0422",
+      "create_time": "2025-06-17T09:13:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Add product strategy: When the combination of \"negation + strong emotion\" appears, memory injection is turned off by default.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0423",
+      "create_time": "2025-06-17T09:14:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Received.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0424",
+      "create_time": "2025-06-17T09:14:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "A small reminder: Don't affect the stability of the 5/8 merging strategy.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0425",
+      "create_time": "2025-06-17T09:15:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I can make a rollback switch.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0425",
+      "create_time": "2025-06-24T02:15:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The initial data from the beta phase is out: lightning strike incidents have decreased by 42%, the follow-up timeliness rate has increased by 18%, and the average time saved per person is about 9 minutes per day. The results are slightly better than expected.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0426",
+      "create_time": "2025-06-24T02:16:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Injection coverage is currently at 62%, with a false injection rate of 3.1%. The target is <2.5%. I plan to do two things: 1) synonym expansion of industry features; 2) lightweight re-ranking.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0427",
+      "create_time": "2025-06-24T02:17:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "The latency here is stable at P95 = 74ms (retrieval + injection), and it can still be reduced by a few milliseconds. It seems the I/O bottleneck is at the vector indexing part.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0428",
+      "create_time": "2025-06-24T02:17:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "The sales team has put forward a request: \"Can the 'Memory Card' be converted into a task with one click?\" They think it's too troublesome to take screenshots and send them to the operations team now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0429",
+      "create_time": "2025-06-24T02:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Alright, I'll add this requirement. I'll first write it into the requirement pool within this week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0430",
+      "create_time": "2025-06-24T02:18:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Not bad, the data is convincing. Keep pushing forward.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0431",
+      "create_time": "2025-06-24T02:19:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I'll first verify the effect of the reordering here to see if it can further suppress the mis-injection.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0432",
+      "create_time": "2025-06-24T02:19:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Whenever you have results, just casually toss them into the group, and I'll help you mark the version.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0433",
+      "create_time": "2025-06-24T02:20:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Alright.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0434",
+      "create_time": "2025-07-01T03:40:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Everyone, thank you for your hard work during this period!",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0435",
+      "create_time": "2025-07-01T03:40:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "The current phase objectives are basically achieved: the emotion recognition module is stable, and the memory system beta validation is effective.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0436",
+      "create_time": "2025-07-01T03:40:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Next, we need the plan for our memory system as soon as possible. Externally, we need a demo.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0437",
+      "create_time": "2025-07-01T03:41:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Everyone has worked hard lately. Let's have a meal together this noon. If you have any food preferences, please let me know.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0438",
+      "create_time": "2025-07-01T03:42:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I am fine with anything, no problem.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0439",
+      "create_time": "2025-07-01T03:42:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Whatever, as long as everyone is happy eating.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0440",
+      "create_time": "2025-07-01T03:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Alex gives a suggestion.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0441",
+      "create_time": "2025-07-01T03:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "How about going to that Peking duck place we went to last time? Everyone said it was pretty good.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0442",
+      "create_time": "2025-07-01T03:43:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Alright, let's have Peking duck. Everyone, meet at the company entrance at 12 o'clock.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0443",
+      "create_time": "2025-07-01T04:41:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "For the demo, I mainly focus on two areas: 1) \"Task-based linkage\" — memory directly triggers tasks/reminders; 2) \"Compliance template export\" — include source tracing when exporting records. It can be ready in about two weeks.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0444",
+      "create_time": "2025-07-01T04:41:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Demo We need to be responsible for three things here: industry-specific recall optimization, counterfactual rollback (correcting erroneous injections), and long-term memory entity merging (companies, brand aliases).",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0445",
+      "create_time": "2025-07-01T04:41:40Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Well, you guys plan it out. Dylan and Emily, what are your plans?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0446",
+      "create_time": "2025-07-01T04:42:15Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I'll handle multi-tenancy and index hot-cold tiering, and plan to provide a solution by mid-July. I'll also unify the log search on the side while I'm at it.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0447",
+      "create_time": "2025-07-01T04:42:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I suggest conducting a round of small-scale usability testing, focusing on the \"error correction when injecting mistakes\" interaction. Currently, users tend to panic when they see an incorrect memory.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0448",
+      "create_time": "2025-07-01T04:43:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK, let's review a version of the overall data again in mid-July.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0449",
+      "create_time": "2025-07-01T04:43:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "A (@Alex), long-term memory is not displayed by default but retained, right? First keep a copy in the backend, but don't display it in the frontend yet.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0450",
+      "create_time": "2025-07-01T04:44:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Right. Before reducing the false injection rate to below 2.5%, first lock in some \"stable facts.\" Do not display them but do not discard the data either.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0451",
+      "create_time": "2025-07-01T04:44:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Understood, I will write the requirements into the document and specify the acceptance criteria.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0452",
+      "create_time": "2025-07-01T04:45:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I'll first compile a version of the changelog here and send it to the group later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0453",
+      "create_time": "2025-07-01T04:45:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Thanks for all the hard work~ 💪",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0454",
+      "create_time": "2025-07-03T04:10:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I ran a benchmark on the hot and cold layering part, and after index partitioning, the latency dropped by another 7ms. However, there is some jitter during writes, so I am adding a cache queue to buffer the writes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0455",
+      "create_time": "2025-07-03T04:12:20Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I looked at the results after reordering, the false injection dropped to 2.6%, basically on target. But the recall decreased by 1.5%, so we need to adjust the threshold again.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0456",
+      "create_time": "2025-07-03T04:13:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I suggest not changing the threshold too drastically, as it might affect the final stability metrics. We'll review the results again next week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0457",
+      "create_time": "2025-07-03T04:15:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I've finished drawing the new task-driven interactive design: 1) Add a \"Convert to Task\" icon at the top right corner of the card; 2) Automatically include memory content and source. I'll send the Figma link later.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0458",
+      "create_time": "2025-07-03T04:53:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "👍 Okay, I'll take the sales team to have a look later. If they can use it directly, the memory system part will be able to close the loop.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0459",
+      "create_time": "2025-07-08T04:17:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Final metric update: injection coverage 68%, false injection rate 2.3% (✅), latency P95 = 66ms. This phase can wrap up beta now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0460",
+      "create_time": "2025-07-08T04:17:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Great, this version can be presented externally. I suggest doing an internal demo report before next Friday.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0461",
+      "create_time": "2025-07-08T04:18:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I'll organize the report document and video, Dylan will help me record the backend process, and Emily will add loading animations to the frontend demo.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0462",
+      "create_time": "2025-07-08T04:18:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Everyone, let's pause for a moment and go to the cafeteria to have a meal together. We can eat and chat at the same time.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0463",
+      "create_time": "2025-07-08T04:18:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Alright, let's eat first.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0464",
+      "create_time": "2025-07-08T04:18:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "You all go ahead and eat, I'll go to the clinic next door for a bit, my throat doesn't feel very good.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0465",
+      "create_time": "2025-07-08T04:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "It’s been quite tough recently, take care of your health.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0466",
+      "create_time": "2025-07-08T06:03:00Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Got it, I'll handle the front-end demo. I'll also add a small pop-up for \"memory-triggered history\" since it looks pretty good.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0467",
+      "create_time": "2025-07-08T06:05:10Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Okay, I will record a video of the backend process for documentation purposes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0468",
+      "create_time": "2025-07-08T06:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I've drafted the report document with the theme \"EverCore Beta Wrap-up & Next Steps Planning.\" I've marked each section with TODO. @Alex @Dylan Please remember to help me fill in the data and system diagrams.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0469",
+      "create_time": "2025-07-08T06:23:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Got it, I'll add the error injection correction part later. I'll also draw a technical flowchart to show the entire process in one diagram.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0470",
+      "create_time": "2025-07-08T06:24:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I am providing the performance curve and resource usage chart here. The GPU usage is now stable at around 25%, which is quite healthy.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0471",
+      "create_time": "2025-07-08T06:25:20Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "I have finished updating the Figma layout and added the \"Memory Trigger History\" animation, allowing users to more intuitively understand what the system \"remembers.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0472",
+      "create_time": "2025-07-08T06:26:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Okay, I will host the demonstration next Friday. This time, we'll let the business side take a look as well and aim to directly connect with the client for a pilot.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0473",
+      "create_time": "2025-07-09T01:11:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I just compiled the internal test feedback: 1) Users care most about \"memory accuracy\"; 2) Next is the \"logic behind the memory appearance (why it shows up)\". Alex, we might need to provide some explanatory hints here.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0474",
+      "create_time": "2025-07-09T01:12:50Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Hmm, I'm considering adding a small tag for \"Memory Source Visualization,\" such as: \"Generated from the last three conversations.\" The logic won't be changed, just a label to help users understand the source.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0475",
+      "create_time": "2025-07-09T01:13:30Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Sure, I can add a light gray label here, something like: \"Source: Chat #1432 / User Feedback,\" and the display won't be too obtrusive.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0476",
+      "create_time": "2025-07-09T01:14:10Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "👍 This is exactly the kind of explanatory approach we need. We are not just building features now; we are building \"trust.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0477",
+      "create_time": "2025-07-09T01:15:30Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Let me add that the memory read/write frequency has surged in the past few days. I will add a distributed lock to prevent race conditions during concurrent writes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0478",
+      "create_time": "2025-07-09T01:16:40Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Well, especially in the part of concurrent write-back, sometimes the write occurs later than the recall. I noticed there are two out-of-order records in the logs, and the timestamps need to be aligned.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0479",
+      "create_time": "2025-07-09T01:17:10Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "Yes, I am working on event timestamp alignment. This issue is quite subtle but can affect the user experience.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0480",
+      "create_time": "2025-07-10T03:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "I have a question before the demo: Is our current \"long-term memory\" strategy too conservative? Some users have feedback that it \"doesn't remember things.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0481",
+      "create_time": "2025-07-10T03:21:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Hmm, being conservative is intentional. If too many things are opened up now, uncontrollable memories could instead trigger \"hallucination amplification.\" It is recommended to relax the policy once the stable version is released.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0482",
+      "create_time": "2025-07-10T03:22:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I understand Alex's concerns. But we can let users know on the UI layer that \"the system actually remembers it, but it's just not displayed for now.\" Emily, could you consider a little prompt saying \"Remembering...\"?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0483",
+      "create_time": "2025-07-10T03:23:10Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Okay, I'll add a semi-transparent small memory icon that, when hovered over, shows the tooltip \"System has recorded it, but it has not been displayed yet.\" This way, users won't mistakenly think \"it hasn't learned it.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0484",
+      "create_time": "2025-07-10T03:24:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Alright, I agree with this compromise. Don't give users too strong a sense of a \"black box.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0485",
+      "create_time": "2025-07-11T08:45:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "The first draft of the PPT report is here: [link]. Please review it by tonight, and we will finalize it tomorrow morning. I have emphasized \"the transition of the memory system to EverAgent\" on the \"Future Outlook\" slide.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0486",
+      "create_time": "2025-07-11T08:46:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I will add a sentence to that part tomorrow: \"Exploring strategies for integrating long-term memory with short-term context.\"",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0487",
+      "create_time": "2025-07-11T08:47:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "I will set up a static sandbox in the demo environment to prevent writing from contaminating the official data during the demonstration.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0488",
+      "create_time": "2025-07-11T08:48:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Great, be more prepared. I plan to have the strategy department take a look as well; it might be presented at the annual summary meeting.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0489",
+      "create_time": "2025-07-15T10:20:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "The demo was very successful. The feedback from the strategy department was: \"It's the first time we've seen AI that can really 'remember things.'\" 👍",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0490",
+      "create_time": "2025-07-15T10:21:10Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Great 😭 Have you received any specific concerns?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0491",
+      "create_time": "2025-07-15T10:21:50Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Yes, two main points: 1) How to isolate data security? 2) How to handle user-triggered \"unauthorized memory\"?",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0492",
+      "create_time": "2025-07-15T10:22:40Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "We solved most of the former with tenant isolation; for the latter, we can add a \"user confirmation write\" layer in the write path.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0493",
+      "create_time": "2025-07-15T10:23:20Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "I agree, but it should not interrupt the user flow too much. It might be necessary to intelligently identify \"risky content\" before prompting for confirmation.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0494",
+      "create_time": "2025-07-15T10:24:10Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "A lightweight classifier can be added to determine the semantic category, for example, triggering confirmation only when it involves personal names or sensitive information. I have an existing model available for use.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0495",
+      "create_time": "2025-07-15T10:25:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "OK, let's directly add this to the v1.0 backlog. We're finally moving towards the official release. 🎯",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0496",
+      "create_time": "2025-07-15T10:25:40Z",
+      "sender": "user_105",
+      "sender_name": "Emily",
+      "type": "text",
+      "content": "Should we also change to a more \"memorable\" logo? The current little brain icon looks too much like a medical app 😂",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0497",
+      "create_time": "2025-07-15T10:26:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Hahaha, I feel the same. Next week I'll hold a small meeting specifically to revise the visuals.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0498",
+      "create_time": "2025-07-15T10:26:30Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Sure, our product really needs to \"have some soul\" now.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0499",
+      "create_time": "2025-07-16T01:02:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "I ran a regression last night: long-term memory recall rate +6.3%, false injection rate has temporarily remained unchanged. It seems the merge logic optimization is effective.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0500",
+      "create_time": "2025-07-16T01:03:00Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "👍 The logs are clean this time, and the data consistency is much better than last week.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0501",
+      "create_time": "2025-07-16T01:05:00Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Everyone, come to the break room. I bought coffee and snacks for everyone. You can chat while enjoying your drinks.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0502",
+      "create_time": "2025-07-16T01:05:15Z",
+      "sender": "user_104",
+      "sender_name": "Dylan",
+      "type": "text",
+      "content": "OK, I'll be right there.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0503",
+      "create_time": "2025-07-16T01:05:30Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "Okay, thank you, boss.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0504",
+      "create_time": "2025-07-16T01:06:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "Thank you, boss.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0505",
+      "create_time": "2025-07-16T01:25:00Z",
+      "sender": "user_101",
+      "sender_name": "Alex",
+      "type": "text",
+      "content": "@Betty, come to meeting room A to take a look at my regression results from last night. @Dylan, please come along as well.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0506",
+      "create_time": "2025-07-16T01:34:00Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "@Chen I checked the regression results and they look good. Dylan showed me the logs, and the data appears clean.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0507",
+      "create_time": "2025-07-16T01:34:30Z",
+      "sender": "user_102",
+      "sender_name": "Betty",
+      "type": "text",
+      "content": "We can almost start preparing the v1.0 release notes. I'll take responsibility for drafting the release notes.",
+      "refer_list": []
+    },
+    {
+      "message_id": "msg_0508",
+      "create_time": "2025-07-16T01:35:20Z",
+      "sender": "user_103",
+      "sender_name": "Chen",
+      "type": "text",
+      "content": "Okay. I'll write the last sentence: \"EverCore, allowing AI to truly have controllable memory.\"",
+      "refer_list": []
+    }
+  ]
+}

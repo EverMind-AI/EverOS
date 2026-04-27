@@ -1,7 +1,7 @@
-# EverMemOS (EverMind) Configuration for Multi-Person Group Chat Evaluation
+# EverCore (EverMind) Configuration for Multi-Person Group Chat Evaluation
 #
 # Environment variables:
-# - EVERMEMOS_BASE_URL: EverMemOS API base url (required, e.g., http://0.0.0.0)
+# - EVERMEMOS_BASE_URL: EverCore API base url (required, e.g., http://0.0.0.0)
 # - EVERMEMOS_API_KEY: API key (optional, not needed for local deployment)
 #
 # For local deployment, use --base-url to specify port:
@@ -12,7 +12,7 @@
 #
 name: "evermemos"
 version: "1.0"
-description: "EverMemOS adapter for multi-person group chat evaluation"
+description: "EverCore adapter for multi-person group chat evaluation"
 
 # API Configuration
 # base_url can be overridden via --base-url CLI argument
