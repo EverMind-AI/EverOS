@@ -2,7 +2,7 @@ name: Deploy Website
 
 on:
   push:
-    branches: [feat/readme-redesign]
+    branches: [main]
     paths:
       - 'benchmarks/EvoAgentBench/website/**'
       - '.github/workflows/deploy-website.yml'

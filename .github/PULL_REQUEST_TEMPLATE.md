@@ -1,80 +1,37 @@
-## Description
+## Summary
 
-<!-- Provide a clear and concise description of your changes -->
+<!-- What changed, and why? -->
 
-## Type of Change
+## Area
 
-<!-- Mark the relevant option with an 'x' -->
+<!-- Mark the relevant option with an x. -->
 
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-- [ ] Refactoring (no functional changes)
-- [ ] Performance improvement
-- [ ] Test improvements
-- [ ] Build/CI/CD changes
+- [ ] Architecture method
+- [ ] Benchmark
+- [ ] Use case
+- [ ] Documentation
+- [ ] Developer experience
+- [ ] CI, build, or release
 
-## Related Issues
+## Verification
 
-<!-- Link to related issues using #issue_number or full URL -->
+<!-- List commands run, manual checks, screenshots, or reasons verification was not needed. -->
 
-Fixes #
-Relates to #
+```text
 
-## Changes Made
-
-<!-- List the main changes in this PR -->
-
--
--
--
-
-## Testing
-
-<!-- Describe the tests you ran to verify your changes -->
-
-- [ ] Tested locally with manual verification
-- [ ] Added/updated unit tests
-- [ ] Added/updated integration tests
-- [ ] All existing tests pass
-
-**Test Configuration:**
-- OS:
-- Python version:
-- Database versions (if relevant):
-
-**Test Results:**
-```
-# Paste relevant test output here
 ```
 
 ## Checklist
 
-<!-- Mark completed items with an 'x' -->
+- [ ] I kept the change scoped to the relevant area.
+- [ ] I updated docs, examples, or setup notes when behavior changed.
+- [ ] I added or updated tests when the change affects behavior.
+- [ ] I did not commit secrets, `.env` files, dependency folders, or generated output.
+- [ ] Active relative links in Markdown files resolve.
 
-- [ ] My code follows the project's [code style guidelines](../CONTRIBUTING.md#-code-style)
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code where necessary, particularly in complex areas
-- [ ] I have updated the documentation accordingly
-- [ ] My changes generate no new warnings or errors
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] I have used [Gitmoji](https://gitmoji.dev/) in my commit messages
-- [ ] Any dependent changes have been merged and published
+## Notes for Reviewers
 
-## Screenshots (if applicable)
+<!-- Anything reviewers should pay special attention to? -->
 
-<!-- Add screenshots to help explain your changes -->
-
-## Additional Notes
-
-<!-- Any additional information that reviewers should know -->
-
-## Breaking Changes
-
-<!-- If this PR introduces breaking changes, describe them and provide migration guidance -->
-
----
-
-By submitting this pull request, I confirm that my contribution is made under the terms of the Apache 2.0 license.
+By submitting this pull request, I agree that my contribution is licensed under
+the Apache License 2.0.

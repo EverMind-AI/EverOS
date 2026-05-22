@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible problem in EverOS
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve EverOS. Clear reproduction steps make bugs much faster to fix.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - methods/EverCore
+        - methods/HyperMem
+        - benchmarks/EverMemBench
+        - benchmarks/EvoAgentBench
+        - use-cases
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the bug and the behavior you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Run ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Python:
+        Node:
+        Docker:
+        Commit:
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      render: shell

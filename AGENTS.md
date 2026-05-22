@@ -1,8 +1,4 @@
-# CLAUDE.md
-
-<!-- Keep this file in sync with AGENTS.md. Claude Code reads CLAUDE.md; other
-agent tools (Cursor, Codex, Aider, etc.) read AGENTS.md. The body below should
-match AGENTS.md verbatim. -->
+# AGENTS.md
 
 This repository is organized around the same reader journey as the top-level
 README:
