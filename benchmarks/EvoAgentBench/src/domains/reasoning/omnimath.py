@@ -114,8 +114,14 @@ class OmniMathAdapter(DomainAdapter):
         return int(_cfg().get("agent_timeout", 600))
 
     def build_prompt(self, task: dict, env_info: dict) -> str:
-        return _PROMPT_TEMPLATE.format(
-            problem=task["problem"],
+        prompt = _PROMPT_TEMPLATE.format(problem=task["problem"])
+        skills_text = task.get("skill_text", "")
+        if not skills_text:
+            return prompt
+        return prompt + (
+            "\n\n## Domain-Specific Strategies\n\n"
+            "The following strategies are specifically designed for this type of task. "
+            "You MUST apply them:\n\n" + skills_text
         )
 
     def verify(self, task: dict, env_info: dict, trial_dir: Path,
