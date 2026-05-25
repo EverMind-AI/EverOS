@@ -59,6 +59,56 @@ Use cases show what persistent memory makes possible in real products and workfl
 <tr>
 <td width="50%" valign="top">
 
+[![banner-gif](https://github.com/user-attachments/assets/840470d7-a838-4c05-8685-dd797d4e9cdf)](https://evermind.ai/usecase_reunite)
+
+#### Reunite - Find with EverOS
+
+Parents describe what they remember. Children describe what they recall. Reunite uses semantic memory to surface the connections.
+
+[Learn more](https://evermind.ai/usecase_reunite)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://evermind.ai/usecase_hive)
+
+#### Hive Orchestrator
+
+Browser-native hive-mind for CLI coding agents — Claude Code, Codex, Gemini, and OpenCode collaborate as real PTY processes via a team protocol.
+
+[Code](https://github.com/tt-a1i/hive)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://evermind.ai/usecase_ai_assistants)
+
+#### AI Coding Assistants with EverOS
+
+Universal long-term memory layer for AI coding assistants, powered by EverOS.
+
+[Code](https://github.com/tt-a1i/evermemos-mcp)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://evermind.ai/usecase_ai_data_techician)
+
+#### AI Data Techician
+
+An agentic AI system that learns from scientist interaction to inspect, analyze, and classify high-dimensional time series data — with persistent memory that improves across sessions.
+
+[Code](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
 ![banner-gif](https://github.com/user-attachments/assets/650b901b-c9ba-4001-bac7-626b009df830)
 
 #### Rokid AI Assistant with EverOS
@@ -80,6 +130,7 @@ Coming soon
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
