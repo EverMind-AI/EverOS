@@ -70,7 +70,7 @@ Parents describe what they remember. Children describe what they recall. Reunite
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://evermind.ai/usecase_hive)
+[![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://github.com/tt-a1i/hive)
 
 #### Hive Orchestrator
 
@@ -84,7 +84,7 @@ Browser-native hive-mind for CLI coding agents — Claude Code, Codex, Gemini, a
 <tr>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://evermind.ai/usecase_ai_assistants)
+[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
 
 #### AI Coding Assistants with EverOS
 
@@ -95,7 +95,7 @@ Universal long-term memory layer for AI coding assistants, powered by EverOS.
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://evermind.ai/usecase_ai_data_techician)
+[![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
 
 #### AI Data Techician
 
