@@ -58,7 +58,7 @@ def convert_to_v1_message(msg: dict, session_meta: dict) -> dict:
     """Convert old-format message to V1 MessageItem format.
 
     Old: { message_id, create_time, sender, sender_name, type, content, ... }
-    New: { message_id, sender_id, sender_name, role, timestamp, type, text: {content} }
+    New: { message_id, sender_id, sender_name, role, timestamp, type, content }
     """
     role = _infer_role(msg.get("sender", ""), session_meta)
     timestamp_ms = _parse_create_time_to_unix_ms(
@@ -72,7 +72,7 @@ def convert_to_v1_message(msg: dict, session_meta: dict) -> dict:
         "role": role,
         "timestamp": timestamp_ms,
         "type": msg.get("type", "text"),
-        "text": {"content": msg.get("content", "")},
+        "content": msg.get("content", ""),
     }
 
 

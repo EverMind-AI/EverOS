@@ -1,0 +1,105 @@
+name: EverCore Smoke
+
+on:
+  pull_request:
+    paths:
+      - "methods/EverCore/**"
+      - ".github/workflows/evercore-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "methods/EverCore/**"
+      - ".github/workflows/evercore-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evercore-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: methods/EverCore
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: methods/EverCore/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Compile API and demo modules
+        env:
+          PYTHONPATH: src:.
+        run: uv run python -m compileall -q src/api_specs demo/extract_memory.py
+
+      - name: Run stable DTO compatibility tests
+        env:
+          PYTHONPATH: src:.
+        run: uv run pytest tests/test_content_item_compat.py -q
+
+      - name: Validate demo payload compatibility
+        env:
+          PYTHONPATH: src:.
+        run: |
+          uv run python - <<'PY'
+          from pydantic import ValidationError
+
+          from api_specs.dtos.memory import PersonalAddRequest
+          from demo.extract_memory import convert_to_v1_message
+
+          source = {
+              "message_id": "msg_001",
+              "create_time": "2025-06-26T00:00:00Z",
+              "sender": "user_001",
+              "sender_name": "User",
+              "type": "text",
+              "content": "hello",
+          }
+          session_meta = {"user_details": {"user_001": {"role": "user"}}}
+          converted = convert_to_v1_message(source, session_meta)
+
+          PersonalAddRequest.model_validate(
+              {"user_id": "user_001", "messages": [converted]}
+          )
+          assert converted["content"] == "hello"
+          assert "text" not in converted
+
+          old_payload = {
+              "user_id": "user_001",
+              "messages": [
+                  {
+                      "message_id": "msg_001",
+                      "sender_id": "user_001",
+                      "sender_name": "User",
+                      "role": "user",
+                      "timestamp": 1750896000000,
+                      "type": "text",
+                      "text": {"content": "hello"},
+                  }
+              ],
+          }
+          try:
+              PersonalAddRequest.model_validate(old_payload)
+          except ValidationError as exc:
+              assert exc.errors()[0]["loc"] == ("messages", 0, "content")
+          else:
+              raise AssertionError("old payload unexpectedly passed validation")
+
+          print("EverCore demo payload smoke passed")
+          PY

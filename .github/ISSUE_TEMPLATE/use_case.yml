@@ -1,0 +1,37 @@
+name: Use-case proposal
+description: Propose an app, demo, or integration for use-cases/
+title: "[Use Case]: "
+labels: ["use case"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What does the use case demonstrate?
+    validations:
+      required: true
+  - type: textarea
+    id: memory
+    attributes:
+      label: Memory behavior
+      description: What should the agent remember, retrieve, or evolve over time?
+    validations:
+      required: true
+  - type: textarea
+    id: stack
+    attributes:
+      label: Stack and dependencies
+      description: List frameworks, services, models, or external APIs.
+  - type: textarea
+    id: run
+    attributes:
+      label: Run path
+      description: How should a new developer run or inspect it?
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Contribution checklist
+      options:
+        - label: I can include a README with setup instructions.
+        - label: I can avoid committing secrets, generated output, dependency folders, and image files.
+        - label: I can include `.env.example` if configuration is needed.
