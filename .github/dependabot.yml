@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # EverCore (pip/uv)
+  - package-ecosystem: pip
+    directory: /methods/EverCore
+    schedule:
+      interval: weekly
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  # EvoAgentBench website (npm)
+  - package-ecosystem: npm
+    directory: /benchmarks/EvoAgentBench/website
+    schedule:
+      interval: weekly
+    groups:
+      npm-deps:
+        patterns: ["*"]

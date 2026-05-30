@@ -59,6 +59,56 @@ Use cases show what persistent memory makes possible in real products and workfl
 <tr>
 <td width="50%" valign="top">
 
+[![banner-gif](https://github.com/user-attachments/assets/840470d7-a838-4c05-8685-dd797d4e9cdf)](https://evermind.ai/usecase_reunite)
+
+#### Reunite - Find with EverOS
+
+Parents describe what they remember. Children describe what they recall. Reunite uses semantic memory to surface the connections.
+
+[Learn more](https://evermind.ai/usecase_reunite)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://github.com/tt-a1i/hive)
+
+#### Hive Orchestrator
+
+Browser-native hive-mind for CLI coding agents — Claude Code, Codex, Gemini, and OpenCode collaborate as real PTY processes via a team protocol.
+
+[Code](https://github.com/tt-a1i/hive)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
+
+#### AI Coding Assistants with EverOS
+
+Universal long-term memory layer for AI coding assistants, powered by EverOS.
+
+[Code](https://github.com/tt-a1i/evermemos-mcp)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
+
+#### AI Data Techician
+
+An agentic AI system that learns from scientist interaction to inspect, analyze, and classify high-dimensional time series data — with persistent memory that improves across sessions.
+
+[Code](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
 ![banner-gif](https://github.com/user-attachments/assets/650b901b-c9ba-4001-bac7-626b009df830)
 
 #### Rokid AI Assistant with EverOS
@@ -80,6 +130,7 @@ Coming soon
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -335,6 +386,8 @@ The fastest way to run a memory system locally is to start with EverCore:
 ```bash
 cd methods/EverCore
 
+# Requires Python 3.12 and Docker.
+
 # Start Docker services
 docker compose up -d
 
@@ -363,29 +416,45 @@ Server runs at `http://localhost:1995` · [Full Setup Guide](methods/EverCore/do
 Store and retrieve memories with simple Python code:
 
 ```python
+import os
 import requests
 
-API_BASE = "http://localhost:1995/api/v1"
+API_BASE = os.getenv("EVERCORE_API_BASE", "http://localhost:1995/api/v1")
 
 # 1. Store a conversation memory
-requests.post(f"{API_BASE}/memories", json={
-    "message_id": "msg_001",
-    "create_time": "2025-02-01T10:00:00+00:00",
-    "sender": "user_001",
-    "content": "I love playing soccer on weekends"
-})
+add_payload = {
+    "user_id": "user_001",
+    "session_id": "quickstart_session",
+    "messages": [
+        {
+            "message_id": "msg_001",
+            "sender_id": "user_001",
+            "sender_name": "User",
+            "role": "user",
+            "timestamp": 1738404000000,
+            "content": "I love playing soccer on weekends",
+        }
+    ],
+}
+add_result = requests.post(f"{API_BASE}/memories", json=add_payload)
+add_result.raise_for_status()
+add_result = add_result.json()
+print(add_result["data"]["status"])
 
 # 2. Search for relevant memories
-response = requests.get(f"{API_BASE}/memories/search", json={
+search_payload = {
     "query": "What sports does the user like?",
-    "user_id": "user_001",
+    "method": "hybrid",
     "memory_types": ["episodic_memory"],
-    "retrieve_method": "hybrid"
-})
+    "top_k": 5,
+    "filters": {"user_id": "user_001"},
+}
+search_result = requests.post(f"{API_BASE}/memories/search", json=search_payload)
+search_result.raise_for_status()
+search_result = search_result.json()
 
-result = response.json().get("result", {})
-for memory_group in result.get("memories", []):
-    print(f"Memory: {memory_group}")
+for episode in search_result["data"]["episodes"]:
+    print(episode["episode"])
 ```
 
 [More Examples](methods/EverCore/docs/usage/USAGE_EXAMPLES.md) · [API Reference](https://docs.evermind.ai/api-reference/introduction) · [Interactive Demos](methods/EverCore/docs/usage/DEMOS.md)

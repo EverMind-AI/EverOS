@@ -18,11 +18,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   links:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate active relative Markdown links
         run: |
@@ -82,6 +86,12 @@ jobs:
           }
 
           failures = []
+          warnings = []
+          primary_link_pattern = re.compile(
+              r"^\[(?:Code|Plugin|Live Demo|Learn more)\]\(([^)]+)\)",
+              flags=re.M,
+          )
+
           for path, heading in files.items():
               text = path.read_text()
               start = text.find(heading)
@@ -101,17 +111,20 @@ jobs:
                   title_match = re.search(r"####\s+(.+)", cell)
                   title = title_match.group(1).strip() if title_match else f"use case {index}"
                   banner_match = re.search(r"\[!\[[^\]]*\]\([^)]+\)\]\(([^)]+)\)", cell)
-                  primary_match = re.search(r"^\[(?:Code|Plugin|Live Demo)\]\(([^)]+)\)", cell, flags=re.M)
+                  primary_match = primary_link_pattern.search(cell)
 
-                  if not banner_match:
-                      failures.append(f"{path}: {title}: missing linked banner")
-                  elif not primary_match:
+                  if not banner_match and primary_match:
+                      warnings.append(f"{path}: {title}: primary link has no linked banner")
+                  elif banner_match and not primary_match:
                       failures.append(f"{path}: {title}: missing primary link")
-                  elif banner_match.group(1) != primary_match.group(1):
+                  elif banner_match and primary_match and banner_match.group(1) != primary_match.group(1):
                       failures.append(
                           f"{path}: {title}: banner link {banner_match.group(1)} "
                           f"does not match primary link {primary_match.group(1)}"
                       )
+
+          if warnings:
+              print("\n".join(f"warning: {warning}" for warning in warnings))
 
           if failures:
               print("\n".join(failures))

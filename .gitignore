@@ -131,6 +131,7 @@ dmypy.json
 # Project specific
 outputs/
 .pytest_cache/
+methods/EverCore/docker-compose.override.yaml
 
 evaluation/static_memory_evaluation/logs/
 evaluation/static_memory_evaluation/retrieval/
