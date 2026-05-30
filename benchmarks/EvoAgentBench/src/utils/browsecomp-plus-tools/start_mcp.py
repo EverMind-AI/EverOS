@@ -60,6 +60,17 @@ def main():
     ]
     if cfg.get("model_name"):
         argv += ["--model-name", cfg["model_name"]]
+
+    emb_cfg = cfg.get("embedding") or {}
+    if emb_cfg.get("api_base"):
+        argv += ["--embedding-api-base", emb_cfg["api_base"]]
+    if emb_cfg.get("api_key"):
+        argv += ["--embedding-api-key", emb_cfg["api_key"]]
+    if emb_cfg.get("model"):
+        argv += ["--embedding-api-model", emb_cfg["model"]]
+    if emb_cfg.get("normalize"):
+        argv += ["--normalize"]
+
     sys.argv = argv
 
     from mcp_server import main as mcp_main

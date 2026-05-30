@@ -20,6 +20,9 @@ disabled_tools:
 # MCP search server (FAISS + Qwen3-Embedding-8B)
 # Build index first: python src/utils/browsecomp-plus-tools/setup_data.py
 # model_name: local path to Qwen3-Embedding-8B, or HuggingFace model ID
+# embedding.api_base: optional OpenAI-compatible embeddings API (vLLM/sglang/ModelScope/etc.)
+#   When set, query vectors are fetched via API instead of loading the model locally.
+#   The API model must match the index (e.g. Qwen/Qwen3-Embedding-8B).
 mcp_server:
   auto_start: true
   startup_timeout: 300
@@ -29,6 +32,11 @@ mcp_server:
   model_name: Qwen/Qwen3-Embedding-8B
   k: 5
   snippet_max_tokens: 512
+  # embedding:
+  #   api_base: ${EMBEDDING_API_BASE}
+  #   api_key: ${EMBEDDING_API_KEY}
+  #   model: Qwen/Qwen3-Embedding-8B
+  #   normalize: false
 
 # LLM Judge for answer verification
 # Set model + api_base to your LLM endpoint; disable_thinking recommended for vLLM

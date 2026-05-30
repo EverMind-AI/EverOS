@@ -27,6 +27,24 @@ from .base import BaseSearcher
 logger = logging.getLogger(__name__)
 
 
+def _resolve_env(value: str | None) -> str:
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        return os.environ.get(value[2:-1], "")
+    return value or ""
+
+
+def _maybe_l2_normalize(vec: np.ndarray, enabled: bool) -> np.ndarray:
+    """L2-normalize vec when enabled, skipping if already unit length."""
+    if not enabled:
+        return vec
+
+    norm = float(np.linalg.norm(vec))
+    if norm <= 0 or np.isclose(norm, 1.0, atol=1e-3, rtol=1e-3):
+        return vec
+
+    return vec / norm
+
+
 class FaissSearcher(BaseSearcher):
     @classmethod
     def parse_args(cls, parser):
@@ -73,6 +91,22 @@ class FaissSearcher(BaseSearcher):
             default=8192,
             help="Maximum sequence length for FAISS search (default: 8192)",
         )
+        parser.add_argument(
+            "--embedding-api-base",
+            default=None,
+            help="OpenAI-compatible embeddings API base URL. If set, query "
+            "embeddings are fetched via API instead of loading a local model.",
+        )
+        parser.add_argument(
+            "--embedding-api-key",
+            default="EMPTY",
+            help="API key for the embeddings endpoint (default: EMPTY).",
+        )
+        parser.add_argument(
+            "--embedding-api-model",
+            default=None,
+            help="Model name for the embeddings API. Defaults to --model-name.",
+        )
 
     def __init__(self, args):
         if args.model_name == "bm25":
@@ -84,6 +118,8 @@ class FaissSearcher(BaseSearcher):
         self.retriever = None
         self.model = None
         self.tokenizer = None
+        self._embedding_client = None
+        self._embedding_model = None
         self.lookup = None
         self.docid_to_text = None
 
@@ -133,7 +169,15 @@ class FaissSearcher(BaseSearcher):
         # Keep FAISS index on CPU to avoid GPU memory contention with LLM services.
         logger.info("FAISS index on CPU.")
 
+    @property
+    def _use_embedding_api(self) -> bool:
+        return bool(_resolve_env(getattr(self.args, "embedding_api_base", None)))
+
     def _load_model(self) -> None:
+        if self._use_embedding_api:
+            self._setup_embedding_api()
+            return
+
         logger.info(f"Loading model: {self.args.model_name}")
 
         hf_home = os.getenv("HF_HOME")
@@ -179,6 +223,59 @@ class FaissSearcher(BaseSearcher):
         )
 
         logger.info("Model loaded successfully")
+
+    def _setup_embedding_api(self) -> None:
+        import openai
+
+        api_base = _resolve_env(self.args.embedding_api_base)
+        if not api_base:
+            raise ValueError("embedding_api_base is set but empty after env resolution")
+
+        api_key = _resolve_env(self.args.embedding_api_key) or "EMPTY"
+        self._embedding_model = (
+            self.args.embedding_api_model or self.args.model_name
+        )
+        self._embedding_client = openai.OpenAI(api_key=api_key, base_url=api_base)
+        self.model = None
+        self.tokenizer = None
+        logger.info(
+            "Using embedding API at %s (model=%s)",
+            api_base,
+            self._embedding_model,
+        )
+
+    def _encode_query(self, query: str) -> np.ndarray:
+        text = self.args.task_prefix + query
+
+        if self._embedding_client is not None:
+            try:
+                resp = self._embedding_client.embeddings.create(
+                    model=self._embedding_model,
+                    input=text,
+                    encoding_format="float",
+                )
+            except Exception as e:
+                raise RuntimeError(f"Embedding API request failed: {e}") from e
+
+            vec = np.array(resp.data[0].embedding, dtype=np.float32)
+            vec = _maybe_l2_normalize(vec, self.args.normalize)
+            return vec.reshape(1, -1)
+
+        batch_dict = self.tokenizer(
+            text,
+            padding=True,
+            truncation=True,
+            max_length=self.args.max_length,
+            return_tensors="pt",
+        )
+
+        device = next(self.model.parameters()).device
+        batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
+
+        with torch.amp.autocast(device.type):
+            with torch.no_grad():
+                q_reps = self.model.encode_query(batch_dict)
+                return q_reps.cpu().detach().numpy()
 
     def _load_dataset(self) -> None:
         logger.info(f"Loading dataset: {self.args.dataset_name}")
@@ -234,24 +331,13 @@ class FaissSearcher(BaseSearcher):
             )
 
     def search(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
-        if not all([self.retriever, self.model, self.tokenizer, self.lookup]):
+        encoder_ready = self._embedding_client is not None or (
+            self.model is not None and self.tokenizer is not None
+        )
+        if not all([self.retriever, encoder_ready, self.lookup]):
             raise RuntimeError("Searcher not properly initialized")
 
-        batch_dict = self.tokenizer(
-            self.args.task_prefix + query,
-            padding=True,
-            truncation=True,
-            max_length=self.args.max_length,
-            return_tensors="pt",
-        )
-
-        device = next(self.model.parameters()).device
-        batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
-
-        with torch.amp.autocast(device.type):
-            with torch.no_grad():
-                q_reps = self.model.encode_query(batch_dict)
-                q_reps = q_reps.cpu().detach().numpy()
+        q_reps = self._encode_query(query)
 
         all_scores, psg_indices = self.retriever.search(q_reps, k)
 
