@@ -14,6 +14,11 @@ export default function register(api) {
   log.info(`[${pluginMeta.id}] Registering EverOS OpenClaw Plugin`);
 
   api.registerContextEngine(pluginMeta.id, (pluginConfig) => {
-    return createContextEngine(pluginMeta, pluginConfig, api.logger);
+    // The OpenClaw host may deliver plugin config in two ways depending on
+    // host version: as `api.pluginConfig` (current contract) or via the
+    // factory-callback argument (legacy). Prefer the host-provided config and
+    // fall back to the callback arg so config forwarding works on both. #150
+    const resolvedConfig = api.pluginConfig ?? pluginConfig ?? {};
+    return createContextEngine(pluginMeta, resolvedConfig, api.logger);
   });
 }
