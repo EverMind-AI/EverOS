@@ -1,0 +1,20 @@
+# Custom prompt slot for BoundaryDetector.adetect.
+#
+# Default behaviour
+#   Leave this slot disabled (``enabled: false``). The pipeline will pass
+#   ``prompt=None`` through to algo, which falls back to the everalgo
+#   bundled default prompt — see:
+#     ~/everalgo/packages/everalgo-boundary/src/everalgo/boundary/prompts/en/chat.py
+#     (constant ``CHAT_BOUNDARY_DETECT_PROMPT_EN``)
+#
+# To customise
+#   1. Read the algo default at the path above; note the required
+#      placeholders ``{messages}`` and ``{token_count}``.
+#   2. Replace the ``template`` body below with your prompt.
+#   3. Flip ``enabled`` to ``true``.
+#
+# When ``enabled: false`` or ``template`` is empty, the pipeline sends
+# ``prompt=None`` and the algo default is used (zero override cost).
+
+enabled: false
+template: ""

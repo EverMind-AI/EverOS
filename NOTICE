@@ -1,7 +1,7 @@
-// EverOS
-Copyright 2026 EverMind.
+EverOS
+Copyright 2025 EverMind AI
 
-This product includes software developed by EverMind.
+This product includes software developed by EverMind AI.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,3 +15,42 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
+
+================================================================================
+Third-Party Licenses
+================================================================================
+
+The Apache License (above) governs the EverOS source code as a whole.
+The items listed below are bundled in this distribution but governed by
+their own licenses; redistribute them only under those terms.
+
+--------------------------------------------------------------------------------
+LoCoMo conversation fixture  (CC BY-NC 4.0 — NOT covered by Apache-2.0)
+--------------------------------------------------------------------------------
+
+File:    tests/fixtures/long_conversation_locomo_caroline_melanie.json
+Source:  Derived from the LoCoMo dataset (snap-research/locomo).
+License: Creative Commons Attribution-NonCommercial 4.0 International
+         https://creativecommons.org/licenses/by-nc/4.0/
+
+This single file is licensed under CC BY-NC 4.0 and is therefore NOT
+covered by the Apache-2.0 license that applies to the rest of EverOS.
+Downstream use is restricted to non-commercial purposes per the upstream
+license. Treat this file as a carve-out from the project-wide Apache
+license when redistributing.
+
+--------------------------------------------------------------------------------
+CairoSVG  (LGPL-3.0 — optional dependency, not installed by default)
+--------------------------------------------------------------------------------
+
+Trigger: ``pip install everos[multimodal]``
+Path:    everos[multimodal] -> everalgo-parser[svg] -> cairosvg
+License: GNU Lesser General Public License, version 3
+         https://www.gnu.org/licenses/lgpl-3.0.html
+Project: https://cairosvg.org/
+
+CairoSVG is dynamically linked through ``everalgo-parser`` and is only
+pulled in when the user explicitly opts into the ``multimodal`` extra.
+LGPL-3.0 is compatible with Apache-2.0 redistribution in this dynamic-
+linking arrangement; if you statically link or modify CairoSVG itself,
+the LGPL-3.0 terms apply to that derivative work.

@@ -1,0 +1,221 @@
+[project]
+name = "everos"
+version = "1.0.0"
+description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
+license = {text = "Apache-2.0"}
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    {name = "EverMind AI"},
+]
+keywords = ["memory", "ai-agent", "markdown", "lancedb", "rag", "everos"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # Core data validation & config
+    "pydantic>=2.7.1",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.1",
+
+    # Storage stack (md-first three-piece set)
+    "lancedb>=0.13.0",            # Vector + BM25 + scalar filter (Arrow-based)
+    "aiosqlite>=0.20.0",          # Async SQLite driver (used by SA async engine)
+    "sqlmodel>=0.0.22",           # ORM (Pydantic + SQLAlchemy 2.0 async)
+    "alembic>=1.13.0",            # SQLite schema migrations
+    "greenlet>=3.0",              # Required by SQLAlchemy async
+
+    # LLM & embedding (one provider per file pattern)
+    "openai>=1.0.0",
+
+    # Markdown / file system
+    "PyYAML>=6.0",                # YAML frontmatter parsing
+    "watchdog>=4.0.0",            # Cross-platform file system events (cascade daemon)
+
+    # Web framework (entrypoints/api)
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+
+    # Observability (core/observability)
+    "structlog>=24.0.0",
+    "prometheus-client>=0.20.0",
+
+    # CLI
+    "typer>=0.12.0",
+
+    # Tokenization (BM25 Chinese support)
+    "jieba==0.42.1",
+
+    # OME (Offline Memory Evolution) async scheduler & file I/O
+    "apscheduler>=3.10.4,<4.0",   # async strategy scheduler chassis
+    "portalocker>=2.8.2",          # cross-platform file lock for single-engine guard
+    "watchfiles>=0.21.0",          # native fs watcher for config hot reload
+    "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
+
+    # Algorithm library (everalgo monorepo, published on PyPI).
+    "everalgo-core==0.2.0",
+    "everalgo-boundary==0.2.0",
+    "everalgo-user-memory==0.2.0",
+    "everalgo-agent-memory==0.2.0",
+    "everalgo-rank==0.3.0",
+]
+
+[project.optional-dependencies]
+multimodal = ["everalgo-parser[svg]>=0.1.0"]  # [svg] bundles cairosvg → SVG works by default
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/everos"]
+
+# ``env.template`` lives at src/everos/templates/env.template and is
+# auto-included via ``packages``. ``everos init`` reads it through
+# ``importlib.resources``. No force-include needed.
+
+# sdist uses an include-whitelist (not exclude) so we don't accidentally ship
+# things like CLAUDE.md, .claude/, CI configs, or IDE settings. New top-level
+# files default to NOT-shipped — you have to opt them in here.
+#
+# exclude is kept as belt-and-suspenders for build artefacts that CI generates
+# inside the project tree (UV_CACHE_DIR=.uv-cache in .gitlab-ci.yml).
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/data",
+    "/docs",
+    "/pyproject.toml",
+    "/uv.lock",
+    "/README.md",
+    "/QUICKSTART.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/CODE_OF_CONDUCT.md",
+    "/SECURITY.md",
+    "/ACKNOWLEDGMENTS.md",
+    "/CITATION.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/config.example.toml",
+]
+exclude = [".uv-cache", ".venv"]
+
+[project.scripts]
+everos = "everos.entrypoints.cli.main:app"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Tooling
+# ───────────────────────────────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["src_old"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# LoCoMo benchmark embeds LLM prompts (ANSWER_PROMPT / JUDGE_*_PROMPT) and
+# verbose argparse help strings as multi-line string literals. Line breaks
+# would change what the LLM actually sees or noise the --help output, so
+# E501 is silenced for this file only.
+"tests/test_locomo.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short -m 'not slow and not live_llm'"
+markers = [
+    "slow: runs that take >=10s (regardless of dependency); CI default excludes these. Run with `pytest -m slow`.",
+    "live_llm: requires real LLM / embedder / reranker credentials from .env; burns tokens. CI default excludes. Run with `pytest -m live_llm`.",
+]
+
+[tool.coverage.run]
+source = ["src/everos"]
+branch = true
+omit = ["**/__init__.py"]
+
+[tool.importlinter]
+root_packages = ["everos"]
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "everos.entrypoints",
+    "everos.service",
+    "everos.memory",
+    "everos.infra",
+]
+
+[[tool.importlinter.contracts]]
+name = "Subpackage internals are private"
+type = "forbidden"
+source_modules = ["everos.service", "everos.memory", "everos.entrypoints"]
+# `**` matches any descendant (writer.py, reader.py, sub.foo.bar, ...).
+# Public API must be reached via the subpackage `__init__.py`.
+forbidden_modules = [
+    "everos.infra.persistence.markdown.**",
+    "everos.infra.persistence.lancedb.**",
+    "everos.infra.persistence.sqlite.**",
+]
+# `forbidden` contracts run a *transitive closure* — any path from a
+# source module to a forbidden module fails the check, even when the
+# source only imports the subpackage top-level. The whitelist below
+# carves out **intra-subpackage wiring**: each storage subpackage's
+# own ``__init__.py`` imports its own ``tables`` / ``repos`` / manager
+# children to assemble the public API surface that outer layers reach.
+# These edges are normal Python package wiring, *not* a privacy
+# breach — without these ignores, even a legitimate
+# ``from everos.infra.persistence.sqlite import X`` would be punished
+# because the transitive scan walks one hop further into the package.
+#
+# Direct imports from outer layers into a subpackage internal module
+# (e.g. ``from everos.infra.persistence.sqlite.tables import X`` written
+# in ``service`` or ``entrypoints``) remain blocked — that edge is not
+# in this whitelist.
+ignore_imports = [
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.tables",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+]
+
+[[tool.importlinter.contracts]]
+name = "OME does not depend on memory/service/entrypoints or sibling infra subpackages"
+type = "forbidden"
+source_modules = ["everos.infra.ome"]
+forbidden_modules = [
+    "everos.infra.persistence",
+    "everos.memory",
+    "everos.service",
+    "everos.entrypoints",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.0.0",
+    "pytest-rerunfailures>=15.0",
+    "import-linter>=2.0",
+    "pre-commit>=4.0.0",
+    "ipdb>=0.13.13",
+    "pyinstrument>=5.0.0",
+]

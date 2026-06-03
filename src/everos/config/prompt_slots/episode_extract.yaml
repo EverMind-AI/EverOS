@@ -1,0 +1,23 @@
+# Custom prompt slot for EpisodeExtractor.aextract.
+#
+# Default behaviour
+#   Leave this slot disabled (``enabled: false``). The pipeline will pass
+#   ``prompt=None`` through to algo, which falls back to the everalgo
+#   bundled default prompt — see:
+#     everalgo/user_memory/prompts/en/episode.py
+#     (the pipeline calls ``aextract`` with ``sender_id=None``, so the
+#      whole-memcell ``EPISODE_GENERATION_PROMPT`` is used, not the
+#      per-user ``USER_EPISODE_GENERATION_PROMPT``)
+#
+# To customise
+#   1. Read the algo default at the path above; note the required
+#      placeholders ``{conversation_start_time}``, ``{conversation}`` and
+#      ``{custom_instructions}``.
+#   2. Replace the ``template`` body below with your prompt.
+#   3. Flip ``enabled`` to ``true``.
+#
+# When ``enabled: false`` or ``template`` is empty, the pipeline sends
+# ``prompt=None`` and the algo default is used (zero override cost).
+
+enabled: false
+template: ""

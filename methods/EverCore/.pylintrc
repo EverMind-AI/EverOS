@@ -1,2 +1,0 @@
-[MASTER]
-init-hook='import sys; sys.path.append("./src"); sys.path.append("./demo"); sys.path.append("./evaluation"); sys.path.append("./data_format")'

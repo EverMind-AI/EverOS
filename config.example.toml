@@ -1,0 +1,58 @@
+# Example user-level config — copy to ~/.everos/config.toml.
+#
+#     cp config.example.toml ~/.everos/config.toml
+#     $EDITOR ~/.everos/config.toml   # fill in api_key / base_url
+#
+# Override priority (low → high):
+#
+#     src/everos/config/default.toml
+#       < ~/.everos/config.toml          (THIS FILE)
+#       < .env in the working directory
+#       < EVEROS_<SECTION>__<KEY> process envs
+#       < programmatic init args
+#
+# The path is configurable: set EVEROS_CONFIG_FILE=/path/to/your.toml to
+# point at any location. Missing file = silently skipped (no error).
+#
+# Comment out anything you do not need — only the fields you set here
+# override the shipped defaults; everything else falls back to
+# src/everos/config/default.toml.
+
+# ── LLM ───────────────────────────────────────────────
+# OpenAI-protocol chat-completions endpoint used by the algo extractors.
+[llm]
+model    = "gpt-4o-mini"
+api_key  = "sk-..."
+base_url = "https://api.openai.com/v1"
+
+# ── Embedding ─────────────────────────────────────────
+[embedding]
+model    = "Qwen/Qwen3-Embedding-4B"
+api_key  = "..."
+base_url = "https://api.deepinfra.com/v1/openai"
+# Runtime knobs (defaults shown):
+timeout_seconds = 30.0
+max_retries     = 3
+batch_size      = 10
+max_concurrent  = 5
+
+# ── Rerank ────────────────────────────────────────────
+[rerank]
+model    = "Qwen/Qwen3-Reranker-4B"
+api_key  = "..."
+base_url = "https://api.deepinfra.com/v1/inference"
+timeout_seconds = 30.0
+max_retries     = 3
+batch_size      = 10
+max_concurrent  = 5
+
+# ── Other tunables you may want to override here ──────
+# [memory]
+# root     = "~/.everos"
+# timezone = "Asia/Shanghai"
+#
+# [sqlite]
+# busy_timeout_ms = 10000
+#
+# [lancedb]
+# read_consistency_seconds = 5.0

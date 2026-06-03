@@ -1,3 +1,0 @@
-"""
-MongoDB migration management module.
-"""

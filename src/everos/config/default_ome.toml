@@ -1,0 +1,64 @@
+# everos OME (Offline Memory Engine) — per-strategy overrides.
+#
+# This file is materialised at ``<memory-root>/ome.toml`` by
+# ``MemoryRoot.ensure()`` on first server start. Edit it to toggle
+# individual strategies or tweak their gate / retry / cron without
+# restarting the server; the engine watches this file and hot-reloads
+# changes within ~2 seconds. Re-running ``ensure()`` will NOT overwrite
+# your edits — the file is only materialised when absent.
+#
+# Overrides are partial: only the keys you set replace the in-code
+# defaults; omitted keys keep each strategy's coded value. Unknown
+# keys (typos) raise StartupValidationError, so you cannot silently
+# misconfigure a strategy.
+#
+# Per-strategy schema (StrategyOverride):
+#   enabled                = bool           # disable a strategy entirely
+#   max_retries            = int >= 0       # re-fire on failure
+#   cron                   = str            # replace the @cron(...) trigger
+#   idle_seconds           = int > 0        # replace @idle(...) idle window
+#   scan_interval_seconds  = int > 0        # paired with idle_seconds; must be <= idle/2
+#   [strategies.<name>.gate]                # only valid on @counter-gated strategies
+#   threshold              = int > 0        # counter trigger threshold
+#   cooldown_seconds       = int >= 0       # min seconds between fires
+#   event_field            = str            # dispatch field for counter increment
+
+# ── User-memory pipeline ────────────────────────────────────────────────
+
+# Atomic fact extraction (runs per memcell). Disable to skip fact mining.
+# [strategies.extract_atomic_facts]
+# enabled = true
+
+# Foresight extraction (runs per memcell). Heavy LLM call — common to
+# disable in evaluation / benchmark runs.
+# [strategies.extract_foresight]
+# enabled = false
+
+# Profile clustering trigger (counter-gated; fires once N user memcells
+# accumulate). Lower the threshold to cluster more aggressively.
+# [strategies.trigger_profile_clustering]
+# enabled = true
+# [strategies.trigger_profile_clustering.gate]
+# threshold = 5
+
+# User-profile extraction (runs after clustering trigger fires). Common
+# to disable in evaluation runs where ground-truth profiles aren't measured.
+# [strategies.extract_user_profile]
+# enabled = false
+
+# ── Agent-memory pipeline ───────────────────────────────────────────────
+
+# Agent case extraction (runs per agent memcell). One per tool call cycle.
+# [strategies.extract_agent_case]
+# enabled = true
+
+# Skill clustering trigger (counter-gated; fires once N agent cases
+# accumulate per agent).
+# [strategies.trigger_skill_clustering]
+# enabled = true
+# [strategies.trigger_skill_clustering.gate]
+# threshold = 5
+
+# Agent skill extraction (runs after skill clustering trigger fires).
+# [strategies.extract_agent_skill]
+# enabled = true

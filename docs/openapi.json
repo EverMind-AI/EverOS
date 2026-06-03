@@ -1,0 +1,1664 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "everos",
+    "description": "md-first memory extraction framework",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "description": "Liveness probe — returns ``{\"status\": \"ok\"}`` with HTTP 200.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Metrics",
+        "description": "Render the current Prometheus registry in exposition format.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/add": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Add Memory",
+        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "operationId": "add_memory_api_v1_memory_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorizeAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_AddResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/flush": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Flush Memory",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\n[OSS-only] — cloud edition decides boundary timing server-side and\ndoes not expose this endpoint.",
+        "operationId": "flush_memory_api_v1_memory_flush_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorizeFlushRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_FlushResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/search": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Post Search",
+        "description": "Hybrid retrieval across the configured memory backends.",
+        "operationId": "post_search_api_v1_memory_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/get": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Post Get",
+        "description": "Paginated listing over the requested ``memory_type``.",
+        "operationId": "post_get_api_v1_memory_get_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddResponseData": {
+        "properties": {
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accumulated",
+              "extracted"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_count",
+          "status"
+        ],
+        "title": "AddResponseData"
+      },
+      "ContentItemDTO": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "doc",
+              "pdf",
+              "html",
+              "email"
+            ],
+            "title": "Type"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uri"
+          },
+          "base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base64"
+          },
+          "ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ext"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "extras": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extras"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ContentItemDTO",
+        "description": "Content piece (v1 API brief appendix A)."
+      },
+      "FilterNode": {
+        "properties": {
+          "AND": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FilterNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "And"
+          },
+          "OR": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FilterNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Or"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "FilterNode",
+        "description": "One Filters DSL node.\n\nRecursive ``AND`` / ``OR`` arrays mix with arbitrary scalar fields at\nthe same level. Pydantic only checks the combinators; field-level\nsafety is enforced when compiling the node to a LanceDB ``where``\nstring in :mod:`everos.memory.search.filters`."
+      },
+      "FlushResponseData": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "extracted",
+              "no_extraction"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "FlushResponseData"
+      },
+      "GetAgentCaseItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "task_intent": {
+            "type": "string",
+            "title": "Task Intent"
+          },
+          "approach": {
+            "type": "string",
+            "title": "Approach"
+          },
+          "quality_score": {
+            "type": "number",
+            "title": "Quality Score"
+          },
+          "key_insight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Insight"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "session_id",
+          "task_intent",
+          "approach",
+          "quality_score",
+          "timestamp"
+        ],
+        "title": "GetAgentCaseItem",
+        "description": "Agent case listing item — always agent-scoped."
+      },
+      "GetAgentSkillItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "maturity_score": {
+            "type": "number",
+            "title": "Maturity Score"
+          },
+          "source_case_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Case Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "name",
+          "description",
+          "content",
+          "confidence",
+          "maturity_score"
+        ],
+        "title": "GetAgentSkillItem",
+        "description": "Agent skill listing item — always agent-scoped."
+      },
+      "GetData": {
+        "properties": {
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/GetEpisodeItem"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/GetProfileItem"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "agent_cases": {
+            "items": {
+              "$ref": "#/components/schemas/GetAgentCaseItem"
+            },
+            "type": "array",
+            "title": "Agent Cases"
+          },
+          "agent_skills": {
+            "items": {
+              "$ref": "#/components/schemas/GetAgentSkillItem"
+            },
+            "type": "array",
+            "title": "Agent Skills"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count",
+            "default": 0
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GetData",
+        "description": "Body of ``response.data``.\n\nAll four arrays are always present so client code can iterate\nwithout branching on ``memory_type``; the route populates exactly\none."
+      },
+      "GetEpisodeItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "episode": {
+            "type": "string",
+            "title": "Episode"
+          },
+          "type": {
+            "type": "string",
+            "const": "Conversation",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "session_id",
+          "timestamp",
+          "summary",
+          "subject",
+          "episode",
+          "type"
+        ],
+        "title": "GetEpisodeItem",
+        "description": "Episode listing item — always user-scoped."
+      },
+      "GetMemoryType": {
+        "type": "string",
+        "enum": [
+          "episode",
+          "profile",
+          "agent_case",
+          "agent_skill"
+        ],
+        "title": "GetMemoryType",
+        "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
+      },
+      "GetProfileItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "profile_data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile Data"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "profile_data"
+        ],
+        "title": "GetProfileItem",
+        "description": "Owner profile — at most one per response, only for user owners."
+      },
+      "GetRequest": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "memory_type": {
+            "$ref": "#/components/schemas/GetMemoryType"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "default": 20
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "timestamp",
+              "updated_at"
+            ],
+            "title": "Sort By",
+            "default": "timestamp"
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Sort Order",
+            "default": "desc"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memory_type"
+        ],
+        "title": "GetRequest",
+        "description": "Request body for ``POST /api/v1/memory/get``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager keeps using\n``owner_id`` / ``owner_type`` (the storage tables' columns); those\nare exposed as derived properties so the rename only affects the\nwire contract."
+      },
+      "GetResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GetData"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "GetResponse",
+        "description": "Top-level response envelope."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MemorizeAddRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageItemDTO"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "messages"
+        ],
+        "title": "MemorizeAddRequest"
+      },
+      "MemorizeFlushRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "Project Id",
+            "default": "default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "MemorizeFlushRequest"
+      },
+      "MessageItemDTO": {
+        "properties": {
+          "sender_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Sender Id"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ],
+            "title": "Role"
+          },
+          "timestamp": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Timestamp",
+            "description": "Message event time as Unix epoch in **milliseconds** (v1 API contract; the algo layer auto-detects sec vs ms for backward compat but the contract is ms)."
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentItemDTO"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Content"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolCallDTO"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sender_id",
+          "role",
+          "timestamp",
+          "content"
+        ],
+        "title": "MessageItemDTO"
+      },
+      "SearchAgentCaseItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "task_intent": {
+            "type": "string",
+            "title": "Task Intent"
+          },
+          "approach": {
+            "type": "string",
+            "title": "Approach"
+          },
+          "quality_score": {
+            "type": "number",
+            "title": "Quality Score"
+          },
+          "key_insight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Insight"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "session_id",
+          "task_intent",
+          "approach",
+          "quality_score",
+          "timestamp",
+          "score"
+        ],
+        "title": "SearchAgentCaseItem",
+        "description": "Agent case hit — always agent-scoped."
+      },
+      "SearchAgentSkillItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "maturity_score": {
+            "type": "number",
+            "title": "Maturity Score"
+          },
+          "source_case_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Case Ids"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "name",
+          "description",
+          "content",
+          "confidence",
+          "maturity_score",
+          "score"
+        ],
+        "title": "SearchAgentSkillItem",
+        "description": "Agent skill hit — always agent-scoped."
+      },
+      "SearchAtomicFactItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "score"
+        ],
+        "title": "SearchAtomicFactItem",
+        "description": "A single atomic fact nested inside its parent episode."
+      },
+      "SearchData": {
+        "properties": {
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/SearchEpisodeItem"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/SearchProfileItem"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "agent_cases": {
+            "items": {
+              "$ref": "#/components/schemas/SearchAgentCaseItem"
+            },
+            "type": "array",
+            "title": "Agent Cases"
+          },
+          "agent_skills": {
+            "items": {
+              "$ref": "#/components/schemas/SearchAgentSkillItem"
+            },
+            "type": "array",
+            "title": "Agent Skills"
+          },
+          "unprocessed_messages": {
+            "items": {
+              "$ref": "#/components/schemas/UnprocessedMessageDTO"
+            },
+            "type": "array",
+            "title": "Unprocessed Messages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SearchData",
+        "description": "Body of ``response.data``.\n\nAll five arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
+      },
+      "SearchEpisodeItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "sender_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sender Ids"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "episode": {
+            "type": "string",
+            "title": "Episode"
+          },
+          "type": {
+            "type": "string",
+            "const": "Conversation",
+            "title": "Type"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "atomic_facts": {
+            "items": {
+              "$ref": "#/components/schemas/SearchAtomicFactItem"
+            },
+            "type": "array",
+            "title": "Atomic Facts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "session_id",
+          "timestamp",
+          "summary",
+          "subject",
+          "episode",
+          "type",
+          "score"
+        ],
+        "title": "SearchEpisodeItem",
+        "description": "Episode hit — always user-scoped in the current emission contract.\n\n``type`` is narrowed to ``\"Conversation\"`` because the only emitted\nepisode shape today is conversation-derived; widen when other\nsources ship. Item kind is encoded by class name (no ``owner_type``\nfield on the wire), so episode results never carry ambiguity."
+      },
+      "SearchMethod": {
+        "type": "string",
+        "enum": [
+          "keyword",
+          "vector",
+          "hybrid",
+          "agentic"
+        ],
+        "title": "SearchMethod",
+        "description": "Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."
+      },
+      "SearchProfileItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "profile_data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile Data"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "profile_data"
+        ],
+        "title": "SearchProfileItem",
+        "description": "Owner profile — at most one per response, only for user owners.\n\n``score`` is ``None`` for direct fetches (``include_profile=true``\non its own does no ranking); a future query-aware lookup may fill\nit in."
+      },
+      "SearchRequest": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Query"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SearchMethod",
+            "default": "hybrid"
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": -1
+          },
+          "radius": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Radius"
+          },
+          "include_profile": {
+            "type": "boolean",
+            "title": "Include Profile",
+            "default": false
+          },
+          "enable_llm_rerank": {
+            "type": "boolean",
+            "title": "Enable Llm Rerank",
+            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hierarchy path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
+            "default": false
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "description": "Request body for ``POST /api/v1/memory/search``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager + compile_filters keep\nusing ``owner_id`` / ``owner_type`` (the storage tables' columns);\nthose are exposed as derived properties so the rename only affects\nthe wire contract, not the internal recall plumbing."
+      },
+      "SearchResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SearchData"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SearchResponse",
+        "description": "Top-level response envelope."
+      },
+      "SuccessEnvelope_AddResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AddResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[AddResponseData]"
+      },
+      "SuccessEnvelope_FlushResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/FlushResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[FlushResponseData]"
+      },
+      "ToolCallDTO": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "function"
+          },
+          "function": {
+            "$ref": "#/components/schemas/ToolFunctionDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "function"
+        ],
+        "title": "ToolCallDTO"
+      },
+      "ToolFunctionDTO": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "arguments": {
+            "type": "string",
+            "title": "Arguments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "title": "ToolFunctionDTO"
+      },
+      "UnprocessedMessageDTO": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "sender_id": {
+            "type": "string",
+            "title": "Sender Id"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Content"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "sender_id",
+          "role",
+          "content",
+          "timestamp"
+        ],
+        "title": "UnprocessedMessageDTO",
+        "description": "A raw message still in the boundary-detection buffer.\n\nNo extracted memcell yet, no owner inference yet (attribution\nhappens at boundary detection). Returned by ``/search`` **only when**\n``filters.session_id`` is present as a top-level eq predicate —\nunprocessed messages have no ``user_id`` / ``agent_id`` to filter\non, so session is the only meaningful query dimension."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

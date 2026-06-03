@@ -1,0 +1,137 @@
+# everos default configuration.
+#
+# Lookup order (later overrides earlier):
+#   1. This file (shipped defaults; lowest priority)
+#   2. ~/.everos/config.toml — user-level overrides (optional;
+#      path is overridable via EVEROS_CONFIG_FILE)
+#   3. .env file in the working directory
+#   4. Environment variables — EVEROS_<SECTION>__<KEY>
+#         e.g. EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000
+#   5. Programmatic init args (highest priority)
+#
+# `null` (omitted in TOML) means "use the Pydantic default declared in code".
+
+[memory]
+# memory-root is the single directory holding all persisted memory.
+# `~` is expanded; the path is resolved when MemoryRoot is constructed.
+root = "~/.everos"
+# Effective timezone for date buckets and timestamps. Drives
+# component.utils.datetime; this is the SOLE source — OS `TZ` is not
+# read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
+timezone = "UTC"
+
+[api]
+# HTTP server bind for ``everos server start``. Default ``127.0.0.1``
+# keeps the API on loopback only — EverOS ships no built-in auth (see
+# SECURITY.md threat model). Only set ``host = "0.0.0.0"`` after you
+# have placed your own gateway / auth layer in front of the server.
+# Override via EVEROS_API__HOST and EVEROS_API__PORT.
+host = "127.0.0.1"
+port = 8000
+
+[sqlite]
+# PRAGMA journal_mode  — WAL is the recommended high-concurrency mode.
+journal_mode = "WAL"
+# PRAGMA synchronous  — NORMAL is safe under WAL and ~2x faster than FULL.
+synchronous = "NORMAL"
+# PRAGMA foreign_keys — must be explicitly enabled per connection.
+foreign_keys = true
+# PRAGMA temp_store   — MEMORY keeps query intermediates in RAM (no IO impact
+# on durability — only affects sort/group/temp-table calculation buffers).
+temp_store = "MEMORY"
+# PRAGMA busy_timeout — milliseconds to wait on a locked DB before erroring.
+busy_timeout_ms = 5000
+# PRAGMA journal_size_limit — cap WAL/journal at ~64 MB.
+journal_size_limit_bytes = 67108864
+# PRAGMA cache_size  — KB of page cache (per connection).
+cache_size_kb = 2048
+
+[lancedb]
+# Read consistency interval in seconds.
+#   omitted / null -> no consistency check (fastest reads)
+#   0              -> strict (every read checks updates)
+#   >0             -> eventual (interval seconds between checks)
+# Uncomment to override:
+# read_consistency_seconds = 5.0
+
+[llm]
+# Provider-agnostic OpenAI-protocol client config. Override via env:
+#   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
+# Or via a ``.env`` file next to the project root (auto-loaded).
+model = "gpt-4o-mini"
+# api_key = ""
+# base_url = ""
+
+[multimodal]
+# Independent LLM for multimodal parsing (everalgo-parser); must accept
+# image / pdf / audio image_url parts. Override via env:
+#   EVEROS_MULTIMODAL__MODEL, EVEROS_MULTIMODAL__API_KEY, EVEROS_MULTIMODAL__BASE_URL
+model = "google/gemini-3-flash-preview"
+max_concurrency = 4
+# api_key = ""
+# base_url = ""
+# file:// content-item support (read locally by EverOS, not everalgo).
+# file_uri_allow_dirs: empty = allow any readable file (local-first default);
+# list base dirs to confine reads when the API is exposed.
+# file_uri_allow_dirs = ["/srv/uploads"]
+# file_uri_max_bytes = 52428800   # 50 MiB cap per file:// asset
+
+[embedding]
+# OpenAI-compatible embedding endpoint. Override via env:
+#   EVEROS_EMBEDDING__MODEL, EVEROS_EMBEDDING__API_KEY, EVEROS_EMBEDDING__BASE_URL
+# model / api_key / base_url have no shipped defaults — must be set
+# (env or user toml) before the embedding capability is used.
+# model     = "Qwen/Qwen3-Embedding-4B"
+# api_key   = ""
+# base_url  = "https://api.example.com/v1"
+timeout_seconds = 30.0
+max_retries     = 3
+batch_size      = 10
+max_concurrent  = 5
+
+[rerank]
+# Rerank provider. Override via env:
+#   EVEROS_RERANK__PROVIDER, EVEROS_RERANK__MODEL, EVEROS_RERANK__API_KEY,
+#   EVEROS_RERANK__BASE_URL
+# `provider` picks the request-shape:
+#   - "deepinfra" -> POST {base_url}/{model} (DeepInfra inference API)
+#   - "vllm"      -> POST {base_url}/rerank (OpenAI-compat rerank endpoint)
+provider = "deepinfra"
+# model     = "Qwen/Qwen3-Reranker-4B"
+# api_key   = ""
+# base_url  = "https://api.deepinfra.com/v1/inference"
+timeout_seconds = 30.0
+max_retries     = 3
+batch_size      = 10
+max_concurrent  = 5
+
+[boundary_detection]
+# Passed through to ``everalgo.BoundaryDetector.adetect``.
+hard_token_limit = 65536
+hard_msg_limit = 500
+
+[search]
+# Vector retrieval strategy when SearchMethod.VECTOR is selected.
+#   "maxsim_atomic" (default): ANN over atomic_fact.vector (pool=top_k*20),
+#       max-pool the per-fact cosine by parent memcell, then reverse-resolve
+#       to episode rows. MaxSim over atomic facts; +0.6pp over the legacy
+#       episode-vector path on LoCoMo, at the cost of one extra LanceDB scan.
+#   "episode": single-vector ANN over episode.vector (legacy path).
+# Override via EVEROS_SEARCH__VECTOR_STRATEGY.
+vector_strategy = "maxsim_atomic"
+
+[memorize]
+# Conversation mode. Selects the boundary detector and which pipelines run:
+#   "chat"  -> BoundaryDetector       + user_memory only
+#   "agent" -> AgentBoundaryDetector  + user_memory + agent_memory
+# A single service process serves one mode at a time; switching mode
+# requires a restart. Override via EVEROS_MEMORIZE__MODE.
+mode = "agent"
+
+# Maximum wall-clock for one memorize() invocation while holding the
+# per-session lock. On timeout the outer asyncio.timeout cancels the call
+# and the lock auto-releases so subsequent concurrent /add on the same
+# session aren't deadlocked. Covers boundary LLM + memcell writes +
+# synchronous portion of pipeline dispatch.
+# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
+session_lock_timeout_seconds = 360.0

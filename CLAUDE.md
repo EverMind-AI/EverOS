@@ -1,77 +1,80 @@
-# CLAUDE.md
+# EverOS — md-first Memory Extraction Framework
 
-<!-- Keep this file in sync with AGENTS.md. Claude Code reads CLAUDE.md; other
-agent tools (Cursor, Codex, Aider, etc.) read AGENTS.md. The body below should
-match AGENTS.md verbatim. -->
+This is a Python framework for md-first memory extraction (lightweight; single-user or small-team).
 
-This repository is organized around the same reader journey as the top-level
-README:
-
-1. **Use cases** show what persistent memory enables in real products and
-   workflows.
-2. **Quick Start** gets EverCore running locally.
-3. **Architecture methods** document the memory systems included in EverOS.
-4. **Benchmarks** and **Evaluation** show how to measure and reproduce results.
-
-## Project Map
-
-- `methods/EverCore/` - long-term memory operating system for agents.
-- `methods/HyperMem/` - hypergraph-based hierarchical memory architecture.
-- `benchmarks/EverMemBench/` - memory quality evaluation.
-- `benchmarks/EvoAgentBench/` - agent self-evolution evaluation.
-- `use-cases/` - apps, demos, and integrations built on top of the memory layer.
-
-## README Guidance
-
-- Keep the top-level README flow smooth: overview, use cases, quick start,
-  architecture methods, benchmarks, evaluation, citations, community.
-- Avoid repeating the three-part project framing after the overview. Later
-  sections should act as catalogues or action paths.
-- Use repository-relative links in the README, and verify that active relative
-  links resolve before finishing.
-- Keep commented-out README blocks out unless they are intentionally preserved
-  for a near-term restoration.
-
-## Open-Source DX Guidance
-
-- Keep root uncluttered. Prefer community files in `.github/`:
-  `.github/CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`,
-  `.github/SECURITY.md`, issue templates, and the pull request template.
-- Treat `CITATION.cff` as optional. Add it only if the project wants GitHub's
-  "Cite this repository" affordance at the cost of one extra root file.
-- Favor clear run paths, small examples, and explicit verification commands.
-- Make contribution paths obvious for architecture methods, benchmarks, docs,
-  and use cases.
-- Treat broken links, stale setup commands, missing `.env.example` files, and
-  unclear issue templates as developer-experience bugs.
-- Keep `.github/workflows/docs.yml` lightweight and dependency-free so docs
-  hygiene is easy to trust.
-
-## Quick Commands
+## Quick commands
 
 ```bash
-cd methods/EverCore
-docker compose up -d          # Start infrastructure
-uv sync                       # Install dependencies
-uv run python src/run.py      # Run application
-make test                     # Run tests
-make lint                     # Run formatting/i18n checks
-uv run pyright                # Type check, if pyright is installed
+uv sync                    # install deps
+make lint                  # ruff (check + format-check) + import-linter
+make format                # auto-fix formatting
+make test                  # pytest tests/unit
+make integration           # pytest tests/integration
+make ci                    # full CI: lint + test + integration
 ```
 
-## Key Entry Points
+## Architecture
 
-- `methods/EverCore/src/run.py` - EverCore application entry.
-- `methods/EverCore/src/agentic_layer/memory_manager.py` - core memory manager.
-- `methods/EverCore/src/infra_layer/adapters/input/api/` - REST API controllers.
-- `methods/EverCore/docs/` - EverCore setup, usage, and architecture docs.
-- `methods/EverCore/evaluation/` - EverCore evaluation runner and reports.
+DDD 5 layers + cross-cutting:
 
-## Development Notes
+```
+entrypoints  →  service  →  memory  →  infra
+                              ↓
+                        component / core / config
+```
 
-- All I/O is async; use `await`.
-- EverCore is multi-tenant; data must remain tenant-scoped.
-- Prompts live in `methods/EverCore/src/memory_layer/prompts/` with EN/ZH
-  variants.
-- Prefer existing repo patterns and component boundaries before adding new
-  abstractions.
+- `entrypoints/` — cli + api (Presentation)
+- `service/` — use case orchestration (memorize / retrieve / evolve / manage)
+- `memory/` — domain (extract + search + cascade + prompt_slots + models)
+- `infra/` — storage adapters (markdown + sqlite + lancedb)
+- `component/` — injectable providers (llm / embedding / config / utils)
+- `core/` — runtime base (observability / lifespan / context)
+- `config/` — configuration data (Settings + default.toml)
+
+**Dependency rule**: `entrypoints → service → memory → infra`. Single-direction, enforced by `import-linter`.
+
+Detailed: [docs/architecture.md](docs/architecture.md).
+
+## Engineering practices
+
+- **Coding rules** auto-loaded from [.claude/rules/](.claude/rules/) (10 rules; path-scoped for performance)
+- **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`
+- **Project-level decisions** in [docs/](docs/) (low-frequency, human-judgment-required)
+- **Language policy**: project targets a global audience — docs and code are English; CJK only in test fixtures and locale-suffixed mirrors. See [.claude/rules/language-policy.md](.claude/rules/language-policy.md).
+
+Engineering infrastructure overview: [docs/engineering.md](docs/engineering.md).
+
+## Branch strategy
+
+`master` = released stable (hidden); `dev` = integration; `feat/* fix/*` → dev; `hotfix/*` → master + dev (sync).
+
+Full GitFlow Lite rationale: [.claude/skills/new-branch/SKILL.md](.claude/skills/new-branch/SKILL.md).
+
+## Storage three-piece set
+
+```
+Markdown (truth)  +  SQLite (state)  +  LanceDB (vector + BM25 + scalar)
+```
+
+- Memory root: `~/.everos/{agents,users,knowledge}/` (md files = single source of truth)
+- System DB: `~/.everos/.index/sqlite/system.db` (state + audit + queue + metadata)
+- Index: `~/.everos/.index/lancedb/` (rebuildable from md)
+
+Selection rationale: [docs/architecture.md](docs/architecture.md).
+
+## Source layout
+
+**src layout** (`src/everos/<...>`): standard PyPA project structure — code lives under `src/` so the working tree is not on the import path until installed, preventing accidental imports of in-development modules.
+
+Algorithm assets (prompts, extractors) are being extracted into a separate `evercore` library.
+
+## Where things go
+
+| Want to... | Look at |
+|---|---|
+| Understand architecture | [docs/architecture.md](docs/architecture.md) |
+| Understand storage choice | [docs/architecture.md](docs/architecture.md) (storage section) |
+| Engineering tooling overview | [docs/engineering.md](docs/engineering.md) |
+| Add a new module | [.claude/rules/init-py-and-reexport.md](.claude/rules/init-py-and-reexport.md) |
+| Make a commit | use `/commit` |
+| Open a branch / PR | use `/new-branch` / `/pr` |

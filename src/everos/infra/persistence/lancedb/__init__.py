@@ -1,0 +1,132 @@
+"""LanceDB business persistence layer.
+
+Sits on top of :mod:`everos.core.persistence.lancedb` (connection
+factory + ``BaseLanceTable`` + ``LanceRepoBase``) and provides:
+
+    * lazy process-wide connection + per-name table cache
+      (:mod:`.lancedb_manager`)
+    * concrete schemas under :mod:`.tables`
+    * concrete repository singletons under :mod:`.repos`
+
+External usage::
+
+    from everos.infra.persistence.lancedb import (
+        get_connection, get_table, dispose_connection,
+        Episode, AtomicFact, Foresight, AgentCase, AgentSkill, UserProfile,
+        episode_repo, atomic_fact_repo, foresight_repo,
+        agent_case_repo, agent_skill_repo, user_profile_repo,
+    )
+
+Three index kinds: scalar / BM25 / vector. Tables are created lazily on
+first access; row population is the cascade daemon's job (see
+``12_cascade_design.md``).
+"""
+
+# Importing ``tables`` registers every business :class:`BaseLanceTable`
+# schema so callers can rely on the package alone to surface every schema.
+from . import tables as tables  # noqa: F401
+from .lancedb_manager import dispose_connection as dispose_connection
+from .lancedb_manager import get_connection as get_connection
+from .lancedb_manager import get_table as get_table
+from .repos import agent_case_repo as agent_case_repo
+from .repos import agent_skill_repo as agent_skill_repo
+from .repos import atomic_fact_repo as atomic_fact_repo
+from .repos import episode_repo as episode_repo
+from .repos import foresight_repo as foresight_repo
+from .repos import user_profile_repo as user_profile_repo
+from .tables import AgentCase as AgentCase
+from .tables import AgentSkill as AgentSkill
+from .tables import AtomicFact as AtomicFact
+from .tables import Episode as Episode
+from .tables import Foresight as Foresight
+from .tables import ParentType as ParentType
+from .tables import UserProfile as UserProfile
+
+_BUSINESS_SCHEMAS = (
+    Episode,
+    AtomicFact,
+    Foresight,
+    AgentCase,
+    AgentSkill,
+    UserProfile,
+)
+
+
+class LanceDBSchemaMismatchError(RuntimeError):
+    """Raised at startup when an on-disk LanceDB table's columns drift
+    from the corresponding Pydantic schema.
+
+    Cascade re-builds LanceDB from md (the SoT), so the recovery is
+    deterministic: delete the index directory and let it reindex.
+    The lifespan surfaces the explicit ``rm -rf ~/.everos/.index/
+    lancedb`` instruction in the error message; see
+    ``docs/cascade_runbook.md`` for the wider context.
+    """
+
+
+async def ensure_business_indexes() -> None:
+    """Ensure FTS (BM25) indexes for every business table (idempotent).
+
+    Called once at startup by :class:`LanceDBLifespanProvider`. Walks
+    the 5 business schemas (each schema owns its ``TABLE_NAME`` +
+    ``BM25_FIELDS``), opens each table via :func:`get_table`, and
+    delegates to ``schema.ensure_fts_indexes(table)``. Already-indexed
+    columns are skipped, so re-runs are no-ops.
+
+    Adding a new business table = adding it to ``_BUSINESS_SCHEMAS``;
+    everything else (table name, columns to index) reads off the
+    schema's ClassVars.
+    """
+    for schema in _BUSINESS_SCHEMAS:
+        table = await get_table(schema.TABLE_NAME, schema)
+        await schema.ensure_fts_indexes(table)
+
+
+async def verify_business_schemas() -> None:
+    """Fail loud at startup if an existing LanceDB table's columns don't
+    match its current Pydantic schema.
+
+    LanceDB doesn't migrate columns automatically; an older index dir
+    (e.g. with the pre-``content_sha256`` shape) would fail
+    unpredictably on upsert. Checking column names up-front turns that
+    into a clean startup error pointing the user at the recovery path
+    (``rm -rf ~/.everos/.index/lancedb`` — the index is rebuildable
+    from md, see ``12_cascade_design.md``).
+    """
+    for schema in _BUSINESS_SCHEMAS:
+        table = await get_table(schema.TABLE_NAME, schema)
+        arrow_schema = await table.schema()
+        actual = set(arrow_schema.names)
+        expected = set(schema.model_fields.keys())
+        missing = expected - actual
+        extra = actual - expected
+        if missing or extra:
+            raise LanceDBSchemaMismatchError(
+                f"LanceDB table {schema.TABLE_NAME!r} schema drift: "
+                f"missing={sorted(missing)}, extra={sorted(extra)}. "
+                "The index is rebuildable from md — recover with "
+                "`rm -rf ~/.everos/.index/lancedb` and restart."
+            )
+
+
+__all__ = [
+    "AgentCase",
+    "AgentSkill",
+    "AtomicFact",
+    "Episode",
+    "Foresight",
+    "LanceDBSchemaMismatchError",
+    "ParentType",
+    "UserProfile",
+    "agent_case_repo",
+    "agent_skill_repo",
+    "atomic_fact_repo",
+    "dispose_connection",
+    "ensure_business_indexes",
+    "episode_repo",
+    "foresight_repo",
+    "get_connection",
+    "get_table",
+    "user_profile_repo",
+    "verify_business_schemas",
+]
