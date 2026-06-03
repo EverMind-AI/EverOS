@@ -140,7 +140,8 @@ export function createContextEngine(pluginMeta, pluginConfig, logger) {
 
         await saveMemories(cfg, {
           userId: cfg.userId,
-          groupId: cfg.groupId,
+          // sessionKey scopes the personal-add envelope to this conversation.
+          sessionId: sessionKey,
           messages: converted,
           idSeed: `${sessionKey}:${state.turnCount}`,
         });

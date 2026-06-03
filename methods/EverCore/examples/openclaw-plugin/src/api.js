@@ -37,34 +37,46 @@ export async function searchMemories(cfg, params, log = noop) {
   };
 }
 
-export async function saveMemories(cfg, { userId, groupId, messages = [], flush = false, idSeed = "" }) {
+export async function saveMemories(cfg, { userId, sessionId, messages = [], idSeed = "" }) {
   if (!messages.length) return;
   const stamp = Date.now();
 
-  const payloads = messages.map((msg, i) => {
+  // PersonalAddRequest (POST /api/v1/memories) is an ENVELOPE: a top-level
+  // user_id plus a `messages` array of MessageItem. Posting flat per-message
+  // bodies without a top-level user_id triggers HTTP 422
+  // ("Field required: user_id") — see issue #237.
+  const items = messages.map((msg, i) => {
     const { role = "user", content = "" } = msg;
-    // Always use userId as sender so the backend stores a consistent user_id
-    // for both user and assistant messages. The `role` field distinguishes who spoke.
-    const sender = userId;
     const senderName = role === "assistant" ? "assistant" : userId;
-    const isLast = i === messages.length - 1;
 
-    return {
+    const item = {
       message_id: messageId(idSeed, role, content),
-      create_time: new Date(stamp + i).toISOString(),
+      // MessageItem.timestamp is a REQUIRED unix-milliseconds integer.
+      // The previous create_time(ISO) field was ignored by the converter and
+      // left timestamp missing, failing validation.
+      timestamp: stamp + i,
       role,
-      sender,
       sender_name: senderName,
       content,
-      group_id: groupId,
-      group_name: groupId,
-      scene: "assistant",
-      raw_data_type: "AgentConversation",
-      ...(flush && isLast && { flush: true }),
     };
+
+    // Personal-scene sender_id rules (request_converter.py):
+    //   role=user      -> sender_id must equal user_id (or be omitted)
+    //   role=assistant -> sender_id must NOT equal user_id (backend generates one)
+    // So only set sender_id for user turns; let the backend derive it for
+    // assistant turns to avoid a sender_id conflict.
+    if (role === "user") {
+      item.sender_id = userId;
+    }
+
+    return item;
   });
 
-  for (const payload of payloads) {
-    await request(cfg, "POST", "/api/v1/memories", payload);
-  }
+  const body = {
+    user_id: userId,
+    messages: items,
+    ...(sessionId ? { session_id: sessionId } : {}),
+  };
+
+  await request(cfg, "POST", "/api/v1/memories", body);
 }
