@@ -552,10 +552,6 @@ Contributions are welcome across the whole repository: architecture methods, ben
 ![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
 ![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
 
-### Status
-
-**Alpha (v0.1.0)** — Active development. Core API may change before v1.0.
-
 ### License
 
 [Apache License 2.0](LICENSE) — see [NOTICE](NOTICE) for third-party attributions.
@@ -563,8 +559,6 @@ Contributions are welcome across the whole repository: architecture methods, ben
 ### Citation
 
 If you use EverOS in research, see [CITATION.md](CITATION.md).
-
----
 
 <br>
 

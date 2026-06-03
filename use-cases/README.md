@@ -1,10 +1,83 @@
-# Use Cases
+## Use Cases
 
-This folder contains apps, demos, and integrations that show what persistent memory enables in real products and workflows. Some examples are complete local projects; others are focused integrations that can be adapted into your own agent stack.
-
-## Use Case Catalogue
+Use cases show what persistent memory makes possible in real products and workflows. Some examples are packaged in this repository; others point to external demos or integrations you can study and adapt.
 
 <table>
+<tr>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/840470d7-a838-4c05-8685-dd797d4e9cdf)](https://evermind.ai/usecase_reunite)
+
+#### Reunite - Find with EverOS
+
+Parents describe what they remember. Children describe what they recall. Reunite uses semantic memory to surface the connections.
+
+[Learn more](https://evermind.ai/usecase_reunite)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://github.com/tt-a1i/hive)
+
+#### Hive Orchestrator
+
+Browser-native hive-mind for CLI coding agents — Claude Code, Codex, Gemini, and OpenCode collaborate as real PTY processes via a team protocol.
+
+[Code](https://github.com/tt-a1i/hive)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
+
+#### AI Coding Assistants with EverOS
+
+Universal long-term memory layer for AI coding assistants, powered by EverOS.
+
+[Code](https://github.com/tt-a1i/evermemos-mcp)
+
+</td>
+<td width="50%" valign="top">
+
+[![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
+
+#### AI Data Techician
+
+An agentic AI system that learns from scientist interaction to inspect, analyze, and classify high-dimensional time series data — with persistent memory that improves across sessions.
+
+[Code](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/650b901b-c9ba-4001-bac7-626b009df830)
+
+#### Rokid AI Assistant with EverOS
+
+Connect to EverOS within Rokid Glasses enabling long-term memory for all of your smart activities.
+
+Coming soon
+
+</td>
+<td width="50%" valign="top">
+
+![banner-gif](https://github.com/user-attachments/assets/85b338b2-e48e-4a65-9f30-0bc6998df872)
+
+#### Creative Assistant with Memory
+
+Creative assistant with long-term memory, never forget your crativites anymore.
+
+Coming soon
+
+</td>
+</tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -19,7 +92,7 @@ Earth Online is a memory-aware productivity game that turns everyday planning in
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)](https://github.com/golutra/golutra)
+[![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)](https://github.com/golutra/golutra) 
 
 #### Multi-Agent Orchestration Platform
 
@@ -43,16 +116,17 @@ Record, visualize, and explore your tasting journey through an immersive 3D star
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/93ac2a68-4f18-4fcb-8d87-80aeb00a9d7c)](https://github.com/kellyvv/OpenHer)
+[![banner-gif](https://github.com/user-attachments/assets/93ac2a68-4f18-4fcb-8d87-80aeb00a9d7c)](https://github.com/kellyvv/OpenHer) 
 
 #### EverOS Open Her
 
 Build AI that feels. Open-source persona engine — personality emerges from neural drives, not prompts. Inspired by Her.
 
-[Code](https://github.com/kellyvv/OpenHer) · [Local notes](openher/)
+[Code](https://github.com/kellyvv/OpenHer)
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -67,7 +141,7 @@ Ruminer brings persistent memory to a browser agent so it can carry personal con
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem)
+[![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem) 
 
 #### EverMem Sync with EverOS
 
@@ -77,6 +151,7 @@ One command to connect any AI coding CLI to EverMemOS long-term memory.
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -91,7 +166,7 @@ MCO equips your primary agent with an agent team that can work together to solve
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public)
+[![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public) 
 
 #### Study Buddy with Self-Evolving Memory
 
@@ -101,6 +176,7 @@ Study proactively with an agent that has self-evolving memory.
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -115,7 +191,7 @@ Empowering individuals with advanced memory support and daily assistance.
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/e2428df3-ea11-4e88-8f9c-dad437dd8998)](https://github.com/AlexL1024/NeuralConnect)
+[![banner-gif](https://github.com/user-attachments/assets/e2428df3-ea11-4e88-8f9c-dad437dd8998)](https://github.com/AlexL1024/NeuralConnect) 
 
 #### Memory-Driven Multi-Agent NPC Experience
 
@@ -125,6 +201,7 @@ An iOS sci-fi mystery game where players explore and uncover the truth.
 
 </td>
 </tr>
+
 <tr>
 <td width="50%" valign="top">
 
@@ -152,24 +229,24 @@ A context-native AI wearable that listens to everyday life and converts conversa
 <tr>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
+[![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)](https://github.com/EverMind-AI/EverOS/tree/0f49826ba0f9a94e1974c97614a46a68e0a08b52/evermemos-openclaw-plugin)
 
 #### OpenClaw Agent Memory
 
 A 24/7 agent workflow with continuous learning memory across sessions.
 
-[Plugin](https://github.com/EverMind-AI/everos/tree/agent_memory/everos-openclaw-plugin)
+[Plugin](https://github.com/EverMind-AI/EverOS/tree/0f49826ba0f9a94e1974c97614a46a68e0a08b52/evermemos-openclaw-plugin)
 
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
+[![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)](https://github.com/TEN-framework/ten-framework/tree/04cb80601374fa9e35b4e544b2dbd23286ca7763/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
 
 #### Live2D Character with Memory
 
 Add long-term memory to a real-time Live2D character, powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
 
-[Code](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-everos)
+[Code](https://github.com/TEN-framework/ten-framework/tree/04cb80601374fa9e35b4e544b2dbd23286ca7763/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
 
 </td>
 </tr>
@@ -187,26 +264,26 @@ Run screenshot-based analysis with computer-use and store the results in memory.
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)](game-of-throne-demo/)
+[![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)](use-cases/game-of-throne-demo)
 
 #### Game of Thrones Memories
 
 A demonstration of AI memory infrastructure through an interactive Q&A experience with *A Game of Thrones*.
 
-[Code](game-of-throne-demo/)
+[Code](use-cases/game-of-throne-demo)
 
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)](claude-code-plugin/)
+[![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)](use-cases/claude-code-plugin)
 
 #### Claude Code Plugin
 
 Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
 
-[Code](claude-code-plugin/)
+[Code](use-cases/claude-code-plugin)
 
 </td>
 <td width="50%" valign="top">
