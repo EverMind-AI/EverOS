@@ -102,29 +102,36 @@ class EverCoreAdapter(BaseAdapter):
         return conversation_id
 
     def _check_missing_indexes(
-        self, index_dir: Path, num_conv: int, index_type: str = "bm25"
-    ) -> List[int]:
+        self, index_dir: Path, conv_ids: List[str], index_type: str = "bm25"
+    ) -> List[str]:
         """
         Check for missing index files.
 
+        Index files are keyed by the GLOBAL conversation id (the suffix produced
+        by ``_extract_conv_index``), not by a local ``0..num_conv-1`` range. On a
+        sliced run (``--from-conv``/``--to-conv``) the sliced conversations keep
+        their global ids, so the missing-index probe must look up those same ids
+        — otherwise it always reports the indexes as missing and rebuilds them
+        under the wrong filenames. See issue #127.
+
         Args:
             index_dir: Index directory
-            num_conv: Total number of conversations
+            conv_ids: Global conversation ids to check (from the conversation set)
             index_type: Index type ("bm25" or "embedding")
 
         Returns:
-            List of conversation indices with missing indexes
+            List of global conversation ids with missing indexes
         """
         missing_indexes = []
 
-        for i in range(num_conv):
+        for conv_id in conv_ids:
             if index_type == "bm25":
-                index_file = index_dir / f"bm25_index_conv_{i}.pkl"
+                index_file = index_dir / f"bm25_index_conv_{conv_id}.pkl"
             else:  # embedding
-                index_file = index_dir / f"embedding_index_conv_{i}.pkl"
+                index_file = index_dir / f"embedding_index_conv_{conv_id}.pkl"
 
             if not index_file.exists():
-                missing_indexes.append(i)
+                missing_indexes.append(conv_id)
 
         return missing_indexes
 
@@ -364,9 +371,15 @@ class EverCoreAdapter(BaseAdapter):
         exp_config = self._convert_config_to_experiment_config()
         exp_config.num_conv = len(conversations)  # Set conversation count
 
+        # Global conv ids for this (possibly sliced) run. Index files are keyed by
+        # these ids, not by a local 0..num_conv-1 range. See issue #127.
+        conv_ids = [
+            self._extract_conv_index(conv.conversation_id) for conv in conversations
+        ]
+
         # Smart skip logic: check existing index files
         bm25_need_build = self._check_missing_indexes(
-            index_dir=bm25_index_dir, num_conv=len(conversations), index_type="bm25"
+            index_dir=bm25_index_dir, conv_ids=conv_ids, index_type="bm25"
         )
 
         emb_need_build = []
@@ -374,7 +387,7 @@ class EverCoreAdapter(BaseAdapter):
         if use_hybrid:
             emb_need_build = self._check_missing_indexes(
                 index_dir=emb_index_dir,
-                num_conv=len(conversations),
+                conv_ids=conv_ids,
                 index_type="embedding",
             )
 
@@ -400,7 +413,10 @@ class EverCoreAdapter(BaseAdapter):
                 style="yellow",
             )
             stage2_index_building.build_bm25_index(
-                config=exp_config, data_dir=memcells_dir, bm25_save_dir=bm25_index_dir
+                config=exp_config,
+                data_dir=memcells_dir,
+                bm25_save_dir=bm25_index_dir,
+                conv_ids=conv_ids,
             )
             console.print("✅ BM25 index building completed", style="green")
         else:
@@ -414,7 +430,10 @@ class EverCoreAdapter(BaseAdapter):
                     style="yellow",
                 )
                 await stage2_index_building.build_emb_index(
-                    config=exp_config, data_dir=memcells_dir, emb_save_dir=emb_index_dir
+                    config=exp_config,
+                    data_dir=memcells_dir,
+                    emb_save_dir=emb_index_dir,
+                    conv_ids=conv_ids,
                 )
                 console.print("✅ Embedding index building completed", style="green")
             else:

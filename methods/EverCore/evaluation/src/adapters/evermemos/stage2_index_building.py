@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import pickle
 from pathlib import Path
@@ -111,8 +112,41 @@ def tokenize(text: str, stemmer, stop_words: set) -> list[str]:
     return processed_tokens
 
 
+_MEMCELL_FILE_RE = re.compile(r"^memcell_list_conv_(.+)\.json$")
+
+
+def discover_conv_ids(data_dir: Path) -> list[str]:
+    """
+    Discover the conversation-id suffixes of the memcell files present on disk.
+
+    Stage 1 writes ``memcell_list_conv_{conv_id}.json`` where ``conv_id`` is the
+    GLOBAL conversation index extracted from ``conversation_id`` (see
+    ``EverCoreAdapter._extract_conv_index``). When the pipeline is run on a slice
+    (``--from-conv``/``--to-conv``), those ids are the global positions of the
+    slice (e.g. ``5..9``), NOT the local ``0..num_conv-1`` range. Iterating the
+    actual filenames keeps stage 2 (index building) aligned with both stage 1
+    (writer) and the search stage (reader), which key off the same global id.
+    See issue #127.
+
+    Returns ids sorted numerically when all are integers, otherwise lexically,
+    for deterministic, human-friendly logging order.
+    """
+    ids: list[str] = []
+    for path in data_dir.glob("memcell_list_conv_*.json"):
+        match = _MEMCELL_FILE_RE.match(path.name)
+        if match:
+            ids.append(match.group(1))
+
+    if all(cid.lstrip("-").isdigit() for cid in ids) and ids:
+        return sorted(ids, key=int)
+    return sorted(ids)
+
+
 def build_bm25_index(
-    config: ExperimentConfig, data_dir: Path, bm25_save_dir: Path
+    config: ExperimentConfig,
+    data_dir: Path,
+    bm25_save_dir: Path,
+    conv_ids: list[str] | None = None,
 ) -> list[list[float]]:
     # --- NLTK Setup ---
     print("Ensuring NLTK data is available...")
@@ -126,8 +160,18 @@ def build_bm25_index(
 
     print(f"Reading data from: {data_dir}")
 
-    for i in range(config.num_conv):
-        file_path = data_dir / f"memcell_list_conv_{i}.json"
+    # Iterate the conv ids actually present on disk (global ids) instead of a
+    # local range(0..num_conv-1); a sliced run (--from-conv/--to-conv) writes
+    # memcell files keyed by the global conversation id. When the caller knows the
+    # exact slice it passes conv_ids explicitly; otherwise discover from disk.
+    # See issue #127.
+    if conv_ids is None:
+        conv_ids = discover_conv_ids(data_dir)
+    if not conv_ids:
+        print(f"Warning: No memcell files found in {data_dir}.")
+
+    for conv_id in conv_ids:
+        file_path = data_dir / f"memcell_list_conv_{conv_id}.json"
         if not file_path.exists():
             print(f"Warning: File not found, skipping: {file_path}")
             continue
@@ -161,13 +205,18 @@ def build_bm25_index(
         # --- Saving the Index ---
         index_data = {"bm25": bm25, "docs": original_docs}
 
-        output_path = bm25_save_dir / f"bm25_index_conv_{i}.pkl"
+        output_path = bm25_save_dir / f"bm25_index_conv_{conv_id}.pkl"
         print(f"Saving index to: {output_path}")
         with open(output_path, "wb") as f:
             pickle.dump(index_data, f)
 
 
-async def build_emb_index(config: ExperimentConfig, data_dir: Path, emb_save_dir: Path):
+async def build_emb_index(
+    config: ExperimentConfig,
+    data_dir: Path,
+    emb_save_dir: Path,
+    conv_ids: list[str] | None = None,
+):
     """
     Build Embedding index (stable version).
 
@@ -190,8 +239,16 @@ async def build_emb_index(config: ExperimentConfig, data_dir: Path, emb_save_dir
 
     import time  # For performance statistics
 
-    for i in range(config.num_conv):
-        file_path = data_dir / f"memcell_list_conv_{i}.json"
+    # Iterate the conv ids actually present on disk (global ids), matching the
+    # stage 1 writer and search reader; range(num_conv) breaks sliced runs. The
+    # caller may pass the exact slice; otherwise discover from disk. See #127.
+    if conv_ids is None:
+        conv_ids = discover_conv_ids(data_dir)
+    if not conv_ids:
+        print(f"Warning: No memcell files found in {data_dir}.")
+
+    for conv_id in conv_ids:
+        file_path = data_dir / f"memcell_list_conv_{conv_id}.json"
         if not file_path.exists():
             print(f"Warning: File not found, skipping: {file_path}")
             continue
@@ -365,7 +422,7 @@ async def build_emb_index(config: ExperimentConfig, data_dir: Path, emb_save_dir
         #     },
         #     ...
         # ]
-        output_path = emb_save_dir / f"embedding_index_conv_{i}.pkl"
+        output_path = emb_save_dir / f"embedding_index_conv_{conv_id}.pkl"
         emb_save_dir.mkdir(parents=True, exist_ok=True)
         print(f"Saving embeddings to: {output_path}")
         with open(output_path, "wb") as f:
