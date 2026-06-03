@@ -16,7 +16,7 @@ Provider selection is config-driven (e.g., `llm_config` in the app). When no sce
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `LLM_PROVIDER` | No | Default provider type (used when scene config omits provider) | `openrouter` |
-| `LLM_MODEL` | Yes | Model name. **Evaluation** recommends `gpt-4o-mini`, **Demo** can use cost-effective models like `x-ai/grok-4-fast` | `gpt-4o-mini` |
+| `LLM_MODEL` | Yes | Model name. **Evaluation** recommends `gpt-4o-mini`, **Demo** can use cost-effective models like `openai/gpt-4.1-mini` | `gpt-4o-mini` |
 | `{PROVIDER}_API_KEY` | Yes* | Provider-specific API key (e.g., `OPENROUTER_API_KEY`, `OPENAI_API_KEY`) | `sk-or-v1-xxxx` |
 | `{PROVIDER}_BASE_URL` | No | Provider-specific base URL (e.g., `OPENROUTER_BASE_URL`, `OPENAI_BASE_URL`) | `https://openrouter.ai/api/v1` |
 | `LLM_API_KEY` | No | Fallback API key for default provider (legacy compatibility) | `sk-or-v1-xxxx` |

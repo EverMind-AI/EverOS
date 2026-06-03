@@ -76,7 +76,7 @@ Edit the `.env` file and fill in actual values for the following required items:
 ```bash
 # LLM provider and model
 LLM_PROVIDER=openrouter
-LLM_MODEL=x-ai/grok-4-fast
+LLM_MODEL=openai/gpt-4.1-mini
 LLM_TEMPERATURE=0.3
 LLM_MAX_TOKENS=32768
 
