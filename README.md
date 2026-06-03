@@ -21,13 +21,14 @@
 
 <br>
 
-- [Project Overview](#project-overview)
+- [What is EverOS](#what-is-everos)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Quick start](#quick-start)
+- [Storage layout](#storage-layout)
+- [Features](#features)
+- [Project structure](#project-structure)
+- [Documentation](#documentation)
 - [Use Cases](#use-cases)
-- [Quick Start](#quick-start)
-- [Architecture Methods](#architecture-methods)
-- [Benchmarks](#benchmarks)
-- [Evaluation](#evaluation)
-- [Citations](#citations)
 - [Stay Tuned](#stay-tuned)
 - [Contributing](#contributing)
 
@@ -36,18 +37,172 @@
 </details>
 
 
+## What is EverOS
 
-## Project Overview
+EverOS is an open-source Python framework that turns conversations, agent trajectories, and files into **structured, retrievable, evolving long-term memory** for AI agents and user chats. Designed for **lightweight local deployments** (small teams, individual developers), with three core principles:
 
-**EverOS** is a unified home for applying, building, and evaluating long-term memory in self-evolving agents. The repository is organized around three essential parts:
+1. **Markdown as Source of Truth** — All memory persists as plain `.md` files. Open, edit, grep, version with Git, view in Obsidian. No black-box database lock-in.
+2. **Lightweight three-piece storage** — `Markdown` files (truth) + `SQLite` (state/queue) + `LanceDB` (vector + BM25 + scalar). No MongoDB / Elasticsearch / Milvus / Redis / Kafka required.
+3. **EverAlgo as pure algorithm library** — Memory extraction algorithms are decoupled into a separate library; this project orchestrates and persists.
 
-| Part | What it gives you | Start here |
-| :--- | :--- | :--- |
-| **Use cases** | Apps, demos, and integrations showing how memory changes real agent workflows. | [use-cases/](use-cases/) |
-| **Architecture methods** | Memory systems and algorithms you can run, extend, or compare. | [methods/](methods/) |
-| **Benchmarks** | Open evaluation suites for memory quality and agent self-evolution. | [benchmarks/](benchmarks/) |
+<br>
 
-At the center of EverOS is **EverCore**, a long-term memory operating system for agents. If you are new to the project, scan the use cases first to see what memory enables, then follow the [Quick Start](#quick-start) to run EverCore locally. The architecture and benchmark sections below give you the deeper reference material when you are ready to compare systems or reproduce results.
+## Architecture at a glance
+
+```
+┌───────────────────────────────────────────────┐
+│  entrypoints/  (CLI + HTTP API)                │  presentation
+├───────────────────────────────────────────────┤
+│  service/      (use cases: memorize/retrieve)  │  application
+├───────────────────────────────────────────────┤
+│  memory/       (extract + search + cascade)    │  domain
+├───────────────────────────────────────────────┤
+│  infra/        (markdown / sqlite / lancedb)   │  infrastructure
+└───────────────────────────────────────────────┘
+        ↑                    ↑
+   component/            core/
+   (LLM/Embedding)       (observability/lifespan)
+```
+
+DDD 5 layers, single-direction dependency. See [docs/architecture.md](docs/architecture.md).
+
+<br>
+
+## Quick start
+
+### Install as a package
+
+```bash
+uv pip install everos               # or: pip install everos
+
+# Generate a starter .env (OpenRouter + DeepInfra defaults; bundled inside the wheel)
+everos init                          # writes ./.env (use --xdg for ~/.config/everos/.env)
+# Edit .env and fill the API key fields (see comments inside).
+
+everos --help
+everos server start
+```
+
+`everos server start` searches for `.env` in this order: `--env-file <path>` →
+`./.env` (cwd) → `${XDG_CONFIG_HOME:-~/.config}/everos/.env` → `~/.everos/.env`.
+The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
+Ollama / DeepInfra …) — override `*__BASE_URL` in the generated `.env` to point
+at any of them.
+
+#### Multi-modal (optional)
+
+To ingest non-text content (image / pdf / audio / office documents)
+through `/api/v1/memory/add` `content` items, install the optional
+extra:
+
+```bash
+uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
+```
+
+This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG
+support via cairosvg) and wires up the multimodal LLM client
+(`EVEROS_MULTIMODAL__*` fields in `.env`, defaults to
+`google/gemini-3-flash-preview` via OpenRouter).
+
+**Office document support requires LibreOffice as a system dependency.**
+The parser shells out to `soffice` (LibreOffice's headless renderer) to
+convert `.doc` / `.docx` / `.ppt` / `.pptx` / `.xls` / `.xlsx` to PDF
+before feeding the result into the multimodal LLM. Without LibreOffice,
+office uploads return HTTP 415 with a clear error message; PDF / image
+/ audio / HTML / email parsing is unaffected.
+
+Install on the host before serving office documents:
+
+```bash
+brew install --cask libreoffice              # macOS
+sudo apt-get install -y libreoffice          # Debian / Ubuntu
+```
+
+For a step-by-step walkthrough (add a conversation → flush → search →
+read the markdown), see [QUICKSTART.md](QUICKSTART.md).
+
+
+### Develop locally
+
+```bash
+git clone <repo>
+cd everos
+uv sync                              # creates ./.venv and installs deps
+source .venv/bin/activate            # — or skip activation and prefix every command with `uv run`
+everos init                         # fill in EVEROS_LLM__API_KEY in the generated .env
+
+everos --help
+make test
+```
+
+<br>
+
+## Storage layout
+
+```
+~/.everos/
+├── default_app/                  # app_id  ("default" → "default_app" on disk)
+│   └── default_project/          # project_id ("default" → "default_project")
+│       ├── users/<user_id>/
+│       │   ├── user.md           # profile
+│       │   ├── episodes/         # daily-log episodes (visible)
+│       │   ├── .atomic_facts/    # nested facts (dotfile-hidden)
+│       │   └── .foresights/      # predictive memory (dotfile-hidden)
+│       └── agents/<agent_id>/
+│           ├── agent.md
+│           ├── .cases/           # one task case per entry
+│           └── skills/           # named procedural memories
+├── .index/                       # derived indexes (rebuildable from md)
+│   ├── sqlite/system.db          # state + queue + audit
+│   └── lancedb/*.lance/          # vector + BM25 + scalar
+└── .tmp/                         # transient working files
+```
+
+Open any `<app>/<project>/users/<user_id>/` folder in Obsidian — your
+agent's brain is just files. The dotfile directories (`.atomic_facts/`,
+`.foresights/`, `.cases/`) stay hidden by default so the visible folder
+is the user-facing memory surface, while extracted derivatives sit
+quietly alongside.
+
+<br>
+
+## Features
+
+- **Hybrid retrieval**: BM25 + vector (HNSW/IVF-PQ) + scalar filter, single-query in LanceDB
+- **Cascade index sync**: edit a `.md` → file watcher → entry-level diff → LanceDB sync, sub-second
+- **Multi-source extraction**: conversations / agent trajectories / file knowledge
+- **Dual-track memory**: user-track (Episodes / Profiles) + agent-track (Cases / Skills)
+- **Async-first**: full asyncio, single event loop
+- **Multi-modal**: text + small image / audio inline; large media via S3/OSS reference
+
+<br>
+
+## Project structure
+
+```
+everos/                        # repo root
+├── src/everos/                # main package (src layout)
+│   ├── entrypoints/           # cli + api
+│   ├── service/               # use case orchestration
+│   ├── memory/                # domain: extract + search + cascade + prompt_slots
+│   ├── infra/                 # storage: markdown + lancedb + sqlite
+│   ├── component/             # cross-cutting: llm / embedding / config / utils
+│   ├── core/                  # runtime: observability / lifespan / context
+│   └── config/                # configuration data + Settings schema
+├── tests/                     # unit / integration / golden / fixtures
+├── docs/                      # design docs
+└── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
+```
+<br>
+
+## Documentation
+
+- [docs/overview.md](docs/overview.md) — Project overview & vision
+- [docs/architecture.md](docs/architecture.md) — DDD layered architecture & dependency rules
+- [docs/engineering.md](docs/engineering.md) — Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code)
+- [CHANGELOG.md](CHANGELOG.md) — Release notes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
+- [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
 
 <br>
 
@@ -360,259 +515,6 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 </div>
 
-## Quick Start
-
-Choose the path that matches your goal:
-
-```bash
-git clone https://github.com/EverMind-AI/EverOS.git
-cd EverOS
-```
-
-| Goal | Component | Entry Point |
-| :--- | :--- | :--- |
-| Build agents with long-term memory | **EverCore** | [methods/EverCore/](methods/EverCore/) |
-| Explore the hypergraph memory architecture | **HyperMem** | [methods/HyperMem/](methods/HyperMem/) |
-| Evaluate memory system quality | **EverMemBench** | [benchmarks/EverMemBench/](benchmarks/EverMemBench/) |
-| Measure agent self-evolution | **EvoAgentBench** | [benchmarks/EvoAgentBench/](benchmarks/EvoAgentBench/) |
-| Adapt an example app or integration | **Use cases** | [use-cases/](use-cases/) |
-
-> Each component has its own installation guide, dependency configuration, and usage examples.
-
-### EverCore
-
-The fastest way to run a memory system locally is to start with EverCore:
-
-```bash
-cd methods/EverCore
-
-# Requires Python 3.12 and Docker.
-
-# Start Docker services
-docker compose up -d
-
-# Install dependencies
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv sync
-
-# Configure API keys
-cp env.template .env
-# Edit .env and set:
-#   - LLM_API_KEY (for memory extraction)
-#   - VECTORIZE_API_KEY (for embedding/rerank)
-
-# Start server
-uv run python src/run.py
-
-# Verify installation
-curl http://localhost:1995/health
-# Expected response: {"status": "healthy", ...}
-```
-
-Server runs at `http://localhost:1995` · [Full Setup Guide](methods/EverCore/docs/installation/SETUP.md)
-
-### Basic Usage
-
-Store and retrieve memories with simple Python code:
-
-```python
-import os
-import requests
-
-API_BASE = os.getenv("EVERCORE_API_BASE", "http://localhost:1995/api/v1")
-
-# 1. Store a conversation memory
-add_payload = {
-    "user_id": "user_001",
-    "session_id": "quickstart_session",
-    "messages": [
-        {
-            "message_id": "msg_001",
-            "sender_id": "user_001",
-            "sender_name": "User",
-            "role": "user",
-            "timestamp": 1738404000000,
-            "content": "I love playing soccer on weekends",
-        }
-    ],
-}
-add_result = requests.post(f"{API_BASE}/memories", json=add_payload)
-add_result.raise_for_status()
-add_result = add_result.json()
-print(add_result["data"]["status"])
-
-# 2. Search for relevant memories
-search_payload = {
-    "query": "What sports does the user like?",
-    "method": "hybrid",
-    "memory_types": ["episodic_memory"],
-    "top_k": 5,
-    "filters": {"user_id": "user_001"},
-}
-search_result = requests.post(f"{API_BASE}/memories/search", json=search_payload)
-search_result.raise_for_status()
-search_result = search_result.json()
-
-for episode in search_result["data"]["episodes"]:
-    print(episode["episode"])
-```
-
-[More Examples](methods/EverCore/docs/usage/USAGE_EXAMPLES.md) · [API Reference](https://docs.evermind.ai/api-reference/introduction) · [Interactive Demos](methods/EverCore/docs/usage/DEMOS.md)
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Architecture Methods
-
-These are the memory architectures currently included in EverOS. Use them as runnable systems, research references, or starting points for your own agent memory layer.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### EverCore
-
-A self-organizing memory operating system inspired by biological imprinting. Extracts, structures, and retrieves long-term knowledge from conversations so agents can remember, understand, and continuously evolve.
-
-LoCoMo **93.05%** · LongMemEval **83.00%**
-
-[Paper](https://arxiv.org/abs/2601.02163) · [Docs](methods/EverCore/)
-
-</td>
-<td width="50%" valign="top">
-
-### HyperMem
-
-A hypergraph-based hierarchical memory architecture that captures high-order associations through hyperedges, with topic, event, and fact layers for coarse-to-fine conversation retrieval.
-
-LoCoMo **92.73%**
-
-[Paper](https://arxiv.org/abs/2604.08256) · [Docs](methods/HyperMem/)
-
-</td>
-</tr>
-</table>
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Benchmarks
-
-These benchmarks provide shared standards for measuring memory quality and agent self-evolution across systems.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### EverMemBench
-
-Three-layer memory quality evaluation: factual recall, applied reasoning, and personalized generalization.
-
-[Paper](https://arxiv.org/abs/2602.01313) · [Dataset](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) · [Docs](benchmarks/EverMemBench/)
-
-</td>
-<td width="50%" valign="top">
-
-### EvoAgentBench
-
-Agent self-evolution evaluation through longitudinal growth curves, transfer efficiency, error avoidance, and skill-hit quality.
-
-[Dataset](https://huggingface.co/datasets/EverMind-AI/EvoAgentBench) · [Docs](benchmarks/EvoAgentBench/)
-
-</td>
-</tr>
-</table>
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Evaluation
-
-Use the evaluation runner to reproduce EverCore results or compare another memory system against the same benchmark tasks.
-
-### Benchmark Results
-
-![EverOS Benchmark Results](https://github.com/user-attachments/assets/41b656e7-6f82-41b7-891d-d6079d10dd39)
-
-### Supported Benchmarks
-
-- **[LoCoMo](https://github.com/snap-research/locomo)** — Long-context memory benchmark with single/multi-hop reasoning
-- **[LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)** — Multi-session conversation evaluation
-- **[PersonaMem](https://huggingface.co/datasets/bowen-upenn/PersonaMem)** — Persona-based memory evaluation
-
-### Run Evaluations
-
-```bash
-cd methods/EverCore
-
-# Install evaluation dependencies
-uv sync --group evaluation
-
-# Run smoke test (quick verification)
-uv run python -m evaluation.cli --dataset locomo --system everos --smoke
-
-# Run full evaluation
-uv run python -m evaluation.cli --dataset locomo --system everos
-
-# View results
-cat evaluation/results/locomo-everos/report.txt
-```
-
-[Full Evaluation Guide](methods/EverCore/evaluation/README.md) · [Complete Results](https://huggingface.co/datasets/EverMind-AI/everos_Eval_Results)
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Citations
-
-If EverOS helps your research, please cite the relevant paper:
-
-```bibtex
-@article{hu2026evermemos,
-  title   = {EverMemOS: A Self-Organizing Memory Operating System for Structured Long-Horizon Reasoning},
-  author  = {Chuanrui Hu and Xingze Gao and Zuyi Zhou and Dannong Xu and Yi Bai and Xintong Li and Hui Zhang and Tong Li and Chong Zhang and Lidong Bing and Yafeng Deng},
-  journal = {arXiv preprint arXiv:2601.02163},
-  year    = {2026}
-}
-
-@article{yue2026hypermem,
-  title   = {HyperMem: Hypergraph Memory for Long-Term Conversations},
-  author  = {Juwei Yue and Chuanrui Hu and Jiawei Sheng and Zuyi Zhou and Wenyuan Zhang and Tingwen Liu and Li Guo and Yafeng Deng},
-  journal = {arXiv preprint arXiv:2604.08256},
-  year    = {2026}
-}
-
-@article{hu2026evaluating,
-  title   = {Evaluating Long-Horizon Memory for Multi-Party Collaborative Dialogues},
-  author  = {Chuanrui Hu and Tong Li and Xingze Gao and Hongda Chen and Yi Bai and Dannong Xu and Tianwei Lin and Xiaohong Li and Yunyun Han and Jian Pei and Yafeng Deng},
-  journal = {arXiv preprint arXiv:2602.01313},
-  year    = {2026}
-}
-```
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
 ## Stay Tuned
 
 Star the repo or join the community links above to follow new architecture methods, benchmark releases, and memory-enabled use cases.
@@ -650,16 +552,19 @@ Contributions are welcome across the whole repository: architecture methods, ben
 ![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
 ![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
 
-### Contribution Guidelines
+### Status
 
-Read the [Contribution Guidelines](.github/CONTRIBUTING.md) for setup, pull request expectations, and use-case submission notes. For responsible disclosure, see the [Security Policy](.github/SECURITY.md).
+**Alpha (v0.1.0)** — Active development. Core API may change before v1.0.
 
-![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
-![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)
+### License
 
-### License, Conduct, and Acknowledgments
+[Apache License 2.0](LICENSE) — see [NOTICE](NOTICE) for third-party attributions.
 
-[Apache 2.0](https://github.com/EverMind-AI/EverOS/blob/main/LICENSE) • [Code of Conduct](.github/CODE_OF_CONDUCT.md) • [Acknowledgments](methods/EverCore/docs/ACKNOWLEDGMENTS.md)
+### Citation
+
+If you use EverOS in research, see [CITATION.md](CITATION.md).
+
+---
 
 <br>
 
