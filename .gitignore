@@ -209,6 +209,7 @@ AGENTS.mk
 docs/api_docs/profile_extraction_fields.md
 .claude/
 .cursor/*
+CLAUDE.local.md
 
 #tmp_data
 demo/memcell_outputs/
