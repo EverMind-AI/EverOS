@@ -82,7 +82,7 @@ class LiteLLMEmbeddingProvider:
             "drop_params": True,
             "timeout": self._timeout,
         }
-        if self._api_key:
+        if self._api_key is not None:
             kwargs["api_key"] = self._api_key
         if self._base_url:
             kwargs["api_base"] = self._base_url
@@ -92,10 +92,8 @@ class LiteLLMEmbeddingProvider:
                 response = await litellm.aembedding(**kwargs)
             except Exception as exc:
                 qualname = f"{type(exc).__module__}.{type(exc).__name__}"
-                if qualname.startswith("litellm.exceptions.") or qualname.startswith(
-                    "openai."
-                ):
+                if qualname.startswith("litellm.") or qualname.startswith("openai."):
                     raise EmbeddingError(str(exc)) from exc
                 raise
 
-        return [list(item["embedding"][: self.dim]) for item in response.data]
+        return [list(item.embedding[: self.dim]) for item in response.data]

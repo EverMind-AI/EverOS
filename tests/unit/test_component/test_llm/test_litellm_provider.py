@@ -143,3 +143,110 @@ async def test_import_error_raises_llm_error() -> None:
     provider = LiteLLMProvider(model="m")
     with pytest.raises(LLMError, match="litellm is not installed"):
         await provider.chat([ChatMessage(role="user", content="x")])
+
+
+async def test_empty_choices_raises_llm_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    resp = mock.MagicMock()
+    resp.choices = []
+    fake.acompletion.return_value = resp  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="m")
+    with pytest.raises(LLMError, match="no choices"):
+        await provider.chat([ChatMessage(role="user", content="x")])
+
+
+async def test_null_usage_handled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    resp = _openai_style_response()
+    resp.usage = None
+    fake.acompletion.return_value = resp  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="m")
+    result = await provider.chat([ChatMessage(role="user", content="x")])
+    assert result.usage is None
+    assert result.content == "hello"
+
+
+async def test_null_content_coerced_to_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    resp = _openai_style_response(content=None)  # type: ignore[arg-type]
+    fake.acompletion.return_value = resp  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="m")
+    result = await provider.chat([ChatMessage(role="user", content="x")])
+    assert result.content == ""
+
+
+async def test_per_call_model_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    fake.acompletion.return_value = _openai_style_response()  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="default-model")
+    await provider.chat([ChatMessage(role="user", content="x")], model="override-model")
+
+    call_kwargs = fake.acompletion.call_args.kwargs  # type: ignore[attr-defined]
+    assert call_kwargs["model"] == "override-model"
+
+
+async def test_openai_exception_wrapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    class FakeOpenAIError(Exception):
+        pass
+
+    FakeOpenAIError.__module__ = "openai._exceptions"
+    fake.acompletion.side_effect = FakeOpenAIError("auth failed")  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="m")
+    with pytest.raises(LLMError, match="auth failed"):
+        await provider.chat([ChatMessage(role="user", content="x")])
+
+
+async def test_litellm_timeout_wrapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """litellm.Timeout lives at litellm.* not litellm.exceptions.*"""
+    fake = _make_fake_litellm()
+    _patch_litellm(monkeypatch, fake)
+
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    class FakeTimeoutError(Exception):
+        pass
+
+    FakeTimeoutError.__module__ = "litellm"
+    fake.acompletion.side_effect = FakeTimeoutError("timed out")  # type: ignore[attr-defined]
+
+    provider = LiteLLMProvider(model="m")
+    with pytest.raises(LLMError, match="timed out"):
+        await provider.chat([ChatMessage(role="user", content="x")])

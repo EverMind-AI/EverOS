@@ -84,7 +84,7 @@ class LiteLLMProvider:
             "drop_params": True,
             "timeout": self._timeout,
         }
-        if self._api_key:
+        if self._api_key is not None:
             request["api_key"] = self._api_key
         if self._base_url:
             request["api_base"] = self._base_url
@@ -100,12 +100,12 @@ class LiteLLMProvider:
             completion = await litellm.acompletion(**request)
         except Exception as exc:
             qualname = f"{type(exc).__module__}.{type(exc).__name__}"
-            if qualname.startswith("litellm.exceptions.") or qualname.startswith(
-                "openai."
-            ):
+            if qualname.startswith("litellm.") or qualname.startswith("openai."):
                 raise LLMError(str(exc)) from exc
             raise
 
+        if not completion.choices:
+            raise LLMError("LiteLLM returned no choices")
         choice = completion.choices[0]
         usage: Usage | None = None
         if completion.usage is not None:
