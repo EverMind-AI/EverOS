@@ -22,7 +22,6 @@
 <br>
 
 - [What is EverOS](#what-is-everos)
-- [EverMind ecosystem](#evermind-ecosystem)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Quick start](#quick-start)
 - [Storage layout](#storage-layout)
@@ -31,6 +30,7 @@
 - [Documentation](#documentation)
 - [Use Cases](#use-cases)
 - [Stay Tuned](#stay-tuned)
+- [EverMind ecosystem](#evermind-ecosystem)
 - [Contributing](#contributing)
 
 <br>
@@ -45,48 +45,6 @@ EverOS is an open-source Python framework that turns conversations, agent trajec
 1. **Markdown as Source of Truth** — All memory persists as plain `.md` files. Open, edit, grep, version with Git, view in Obsidian. No black-box database lock-in.
 2. **Lightweight three-piece storage** — `Markdown` files (truth) + `SQLite` (state/queue) + `LanceDB` (vector + BM25 + scalar). No MongoDB / Elasticsearch / Milvus / Redis / Kafka required.
 3. **[EverAlgo](https://github.com/EverMind-AI/EverAlgo) as pure algorithm library** — Memory extraction algorithms are decoupled into a separate library; this project orchestrates and persists.
-
-<br>
-
-## EverMind ecosystem
-
-EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation. EverOS is the core runtime architecture; EverMemOS is the paper and research line carrying our strongest memory-system benchmark runs; EverAlgo supplies the next-generation algorithms that make the system modular and reusable.
-
-<table>
-<tr>
-<th colspan="2">EverMind Open-Source Ecosystem</th>
-</tr>
-<tr>
-<td><strong>Core memory architecture</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> / EverMemOS - the local memory operating system and research-backed runtime for agent and user memory.</td>
-</tr>
-<tr>
-<td><strong>Algorithm engine</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
-</tr>
-<tr>
-<td><strong>Alternative architecture</strong></td>
-<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - hypergraph memory for long-term conversations, with its own benchmark-backed topic -> episode -> fact retrieval method.</td>
-</tr>
-<tr>
-<td><strong>Benchmarks</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - evaluation suites for conversational memory and agent self-evolution.</td>
-</tr>
-<tr>
-<td><strong>Long-context research</strong></td>
-<td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention for scalable latent memory and 100M-token contexts.</td>
-</tr>
-<tr>
-<td><strong>Personal memory layer</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
-</tr>
-<tr>
-<td><strong>Developer integrations</strong></td>
-<td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - plugins, skills, and migration tooling for AI coding agents.</td>
-</tr>
-</table>
-
-Together, these repositories form EverMind's research-to-runtime stack: new memory methods, reusable algorithms, benchmark evidence, and practical agent integrations.
 
 <br>
 
@@ -564,6 +522,48 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 Star the repo or join the community links above to follow new architecture methods, benchmark releases, and memory-enabled use cases.
 
 ![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+
+<br>
+
+## EverMind ecosystem
+
+EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation. EverOS is the core runtime architecture; EverMemOS is the paper and research line carrying our strongest memory-system benchmark runs; EverAlgo supplies the next-generation algorithms that make the system modular and reusable.
+
+<table>
+<tr>
+<th colspan="2">EverMind Open-Source Ecosystem</th>
+</tr>
+<tr>
+<td><strong>Core memory architecture</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> / EverMemOS - the local memory operating system and research-backed runtime for agent and user memory.</td>
+</tr>
+<tr>
+<td><strong>Algorithm engine</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
+</tr>
+<tr>
+<td><strong>Alternative architecture</strong></td>
+<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - hypergraph memory for long-term conversations, with its own benchmark-backed topic -> episode -> fact retrieval method.</td>
+</tr>
+<tr>
+<td><strong>Benchmarks</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - evaluation suites for conversational memory and agent self-evolution.</td>
+</tr>
+<tr>
+<td><strong>Long-context research</strong></td>
+<td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention for scalable latent memory and 100M-token contexts.</td>
+</tr>
+<tr>
+<td><strong>Personal memory layer</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
+</tr>
+<tr>
+<td><strong>Developer integrations</strong></td>
+<td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - plugins, skills, and migration tooling for AI coding agents.</td>
+</tr>
+</table>
+
+Together, these repositories form EverMind's research-to-runtime stack: new memory methods, reusable algorithms, benchmark evidence, and practical agent integrations.
 
 <br>
 <div align="right">
