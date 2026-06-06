@@ -22,7 +22,7 @@
 <br>
 
 - [EverOS 1.0.0 Highlights](#everos-100-highlights)
-- [What Is EverOS](#what-is-everos)
+- [Why EverOS](#why-everos)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
@@ -96,7 +96,7 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 </div>
 
 
-## What Is EverOS
+## Why EverOS
 
 EverOS is an open-source Python framework for self-evolving long-term
 memory across agents and platforms. It gives makers one portable memory
@@ -675,7 +675,7 @@ Star the repo or join the community links above to follow new architecture metho
 
 ## EverMind Ecosystems
 
-EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation. EverOS is the core runtime architecture; EverMemOS is the paper and research line carrying our strongest memory-system benchmark runs; EverAlgo supplies the next-generation algorithms that make the system modular and reusable.
+EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation.
 
 <table>
 <tr>
@@ -683,7 +683,7 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 </tr>
 <tr>
 <td><strong>Core Memory Architecture</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> / EverMemOS - the local memory operating system and research-backed runtime for agent and user memory.</td>
+<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - the local memory operating system and research-backed runtime for agent and user memory.</td>
 </tr>
 <tr>
 <td><strong>Algorithm Engine</strong></td>
