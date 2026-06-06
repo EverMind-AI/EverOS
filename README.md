@@ -9,20 +9,20 @@
   <a href="https://github.com/EverMind-AI/EverOS/discussions/67"><img src="https://img.shields.io/badge/WeCom-EverMind_社区-07C160?labelColor=gray&style=for-the-badge&logo=wechat&logoColor=white" alt="WeChat"></a>
 </p>
 
-[Website](https://evermind.ai) · [Documentation](https://docs.evermind.ai) · [Blog](https://evermind.ai/blogs)
+[Website](https://evermind.ai) · [Documentation](https://docs.evermind.ai) · [Blog](https://evermind.ai/blogs) · [中文](README.zh-CN.md)
 
 </div>
 
 
 <br>
 
-<details open>
+<details>
   <summary><kbd>Table of Contents</kbd></summary>
 
 <br>
 
-- [What Is EverOS](#what-is-everos)
 - [EverOS 1.0.0 Highlights](#everos-100-highlights)
+- [What Is EverOS](#what-is-everos)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
@@ -37,33 +37,6 @@
 <br>
 
 </details>
-
-
-## What Is EverOS
-
-EverOS is an open-source Python framework for self-evolving long-term
-memory across agents and platforms. It gives makers one portable memory
-layer for every agent they use - Claude Code, Codex, OpenClaw, Hermes,
-and more - so context, decisions, files, and trajectories can follow the
-work instead of staying trapped in one tool.
-
-EverOS stores conversations, agent trajectories, and files as readable
-Markdown, then syncs local SQLite and LanceDB indexes for fast retrieval.
-Agents can reuse past cases and skills, improve from repeated workflows,
-and become more proactive over time.
-
-The system is built around three boundaries:
-
-1. **Memory content stays readable** - Markdown is the durable source of truth.
-2. **Runtime state stays local** - SQLite tracks state and LanceDB handles vector, BM25, and scalar-filter search.
-3. **Algorithms stay modular** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) owns memory algorithms; EverOS owns runtime, persistence, online flows, and offline evolution.
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
 
 
 ## EverOS 1.0.0 Highlights
@@ -131,6 +104,33 @@ and offline evolution.
 </td>
 </tr>
 </table>
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+
+## What Is EverOS
+
+EverOS is an open-source Python framework for self-evolving long-term
+memory across agents and platforms. It gives makers one portable memory
+layer for every agent they use - Claude Code, Codex, OpenClaw, Hermes,
+and more - so context, decisions, files, and trajectories can follow the
+work instead of staying trapped in one tool.
+
+EverOS stores conversations, agent trajectories, and files as readable
+Markdown, then syncs local SQLite and LanceDB indexes for fast retrieval.
+Agents can reuse past cases and skills, improve from repeated workflows,
+and become more proactive over time.
+
+The system is built around three boundaries:
+
+1. **Memory content stays readable** - Markdown is the durable source of truth.
+2. **Runtime state stays local** - SQLite tracks state and LanceDB handles vector, BM25, and scalar-filter search.
+3. **Algorithms stay modular** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) owns memory algorithms; EverOS owns runtime, persistence, online flows, and offline evolution.
 
 <br>
 <div align="right">
@@ -678,6 +678,10 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 Star the repo or join the community links above to follow new architecture methods, benchmark releases, memory-enabled use cases, Wiki-style memory, and Dreaming updates.
 
 ![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+
+### Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
 
 <br>
 <div align="right">
