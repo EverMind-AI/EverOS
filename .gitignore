@@ -165,5 +165,40 @@ outputs/
 logs/
 nohup.out
 
+# Repository media policy: do not commit images, videos, or asset/media folders.
+# Use external hosting, release artifacts, or approved storage and link from docs.
+asset/
+assets/
+image/
+images/
+img/
+media/
+video/
+videos/
+*.avif
+*.bmp
+*.gif
+*.heic
+*.heif
+*.icns
+*.ico
+*.jpeg
+*.jpg
+*.png
+*.svg
+*.tif
+*.tiff
+*.webp
+*.avi
+*.flv
+*.m4v
+*.mkv
+*.mov
+*.mp4
+*.mpeg
+*.mpg
+*.webm
+*.wmv
+
 # Use-cases: exclude lock files to keep the repo lean
 use-cases/**/package-lock.json

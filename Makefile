@@ -1,12 +1,13 @@
-.PHONY: help install install-deps lint docs-check check-commits check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-assets check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
 
 help:
 	@echo "Targets:"
 	@echo "  install       Install deps + pre-commit hooks (full dev setup)"
 	@echo "  install-deps  Install deps only (uv sync --frozen, used by CI)"
-	@echo "  lint          ruff (check + format-check) + import-linter + datetime discipline + openapi drift"
+	@echo "  lint          ruff + import-linter + repo asset/media + datetime discipline + openapi drift"
 	@echo "  docs-check    Validate Markdown links, use-case banners, and issue template YAML"
 	@echo "  check-commits Validate Conventional Commit subjects for a git range"
+	@echo "  check-assets  Block committed images, videos, and asset/media directories"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
 	@echo "  check-datetime Scan for code that bypasses component/utils/datetime (HARD gate, run via lint)"
 	@echo "  openapi       Regenerate docs/openapi.json from the FastAPI app"
@@ -34,6 +35,7 @@ lint:
 	uv run ruff check src tests
 	uv run ruff format --check src tests
 	uv run lint-imports
+	uv run python scripts/check_repo_assets.py
 	uv run python scripts/check_datetime_discipline.py
 	uv run python scripts/dump_openapi.py --check
 
@@ -43,6 +45,11 @@ docs-check:
 
 check-commits:
 	python3 scripts/check_commit_messages.py $(RANGE)
+
+# Repository media hygiene gate. Images/videos belong in external hosting,
+# release artifacts, or other approved storage, then linked from docs.
+check-assets:
+	uv run python scripts/check_repo_assets.py
 
 # Advisory CJK scan (see .claude/rules/language-policy.md). Deliberately NOT
 # wired into `lint` / `ci`: the policy is enforced by review and the rules

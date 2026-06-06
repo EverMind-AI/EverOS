@@ -889,7 +889,7 @@ function getGroupsForKey(keyId) {
 // Proxy forwards to upstream API with Authorization header
 ```
 
-### Dashboard (`assets/dashboard.html`)
+### Dashboard (`dashboard/dashboard.html`)
 
 **Data Loading Flow:**
 
@@ -1059,7 +1059,7 @@ evermem-plugin/
 │           ├── config.js         # Configuration utilities
 │           ├── debug.js          # Shared debug logging utility
 │           └── groups-store.js   # Local groups persistence
-├── assets/
+├── dashboard/
 │   └── dashboard.html        # Memory Hub dashboard
 ├── server/
 │   └── proxy.js              # Local proxy server for dashboard

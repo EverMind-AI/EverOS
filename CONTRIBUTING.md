@@ -42,9 +42,11 @@ Use the [feature request template](https://github.com/EverMind-AI/EverOS/issues/
 
 1. Create a branch from `main`.
 2. Keep the change scoped to one purpose.
-3. Run `make ci` locally before requesting review.
-4. Use a Conventional Commit title, such as `fix(search): guard empty profile`.
-5. Open a pull request to `main` and fill out the PR template.
+3. Do not commit images, videos, or asset/media directories. Use external
+   hosting, release artifacts, or approved storage and link from docs.
+4. Run `make ci` locally before requesting review.
+5. Use a Conventional Commit title, such as `fix(search): guard empty profile`.
+6. Open a pull request to `main` and fill out the PR template.
 
 By submitting a pull request, you agree that your contribution is licensed under
 the project's [Apache-2.0](LICENSE) license.
@@ -90,7 +92,7 @@ git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 make install             # deps + pre-commit hooks (one-stop dev setup)
 everos init              # write ./.env, then fill in the API key slots
-make ci                  # verify: lint + unit + integration
+make ci                  # verify: lint + unit + integration + package
 ```
 
 ### Code style
@@ -110,7 +112,7 @@ Highlights:
 
 ```bash
 make format    # ruff fix + format
-make lint      # ruff check + import-linter
+make lint      # ruff check + import-linter + hard repo hygiene gates
 ```
 
 ### Branch strategy

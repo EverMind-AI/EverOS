@@ -69,11 +69,13 @@ Reasons this is documented separately:
 │   │     ├ check-yaml / check-toml                              │    │
 │   │     ├ check-added-large-files (≥1MB warn)                  │    │
 │   │     ├ detect-private-key                                   │    │
+│   │     ├ no committed images/videos/assets                    │    │
 │   │     └ gitlint (commit-msg stage)                           │    │
 │   │                                                            │    │
 │   │   ruff                lint + format                        │    │
 │   │                       (replaces black / isort / flake8)    │    │
 │   │   import-linter       DDD layer-direction enforcement      │    │
+│   │   repo asset gate     blocks images/videos/assets in git   │    │
 │   │   pytest              unit / integration                   │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
@@ -94,6 +96,7 @@ Reasons this is documented separately:
 │   ┌─ CI/CD (GitHub Actions) ───────────────────────────────────┐    │
 │   │                                                            │    │
 │   │   CI:    .github/workflows/ci.yml    lint / test / integ   │    │
+│   │                                      / package build        │    │
 │   │   Docs:  .github/workflows/docs.yml  Markdown + YAML check │    │
 │   │   Gates invoke Makefile targets; the Makefile is the       │    │
 │   │   single source of truth for commands.                     │    │
@@ -204,19 +207,21 @@ Stage 2: pre-commit (triggered by `git commit`)
      ├ check-yaml, check-toml
      ├ check-added-large-files (≥1MB)
      ├ detect-private-key
+     ├ no-repo-assets (rejects images/videos/assets in git)
      └ gitlint  (commit-msg stage; rejects malformed messages)
 
      │
      ▼
 Stage 3: local `make ci` (manual, before push)
-     ├ make lint        (ruff check + ruff format --check + import-linter)
+     ├ make lint        (ruff + import-linter + repo hygiene gates)
      ├ make test        (pytest tests/unit)
-     └ make integration (pytest tests/integration)
+     ├ make integration (pytest tests/integration)
+     └ make package     (sdist/wheel build + import smoke test)
 
      │
      ▼
 Stage 4: CI (GitHub Actions, push + PR triggered)
-     └ re-runs the same `make lint / test / integration` targets
+     └ re-runs the same `make lint / test / integration / package` targets
 
      │
      ▼
@@ -272,7 +277,7 @@ dev = ["ruff", "pytest", "pytest-asyncio", "pytest-cov",
 make help          list all targets
 make install       uv sync --frozen
 make format        ruff fix + format
-make lint          ruff + import-linter + datetime discipline + openapi drift
+make lint          ruff + import-linter + repo asset/media + datetime discipline + openapi drift
 make test          pytest tests/unit
 make integration   pytest tests/integration
 make package       build sdist/wheel + smoke-test wheel import
@@ -338,6 +343,7 @@ Every key has a sensible default except the `API_KEY` fields, which you fill in.
 |---|---|---|
 | Lint | `make lint` (ruff check + ruff format --check) | any error |
 | Layer direction | `make lint` (lint-imports inside) | layer violation |
+| Repository media | `make lint` (check_repo_assets.py) | images/videos/assets committed |
 | Datetime discipline | `make lint` (check_datetime_discipline.py) | bypasses helper module |
 | OpenAPI drift | `make lint` (dump_openapi.py --check) | schema ≠ committed openapi.json |
 | Unit | `make test` (pytest tests/unit) | any failure |

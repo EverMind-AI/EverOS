@@ -28,6 +28,14 @@ repos:
       - id: detect-private-key
       - id: check-merge-conflict
 
+  - repo: local
+    hooks:
+      - id: no-repo-assets
+        name: block committed images, videos, and asset directories
+        entry: python3 scripts/check_repo_assets.py
+        language: system
+        pass_filenames: false
+
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1
     hooks:
