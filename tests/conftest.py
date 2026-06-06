@@ -51,4 +51,13 @@ def _reset_settings_cache() -> Iterator[None]:
 @pytest.fixture(scope="session")
 def long_conversation() -> dict:
     """LoCoMo conv_0 fixture (419 messages, 19 batches, one session)."""
-    return json.loads(_LONG_CONV_PATH.read_text())
+    data: dict = json.loads(_LONG_CONV_PATH.read_text())
+    assert isinstance(data, dict)
+    assert "everos_session_id" in data
+    assert "batches" in data
+    batches: list = data["batches"]
+    assert isinstance(batches, list)
+    assert len(batches) == data.get("total_batches", 19)
+    total_messages = sum(batch["message_count"] for batch in batches)
+    assert total_messages == data.get("total_messages", 419)
+    return data
