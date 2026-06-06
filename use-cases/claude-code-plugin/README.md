@@ -2,6 +2,13 @@
 
 Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
 
+> Compatibility note: this folder documents a legacy EverMem Cloud
+> plugin. It still uses the old cloud `/api/v1/memories/*` routes and
+> should not be treated as the canonical local EverOS 1.0 OSS API.
+> New integrations should follow
+> [EverOS 1.0 migration notes](../../docs/migration-to-1.0.md) and
+> [the API reference](../../docs/api.md).
+
 ![Memory Hub Screenshot](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)
 
 ## Features

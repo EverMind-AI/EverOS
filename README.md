@@ -200,6 +200,7 @@ everos/                        # repo root
 - [docs/overview.md](docs/overview.md) — Project overview & vision
 - [docs/architecture.md](docs/architecture.md) — DDD layered architecture & dependency rules
 - [docs/engineering.md](docs/engineering.md) — Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code)
+- [docs/migration-to-1.0.md](docs/migration-to-1.0.md) — Legacy API and infrastructure migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
 - [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
@@ -437,13 +438,13 @@ A context-native AI wearable that listens to everyday life and converts conversa
 <tr>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)](https://github.com/EverMind-AI/EverOS/tree/0f49826ba0f9a94e1974c97614a46a68e0a08b52/evermemos-openclaw-plugin)
+[![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)](docs/migration-to-1.0.md)
 
-#### OpenClaw Agent Memory
+#### Legacy OpenClaw Agent Memory
 
-A 24/7 agent workflow with continuous learning memory across sessions.
+Archived pre-1.0 plugin reference. New integrations should use the EverOS 1.0 API.
 
-[Plugin](https://github.com/EverMind-AI/EverOS/tree/0f49826ba0f9a94e1974c97614a46a68e0a08b52/evermemos-openclaw-plugin)
+[Learn more](docs/migration-to-1.0.md)
 
 </td>
 <td width="50%" valign="top">

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 DEPRECATED_NAME_RE = re.compile(r"\bever[\s_-]*core\b", flags=re.IGNORECASE)
 SKIP_SUFFIXES = frozenset(
@@ -53,11 +53,7 @@ def _tracked_paths() -> list[Path]:
         stdout=subprocess.PIPE,
         text=False,
     )
-    return [
-        Path(raw.decode("utf-8"))
-        for raw in result.stdout.split(b"\0")
-        if raw
-    ]
+    return [Path(raw.decode("utf-8")) for raw in result.stdout.split(b"\0") if raw]
 
 
 def _tracked_text_files() -> Iterable[tuple[str, str]]:

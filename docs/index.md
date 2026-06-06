@@ -15,6 +15,7 @@ already know what you want to do and need to know exactly how.
 | [cli.md](cli.md) | `everos` CLI subcommands + env var conventions |
 | [storage_layout.md](storage_layout.md) | Memory-root tree + frontmatter chassis + EntryId encoding |
 | [prompt_slots.md](prompt_slots.md) | YamlConfigLoader + three-layer prompt override |
+| [migration-to-1.0.md](migration-to-1.0.md) | Legacy API and infrastructure migration notes for EverOS 1.0 |
 
 ## Explanation
 
