@@ -53,6 +53,7 @@ Top-level project files live next to the repo root:
 
 - [README.md](../README.md) — quick start & feature overview
 - [QUICKSTART.md](../QUICKSTART.md) — 5-minute walkthrough (install → service → search)
+- [use-cases.md](use-cases.md) — full use-case gallery and integration examples
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — how to contribute (issue-only model)
 - [CHANGELOG.md](../CHANGELOG.md) — release notes
 - [SECURITY.md](../SECURITY.md) — security policy & private vulnerability reporting
