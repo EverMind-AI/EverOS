@@ -15,7 +15,10 @@ Use this as the admin checklist for `main` after the EverOS 1.0 history reset.
 
 Mark these checks as required before merge:
 
-- `CI / lint + test + integration`
+- `CI / lint`
+- `CI / unit tests`
+- `CI / integration tests`
+- `CI / package build`
 - `Docs / links`
 - `Commit lint / commit messages`
 - `.github/dependabot.yml`

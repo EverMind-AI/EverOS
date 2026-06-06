@@ -53,6 +53,7 @@ coverage.xml
 .ruff_cache/
 .import_linter_cache/
 .uv-cache/
+.package-smoke/
 
 # Translations
 *.mo

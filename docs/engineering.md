@@ -275,8 +275,9 @@ make format        ruff fix + format
 make lint          ruff + import-linter + datetime discipline + openapi drift
 make test          pytest tests/unit
 make integration   pytest tests/integration
+make package       build sdist/wheel + smoke-test wheel import
 make cov           pytest unit + integration, coverage gate (fail under 80%)
-make ci            lint + test + integration   ← CI invokes these targets
+make ci            lint + test + integration + package
 make clean         clear caches
 ```
 
@@ -314,11 +315,10 @@ Every key has a sensible default except the `API_KEY` fields, which you fill in.
 │                                                          │
 │   GitHub Actions   (.github/workflows/)                  │
 │     ci.yml    push (main) + PR                           │
-│       ├ make install-deps   (uv sync --frozen)           │
-│       ├ make lint           (ruff + import-linter +      │
-│       │                      datetime + openapi drift)   │
-│       ├ make test           (pytest tests/unit)          │
-│       └ make integration    (pytest tests/integration)   │
+│       ├ lint              make lint                      │
+│       ├ unit tests        make test                      │
+│       ├ integration tests make integration               │
+│       └ package build     make package                   │
 │     docs.yml  Markdown link check + issue-template YAML  │
 │       └ make docs-check                                  │
 │     commits.yml Conventional Commit subject check        │
@@ -342,6 +342,7 @@ Every key has a sensible default except the `API_KEY` fields, which you fill in.
 | OpenAPI drift | `make lint` (dump_openapi.py --check) | schema ≠ committed openapi.json |
 | Unit | `make test` (pytest tests/unit) | any failure |
 | Integration | `make integration` (pytest tests/integration) | any failure |
+| Package build | `make package` (sdist/wheel + import smoke test) | build or import failure |
 | Commit message | `Commit lint` workflow | non-Conventional Commit subject |
 
 Integration tests run with a `FakeLLMClient` — no live credentials are needed in CI.
@@ -352,7 +353,7 @@ pre-commit stage and remotely via the `Commit lint` workflow.
 
 | Branch | Rule |
 |---|---|
-| **main** | branch protection: PR + two reviews + green CI; no direct push |
+| **main** | branch protection: PR + two reviews + green required checks; no direct push |
 | feat / fix / docs / ci | contributor branches; merge through PR |
 
 ---
