@@ -1,6 +1,6 @@
 # EverMem Story Memory Demo
 
-> Built on [EverCore](https://github.com/EverMind-AI/EverOS/) - Open-source AI memory infrastructure
+> Built on [EverOS](https://github.com/EverMind-AI/EverOS/) - Open-source AI memory infrastructure
 
 A demonstration web application showcasing [EverMem](https://evermind.ai)'s AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones" (Book 1).
 
@@ -30,7 +30,7 @@ Ask questions about the book and watch two AI responses stream side-by-side: one
 
 - [Bun](https://bun.sh/) (latest version)
 - OpenAI API key (or OpenRouter API key)
-- EverMind Cloud API key (apply at [EverCore Cloud](https://console.evermind.ai/))
+- EverMind Cloud API key (apply at [EverMind Cloud](https://console.evermind.ai/))
 
 ### Installation
 

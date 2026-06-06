@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-OpenHer × EverCore Integration Demo
+OpenHer × EverOS Integration Demo
 
-Demonstrates how EverCore provides long-term memory to the
+Demonstrates how EverOS provides long-term memory to the
 AI Being persona engine. Shows session context loading, memory
 storage, search, and relationship vector evolution.
 
 Usage:
-    # With EverCore Cloud
+    # With EverMind Cloud
     export EVERMEMOS_BASE_URL=https://api.evermind.ai/v1
     export EVERMEMOS_API_KEY=your_key
     python demo/evermemos_demo.py
 
-    # With self-hosted EverCore
+    # With self-hosted EverOS
     export EVERMEMOS_BASE_URL=http://localhost:1995/api/v1
     python demo/evermemos_demo.py
 """
@@ -20,12 +20,10 @@ Usage:
 import asyncio
 import os
 import sys
-import json
 from datetime import datetime
-from typing import Optional
 
 # ──────────────────────────────────────────────
-# EverCore Client (minimal standalone version)
+# EverOS Client (minimal standalone version)
 # ──────────────────────────────────────────────
 
 try:
@@ -35,8 +33,8 @@ except ImportError:
     sys.exit(1)
 
 
-class EverCoreClient:
-    """Minimal EverCore client for demo purposes."""
+class EverOSClient:
+    """Minimal EverOS client for demo purposes."""
 
     def __init__(self, base_url: str, api_key: str = ""):
         self.base_url = base_url.rstrip("/")
@@ -51,7 +49,7 @@ class EverCoreClient:
         return h
 
     async def health_check(self) -> bool:
-        """Check if EverCore is reachable."""
+        """Check if EverOS is reachable."""
         try:
             # Try the health endpoint (remove /api/v1 suffix)
             health_url = self.base_url.replace("/api/v1", "") + "/health"
@@ -129,12 +127,13 @@ class EverCoreClient:
 
 
 # ──────────────────────────────────────────────
-# Relationship Vector (from EverCore session)
+# Relationship Vector (from EverOS session)
 # ──────────────────────────────────────────────
+
 
 def compute_relationship_vector(profile_data: dict) -> dict:
     """
-    Extract 4D relationship vector from EverCore profile data.
+    Extract 4D relationship vector from EverOS profile data.
 
     These 4 dimensions expand the persona engine's neural network
     from 8D to 12D input, allowing it to differentiate behavior
@@ -152,12 +151,12 @@ def apply_relationship_ema(
     prior: dict,
     delta: dict,
     conversation_depth: float,
-    prev_ema: Optional[dict] = None,
+    prev_ema: dict | None = None,
 ) -> dict:
     """
     Semi-emergent relationship update (Step 2.5 of ChatAgent lifecycle).
 
-    Blends EverCore prior with LLM-judged delta through EMA:
+    Blends EverOS prior with LLM-judged delta through EMA:
       - alpha modulated by conversation depth (deeper = trust LLM more)
       - Clips to valid ranges
       - Preserves momentum through prev_ema
@@ -181,25 +180,26 @@ def apply_relationship_ema(
 # Demo
 # ──────────────────────────────────────────────
 
+
 async def main():
     base_url = os.getenv("EVERMEMOS_BASE_URL", "")
     api_key = os.getenv("EVERMEMOS_API_KEY", "")
 
     if not base_url:
         print("=" * 60)
-        print("OpenHer × EverCore Integration Demo")
+        print("OpenHer × EverOS Integration Demo")
         print("=" * 60)
         print()
         print("⚠️  EVERMEMOS_BASE_URL not set.")
         print()
-        print("To run this demo, set up EverCore:")
+        print("To run this demo, set up EverOS:")
         print()
-        print("  Option A — Cloud:")
+        print("  Option A — EverMind Cloud:")
         print("    export EVERMEMOS_BASE_URL=https://api.evermind.ai/v1")
         print("    export EVERMEMOS_API_KEY=your_key")
         print()
         print("  Option B — Self-hosted:")
-        print("    cd vendor/EverCore && docker compose up -d")
+        print("    cd vendor/EverOS && docker compose up -d")
         print("    uv run python src/run.py")
         print("    export EVERMEMOS_BASE_URL=http://localhost:1995/api/v1")
         print()
@@ -209,20 +209,20 @@ async def main():
         await demo_simulation()
         return
 
-    client = EverCoreClient(base_url, api_key)
+    client = EverOSClient(base_url, api_key)
 
     print("=" * 60)
-    print("OpenHer × EverCore Integration Demo")
+    print("OpenHer × EverOS Integration Demo")
     print("=" * 60)
-    print(f"\n📡 EverCore: {base_url}")
+    print(f"\n📡 EverOS: {base_url}")
 
     # Health check
     healthy = await client.health_check()
     if not healthy:
-        print("❌ EverCore is not reachable. Check your URL and try again.")
+        print("❌ EverOS is not reachable. Check your URL and try again.")
         await client.close()
         return
-    print("✅ EverCore is healthy\n")
+    print("✅ EverOS is healthy\n")
 
     # ── Demo conversation ──
     user_id = "demo_user"
@@ -232,8 +232,15 @@ async def main():
     group_id = f"{persona_id}__{user_id}"
 
     conversations = [
-        ("My name is Alex, I'm a software engineer", "Nice to meet you Alex! What kind of software do you work on?"),
-        ("I love hiking in the mountains on weekends", "That sounds wonderful! There's something about being up high that makes everything else feel small."),
+        (
+            "My name is Alex, I'm a software engineer",
+            "Nice to meet you Alex! What kind of software do you work on?",
+        ),
+        (
+            "I love hiking in the mountains on weekends",
+            "That sounds wonderful! There's something about being up high "
+            "that makes everything else feel small.",
+        ),
         ("I drink my coffee black, no sugar", "Noted! A purist. I respect that."),
     ]
 
@@ -249,7 +256,7 @@ async def main():
             agent_reply=agent_reply,
         )
         status = "✅" if "error" not in result else "❌"
-        print(f"  {status} User: \"{user_msg[:50]}...\"")
+        print(f'  {status} User: "{user_msg[:50]}..."')
 
     # Wait for indexing
     print("\n⏳ Waiting for memory indexing (3s)...")
@@ -270,7 +277,7 @@ async def main():
             group_id=group_id,
         )
         memories = result.get("result", {}).get("memories", [])
-        print(f"  Q: \"{query}\"")
+        print(f'  Q: "{query}"')
         if memories:
             for mem in memories[:2]:
                 content = str(mem)[:100]
@@ -281,7 +288,12 @@ async def main():
 
     # Relationship vector
     print("📊 Relationship Vector Evolution:\n")
-    prior = {"relationship_depth": 0.0, "emotional_valence": 0.0, "trust_level": 0.0, "pending_foresight": 0.0}
+    prior = {
+        "relationship_depth": 0.0,
+        "emotional_valence": 0.0,
+        "trust_level": 0.0,
+        "pending_foresight": 0.0,
+    }
     deltas = [
         {"relationship_depth": 0.1, "emotional_valence": 0.2, "trust_level": 0.05},
         {"relationship_depth": 0.05, "emotional_valence": 0.1, "trust_level": 0.1},
@@ -290,61 +302,147 @@ async def main():
 
     ema = None
     for i, delta in enumerate(deltas):
-        ema = apply_relationship_ema(prior, delta, conversation_depth=0.2 * (i + 1), prev_ema=ema)
-        print(f"  Turn {i+1}: depth={ema['relationship_depth']:.3f} "
-              f"valence={ema['emotional_valence']:.3f} "
-              f"trust={ema['trust_level']:.3f}")
+        ema = apply_relationship_ema(
+            prior, delta, conversation_depth=0.2 * (i + 1), prev_ema=ema
+        )
+        print(
+            f"  Turn {i + 1}: depth={ema['relationship_depth']:.3f} "
+            f"valence={ema['emotional_valence']:.3f} "
+            f"trust={ema['trust_level']:.3f}"
+        )
         prior = ema
 
-    print(f"\n  → After 3 turns: no longer a stranger (depth={ema['relationship_depth']:.3f})")
-    print(f"  → Neural network now produces warmer, more familiar behavioral signals\n")
+    print(
+        "\n  → After 3 turns: no longer a stranger "
+        f"(depth={ema['relationship_depth']:.3f})"
+    )
+    print("  → Neural network now produces warmer, more familiar behavioral signals\n")
 
     await client.close()
     print("✅ Demo complete!")
 
 
 async def demo_simulation():
-    """Run demo in simulation mode (no EverCore connection)."""
+    """Run demo in simulation mode (no EverOS connection)."""
     print("📊 Simulating Relationship Vector Evolution:\n")
-    print("   This shows how the 4D EverCore relationship vector")
+    print("   This shows how the 4D EverOS relationship vector")
     print("   deepens over multiple conversation turns.\n")
 
-    prior = {"relationship_depth": 0.0, "emotional_valence": 0.0, "trust_level": 0.0, "pending_foresight": 0.0}
+    prior = {
+        "relationship_depth": 0.0,
+        "emotional_valence": 0.0,
+        "trust_level": 0.0,
+        "pending_foresight": 0.0,
+    }
 
     # Simulate 10 turns of conversation
     simulated_deltas = [
-        (0.3, {"relationship_depth": 0.10, "emotional_valence": 0.15, "trust_level": 0.05}),
-        (0.4, {"relationship_depth": 0.08, "emotional_valence": 0.10, "trust_level": 0.08}),
-        (0.5, {"relationship_depth": 0.05, "emotional_valence": 0.20, "trust_level": 0.12}),
-        (0.6, {"relationship_depth": 0.06, "emotional_valence": -0.10, "trust_level": 0.03}),
-        (0.7, {"relationship_depth": 0.04, "emotional_valence": 0.08, "trust_level": 0.10}),
-        (0.7, {"relationship_depth": 0.03, "emotional_valence": 0.12, "trust_level": 0.08}),
-        (0.8, {"relationship_depth": 0.02, "emotional_valence": 0.05, "trust_level": 0.06}),
-        (0.8, {"relationship_depth": 0.03, "emotional_valence": 0.10, "trust_level": 0.05}),
-        (0.9, {"relationship_depth": 0.01, "emotional_valence": 0.08, "trust_level": 0.04}),
-        (0.9, {"relationship_depth": 0.02, "emotional_valence": 0.06, "trust_level": 0.03}),
+        (
+            0.3,
+            {
+                "relationship_depth": 0.10,
+                "emotional_valence": 0.15,
+                "trust_level": 0.05,
+            },
+        ),
+        (
+            0.4,
+            {
+                "relationship_depth": 0.08,
+                "emotional_valence": 0.10,
+                "trust_level": 0.08,
+            },
+        ),
+        (
+            0.5,
+            {
+                "relationship_depth": 0.05,
+                "emotional_valence": 0.20,
+                "trust_level": 0.12,
+            },
+        ),
+        (
+            0.6,
+            {
+                "relationship_depth": 0.06,
+                "emotional_valence": -0.10,
+                "trust_level": 0.03,
+            },
+        ),
+        (
+            0.7,
+            {
+                "relationship_depth": 0.04,
+                "emotional_valence": 0.08,
+                "trust_level": 0.10,
+            },
+        ),
+        (
+            0.7,
+            {
+                "relationship_depth": 0.03,
+                "emotional_valence": 0.12,
+                "trust_level": 0.08,
+            },
+        ),
+        (
+            0.8,
+            {
+                "relationship_depth": 0.02,
+                "emotional_valence": 0.05,
+                "trust_level": 0.06,
+            },
+        ),
+        (
+            0.8,
+            {
+                "relationship_depth": 0.03,
+                "emotional_valence": 0.10,
+                "trust_level": 0.05,
+            },
+        ),
+        (
+            0.9,
+            {
+                "relationship_depth": 0.01,
+                "emotional_valence": 0.08,
+                "trust_level": 0.04,
+            },
+        ),
+        (
+            0.9,
+            {
+                "relationship_depth": 0.02,
+                "emotional_valence": 0.06,
+                "trust_level": 0.03,
+            },
+        ),
     ]
 
     ema = None
     for i, (depth, delta) in enumerate(simulated_deltas, 1):
         alpha = max(0.15, min(0.65, 0.15 + 0.5 * depth))
-        ema = apply_relationship_ema(prior, delta, conversation_depth=depth, prev_ema=ema)
+        ema = apply_relationship_ema(
+            prior, delta, conversation_depth=depth, prev_ema=ema
+        )
         bar_d = "█" * int(ema["relationship_depth"] * 20)
         bar_v = "█" * int(max(0, ema["emotional_valence"]) * 20)
         bar_t = "█" * int(ema["trust_level"] * 20)
-        print(f"  Turn {i:2d} (α={alpha:.2f}): "
-              f"depth={ema['relationship_depth']:.3f} {bar_d}")
-        print(f"                     "
-              f"valence={ema['emotional_valence']:+.3f} {bar_v}")
-        print(f"                     "
-              f"trust={ema['trust_level']:.3f} {bar_t}")
+        print(
+            f"  Turn {i:2d} (α={alpha:.2f}): "
+            f"depth={ema['relationship_depth']:.3f} {bar_d}"
+        )
+        print(f"                     valence={ema['emotional_valence']:+.3f} {bar_v}")
+        print(f"                     trust={ema['trust_level']:.3f} {bar_t}")
         print()
         prior = ema
 
     print("  ──────────────────────────────────")
-    print(f"  Final state: depth={ema['relationship_depth']:.3f}, "
-          f"valence={ema['emotional_valence']:+.3f}, "
-          f"trust={ema['trust_level']:.3f}")
+    print(
+        f"  Final state: depth={ema['relationship_depth']:.3f}, "
+        f"valence={ema['emotional_valence']:+.3f}, "
+        f"trust={ema['trust_level']:.3f}"
+    )
     print()
     print("  Turn 4 shows a negative emotional event (valence delta = -0.10),")
     print("  but the EMA smoothing prevents overreaction — the relationship")

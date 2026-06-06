@@ -518,7 +518,7 @@ class SearchManager:
         ``atomic_fact`` table) for finer-grained semantic match — long
         episodes whose single mean-pooled vector dilutes a specific topic
         recover via the matching atomic fact's own embedding. Mirrors
-        EverOS/EverCore's MaxSim retrieval pattern.
+        the EverOS MaxSim retrieval pattern.
         """
         vector = await self._embed_query(req.query)
         if not vector:

@@ -163,7 +163,7 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
         preview=["earlier intent"],
         members=["ac_20260517_0000"],
     )
-    # Simulate evercore _merge: id passes through from existing, members appended.
+    # Simulate merge behavior: id passes through from existing, members appended.
     merged_cluster = AlgoCluster(
         id="cl_existing0001",
         centroid=np.array([0.17] * 1024, dtype=np.float32),

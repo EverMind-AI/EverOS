@@ -204,7 +204,7 @@ everalgo is:
 - **No I/O** — does not touch md files / LanceDB / SQLite
 - **No prompts inline** — receives `PromptSlot` parameter, project supplies defaults
 
-This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
+This boundary lets everalgo be reused across product forms (this open-source build, EverMind Cloud, OpenClaw plugins, etc.).
 
 ## Further reading
 

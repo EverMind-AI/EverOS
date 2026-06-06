@@ -11,7 +11,7 @@ body:
     attributes:
       label: Area
       options:
-        - methods/EverCore
+        - src/everos
         - methods/HyperMem
         - benchmarks/EverMemBench
         - benchmarks/EvoAgentBench

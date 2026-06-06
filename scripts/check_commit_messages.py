@@ -21,9 +21,7 @@ ALLOWED_TYPES = (
     "ci",
     "revert",
 )
-TITLE_RE = re.compile(
-    rf"^({'|'.join(ALLOWED_TYPES)})(\([A-Za-z0-9._/-]+\))?(!)?: .+"
-)
+TITLE_RE = re.compile(rf"^({'|'.join(ALLOWED_TYPES)})(\([A-Za-z0-9._/-]+\))?(!)?: .+")
 MAX_TITLE_LENGTH = 72
 
 
@@ -33,7 +31,9 @@ def _run_git(args: list[str]) -> str:
 
 def _default_range() -> str:
     event_name = os.getenv("GITHUB_EVENT_NAME", "")
-    before = os.getenv("GITHUB_EVENT_BEFORE", "") or os.getenv("GITHUB_EVENT_BEFORE_SHA", "")
+    before = os.getenv("GITHUB_EVENT_BEFORE", "") or os.getenv(
+        "GITHUB_EVENT_BEFORE_SHA", ""
+    )
     after = os.getenv("GITHUB_SHA", "HEAD")
     pr_base = os.getenv("GITHUB_PR_BASE_SHA", "")
 
@@ -83,7 +83,8 @@ def _validate(commit_range: str) -> list[str]:
         short = commit[:12]
         if len(subject) > MAX_TITLE_LENGTH:
             failures.append(
-                f"{short}: subject is {len(subject)} chars; max is {MAX_TITLE_LENGTH}: {subject}"
+                f"{short}: subject is {len(subject)} chars; "
+                f"max is {MAX_TITLE_LENGTH}: {subject}"
             )
             continue
 

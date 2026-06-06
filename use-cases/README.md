@@ -92,7 +92,7 @@ Earth Online is a memory-aware productivity game that turns everyday planning in
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)](https://github.com/golutra/golutra) 
+[![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)](https://github.com/golutra/golutra)
 
 #### Multi-Agent Orchestration Platform
 
@@ -116,7 +116,7 @@ Record, visualize, and explore your tasting journey through an immersive 3D star
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/93ac2a68-4f18-4fcb-8d87-80aeb00a9d7c)](https://github.com/kellyvv/OpenHer) 
+[![banner-gif](https://github.com/user-attachments/assets/93ac2a68-4f18-4fcb-8d87-80aeb00a9d7c)](https://github.com/kellyvv/OpenHer)
 
 #### EverOS Open Her
 
@@ -141,7 +141,7 @@ Ruminer brings persistent memory to a browser agent so it can carry personal con
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem) 
+[![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem)
 
 #### EverMem Sync with EverOS
 
@@ -166,7 +166,7 @@ MCO equips your primary agent with an agent team that can work together to solve
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public) 
+[![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public)
 
 #### Study Buddy with Self-Evolving Memory
 
@@ -191,7 +191,7 @@ Empowering individuals with advanced memory support and daily assistance.
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/e2428df3-ea11-4e88-8f9c-dad437dd8998)](https://github.com/AlexL1024/NeuralConnect) 
+[![banner-gif](https://github.com/user-attachments/assets/e2428df3-ea11-4e88-8f9c-dad437dd8998)](https://github.com/AlexL1024/NeuralConnect)
 
 #### Memory-Driven Multi-Agent NPC Experience
 

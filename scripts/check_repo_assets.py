@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import subprocess
-import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Iterable
 
 BLOCKED_DIR_NAMES = frozenset(
     {
@@ -94,11 +93,7 @@ def _tracked_paths() -> list[str]:
         stdout=subprocess.PIPE,
         text=False,
     )
-    return [
-        raw.decode("utf-8")
-        for raw in result.stdout.split(b"\0")
-        if raw
-    ]
+    return [raw.decode("utf-8") for raw in result.stdout.split(b"\0") if raw]
 
 
 def main() -> int:

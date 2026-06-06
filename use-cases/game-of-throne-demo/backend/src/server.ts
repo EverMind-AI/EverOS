@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { MockMemoryService } from './services/MockMemoryService.js';
-import { EverCoreService } from './services/EverMemOSService.js';
+import { EverOSService } from './services/EverMemOSService.js';
 import { OpenAIService } from './services/OpenAIService.js';
 import { createChatRouter } from './routes/chat.js';
 import { createHealthRouter } from './routes/health.js';
@@ -24,7 +24,7 @@ if (!OPENAI_API_KEY) {
 
 // Initialize services
 const memoryService = USE_EVERMEMOS
-  ? new EverCoreService({
+  ? new EverOSService({
       baseUrl: EVERMEMOS_URL,
       apiKey: EVERMEMOS_API_KEY || undefined,
       groupId: EVERMEMOS_GROUP_ID,
@@ -33,9 +33,9 @@ const memoryService = USE_EVERMEMOS
 const openaiService = new OpenAIService(OPENAI_API_KEY, OPENAI_MODEL);
 
 const isCloudMode = USE_EVERMEMOS && !!EVERMEMOS_API_KEY;
-logger.info('Server', `Memory service: ${USE_EVERMEMOS ? (isCloudMode ? 'EverMind Cloud' : 'EverCore (local)') : 'Mock'}`);
+logger.info('Server', `Memory service: ${USE_EVERMEMOS ? (isCloudMode ? 'EverMind Cloud' : 'EverOS (local)') : 'Mock'}`);
 if (USE_EVERMEMOS) {
-  logger.info('Server', `EverCore URL: ${EVERMEMOS_URL}`);
+  logger.info('Server', `EverOS URL: ${EVERMEMOS_URL}`);
   if (isCloudMode) {
     logger.info('Server', `EverMind Cloud API Key: ${EVERMEMOS_API_KEY.slice(0, 8)}...`);
   }

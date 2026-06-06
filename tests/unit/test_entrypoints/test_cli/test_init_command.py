@@ -41,6 +41,9 @@ def test_default_writes_dotenv_in_cwd(runner: CliRunner, in_tmp: Path) -> None:
     assert written.exists()
     assert written.stat().st_size > 0
     assert "EVEROS_LLM__API_KEY" in written.read_text()
+    assert "https://github.com/EverMind-AI/EverOS/blob/main/QUICKSTART.md" in (
+        result.output
+    )
 
 
 def test_default_file_permissions_are_0600(runner: CliRunner, in_tmp: Path) -> None:

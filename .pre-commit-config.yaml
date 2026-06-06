@@ -35,6 +35,11 @@ repos:
         entry: python3 scripts/check_repo_assets.py
         language: system
         pass_filenames: false
+      - id: no-deprecated-product-names
+        name: block deprecated product names
+        entry: python3 scripts/check_deprecated_names.py
+        language: system
+        pass_filenames: false
 
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1

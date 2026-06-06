@@ -3,9 +3,9 @@ Memory shared types for OpenHer.
 
 These types bridge the two memory providers:
   - SoulMem (behavioral memory, always-on SQLite layer)
-  - EverCore (declarative memory, cross-session persistence)
+  - EverOS (declarative memory, cross-session persistence)
 
-The SessionContext is the key data structure loaded from EverCore
+The SessionContext is the key data structure loaded from EverOS
 at session start — it provides relationship priors, user profile,
 episode summaries, and foresight data that expand the neural
 network's perception from 8D to 12D.
@@ -16,12 +16,12 @@ Full source: https://github.com/kellyvv/OpenHer/blob/main/memory/types.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class Memory:
     """A single memory entry (SoulMem behavioral layer)."""
+
     memory_id: int = 0
     user_id: str = ""
     persona_id: str = ""
@@ -35,7 +35,7 @@ class Memory:
 @dataclass
 class SessionContext:
     """
-    EverCore session context (declarative memory).
+    EverOS session context (declarative memory).
 
     Loaded once at session start, this contains everything the
     persona needs to know about the user from past sessions:
@@ -53,6 +53,7 @@ class SessionContext:
     - Step 5:   4D vector enters neural network as context features
     - Step 8.5: Used as fallback when async search times out
     """
+
     user_id: str = ""
     persona_id: str = ""
     user_profile: str = ""
@@ -63,4 +64,4 @@ class SessionContext:
     trust_level: float = 0.0
     pending_foresight: float = 0.0
     has_history: bool = False
-    raw_data: Optional[dict] = None
+    raw_data: dict | None = None

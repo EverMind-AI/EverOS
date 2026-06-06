@@ -1,14 +1,14 @@
 """
-EverMemosMixin — EverCore integration for ChatAgent.
+EverMemosMixin — EverOS integration for ChatAgent.
 
 This mixin handles all async memory operations in the ChatAgent lifecycle:
   Step 0:   Session context loading (first turn)
-  Step 2.5: Relationship EMA (blend EverCore prior + LLM delta)
+  Step 2.5: Relationship EMA (blend EverOS prior + LLM delta)
   Step 8.5: Collect async search results
   Step 11:  Fire-and-forget turn storage
   Step 12:  Async prefetch for next turn
 
-The mixin pattern keeps EverCore concerns cleanly separated from the
+The mixin pattern keeps EverOS concerns cleanly separated from the
 core persona engine (drives, metabolism, neural network, style memory).
 
 Full source: https://github.com/kellyvv/OpenHer/blob/main/agent/evermemos_mixin.py
@@ -20,19 +20,19 @@ import asyncio
 
 
 class EverMemosMixin:
-    """EverCore async memory integration methods."""
+    """EverOS async memory integration methods."""
 
     async def _evermemos_gather(self) -> dict:
         """
-        Step 0: Load EverCore session context (first turn only).
+        Step 0: Load EverOS session context (first turn only).
         Subsequent turns reuse cached _session_ctx.
         Returns relationship_4d dict for GenomeEngine context.
         """
         empty_4d = {
-            'relationship_depth': 0.0,
-            'emotional_valence': 0.0,
-            'trust_level': 0.0,
-            'pending_foresight': 0.0,
+            "relationship_depth": 0.0,
+            "emotional_valence": 0.0,
+            "trust_level": 0.0,
+            "pending_foresight": 0.0,
         }
 
         if not (self.evermemos and self.evermemos.available):
@@ -75,10 +75,10 @@ class EverMemosMixin:
         """
         # Map Critic output keys → context feature keys
         delta_map = {
-            'relationship_depth': rel_delta.get('relationship_delta', 0.0),
-            'emotional_valence': rel_delta.get('emotional_valence', 0.0),
-            'trust_level': rel_delta.get('trust_delta', 0.0),
-            'pending_foresight': 0.0,  # No delta for foresight (data-driven only)
+            "relationship_depth": rel_delta.get("relationship_delta", 0.0),
+            "emotional_valence": rel_delta.get("emotional_valence", 0.0),
+            "trust_level": rel_delta.get("trust_delta", 0.0),
+            "pending_foresight": 0.0,  # No delta for foresight (data-driven only)
         }
 
         # Initialize EMA on first turn
@@ -88,7 +88,7 @@ class EverMemosMixin:
         # Compute posterior = clip(prior + delta)
         posterior = {}
         for k in prior:
-            lo = -1.0 if k == 'emotional_valence' else 0.0
+            lo = -1.0 if k == "emotional_valence" else 0.0
             posterior[k] = max(lo, min(1.0, prior[k] + delta_map.get(k, 0.0)))
 
         # Depth-modulated alpha: shallow → trust prior, deep → trust LLM
@@ -104,9 +104,10 @@ class EverMemosMixin:
         return ema
 
     def _evermemos_store_bg(self, user_message: str, reply: str) -> None:
-        """Step 11: Fire-and-forget EverCore storage (asyncio.create_task)."""
+        """Step 11: Fire-and-forget EverOS storage (asyncio.create_task)."""
         if not (self.evermemos and self.evermemos.available):
             return
+
         async def _do_store():
             try:
                 await self.evermemos.store_turn(
@@ -120,6 +121,7 @@ class EverMemosMixin:
                 )
             except Exception as e:
                 print(f"  [evermemos] ❌ store failed: {type(e).__name__}: {e}")
+
         try:
             asyncio.create_task(_do_store())
         except Exception as e:
@@ -180,7 +182,7 @@ class EverMemosMixin:
             self._relevant_facts = facts
             self._relevant_episodes = episodes
             self._relevant_profile = profile
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Graceful degradation: use static session context
             self._relevant_facts = ""
             self._relevant_episodes = ""

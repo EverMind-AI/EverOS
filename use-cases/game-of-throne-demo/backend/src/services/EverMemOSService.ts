@@ -1,6 +1,6 @@
 import type { IMemoryService, Memory } from './IMemoryService';
 
-interface EverCoreMemoryItem {
+interface EverOSMemoryItem {
   memory_type: string;
   summary: string | null;
   subject?: string;      // Concise title/headline
@@ -38,12 +38,12 @@ interface ProfileSearchItem {
   score: number;
 }
 
-interface EverCoreSearchResponse {
+interface EverOSSearchResponse {
   status: string;
   message?: string;
   result: {
     profiles: ProfileSearchItem[];
-    memories: EverCoreMemoryItem[];
+    memories: EverOSMemoryItem[];
     total_count: number;
     scores: number[];
     has_more: boolean;
@@ -53,7 +53,7 @@ interface EverCoreSearchResponse {
   };
 }
 
-interface EverCoreHealthResponse {
+interface EverOSHealthResponse {
   status: string;
   [key: string]: unknown;
 }
@@ -70,25 +70,25 @@ const BOOK_TITLES: Record<string, string> = {
 };
 
 /**
- * Configuration for EverCore/EverMind Cloud service
+ * Configuration for EverOS/EverMind Cloud service
  */
-interface EverCoreConfig {
+interface EverOSConfig {
   baseUrl: string;
   apiKey?: string;      // Required for cloud API
   groupId?: string;     // Group ID for search (default: 'asoiaf')
 }
 
 /**
- * EverCore service implementation for memory retrieval
- * Supports both local EverCore and EverMind Cloud API
+ * EverOS service implementation for memory retrieval
+ * Supports both local EverOS and EverMind Cloud API
  */
-export class EverCoreService implements IMemoryService {
+export class EverOSService implements IMemoryService {
   private baseUrl: string;
   private apiKey?: string;
   private groupId: string;
   private isCloudMode: boolean;
 
-  constructor(config: string | EverCoreConfig) {
+  constructor(config: string | EverOSConfig) {
     if (typeof config === 'string') {
       // Legacy: just a URL string (local mode)
       this.baseUrl = config.replace(/\/$/, '');
@@ -104,7 +104,7 @@ export class EverCoreService implements IMemoryService {
   }
 
   /**
-   * Retrieve relevant memories for a query using EverCore search
+   * Retrieve relevant memories for a query using EverOS search
    */
   async retrieveMemories(query: string, limit: number = 5): Promise<Memory[]> {
     try {
@@ -136,20 +136,20 @@ export class EverCoreService implements IMemoryService {
       });
 
       if (!response.ok) {
-        console.error(`EverCore search failed: HTTP ${response.status}`);
+        console.error(`EverOS search failed: HTTP ${response.status}`);
         return [];
       }
 
-      const data = await response.json() as EverCoreSearchResponse;
+      const data = await response.json() as EverOSSearchResponse;
       return this.mapSearchResultsToMemories(data);
     } catch (error) {
-      console.error('Error retrieving memories from EverCore:', error);
+      console.error('Error retrieving memories from EverOS:', error);
       return []; // Graceful degradation
     }
   }
 
   /**
-   * Check if EverCore service is available
+   * Check if EverOS service is available
    */
   async isAvailable(): Promise<boolean> {
     try {
@@ -168,19 +168,19 @@ export class EverCoreService implements IMemoryService {
         return false;
       }
 
-      const data = await response.json() as EverCoreHealthResponse;
+      const data = await response.json() as EverOSHealthResponse;
       // Cloud API returns "ok" status, local returns "healthy"
       return data.status === 'healthy' || data.status === 'ok';
     } catch (error) {
-      console.warn('EverCore health check failed:', error);
+      console.warn('EverOS health check failed:', error);
       return false;
     }
   }
 
   /**
-   * Map EverCore search results to our Memory interface
+   * Map EverOS search results to our Memory interface
    */
-  private mapSearchResultsToMemories(data: EverCoreSearchResponse): Memory[] {
+  private mapSearchResultsToMemories(data: EverOSSearchResponse): Memory[] {
     const memories: Memory[] = [];
 
     const result = data.result;
@@ -206,10 +206,10 @@ export class EverCoreService implements IMemoryService {
   }
 
   /**
-   * Map a single EverCore memory item to our Memory interface
+   * Map a single EverOS memory item to our Memory interface
    */
   private mapMemoryItem(
-    item: EverCoreMemoryItem,
+    item: EverOSMemoryItem,
     score: number,
     originalContents: OriginalDataItem[] = []
   ): Memory | null {
