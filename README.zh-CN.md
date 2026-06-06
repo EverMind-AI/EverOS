@@ -30,7 +30,7 @@
 - [项目结构](#项目结构)
 - [文档](#文档)
 - [使用场景](#使用场景)
-- [持续关注](#持续关注)
+- [关注 EverOS](#关注-everos)
 - [EverMind 生态](#evermind-生态)
 - [参与贡献](#参与贡献)
 
@@ -642,12 +642,14 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 
 </div>
 
-## 持续关注
+## 关注 EverOS
 
-Star 这个仓库，或加入上面的社区链接，以持续关注新的架构方法、benchmark releases、
-memory-enabled use cases、Wiki 式记忆和 Dreaming 更新。
+EverOS 1.0.0 是更大规模记忆系统路线图的第一个发布版本。Watch 这个仓库，
+即可持续关注 Wiki 式记忆、Dreaming、更深入的离线进化、benchmark releases，
+以及更多真实 Agent 集成。
 
-![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+如果 EverOS 对你的 Agent stack 有帮助，Star 这个仓库也会帮助更多 builders
+发现它。
 
 ### Star 趋势
 

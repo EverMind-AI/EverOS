@@ -30,7 +30,7 @@
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
 - [Use Cases](#use-cases)
-- [Stay Tuned](#stay-tuned)
+- [Watch EverOS](#watch-everos)
 - [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
@@ -656,11 +656,15 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 </div>
 
-## Stay Tuned
+## Watch EverOS
 
-Star the repo or join the community links above to follow new architecture methods, benchmark releases, memory-enabled use cases, Wiki-style memory, and Dreaming updates.
+EverOS 1.0.0 is the first release of a larger memory-system roadmap.
+Watch this repository for upcoming work on Wiki-style memory, Dreaming,
+deeper offline evolution, benchmark releases, and more real-world agent
+integrations.
 
-![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+If EverOS is useful to your agent stack, starring the repo helps more
+builders discover it.
 
 ### Star History
 
