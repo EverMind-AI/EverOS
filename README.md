@@ -55,16 +55,19 @@
 <tr>
 <td width="33%" valign="top">
 <strong>Markdown As Source Of Truth</strong><br>
+<br>
 All memory is persisted as <code>.md</code> files: readable, editable,
 grep-able, Git-versioned, and openable directly in Obsidian.
 </td>
 <td width="33%" valign="top">
 <strong>Local Three-Part Stack</strong><br>
+<br>
 Markdown + SQLite + LanceDB keep vectors, BM25, and scalar filters
 local. No MongoDB, Elasticsearch, or Redis required.
 </td>
 <td width="33%" valign="top">
 <strong>Dual-Track Memory</strong><br>
+<br>
 Agent memory (<code>cases</code> / <code>skills</code>) and user memory
 (<code>episodes</code> / <code>profile</code>) are extracted independently.
 </td>
@@ -72,16 +75,19 @@ Agent memory (<code>cases</code> / <code>skills</code>) and user memory
 <tr>
 <td width="33%" valign="top">
 <strong>Multimodal Ingestion</strong><br>
+<br>
 Text, images, audio, documents, PDFs, HTML, and email are unified into
 searchable memory.
 </td>
 <td width="33%" valign="top">
 <strong>Self-Evolution</strong><br>
+<br>
 Common skills are extracted from real usage; repeated patterns become
 reusable workflows, no retraining required.
 </td>
 <td width="33%" valign="top">
 <strong>Orthogonal Retrieval</strong><br>
+<br>
 Search independently by <code>user_id</code>, <code>agent_id</code>,
 <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.
 </td>

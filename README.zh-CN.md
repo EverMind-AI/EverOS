@@ -55,28 +55,34 @@
 <tr>
 <td width="33%" valign="top">
 <strong>Markdown As Source Of Truth</strong><br>
+<br>
 所有记忆持久化为 <code>.md</code> 文件：可读、可改、可 grep、可 Git 版本化，也可直接用 Obsidian 打开。
 </td>
 <td width="33%" valign="top">
 <strong>Local Three-Part Stack</strong><br>
+<br>
 Markdown + SQLite + LanceDB 在本地完成向量、BM25 和标量过滤检索，无需 MongoDB、Elasticsearch 或 Redis。
 </td>
 <td width="33%" valign="top">
 <strong>Dual-Track Memory</strong><br>
+<br>
 Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<code>episodes</code> / <code>profile</code>）独立提取，互不污染。
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
 <strong>Multimodal Ingestion</strong><br>
+<br>
 文本、图像、音频、文档、PDF、HTML 和邮件统一抽取为可检索的记忆形态。
 </td>
 <td width="33%" valign="top">
 <strong>Self-Evolution</strong><br>
+<br>
 从真实使用经验中自动抽取共性 skills，重复模式沉淀为可复用流程，无需重训。
 </td>
 <td width="33%" valign="top">
 <strong>Orthogonal Retrieval</strong><br>
+<br>
 按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 五维独立检索。
 </td>
 </tr>
