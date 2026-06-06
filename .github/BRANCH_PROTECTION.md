@@ -21,6 +21,12 @@ Mark these checks as required before merge:
 - `CI / package build`
 - `Docs / links`
 - `Commit lint / commit messages`
+
+## Optional Repository Checks
+
+Do not require checks that are not emitted for every pull request. Treat these
+as advisory unless GitHub shows they run on all normal PRs:
+
 - `.github/dependabot.yml`
 
 ## Merge Policy
