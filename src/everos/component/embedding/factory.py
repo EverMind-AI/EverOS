@@ -1,4 +1,11 @@
-"""Factory for building an embedding provider from :class:`EmbeddingSettings`."""
+"""Factory for building an embedding provider from :class:`EmbeddingSettings`.
+
+Dispatches on ``settings.provider``:
+
+- ``"openai"`` — :class:`OpenAIEmbeddingProvider` (requires ``base_url``).
+- ``"litellm"`` — :class:`LiteLLMEmbeddingProvider` (routes via
+  model-id prefix; ``base_url`` optional).
+"""
 
 from __future__ import annotations
 
@@ -7,7 +14,6 @@ from everos.config import EmbeddingSettings
 from .openai_provider import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
-# Vector dim for the LanceDB index column — see ``17_lancedb_tables_design.md``.
 _DEFAULT_DIM = 1024
 
 
@@ -16,7 +22,7 @@ def build_embedding_provider(
     *,
     dim: int = _DEFAULT_DIM,
 ) -> EmbeddingProvider:
-    """Build an OpenAI-compatible embedding provider from settings.
+    """Build an embedding provider from settings.
 
     Args:
         settings: The :class:`EmbeddingSettings` slice from
@@ -29,8 +35,14 @@ def build_embedding_provider(
         ``embed_batch``.
 
     Raises:
-        ValueError: If ``model``, ``api_key`` or ``base_url`` is unset.
+        ValueError: If required fields are unset for the chosen provider.
     """
+    if settings.provider == "litellm":
+        return _build_litellm(settings, dim=dim)
+    return _build_openai(settings, dim=dim)
+
+
+def _build_openai(settings: EmbeddingSettings, *, dim: int) -> EmbeddingProvider:
     if not settings.model:
         raise ValueError(
             "Embedding model is not configured "
@@ -51,6 +63,29 @@ def build_embedding_provider(
         dim=dim,
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
+        batch_size=settings.batch_size,
+        max_concurrent=settings.max_concurrent,
+    )
+
+
+def _build_litellm(settings: EmbeddingSettings, *, dim: int) -> EmbeddingProvider:
+    from .litellm_provider import LiteLLMEmbeddingProvider
+
+    if not settings.model:
+        raise ValueError(
+            "Embedding model is not configured "
+            "(set EVEROS_EMBEDDING__MODEL or [embedding] model in user toml)"
+        )
+    return LiteLLMEmbeddingProvider(
+        model=settings.model,
+        api_key=(
+            settings.api_key.get_secret_value()
+            if settings.api_key is not None
+            else None
+        ),
+        base_url=settings.base_url,
+        dim=dim,
+        timeout=settings.timeout_seconds,
         batch_size=settings.batch_size,
         max_concurrent=settings.max_concurrent,
     )

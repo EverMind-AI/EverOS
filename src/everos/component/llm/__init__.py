@@ -24,6 +24,7 @@ from .client import LLMNotConfiguredError as LLMNotConfiguredError
 from .client import get_llm_client as get_llm_client
 from .client import get_multimodal_llm_client as get_multimodal_llm_client
 from .factory import build_llm_provider as build_llm_provider
+from .litellm_provider import LiteLLMProvider as LiteLLMProvider
 from .openai_provider import OpenAIProvider as OpenAIProvider
 from .protocol import ChatMessage as ChatMessage
 from .protocol import ChatResponse as ChatResponse
@@ -37,6 +38,7 @@ __all__ = [
     "LLMClient",
     "LLMError",
     "LLMNotConfiguredError",
+    "LiteLLMProvider",
     "OpenAIProvider",
     "Usage",
     "build_llm_provider",

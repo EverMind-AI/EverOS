@@ -1,4 +1,11 @@
-"""Factory for building an LLM provider from :class:`LLMSettings`."""
+"""Factory for building an LLM provider from :class:`LLMSettings`.
+
+Dispatches on ``settings.provider``:
+
+- ``"openai"`` — :class:`OpenAIProvider` (requires ``base_url``).
+- ``"litellm"`` — :class:`LiteLLMProvider` (routes via model-id
+  prefix; ``base_url`` optional).
+"""
 
 from __future__ import annotations
 
@@ -9,12 +16,10 @@ from .protocol import LLMClient
 
 
 def build_llm_provider(settings: LLMSettings) -> LLMClient:
-    """Build an OpenAI-compatible LLM provider from settings.
+    """Build an LLM provider from settings.
 
     Unwraps :class:`pydantic.SecretStr` here so downstream callers never
-    touch the raw key directly. Fails fast if either ``api_key`` or
-    ``base_url`` is missing — caller is expected to set them via
-    ``.env`` / user toml / programmatic init before calling.
+    touch the raw key directly.
 
     Args:
         settings: The :class:`LLMSettings` slice from
@@ -26,8 +31,15 @@ def build_llm_provider(settings: LLMSettings) -> LLMClient:
         operators via ``llm=``.
 
     Raises:
-        ValueError: If ``api_key`` or ``base_url`` is unset.
+        ValueError: If required credentials are unset for the chosen
+            provider.
     """
+    if settings.provider == "litellm":
+        return _build_litellm(settings)
+    return _build_openai(settings)
+
+
+def _build_openai(settings: LLMSettings) -> LLMClient:
     if settings.api_key is None:
         raise ValueError(
             "LLM api_key is not configured "
@@ -41,5 +53,19 @@ def build_llm_provider(settings: LLMSettings) -> LLMClient:
     return OpenAIProvider(
         model=settings.model,
         api_key=settings.api_key.get_secret_value(),
+        base_url=settings.base_url,
+    )
+
+
+def _build_litellm(settings: LLMSettings) -> LLMClient:
+    from .litellm_provider import LiteLLMProvider
+
+    return LiteLLMProvider(
+        model=settings.model,
+        api_key=(
+            settings.api_key.get_secret_value()
+            if settings.api_key is not None
+            else None
+        ),
         base_url=settings.base_url,
     )

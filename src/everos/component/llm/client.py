@@ -1,10 +1,14 @@
 """Process-wide LLM client accessor.
 
-Lazy singleton — first call reads settings and builds the algo LLM
+Lazy singleton -- first call reads settings and builds the algo LLM
 client; subsequent calls return the cached instance. Raises
 :class:`LLMNotConfiguredError` when no credentials are present so
 misconfiguration surfaces at app startup (via the LLM lifespan
 provider) instead of silently failing per-request downstream.
+
+When ``settings.llm.provider`` is ``"litellm"``, the factory-built
+:class:`LiteLLMProvider` is used instead of the everalgo default
+client, giving users access to 100+ LLM providers.
 """
 
 from __future__ import annotations
@@ -39,6 +43,17 @@ def get_llm_client() -> LLMClient:
         return _llm_client
 
     llm_cfg = load_settings().llm
+
+    if llm_cfg.provider == "litellm":
+        from .factory import build_llm_provider
+
+        try:
+            _llm_client = build_llm_provider(llm_cfg)
+        except ValueError as exc:
+            raise LLMNotConfiguredError(str(exc)) from exc
+        logger.info("llm_client_built", model=llm_cfg.model, provider="litellm")
+        return _llm_client
+
     api_key = (
         llm_cfg.api_key.get_secret_value() if llm_cfg.api_key is not None else None
     )
@@ -60,7 +75,7 @@ def get_llm_client() -> LLMClient:
 def get_multimodal_llm_client() -> LLMClient:
     """Return the singleton multimodal LLM client (for everalgo.parser).
 
-    Reads the flat ``[multimodal]`` config — kept separate from the main
+    Reads the flat ``[multimodal]`` config -- kept separate from the main
     ``[llm]`` so parsing can target a vision/audio-capable endpoint.
 
     Raises:

@@ -113,16 +113,20 @@ class LLMSettings(BaseModel):
     """LLM client configuration.
 
     Read by the service layer when lazily constructing the LLM client
-    handed to algo extractors. Provider-agnostic field names — the
-    project follows the OpenAI API protocol so any OpenAI-compatible
-    endpoint plugs in via ``base_url``.
+    handed to algo extractors. ``provider`` selects the backend
+    implementation: ``"openai"`` (default) wraps ``openai.AsyncOpenAI``
+    against any OpenAI-compatible endpoint; ``"litellm"`` routes through
+    the LiteLLM SDK to 100+ providers via model-id prefix
+    (e.g. ``anthropic/claude-sonnet-4-20250514``).
 
     Env binding (via parent ``Settings``):
+        EVEROS_LLM__PROVIDER
         EVEROS_LLM__MODEL
         EVEROS_LLM__API_KEY
         EVEROS_LLM__BASE_URL
     """
 
+    provider: Literal["openai", "litellm"] = "openai"
     model: str = "gpt-4o-mini"
     api_key: SecretStr | None = None
     base_url: str | None = None
@@ -161,12 +165,12 @@ class MultimodalSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     """Embedding client configuration.
 
-    OpenAI-compatible embedding endpoint. ``model`` / ``api_key`` /
-    ``base_url`` are required at runtime when the embedding capability
-    is enabled; the runtime knobs (``timeout`` etc.) have sensible
-    defaults.
+    ``provider`` selects the backend: ``"openai"`` (default) wraps
+    ``openai.AsyncOpenAI`` against any OpenAI-compatible endpoint;
+    ``"litellm"`` routes through LiteLLM to 100+ providers.
 
     Env binding:
+        EVEROS_EMBEDDING__PROVIDER
         EVEROS_EMBEDDING__MODEL
         EVEROS_EMBEDDING__API_KEY
         EVEROS_EMBEDDING__BASE_URL
@@ -176,6 +180,7 @@ class EmbeddingSettings(BaseModel):
         EVEROS_EMBEDDING__MAX_CONCURRENT
     """
 
+    provider: Literal["openai", "litellm"] = "openai"
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
