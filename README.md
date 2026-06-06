@@ -115,10 +115,10 @@ and offline evolution.
 
 ## What Is EverOS
 
-EverOS is an open-source Python framework for long-term memory in AI
-agents and user chats. It turns conversations, agent trajectories, and
-files into structured memory, then keeps local retrieval indexes in sync
-so the memory can be searched and reused.
+EverOS is an open-source Python framework for self-evolving memory across
+agents and platforms. It turns conversations, agent trajectories, and
+files into structured long-term memory, then keeps local retrieval indexes
+in sync so the memory can be searched and reused.
 
 The system is built around three boundaries:
 
