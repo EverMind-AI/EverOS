@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![banner-gif](https://github.com/user-attachments/assets/0bf97efd-580f-4a53-a2a2-58d6daea7290)
+![EverOS banner](https://github.com/EverMind-AI/EverOS/releases/download/v1.0.0/everos-readme-banner.jpg)
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
