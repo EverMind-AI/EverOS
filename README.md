@@ -53,27 +53,37 @@
 
 <table>
 <tr>
-<td width="50%" valign="top">
-<strong>Self-Evolving Long-Term Memory</strong><br>
-Agents can reuse past cases and skills, improve from repeated workflows,
-and become more proactive over time.
+<td width="33%" valign="top">
+<strong>Markdown As Source Of Truth</strong><br>
+All memory is persisted as <code>.md</code> files: readable, editable,
+grep-able, Git-versioned, and openable directly in Obsidian.
 </td>
-<td width="50%" valign="top">
-<strong>Cross-Agent + Cross-Platform</strong><br>
-One portable memory layer follows Claude Code, Codex, OpenClaw, Hermes,
-and the next agents makers build with.
+<td width="33%" valign="top">
+<strong>Local Three-Part Stack</strong><br>
+Markdown + SQLite + LanceDB keep vectors, BM25, and scalar filters
+local. No MongoDB, Elasticsearch, or Redis required.
+</td>
+<td width="33%" valign="top">
+<strong>Dual-Track Memory</strong><br>
+Agent memory (<code>cases</code> / <code>skills</code>) and user memory
+(<code>episodes</code> / <code>profile</code>) are extracted independently.
 </td>
 </tr>
 <tr>
-<td width="50%" valign="top">
-<strong>Markdown-First, User-Owned</strong><br>
-Memory is stored as readable Markdown: visible, auditable, hand-editable,
-Git-friendly, and easy to bring into your own workflow.
+<td width="33%" valign="top">
+<strong>Multimodal Ingestion</strong><br>
+Text, images, audio, documents, PDFs, HTML, and email are unified into
+searchable memory.
 </td>
-<td width="50%" valign="top">
-<strong>Local Runtime, Modular Algorithms</strong><br>
-SQLite and LanceDB keep retrieval local while EverAlgo supplies reusable
-memory algorithms for online and offline evolution.
+<td width="33%" valign="top">
+<strong>Self-Evolution</strong><br>
+Common skills are extracted from real usage; repeated patterns become
+reusable workflows, no retraining required.
+</td>
+<td width="33%" valign="top">
+<strong>Orthogonal Retrieval</strong><br>
+Search independently by <code>user_id</code>, <code>agent_id</code>,
+<code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.
 </td>
 </tr>
 </table>
