@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint docs-check check-commits check-assets check-deprecated-names check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-deprecated-names check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
 
 help:
 	@echo "Targets:"
@@ -7,6 +7,7 @@ help:
 	@echo "  lint          ruff + import-linter + repo hygiene + datetime discipline + openapi drift"
 	@echo "  docs-check    Validate Markdown links, use-case banners, and issue template YAML"
 	@echo "  check-commits Validate Conventional Commit subjects for a git range"
+	@echo "  check-pr-title Validate PR title uses Conventional Commit format"
 	@echo "  check-assets  Block committed images, videos, and asset/media directories"
 	@echo "  check-deprecated-names Block deprecated product names"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
@@ -47,6 +48,9 @@ docs-check:
 
 check-commits:
 	python3 scripts/check_commit_messages.py $(RANGE)
+
+check-pr-title:
+	python3 scripts/check_pr_title.py
 
 # Repository media hygiene gate. Images/videos belong in external hosting,
 # release artifacts, or other approved storage, then linked from docs.

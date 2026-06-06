@@ -13,6 +13,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  title:
+    name: pull request title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate Conventional Commit PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: make check-pr-title
+
   messages:
     name: commit messages
     runs-on: ubuntu-latest
