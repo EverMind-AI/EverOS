@@ -21,6 +21,7 @@
 
 <br>
 
+- [EverOS 1.0.0 highlights](#everos-100-highlights)
 - [What is EverOS](#what-is-everos)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Quick start](#quick-start)
@@ -36,6 +37,70 @@
 <br>
 
 </details>
+
+
+## EverOS 1.0.0 highlights
+
+EverOS 1.0.0 is the refactored local-first memory runtime for auditable
+user memory, self-evolving agent memory, and modular memory algorithms.
+The core idea is simple: memory should be readable, recoverable, and
+useful without handing ownership to an opaque hosted system.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<strong>Markdown-first memory</strong><br>
+Memory is persisted as plain Markdown: visible, auditable, hand-editable,
+Git-friendly, and owned by the user.
+</td>
+<td width="33%" valign="top">
+<strong>Lightweight local stack</strong><br>
+Install with Python. SQLite tracks runtime state; LanceDB powers vector,
+BM25, and scalar-filter retrieval locally.
+</td>
+<td width="33%" valign="top">
+<strong>Layered memory model</strong><br>
+User memory and agent memory are first-class today. Wiki-style world
+knowledge is the next layer in the roadmap.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Self-evolving agents</strong><br>
+Agent memory can extract reusable cases and skills from repeated
+experience, so workflows become smarter over time.
+</td>
+<td width="33%" valign="top">
+<strong>Multimodal ingestion</strong><br>
+Text, image, audio, documents, PDF, HTML, and email can be parsed into
+memory through the optional multimodal pipeline.
+</td>
+<td width="33%" valign="top">
+<strong>Online and offline strategy control</strong><br>
+Online extraction and offline evolution stay separate, with configurable
+prompts and models at each step. Reflection ships next.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Orthogonal memory scope</strong><br>
+Owner, memory type, and scope are independent: search by user, agent,
+app, project, session, and structured filters.
+</td>
+<td width="33%" valign="top">
+<strong>Progressive disclosure</strong><br>
+Readable memory surfaces stay simple while deeper facts, cases, and
+skills remain available. LLM Wiki will extend this to domain/topic/content.
+</td>
+<td width="33%" valign="top">
+<strong>Modular by design</strong><br>
+EverAlgo owns algorithms; EverOS owns runtime, persistence, online flows,
+and offline evolution.
+</td>
+</tr>
+</table>
+
+<br>
 
 
 ## What is EverOS
