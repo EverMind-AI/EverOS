@@ -1,10 +1,12 @@
-.PHONY: help install install-deps lint check-cjk check-datetime openapi check-openapi format test integration cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-cjk check-datetime openapi check-openapi format test integration cov ci clean
 
 help:
 	@echo "Targets:"
 	@echo "  install       Install deps + pre-commit hooks (full dev setup)"
 	@echo "  install-deps  Install deps only (uv sync --frozen, used by CI)"
 	@echo "  lint          ruff (check + format-check) + import-linter + datetime discipline + openapi drift"
+	@echo "  docs-check    Validate Markdown links, use-case banners, and issue template YAML"
+	@echo "  check-commits Validate Conventional Commit subjects for a git range"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
 	@echo "  check-datetime Scan for code that bypasses component/utils/datetime (HARD gate, run via lint)"
 	@echo "  openapi       Regenerate docs/openapi.json from the FastAPI app"
@@ -33,6 +35,13 @@ lint:
 	uv run lint-imports
 	uv run python scripts/check_datetime_discipline.py
 	uv run python scripts/dump_openapi.py --check
+
+docs-check:
+	python3 scripts/check_docs.py
+	ruby -e 'require "yaml"; Dir[".github/ISSUE_TEMPLATE/*.yml"].sort.each { |p| YAML.load_file(p); puts "YAML ok: #{p}" }'
+
+check-commits:
+	python3 scripts/check_commit_messages.py $(RANGE)
 
 # Advisory CJK scan (see .claude/rules/language-policy.md). Deliberately NOT
 # wired into `lint` / `ci`: the policy is enforced by review and the rules

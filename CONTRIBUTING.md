@@ -5,10 +5,9 @@ on this project.
 
 ## How EverOS accepts contributions
 
-EverOS follows an **"open source, not open contribution"** model (similar to
-SQLite). The codebase is developed and maintained by the EverMind core team, and
-we **do not merge external pull requests**. This keeps copyright provenance
-clean and the architecture coherent.
+EverOS accepts **curated pull request contributions**. The EverMind core team
+reviews every change for product fit, architecture consistency, licensing, and
+long-term maintainability before it is merged.
 
 What we actively welcome from the community:
 
@@ -16,12 +15,11 @@ What we actively welcome from the community:
 |---|---|
 | 🐛 Bug reports | [Open a bug issue](https://github.com/EverMind-AI/EverOS/issues/new?template=bug_report.yml) |
 | 💡 Feature ideas / use cases | [Open a feature issue](https://github.com/EverMind-AI/EverOS/issues/new?template=feature_request.yml) |
-| 🔧 Suggested fixes | An issue with a code snippet / patch attached (see below) |
+| 🔧 Focused fixes | A pull request linked to a bug, design note, or clear reproduction |
 | ❓ Questions & discussion | [GitHub Discussions](https://github.com/EverMind-AI/EverOS/discussions) / [Discord](https://discord.gg/pfwwskxp) |
 
-> **Pull requests opened against this repository will be closed** with a pointer
-> to this policy. Please open an issue instead — it is the fastest path to
-> getting a change in.
+Large architectural changes should start as an issue or discussion before code.
+Small documentation, test, CI, and bug-fix PRs can be opened directly.
 
 ## Reporting a bug
 
@@ -40,15 +38,16 @@ Use the [feature request template](https://github.com/EverMind-AI/EverOS/issues/
 - Proposed API or behavior
 - Backward-compatibility considerations
 
-## Suggesting a fix (code welcome)
+## Sending a pull request
 
-Found the bug *and* the fix? Great — paste a minimal patch or code snippet
-**in the issue**. Treat it as a proposal: the core team will review it, adapt it
-to the project's conventions, and land the actual commit (crediting you in the
-commit message / changelog).
+1. Create a branch from `main`.
+2. Keep the change scoped to one purpose.
+3. Run `make ci` locally before requesting review.
+4. Use a Conventional Commit title, such as `fix(search): guard empty profile`.
+5. Open a pull request to `main` and fill out the PR template.
 
-> By posting a code suggestion in an issue, you agree it may be incorporated into
-> EverOS under the project's [Apache-2.0](LICENSE) license.
+By submitting a pull request, you agree that your contribution is licensed under
+the project's [Apache-2.0](LICENSE) license.
 
 ## Reporting security issues
 
@@ -114,24 +113,26 @@ make format    # ruff fix + format
 make lint      # ruff check + import-linter
 ```
 
-### Branch strategy (GitFlow Lite)
+### Branch strategy
 
 | Branch | Role |
 |---|---|
-| `master` | Released stable |
-| `dev` | Default integration branch |
-| `feat/<scope>-<desc>` | New features (from dev → dev) |
-| `fix/<scope>-<desc>` | Bug fixes (from dev → dev) |
-| `hotfix/<scope>-<desc>` | Emergency fixes (from master → master + dev) |
+| `main` | Default and protected branch |
+| `feat/<scope>-<desc>` | Feature work |
+| `fix/<scope>-<desc>` | Bug fixes |
+| `docs/<scope>-<desc>` | Documentation-only changes |
+| `ci/<scope>-<desc>` | CI, build, and developer-experience changes |
 
-Full rationale: [.claude/skills/new-branch/SKILL.md](.claude/skills/new-branch/SKILL.md).
+Do not push directly to `main`. Do not force-push shared branches. Merge through
+PRs after required checks pass.
 
 ### Commit messages
 
 **[Conventional Commits](https://www.conventionalcommits.org)**: `<type>[(scope)]: <description>`
 (e.g. `feat: add agentic rerank`, `fix(search): guard empty profile`). Enforced
-by `gitlint` in the `commit-msg` hook. Use `/commit` for guided generation; full
-type list: [.claude/skills/commit/SKILL.md](.claude/skills/commit/SKILL.md).
+locally by `gitlint` in the `commit-msg` hook and in GitHub Actions by the
+`Commit lint` workflow. Use `/commit` for guided generation; full type list:
+[.claude/skills/commit/SKILL.md](.claude/skills/commit/SKILL.md).
 
 ### Testing
 

@@ -7,6 +7,7 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
       - ".github/workflows/docs.yml"
+      - "scripts/check_docs.py"
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
       - ".github/workflows/docs.yml"
+      - "scripts/check_docs.py"
 
 permissions:
   contents: read
@@ -28,110 +30,5 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Validate active relative Markdown links
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-
-          # Validate every Markdown file in the documentation surface. Globbing
-          # (rather than a hand-maintained list) means new docs are covered
-          # automatically and phantom links cannot slip in. Skip vendored trees.
-          skip_dirs = {".git", "node_modules", ".venv", ".uv-cache"}
-          files = sorted(
-              p
-              for p in Path(".").rglob("*.md")
-              if not any(part in skip_dirs for part in p.parts)
-          )
-
-          missing = []
-          for path in files:
-              if not path.exists():
-                  continue
-              text = path.read_text()
-              active = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-              for raw in re.findall(r"\[[^\]]*\]\(([^)]+)\)", active):
-                  link = raw.split("#", 1)[0]
-                  if not link or link.startswith(("http://", "https://", "mailto:")):
-                      continue
-                  target = (path.parent / link).resolve()
-                  try:
-                      target.relative_to(Path.cwd().resolve())
-                  except ValueError:
-                      missing.append((path, raw, "outside repository"))
-                      continue
-                  if not target.exists():
-                      missing.append((path, raw, "missing"))
-
-          if missing:
-              for path, raw, reason in missing:
-                  print(f"{path}: {raw} -> {reason}")
-              sys.exit(1)
-
-          print("Active relative Markdown links resolve.")
-          PY
-
-      - name: Validate use-case banner links
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-
-          files = {
-              Path("README.md"): "## Use Cases",
-              Path("use-cases/README.md"): "## Use Cases",
-          }
-
-          failures = []
-          warnings = []
-          primary_link_pattern = re.compile(
-              r"^\[(?:Code|Plugin|Live Demo|Learn more)\]\(([^)]+)\)",
-              flags=re.M,
-          )
-
-          for path, heading in files.items():
-              text = path.read_text()
-              start = text.find(heading)
-              if start == -1:
-                  failures.append(f"{path}: missing {heading}")
-                  continue
-
-              table_start = text.find("<table>", start)
-              table_end = text.find("</table>", table_start)
-              if table_start == -1 or table_end == -1:
-                  failures.append(f"{path}: missing use-case table")
-                  continue
-
-              table = text[table_start:table_end]
-              cells = re.findall(r"<td[^>]*>(.*?)</td>", table, flags=re.S)
-              for index, cell in enumerate(cells, start=1):
-                  title_match = re.search(r"####\s+(.+)", cell)
-                  title = title_match.group(1).strip() if title_match else f"use case {index}"
-                  banner_match = re.search(r"\[!\[[^\]]*\]\([^)]+\)\]\(([^)]+)\)", cell)
-                  primary_match = primary_link_pattern.search(cell)
-
-                  if not banner_match and primary_match:
-                      warnings.append(f"{path}: {title}: primary link has no linked banner")
-                  elif banner_match and not primary_match:
-                      failures.append(f"{path}: {title}: missing primary link")
-                  elif banner_match and primary_match and banner_match.group(1) != primary_match.group(1):
-                      failures.append(
-                          f"{path}: {title}: banner link {banner_match.group(1)} "
-                          f"does not match primary link {primary_match.group(1)}"
-                      )
-
-          if warnings:
-              print("\n".join(f"warning: {warning}" for warning in warnings))
-
-          if failures:
-              print("\n".join(failures))
-              sys.exit(1)
-
-          print("Use-case banner links match primary links.")
-          PY
-
-      - name: Validate issue template YAML
-        run: |
-          ruby -e 'require "yaml"; Dir[".github/ISSUE_TEMPLATE/*.yml"].sort.each { |p| YAML.load_file(p); puts "YAML ok: #{p}" }'
+      - name: Validate Markdown docs
+        run: make docs-check

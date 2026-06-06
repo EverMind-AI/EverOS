@@ -1,0 +1,28 @@
+name: Commit lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  messages:
+    name: commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate Conventional Commit subjects
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: make check-commits

@@ -50,6 +50,9 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.uv-cache/
 
 # Translations
 *.mo
@@ -146,6 +149,8 @@ dmypy.json
 !.claude/settings.json
 .claude/settings.local.json
 .claude/worktrees/
+.worktrees/
+worktrees/
 
 # Runtime data (the default memory root + local databases)
 .everos/

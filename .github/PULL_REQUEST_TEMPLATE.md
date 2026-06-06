@@ -24,6 +24,7 @@
 ## Checklist
 
 - [ ] I kept the change scoped to the relevant area.
+- [ ] I am opening this from a separate branch, not pushing directly to `main`.
 - [ ] I updated docs, examples, or setup notes when behavior changed.
 - [ ] I added or updated tests when the change affects behavior.
 - [ ] I did not commit secrets, `.env` files, dependency folders, or generated output.
