@@ -21,6 +21,7 @@
 
 <br>
 
+- [EverOS 1.0 highlights](#everos-10-highlights)
 - [What is EverOS](#what-is-everos)
 - [Quick start](#quick-start)
 - [Architecture at a glance](#architecture-at-a-glance)
@@ -28,9 +29,9 @@
 - [Features](#features)
 - [Project structure](#project-structure)
 - [Documentation](#documentation)
-- [Stay Tuned](#stay-tuned)
 - [Use Cases](#use-cases)
-- [Related EverMind repositories](#related-evermind-repositories)
+- [Stay Tuned](#stay-tuned)
+- [EverMind ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
 <br>
@@ -38,15 +39,78 @@
 </details>
 
 
-> [!NOTE]
+## EverOS 1.0 highlights
+
+> [!IMPORTANT]
 >
-> **EverOS 1.0.0 is here.** The refactor is Markdown-first, lightweight
-> enough to run locally with Python, and built around scoped user and
-> agent memory. It supports local SQLite state, LanceDB hybrid retrieval,
-> multimodal ingestion, configurable online/offline memory strategies,
-> and modular algorithms through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
+> **EverOS 1.0 is a major release for self-evolving memory.** It brings a
+> local-first runtime, Markdown as the source of truth, hybrid retrieval,
+> multimodal ingestion, user and agent memory scopes, and modular algorithms
+> through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
+>
+> **Watch this repository** for the next wave of memory-system work, including
+> Wiki-style knowledge layers and Dreaming for deeper offline evolution.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<strong>Markdown-first memory</strong><br>
+Memory is persisted as plain Markdown: visible, auditable, hand-editable,
+Git-friendly, and owned by the user.
+</td>
+<td width="33%" valign="top">
+<strong>Lightweight local stack</strong><br>
+Install with Python. SQLite tracks runtime state; LanceDB powers vector,
+BM25, and scalar-filter retrieval locally.
+</td>
+<td width="33%" valign="top">
+<strong>Layered memory model</strong><br>
+User memory and agent memory are first-class today. Wiki-style knowledge
+is the next layer in the roadmap.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Self-evolving agents</strong><br>
+Agent memory can extract reusable cases and skills from repeated
+experience, so workflows become smarter over time.
+</td>
+<td width="33%" valign="top">
+<strong>Multimodal ingestion</strong><br>
+Text, image, audio, documents, PDF, HTML, and email can be parsed into
+memory through the optional multimodal pipeline.
+</td>
+<td width="33%" valign="top">
+<strong>Online and offline strategy control</strong><br>
+Online extraction and offline evolution stay separate, with configurable
+prompts and models at each step. Dreaming is coming next.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Orthogonal memory scope</strong><br>
+Owner, memory type, and scope are independent: search by user, agent,
+app, project, session, and structured filters.
+</td>
+<td width="33%" valign="top">
+<strong>Progressive disclosure</strong><br>
+Readable memory surfaces stay simple while deeper facts, cases, and
+skills remain available.
+</td>
+<td width="33%" valign="top">
+<strong>Modular by design</strong><br>
+EverAlgo owns algorithms; EverOS owns runtime, persistence, online flows,
+and offline evolution.
+</td>
+</tr>
+</table>
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 
 ## What is EverOS
@@ -63,6 +127,11 @@ The system is built around three boundaries:
 3. **Algorithms stay modular** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) owns memory algorithms; EverOS owns runtime, persistence, online flows, and offline evolution.
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Quick start
 
@@ -144,6 +213,11 @@ make test
 ```
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Architecture at a glance
 
@@ -165,6 +239,11 @@ make test
 DDD 5 layers, single-direction dependency. See [docs/architecture.md](docs/architecture.md).
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Storage layout
 
@@ -194,6 +273,11 @@ is the user-facing memory surface, while extracted derivatives sit
 quietly alongside.
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Features
 
@@ -205,6 +289,11 @@ quietly alongside.
 - **Multi-modal**: text + small image / audio inline; large media via S3/OSS reference
 
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Project structure
 
@@ -223,6 +312,11 @@ everos/                        # repo root
 └── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
 ```
 <br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 ## Documentation
 
@@ -236,14 +330,12 @@ everos/                        # repo root
 - [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
 
 <br>
+<div align="right">
 
-## Stay Tuned
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
 
-Star the repo or join the community links above to follow new architecture methods, benchmark releases, and memory-enabled use cases.
+</div>
 
-![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
-
-<br>
 
 ## Use Cases
 
@@ -328,6 +420,12 @@ Coming soon
 </tr>
 
 <tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
+</td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/f30617a1-adc0-4271-bc0e-c3a0b28cb903)](https://github.com/xunyud/Earth-Online)
@@ -398,6 +496,12 @@ One command to connect any AI coding CLI to EverMemOS long-term memory.
 
 [Code](https://github.com/nanxingw/EverMem)
 
+</td>
+</tr>
+
+<tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
 </td>
 </tr>
 
@@ -473,6 +577,12 @@ A context-native AI wearable that listens to everyday life and converts conversa
 
 [Code](https://github.com/JaMesLiMers/EvermemCompetition-Spiro)
 
+</td>
+</tr>
+
+<tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
 </td>
 </tr>
 <tr>
@@ -556,29 +666,65 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 </div>
 
-## Related EverMind repositories
+## Stay Tuned
+
+Star the repo or join the community links above to follow new architecture methods, benchmark releases, memory-enabled use cases, Wiki-style memory, and Dreaming updates.
+
+![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## EverMind ecosystems
+
+EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation. EverOS is the core runtime architecture; EverMemOS is the paper and research line carrying our strongest memory-system benchmark runs; EverAlgo supplies the next-generation algorithms that make the system modular and reusable.
 
 <table>
 <tr>
-<th colspan="2">EverMind Open Source</th>
+<th colspan="2">EverMind Open-Source Ecosystem</th>
 </tr>
 <tr>
-<td><strong>Core</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> · <a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a></td>
+<td><strong>Core memory architecture</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> / EverMemOS - the local memory operating system and research-backed runtime for agent and user memory.</td>
 </tr>
 <tr>
-<td><strong>Memory methods</strong></td>
-<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> · <a href="https://github.com/EverMind-AI/MSA">MSA</a></td>
+<td><strong>Algorithm engine</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
+</tr>
+<tr>
+<td><strong>Alternative architecture</strong></td>
+<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - hypergraph memory for long-term conversations, with its own benchmark-backed topic -> episode -> fact retrieval method.</td>
 </tr>
 <tr>
 <td><strong>Benchmarks</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a></td>
+<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - evaluation suites for conversational memory and agent self-evolution.</td>
 </tr>
 <tr>
-<td><strong>Integrations</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> · <a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a></td>
+<td><strong>Long-context research</strong></td>
+<td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention for scalable latent memory and 100M-token contexts.</td>
+</tr>
+<tr>
+<td><strong>Personal memory layer</strong></td>
+<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
+</tr>
+<tr>
+<td><strong>Developer integrations</strong></td>
+<td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - plugins, skills, and migration tooling for AI coding agents.</td>
 </tr>
 </table>
+
+Together, these repositories form EverMind's research-to-runtime stack: new memory methods, reusable algorithms, benchmark evidence, and practical agent integrations.
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
 
 <br>
 
