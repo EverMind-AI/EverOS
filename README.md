@@ -21,17 +21,17 @@
 
 <br>
 
-- [EverOS 1.0 highlights](#everos-10-highlights)
-- [What is EverOS](#what-is-everos)
-- [Quick start](#quick-start)
-- [Architecture at a glance](#architecture-at-a-glance)
-- [Storage layout](#storage-layout)
+- [EverOS 1.0.0 Highlights](#everos-100-highlights)
+- [What Is EverOS](#what-is-everos)
+- [Quick Start](#quick-start)
+- [Architecture At A Glance](#architecture-at-a-glance)
+- [Storage Layout](#storage-layout)
 - [Features](#features)
-- [Project structure](#project-structure)
+- [Project Structure](#project-structure)
 - [Documentation](#documentation)
 - [Use Cases](#use-cases)
 - [Stay Tuned](#stay-tuned)
-- [EverMind ecosystems](#evermind-ecosystems)
+- [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
 <br>
@@ -39,11 +39,11 @@
 </details>
 
 
-## EverOS 1.0 highlights
+## EverOS 1.0.0 Highlights
 
 > [!IMPORTANT]
 >
-> **EverOS 1.0 is a major release for self-evolving memory.** It brings a
+> **EverOS 1.0.0 is a major release for self-evolving memory.** It brings a
 > local-first runtime, Markdown as the source of truth, hybrid retrieval,
 > multimodal ingestion, user and agent memory scopes, and modular algorithms
 > through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
@@ -54,51 +54,51 @@
 <table>
 <tr>
 <td width="33%" valign="top">
-<strong>Markdown-first memory</strong><br>
+<strong>Markdown-First Memory</strong><br>
 Memory is persisted as plain Markdown: visible, auditable, hand-editable,
 Git-friendly, and owned by the user.
 </td>
 <td width="33%" valign="top">
-<strong>Lightweight local stack</strong><br>
+<strong>Lightweight Local Stack</strong><br>
 Install with Python. SQLite tracks runtime state; LanceDB powers vector,
 BM25, and scalar-filter retrieval locally.
 </td>
 <td width="33%" valign="top">
-<strong>Layered memory model</strong><br>
+<strong>Layered Memory Model</strong><br>
 User memory and agent memory are first-class today. Wiki-style knowledge
 is the next layer in the roadmap.
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
-<strong>Self-evolving agents</strong><br>
+<strong>Self-Evolving Agents</strong><br>
 Agent memory can extract reusable cases and skills from repeated
 experience, so workflows become smarter over time.
 </td>
 <td width="33%" valign="top">
-<strong>Multimodal ingestion</strong><br>
+<strong>Multimodal Ingestion</strong><br>
 Text, image, audio, documents, PDF, HTML, and email can be parsed into
 memory through the optional multimodal pipeline.
 </td>
 <td width="33%" valign="top">
-<strong>Online and offline strategy control</strong><br>
+<strong>Online And Offline Strategy Control</strong><br>
 Online extraction and offline evolution stay separate, with configurable
 prompts and models at each step. Dreaming is coming next.
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
-<strong>Orthogonal memory scope</strong><br>
+<strong>Orthogonal Memory Scope</strong><br>
 Owner, memory type, and scope are independent: search by user, agent,
 app, project, session, and structured filters.
 </td>
 <td width="33%" valign="top">
-<strong>Progressive disclosure</strong><br>
+<strong>Progressive Disclosure</strong><br>
 Readable memory surfaces stay simple while deeper facts, cases, and
 skills remain available.
 </td>
 <td width="33%" valign="top">
-<strong>Modular by design</strong><br>
+<strong>Modular By Design</strong><br>
 EverAlgo owns algorithms; EverOS owns runtime, persistence, online flows,
 and offline evolution.
 </td>
@@ -113,7 +113,7 @@ and offline evolution.
 </div>
 
 
-## What is EverOS
+## What Is EverOS
 
 EverOS is an open-source Python framework for long-term memory in AI
 agents and user chats. It turns conversations, agent trajectories, and
@@ -133,7 +133,7 @@ The system is built around three boundaries:
 
 </div>
 
-## Quick start
+## Quick Start
 
 ### 1. Install EverOS
 
@@ -142,7 +142,7 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. Initialize configuration
+### 2. Initialize Configuration
 
 Generate a starter `.env` file, then fill the API key fields shown in
 the generated comments.
@@ -154,7 +154,7 @@ everos init
 `everos init` writes `./.env` by default. Use `everos init --xdg` to
 write `${XDG_CONFIG_HOME:-~/.config}/everos/.env` instead.
 
-### 3. Start the server
+### 3. Start The Server
 
 ```bash
 everos --help
@@ -170,7 +170,7 @@ at any of them.
 For a step-by-step walkthrough (add a conversation, flush, search, then
 read the markdown), see [QUICKSTART.md](QUICKSTART.md).
 
-### Optional: ingest multimodal files
+### Optional: Ingest Multimodal Files
 
 To ingest non-text content (image / pdf / audio / office documents)
 through `/api/v1/memory/add` `content` items, install the optional
@@ -199,7 +199,7 @@ brew install --cask libreoffice              # macOS
 sudo apt-get install -y libreoffice          # Debian / Ubuntu
 ```
 
-### For contributors
+### For Contributors
 
 ```bash
 git clone https://github.com/EverMind-AI/EverOS.git
@@ -219,7 +219,7 @@ make test
 
 </div>
 
-## Architecture at a glance
+## Architecture At A Glance
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -245,7 +245,7 @@ DDD 5 layers, single-direction dependency. See [docs/architecture.md](docs/archi
 
 </div>
 
-## Storage layout
+## Storage Layout
 
 ```
 ~/.everos/
@@ -295,7 +295,7 @@ quietly alongside.
 
 </div>
 
-## Project structure
+## Project Structure
 
 ```
 everos/                        # repo root
@@ -349,7 +349,7 @@ external demos or integrations you can study and adapt.
 
 [![banner-gif](https://github.com/user-attachments/assets/840470d7-a838-4c05-8685-dd797d4e9cdf)](https://evermind.ai/usecase_reunite)
 
-#### Reunite - Find with EverOS
+#### Reunite - Find With EverOS
 
 Parents describe what they remember. Children describe what they recall. Reunite uses semantic memory to surface the connections.
 
@@ -374,7 +374,7 @@ Browser-native hive-mind for CLI coding agents - Claude Code, Codex, Gemini, and
 
 [![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
 
-#### AI Coding Assistants with EverOS
+#### AI Coding Assistants With EverOS
 
 Universal long-term memory layer for AI coding assistants, powered by EverOS.
 
@@ -399,7 +399,7 @@ An agentic AI system that learns from scientist interaction to inspect, analyze,
 
 ![banner-gif](https://github.com/user-attachments/assets/650b901b-c9ba-4001-bac7-626b009df830)
 
-#### Rokid AI Assistant with EverOS
+#### Rokid AI Assistant With EverOS
 
 Connect to EverOS within Rokid Glasses enabling long-term memory for all of your smart activities.
 
@@ -410,7 +410,7 @@ Coming soon
 
 ![banner-gif](https://github.com/user-attachments/assets/85b338b2-e48e-4a65-9f30-0bc6998df872)
 
-#### Creative Assistant with Memory
+#### Creative Assistant With Memory
 
 Creative assistant with long-term memory, so your creative context stays available across sessions.
 
@@ -479,7 +479,7 @@ Build AI that feels. Open-source persona engine - personality emerges from neura
 
 [![banner-gif](https://github.com/user-attachments/assets/550071c1-dc39-4964-9f67-ffdfad792345)](https://chromewebstore.google.com/detail/ruminer-browser-agent/lbccjohfpdpimbhpckljimgolndfmfif)
 
-#### Browser Agent for Personal Memory
+#### Browser Agent For Personal Memory
 
 Ruminer brings persistent memory to a browser agent so it can carry personal context across web tasks.
 
@@ -490,7 +490,7 @@ Ruminer brings persistent memory to a browser agent so it can carry personal con
 
 [![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem)
 
-#### EverMem Sync with EverOS
+#### EverMem Sync With EverOS
 
 One command to connect any AI coding CLI to EverMemOS long-term memory.
 
@@ -521,7 +521,7 @@ MCO equips your primary agent with an agent team that can work together to solve
 
 [![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public)
 
-#### Study Buddy with Self-Evolving Memory
+#### Study Buddy With Self-Evolving Memory
 
 Study proactively with an agent that has self-evolving memory.
 
@@ -571,7 +571,7 @@ An iOS app where users create, nurture, and live with a personalized AI companio
 
 [![banner-gif](https://github.com/user-attachments/assets/9aabcaa9-f97a-49d2-9109-0b5bb696ed41)](https://github.com/JaMesLiMers/EvermemCompetition-Spiro)
 
-#### AI Wearable with Memory
+#### AI Wearable With Memory
 
 A context-native AI wearable that listens to everyday life and converts conversations into memory.
 
@@ -601,7 +601,7 @@ Archived pre-1.0.0 plugin reference. New integrations should use the EverOS 1.0.
 
 [![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)](https://github.com/TEN-framework/ten-framework/tree/04cb80601374fa9e35b4e544b2dbd23286ca7763/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
 
-#### Live2D Character with Memory
+#### Live2D Character With Memory
 
 Add long-term memory to a real-time Live2D character, powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
 
@@ -614,7 +614,7 @@ Add long-term memory to a real-time Live2D character, powered by [TEN Framework]
 
 [![banner-gif](https://github.com/user-attachments/assets/c36bdc04-97d3-4fe9-97d9-4b93b475595a)](https://screenshot-analysis-vercel.vercel.app/)
 
-#### Computer-Use with Memory
+#### Computer-Use With Memory
 
 Run screenshot-based analysis with computer-use and store the results in memory.
 
@@ -625,7 +625,7 @@ Run screenshot-based analysis with computer-use and store the results in memory.
 
 [![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)](use-cases/game-of-throne-demo)
 
-#### Game of Thrones Memories
+#### Game Of Thrones Memories
 
 A demonstration of AI memory infrastructure through an interactive Q&A experience with *A Game of Thrones*.
 
@@ -679,7 +679,7 @@ Star the repo or join the community links above to follow new architecture metho
 
 </div>
 
-## EverMind ecosystems
+## EverMind Ecosystems
 
 EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation. EverOS is the core runtime architecture; EverMemOS is the paper and research line carrying our strongest memory-system benchmark runs; EverAlgo supplies the next-generation algorithms that make the system modular and reusable.
 
@@ -688,15 +688,15 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 <th colspan="2">EverMind Open-Source Ecosystem</th>
 </tr>
 <tr>
-<td><strong>Core memory architecture</strong></td>
+<td><strong>Core Memory Architecture</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> / EverMemOS - the local memory operating system and research-backed runtime for agent and user memory.</td>
 </tr>
 <tr>
-<td><strong>Algorithm engine</strong></td>
+<td><strong>Algorithm Engine</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
 </tr>
 <tr>
-<td><strong>Alternative architecture</strong></td>
+<td><strong>Alternative Architecture</strong></td>
 <td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - hypergraph memory for long-term conversations, with its own benchmark-backed topic -> episode -> fact retrieval method.</td>
 </tr>
 <tr>
@@ -704,15 +704,15 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 <td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - evaluation suites for conversational memory and agent self-evolution.</td>
 </tr>
 <tr>
-<td><strong>Long-context research</strong></td>
+<td><strong>Long-Context Research</strong></td>
 <td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention for scalable latent memory and 100M-token contexts.</td>
 </tr>
 <tr>
-<td><strong>Personal memory layer</strong></td>
+<td><strong>Personal Memory Layer</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
 </tr>
 <tr>
-<td><strong>Developer integrations</strong></td>
+<td><strong>Developer Integrations</strong></td>
 <td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - plugins, skills, and migration tooling for AI coding agents.</td>
 </tr>
 </table>
