@@ -53,54 +53,27 @@
 
 <table>
 <tr>
-<td width="33%" valign="top">
-<strong>Markdown-First Memory</strong><br>
-Memory is persisted as plain Markdown: visible, auditable, hand-editable,
-Git-friendly, and owned by the user.
+<td width="50%" valign="top">
+<strong>Self-Evolving Long-Term Memory</strong><br>
+Agents can reuse past cases and skills, improve from repeated workflows,
+and become more proactive over time.
 </td>
-<td width="33%" valign="top">
-<strong>Lightweight Local Stack</strong><br>
-Install with Python. SQLite tracks runtime state; LanceDB powers vector,
-BM25, and scalar-filter retrieval locally.
-</td>
-<td width="33%" valign="top">
-<strong>Layered Memory Model</strong><br>
-User memory and agent memory are first-class today. Wiki-style knowledge
-is the next layer in the roadmap.
+<td width="50%" valign="top">
+<strong>Cross-Agent + Cross-Platform</strong><br>
+One portable memory layer follows Claude Code, Codex, OpenClaw, Hermes,
+and the next agents makers build with.
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
-<strong>Self-Evolving Agents</strong><br>
-Agent memory can extract reusable cases and skills from repeated
-experience, so workflows become smarter over time.
+<td width="50%" valign="top">
+<strong>Markdown-First, User-Owned</strong><br>
+Memory is stored as readable Markdown: visible, auditable, hand-editable,
+Git-friendly, and easy to bring into your own workflow.
 </td>
-<td width="33%" valign="top">
-<strong>Multimodal Ingestion</strong><br>
-Text, image, audio, documents, PDF, HTML, and email can be parsed into
-memory through the optional multimodal pipeline.
-</td>
-<td width="33%" valign="top">
-<strong>Online And Offline Strategy Control</strong><br>
-Online extraction and offline evolution stay separate, with configurable
-prompts and models at each step. Dreaming is coming next.
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<strong>Orthogonal Memory Scope</strong><br>
-Owner, memory type, and scope are independent: search by user, agent,
-app, project, session, and structured filters.
-</td>
-<td width="33%" valign="top">
-<strong>Progressive Disclosure</strong><br>
-Readable memory surfaces stay simple while deeper facts, cases, and
-skills remain available.
-</td>
-<td width="33%" valign="top">
-<strong>Modular By Design</strong><br>
-EverAlgo owns algorithms; EverOS owns runtime, persistence, online flows,
-and offline evolution.
+<td width="50%" valign="top">
+<strong>Local Runtime, Modular Algorithms</strong><br>
+SQLite and LanceDB keep retrieval local while EverAlgo supplies reusable
+memory algorithms for online and offline evolution.
 </td>
 </tr>
 </table>

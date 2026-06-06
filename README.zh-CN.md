@@ -53,45 +53,23 @@
 
 <table>
 <tr>
-<td width="33%" valign="top">
-<strong>Markdown-First Memory</strong><br>
-记忆以普通 Markdown 持久化：可见、可审计、可手动编辑、Git 友好，并由用户自己拥有。
+<td width="50%" valign="top">
+<strong>Self-Evolving Long-Term Memory</strong><br>
+Agent 可以复用过去的 cases 和 skills，从重复工作流中自我改进，并逐渐变得更加主动。
 </td>
-<td width="33%" valign="top">
-<strong>Lightweight Local Stack</strong><br>
-用 Python 即可安装。SQLite 负责运行时状态；LanceDB 在本地提供向量、BM25 和结构化过滤检索。
-</td>
-<td width="33%" valign="top">
-<strong>Layered Memory Model</strong><br>
-用户记忆和 Agent 记忆现在是一等公民。Wiki 式知识层是路线图中的下一层。
+<td width="50%" valign="top">
+<strong>Cross-Agent + Cross-Platform</strong><br>
+一层可携带的记忆跟随 Claude Code、Codex、OpenClaw、Hermes，以及 maker 接下来构建的 Agent。
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
-<strong>Self-Evolving Agents</strong><br>
-Agent 记忆可以从重复经验中提取可复用的 cases 和 skills，让工作流随着时间变得更聪明。
+<td width="50%" valign="top">
+<strong>Markdown-First, User-Owned</strong><br>
+记忆以可读 Markdown 存储：可见、可审计、可手动编辑、Git 友好，也方便接入自己的工作流。
 </td>
-<td width="33%" valign="top">
-<strong>Multimodal Ingestion</strong><br>
-文本、图片、音频、文档、PDF、HTML 和邮件都可以通过可选的多模态管线解析进记忆。
-</td>
-<td width="33%" valign="top">
-<strong>Online And Offline Strategy Control</strong><br>
-在线提取和离线进化保持分离，并且每一步都可以配置 prompts 和 models。Dreaming 即将到来。
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<strong>Orthogonal Memory Scope</strong><br>
-Owner、memory type 和 scope 相互独立：可以按 user、agent、app、project、session 和结构化 filters 搜索。
-</td>
-<td width="33%" valign="top">
-<strong>Progressive Disclosure</strong><br>
-可读记忆界面保持简单，同时更深层的 facts、cases 和 skills 仍然可以被系统使用。
-</td>
-<td width="33%" valign="top">
-<strong>Modular By Design</strong><br>
-EverAlgo 负责算法；EverOS 负责运行时、持久化、在线流程和离线进化。
+<td width="50%" valign="top">
+<strong>Local Runtime, Modular Algorithms</strong><br>
+SQLite 和 LanceDB 让检索保持本地化；EverAlgo 提供可复用的记忆算法，支撑在线与离线进化。
 </td>
 </tr>
 </table>
