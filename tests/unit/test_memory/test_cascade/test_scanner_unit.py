@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from everos.core.persistence import MemoryRoot
+from everos.memory.cascade import scanner as scanner_module
 from everos.memory.cascade.scanner import CascadeScanner, _collect_scan_inputs
 
 
@@ -112,16 +113,26 @@ async def test_run_loop_swallows_scan_exception(
     scanner = CascadeScanner(mr, scan_interval_seconds=0.05)
 
     call_count = {"n": 0}
+    second_scan = asyncio.Event()
+    logged_errors: list[str] = []
 
     async def fake_scan() -> list:  # type: ignore[type-arg]
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise RuntimeError("simulated scanner failure")
+        second_scan.set()
         return []
 
+    def fake_exception(_event: str, *, error: str) -> None:
+        logged_errors.append(error)
+
     monkeypatch.setattr(scanner, "scan_once", fake_scan)
+    monkeypatch.setattr(scanner_module.logger, "exception", fake_exception)
     await scanner.start()
-    # Let the loop iterate at least twice (interval is 50ms).
-    await asyncio.sleep(0.2)
-    await scanner.stop()
+    try:
+        await asyncio.wait_for(second_scan.wait(), timeout=1.0)
+    finally:
+        await scanner.stop()
+
+    assert logged_errors == ["simulated scanner failure"]
     assert call_count["n"] >= 2  # second call ran despite first throwing
