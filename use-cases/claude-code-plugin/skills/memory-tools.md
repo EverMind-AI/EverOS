@@ -9,8 +9,7 @@ You have access to memory tools that can recall context from the user's past cod
 
 ## Available Tools
 
-- **search_memories**: Search past conversations using semantic + keyword matching
-- **get_memory**: Retrieve full details of a specific memory by ID
+- **evermem_search**: Search past conversations using semantic + keyword matching. Params: `query` (required), `limit` (default 10, max 20)
 
 ## When to Use Memory Search
 

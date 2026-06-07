@@ -204,7 +204,7 @@ Lives in `LanceDBSettings`; overridable via the
 `EVEROS_LANCEDB__INDEX_CACHE_SIZE_BYTES` environment variable. This
 is the only knob that bounds the steady-state file-descriptor count
 of a long-running EverOS daemon — see
-[Recovery paths § FD exhaustion](#fd-exhaustion-os-error-24-emfile)
+[Recovery paths § FD exhaustion](#fd-exhaustion-os-error-24--emfile)
 for why nothing else (prune, rebuild, `drop_index`) helps.
 
 Measured cap → FD ceiling (30 add+optimize cycles + 100-query stress

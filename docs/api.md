@@ -793,7 +793,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 | `sender_id` | `string` | Original sender id from `/add` |
 | `sender_name` | `string \| null` | Original sender name; `null` if not provided |
 | `role` | `"user" \| "assistant" \| "tool"` | Original role |
-| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#addmessage)) |
+| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#messageitem)) |
 | `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
 | `tool_calls` | `array<object> \| null` | Original tool_calls payload if any |
 | `tool_call_id` | `string \| null` | Original tool_call_id if any |
