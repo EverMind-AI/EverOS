@@ -277,7 +277,7 @@ quietly alongside.
 
 ## Features
 
-- **Hybrid retrieval**: BM25 + vector (HNSW/IVF-PQ) + scalar filter, single-query in LanceDB
+- **Hybrid retrieval**: BM25 + cosine vector ANN + scalar filters, backed by LanceDB
 - **Cascade index sync**: edit a `.md` → file watcher → entry-level diff → LanceDB sync, sub-second
 - **Multi-source extraction**: conversations / agent trajectories / file knowledge
 - **Dual-track memory**: user-track (Episodes / Profiles) + agent-track (Cases / Skills)
