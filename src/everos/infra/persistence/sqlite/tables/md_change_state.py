@@ -13,9 +13,11 @@ DD-12; the four indexes below are required by ``13_cascade_design.md``
 
 from __future__ import annotations
 
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy import Index, text
 
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
+from everos.core.enums import ChangeKind, ChangeStatus, ChangeType
 from everos.core.persistence.sqlite import BaseTable, Field
 from everos.core.persistence.sqlite.base import UtcDateTimeColumn
 
@@ -58,13 +60,19 @@ class MdChangeState(BaseTable, table=True):
     """Path relative to the memory-root (e.g. ``users/u_jason/
     episodes/episode-2026-05-12.md``). Every reverse-link anchors here."""
 
-    kind: str = Field(nullable=False, index=True)
-    """Kind registry name (e.g. ``"episode"``); worker dispatches the
-    matching handler."""
+    kind: ChangeKind = Field(
+        nullable=False,
+        index=True,
+        sa_type=SAEnum(ChangeKind, values_callable=lambda e: [x.value for x in e]),
+    )
+    """Kind registry name; worker dispatches the matching handler."""
 
-    change_type: str = Field(nullable=False)
-    """``"added"`` | ``"modified"`` | ``"deleted"``. A hint for the
-    worker — handler re-derives truth from the actual file state."""
+    change_type: ChangeType = Field(
+        nullable=False,
+        sa_type=SAEnum(ChangeType, values_callable=lambda e: [x.value for x in e]),
+    )
+    """A hint for the worker — handler re-derives truth from the
+    actual file state."""
 
     mtime: float = Field(default=0.0, nullable=False)
     """File mtime captured when the row was last UPSERTed. Scanner
@@ -85,16 +93,13 @@ class MdChangeState(BaseTable, table=True):
     processes pending rows in ascending lsn order; the gap between
     ``MAX(lsn)`` and the last processed lsn is the queue lag."""
 
-    status: str = Field(default="pending", nullable=False, index=True)
-    """Lifecycle:
-
-    - ``"pending"`` — waiting for the worker.
-    - ``"processing"`` — claimed by a worker (internal; CLI rolls into
-      pending for display).
-    - ``"done"`` — handler completed successfully.
-    - ``"failed"`` — handler exhausted retries or hit an
-      unrecoverable error (see :attr:`retryable`).
-    """
+    status: ChangeStatus = Field(
+        default=ChangeStatus.PENDING,
+        nullable=False,
+        index=True,
+        sa_type=SAEnum(ChangeStatus, values_callable=lambda e: [x.value for x in e]),
+    )
+    """Lifecycle: ``PENDING`` → ``PROCESSING`` → ``DONE`` | ``FAILED``."""
 
     retryable: bool | None = Field(default=None)
     """Meaningful only when ``status='failed'``.

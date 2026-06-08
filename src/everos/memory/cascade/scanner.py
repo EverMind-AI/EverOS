@@ -36,7 +36,7 @@ from everos.infra.persistence.sqlite import (
 
 from .reconciler import PriorState, reconcile
 from .registry import KIND_REGISTRY
-from .types import ReconcileDecision, ScanInput
+from .types import ChangeType, ReconcileDecision, ScanInput
 
 logger = get_logger(__name__)
 
@@ -95,9 +95,13 @@ class CascadeScanner:
             logger.info(
                 "cascade_scanner_decisions",
                 count=len(decisions),
-                added=sum(1 for d in decisions if d.change_type == "added"),
-                modified=sum(1 for d in decisions if d.change_type == "modified"),
-                deleted=sum(1 for d in decisions if d.change_type == "deleted"),
+                added=sum(1 for d in decisions if d.change_type == ChangeType.ADDED),
+                modified=sum(
+                    1 for d in decisions if d.change_type == ChangeType.MODIFIED
+                ),
+                deleted=sum(
+                    1 for d in decisions if d.change_type == ChangeType.DELETED
+                ),
             )
         return decisions
 

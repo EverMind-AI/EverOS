@@ -490,6 +490,78 @@ async def test_recover_orphan_processing_only_touches_processing_rows(
 # ── Partial indexes (smoke) ─────────────────────────────────────────────
 
 
+# ── StrEnum validation ───────────────────────────────────────────────────
+
+
+async def test_upsert_rejects_invalid_kind(repo: _MdChangeStateRepo) -> None:
+    """An invalid kind value must be rejected by Pydantic validation."""
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeKind,
+    )
+
+    # Verify the enum accepts valid values.
+    assert ChangeKind("episode") == ChangeKind.EPISODE
+
+    # Verify the enum rejects invalid values.
+    with pytest.raises(ValueError, match="'epsiode'"):
+        ChangeKind("epsiode")
+
+
+async def test_upsert_rejects_invalid_change_type(
+    repo: _MdChangeStateRepo,
+) -> None:
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeType,
+    )
+
+    assert ChangeType("added") == ChangeType.ADDED
+    with pytest.raises(ValueError, match="'addded'"):
+        ChangeType("addded")
+
+
+async def test_upsert_rejects_invalid_status(
+    repo: _MdChangeStateRepo,
+) -> None:
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeStatus,
+    )
+
+    assert ChangeStatus("pending") == ChangeStatus.PENDING
+    with pytest.raises(ValueError, match="'pendig'"):
+        ChangeStatus("pendig")
+
+
+async def test_enum_values_match_documented_strings(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Enum values must match the strings documented in the docstrings."""
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeKind,
+        ChangeStatus,
+        ChangeType,
+    )
+
+    assert set(ChangeKind) == {
+        ChangeKind.EPISODE,
+        ChangeKind.ATOMIC_FACT,
+        ChangeKind.FORESIGHT,
+        ChangeKind.AGENT_CASE,
+        ChangeKind.AGENT_SKILL,
+        ChangeKind.USER_PROFILE,
+    }
+    assert set(ChangeType) == {
+        ChangeType.ADDED,
+        ChangeType.MODIFIED,
+        ChangeType.DELETED,
+    }
+    assert set(ChangeStatus) == {
+        ChangeStatus.PENDING,
+        ChangeStatus.PROCESSING,
+        ChangeStatus.DONE,
+        ChangeStatus.FAILED,
+    }
+
+
 async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
     """The three partial / mtime indexes from the schema land in sqlite_master."""
     async with repo.session_factory() as s:
@@ -506,3 +578,40 @@ async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
         "idx_md_change_kind",
     ):
         assert expected in names, f"missing index {expected!r}; got {names!r}"
+
+
+async def test_db_stores_lowercase_enum_values(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Raw SQLite values must be lowercase (matching pre-StrEnum rows).
+
+    SQLAlchemy's ``Enum`` stores the *name* by default (e.g. ``EPISODE``).
+    Our ``values_callable`` forces it to store the *value* (``episode``)
+    so partial indexes and existing data keep working.
+    """
+    from sqlalchemy import text
+
+    await repo.upsert(
+        "users/u/episodes/episode-2026-05-12.md",
+        kind="episode",
+        change_type="added",
+        mtime=1.0,
+    )
+
+    async with repo.session_factory() as s:
+        result = await s.execute(
+            text(
+                "SELECT kind, change_type, status "
+                "FROM md_change_state "
+                "WHERE md_path = 'users/u/episodes/episode-2026-05-12.md'"
+            )
+        )
+        row = result.one()
+
+    assert row.kind == "episode", f"kind stored as {row.kind!r}, expected 'episode'"
+    assert row.change_type == "added", (
+        f"change_type stored as {row.change_type!r}, expected 'added'"
+    )
+    assert row.status == "pending", (
+        f"status stored as {row.status!r}, expected 'pending'"
+    )
