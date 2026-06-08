@@ -13,11 +13,54 @@ DD-12; the four indexes below are required by ``13_cascade_design.md``
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from sqlalchemy import Index, text
 
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
 from everos.core.persistence.sqlite import BaseTable, Field
 from everos.core.persistence.sqlite.base import UtcDateTimeColumn
+
+
+class ChangeKind(StrEnum):
+    """Registered cascade handler kinds.
+
+    Each value corresponds to a :class:`Handler` subclass's ``kind``
+    class attribute in :mod:`everos.memory.cascade.handlers`.
+    """
+
+    EPISODE = "episode"
+    ATOMIC_FACT = "atomic_fact"
+    FORESIGHT = "foresight"
+    AGENT_CASE = "agent_case"
+    AGENT_SKILL = "agent_skill"
+    USER_PROFILE = "user_profile"
+
+
+class ChangeType(StrEnum):
+    """Lifecycle hint for a single md path's work-queue row.
+
+    The handler re-derives truth from the actual file state at run
+    time (DD-3 in 12 doc); this field is a dispatch hint only.
+    """
+
+    ADDED = "added"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+
+
+class ChangeStatus(StrEnum):
+    """Work-queue row lifecycle.
+
+    ``PROCESSING`` is an internal claim state used by
+    :meth:`MdChangeStateRepo.claim_one`; CLI output rolls it back
+    into ``PENDING`` for display (16 doc §4.2 — DD-12).
+    """
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    DONE = "done"
+    FAILED = "failed"
 
 
 class MdChangeState(BaseTable, table=True):
@@ -58,13 +101,12 @@ class MdChangeState(BaseTable, table=True):
     """Path relative to the memory-root (e.g. ``users/u_jason/
     episodes/episode-2026-05-12.md``). Every reverse-link anchors here."""
 
-    kind: str = Field(nullable=False, index=True)
-    """Kind registry name (e.g. ``"episode"``); worker dispatches the
-    matching handler."""
+    kind: ChangeKind = Field(nullable=False, index=True)
+    """Kind registry name; worker dispatches the matching handler."""
 
-    change_type: str = Field(nullable=False)
-    """``"added"`` | ``"modified"`` | ``"deleted"``. A hint for the
-    worker — handler re-derives truth from the actual file state."""
+    change_type: ChangeType = Field(nullable=False)
+    """A hint for the worker — handler re-derives truth from the
+    actual file state."""
 
     mtime: float = Field(default=0.0, nullable=False)
     """File mtime captured when the row was last UPSERTed. Scanner
@@ -85,16 +127,10 @@ class MdChangeState(BaseTable, table=True):
     processes pending rows in ascending lsn order; the gap between
     ``MAX(lsn)`` and the last processed lsn is the queue lag."""
 
-    status: str = Field(default="pending", nullable=False, index=True)
-    """Lifecycle:
-
-    - ``"pending"`` — waiting for the worker.
-    - ``"processing"`` — claimed by a worker (internal; CLI rolls into
-      pending for display).
-    - ``"done"`` — handler completed successfully.
-    - ``"failed"`` — handler exhausted retries or hit an
-      unrecoverable error (see :attr:`retryable`).
-    """
+    status: ChangeStatus = Field(
+        default=ChangeStatus.PENDING, nullable=False, index=True
+    )
+    """Lifecycle: ``PENDING`` → ``PROCESSING`` → ``DONE`` | ``FAILED``."""
 
     retryable: bool | None = Field(default=None)
     """Meaningful only when ``status='failed'``.

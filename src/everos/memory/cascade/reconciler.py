@@ -29,7 +29,13 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterable, Mapping
 
-from .types import ReconcileDecision, ScanInput
+from .types import (
+    ChangeKind,
+    ChangeStatus,
+    ChangeType,
+    ReconcileDecision,
+    ScanInput,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,10 +48,10 @@ class PriorState:
     """
 
     md_path: str
-    kind: str
+    kind: ChangeKind
     mtime: float
-    status: str  # "pending" | "processing" | "done" | "failed"
-    change_type: str  # "added" | "modified" | "deleted"
+    status: ChangeStatus
+    change_type: ChangeType
 
 
 def reconcile(
@@ -76,19 +82,19 @@ def reconcile(
                 ReconcileDecision(
                     md_path=item.md_path,
                     kind=item.kind,
-                    change_type="added",
+                    change_type=ChangeType.ADDED,
                     mtime=item.mtime,
                 )
             )
             continue
         # Skip when the row is already done and mtime hasn't moved.
-        if prior.status == "done" and prior.mtime == item.mtime:
+        if prior.status == ChangeStatus.DONE and prior.mtime == item.mtime:
             continue
         decisions.append(
             ReconcileDecision(
                 md_path=item.md_path,
                 kind=item.kind,
-                change_type="modified",
+                change_type=ChangeType.MODIFIED,
                 mtime=item.mtime,
             )
         )
@@ -102,13 +108,15 @@ def reconcile(
         # 'modified' means the watcher missed the subsequent unlink —
         # without re-emitting 'deleted' here the scanner would never
         # recover the stale LanceDB rows.
-        if prior.status == "done" and prior.change_type == "deleted":
+        done = prior.status == ChangeStatus.DONE
+        deleted = prior.change_type == ChangeType.DELETED
+        if done and deleted:
             continue
         decisions.append(
             ReconcileDecision(
                 md_path=path,
                 kind=prior.kind,
-                change_type="deleted",
+                change_type=ChangeType.DELETED,
                 mtime=prior.mtime,
             )
         )

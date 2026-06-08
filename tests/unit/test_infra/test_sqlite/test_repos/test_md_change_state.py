@@ -490,6 +490,78 @@ async def test_recover_orphan_processing_only_touches_processing_rows(
 # ── Partial indexes (smoke) ─────────────────────────────────────────────
 
 
+# ── StrEnum validation ───────────────────────────────────────────────────
+
+
+async def test_upsert_rejects_invalid_kind(repo: _MdChangeStateRepo) -> None:
+    """An invalid kind value must be rejected by Pydantic validation."""
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeKind,
+    )
+
+    # Verify the enum accepts valid values.
+    assert ChangeKind("episode") == ChangeKind.EPISODE
+
+    # Verify the enum rejects invalid values.
+    with pytest.raises(ValueError, match="'epsiode'"):
+        ChangeKind("epsiode")
+
+
+async def test_upsert_rejects_invalid_change_type(
+    repo: _MdChangeStateRepo,
+) -> None:
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeType,
+    )
+
+    assert ChangeType("added") == ChangeType.ADDED
+    with pytest.raises(ValueError, match="'addded'"):
+        ChangeType("addded")
+
+
+async def test_upsert_rejects_invalid_status(
+    repo: _MdChangeStateRepo,
+) -> None:
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeStatus,
+    )
+
+    assert ChangeStatus("pending") == ChangeStatus.PENDING
+    with pytest.raises(ValueError, match="'pendig'"):
+        ChangeStatus("pendig")
+
+
+async def test_enum_values_match_documented_strings(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Enum values must match the strings documented in the docstrings."""
+    from everos.infra.persistence.sqlite.tables.md_change_state import (
+        ChangeKind,
+        ChangeStatus,
+        ChangeType,
+    )
+
+    assert set(ChangeKind) == {
+        ChangeKind.EPISODE,
+        ChangeKind.ATOMIC_FACT,
+        ChangeKind.FORESIGHT,
+        ChangeKind.AGENT_CASE,
+        ChangeKind.AGENT_SKILL,
+        ChangeKind.USER_PROFILE,
+    }
+    assert set(ChangeType) == {
+        ChangeType.ADDED,
+        ChangeType.MODIFIED,
+        ChangeType.DELETED,
+    }
+    assert set(ChangeStatus) == {
+        ChangeStatus.PENDING,
+        ChangeStatus.PROCESSING,
+        ChangeStatus.DONE,
+        ChangeStatus.FAILED,
+    }
+
+
 async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
     """The three partial / mtime indexes from the schema land in sqlite_master."""
     async with repo.session_factory() as s:

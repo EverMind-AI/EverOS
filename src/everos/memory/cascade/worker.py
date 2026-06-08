@@ -49,6 +49,7 @@ from everos.infra.persistence.sqlite import MdChangeState, md_change_state_repo
 
 from .errors import RecoverableError
 from .handlers import Handler
+from .types import ChangeType
 
 logger = get_logger(__name__)
 
@@ -307,7 +308,7 @@ class CascadeWorker:
         last_error: str = ""
         for attempt in range(self._max_retry + 1):
             try:
-                if row.change_type == "deleted":
+                if row.change_type == ChangeType.DELETED:
                     outcome = await handler.handle_deleted(row.md_path)
                 else:
                     outcome = await handler.handle_added_or_modified(row.md_path)

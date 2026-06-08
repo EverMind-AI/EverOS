@@ -968,7 +968,7 @@ def test_typedec_covers_orm_session_add(
             s.add(
                 MdChangeState(
                     md_path="p_orm",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=1,
@@ -1007,7 +1007,7 @@ def test_typedec_covers_core_insert_values(
             await s.execute(
                 insert(MdChangeState).values(
                     md_path="p_core_ins",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=2,
@@ -1049,7 +1049,7 @@ def test_typedec_covers_core_update_values(
             s.add(
                 MdChangeState(
                     md_path="p_upd",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=3,
@@ -1092,7 +1092,7 @@ def test_typedec_aware_utc_input_is_idempotent(
             s.add(
                 MdChangeState(
                     md_path="p_utc",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=4,
@@ -1144,7 +1144,7 @@ def test_typedec_naive_input_treated_as_utc(
             s.add(
                 MdChangeState(
                     md_path="p_naive",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=5,
@@ -1184,7 +1184,7 @@ def test_typedec_microsecond_precision_preserved(
             s.add(
                 MdChangeState(
                     md_path="p_us",
-                    kind="ep",
+                    kind="episode",
                     change_type="added",
                     mtime=0.0,
                     lsn=6,
@@ -1227,7 +1227,7 @@ def test_typedec_extreme_dates_round_trip(
                 [
                     MdChangeState(
                         md_path="p_1970",
-                        kind="ep",
+                        kind="episode",
                         change_type="added",
                         mtime=0.0,
                         lsn=7,
@@ -1235,7 +1235,7 @@ def test_typedec_extreme_dates_round_trip(
                     ),
                     MdChangeState(
                         md_path="p_2099",
-                        kind="ep",
+                        kind="episode",
                         change_type="added",
                         mtime=0.0,
                         lsn=8,
@@ -1292,7 +1292,7 @@ def test_typedec_dst_boundary_round_trip(
                 [
                     MdChangeState(
                         md_path="p_pre",
-                        kind="ep",
+                        kind="episode",
                         change_type="added",
                         mtime=0.0,
                         lsn=9,
@@ -1300,7 +1300,7 @@ def test_typedec_dst_boundary_round_trip(
                     ),
                     MdChangeState(
                         md_path="p_post",
-                        kind="ep",
+                        kind="episode",
                         change_type="added",
                         mtime=0.0,
                         lsn=10,

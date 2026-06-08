@@ -38,6 +38,7 @@ from everos.core.persistence.sqlite import RepoBase, session_scope
 
 from ..sqlite_manager import get_session_factory
 from ..tables import MdChangeState
+from ..tables.md_change_state import ChangeKind, ChangeStatus, ChangeType
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,8 +83,8 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         self,
         md_path: str,
         *,
-        kind: str,
-        change_type: str,
+        kind: ChangeKind | str,
+        change_type: ChangeType | str,
         mtime: float,
     ) -> int:
         """Enqueue or re-enqueue ``md_path``; return the assigned LSN.
@@ -117,7 +118,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                     first_seen_at=now,
                     last_changed_at=now,
                     lsn=new_lsn,
-                    status="pending",
+                    status=ChangeStatus.PENDING,
                     retryable=None,
                     last_attempt_at=None,
                     retry_count=0,
@@ -131,7 +132,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                         "mtime": mtime,
                         "last_changed_at": now,
                         "lsn": new_lsn,
-                        "status": "pending",
+                        "status": ChangeStatus.PENDING,
                         "retryable": None,
                         "last_attempt_at": None,
                         "retry_count": 0,
@@ -143,7 +144,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             await s.commit()
             return new_lsn
 
-    async def force_enqueue(self, md_path: str, kind: str) -> int:
+    async def force_enqueue(self, md_path: str, kind: ChangeKind | str) -> int:
         """`cascade sync --path` entry: re-enqueue regardless of status.
 
         Semantically the same as :meth:`upsert` with ``change_type
@@ -153,7 +154,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         return await self.upsert(
             md_path,
             kind=kind,
-            change_type="modified",
+            change_type=ChangeType.MODIFIED,
             mtime=0.0,
         )
 
@@ -172,8 +173,8 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             result = await s.execute(
                 update(MdChangeState)
                 .where(MdChangeState.md_path == md_path)
-                .where(MdChangeState.status == "pending")
-                .values(status="processing", last_attempt_at=now)
+                .where(MdChangeState.status == ChangeStatus.PENDING)
+                .values(status=ChangeStatus.PROCESSING, last_attempt_at=now)
             )
             await s.commit()
             if result.rowcount != 1:
@@ -197,7 +198,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                 (
                     await s.execute(
                         select(MdChangeState.md_path)
-                        .where(MdChangeState.status == "pending")
+                        .where(MdChangeState.status == ChangeStatus.PENDING)
                         .order_by(MdChangeState.lsn)
                         .limit(limit)
                     )
@@ -210,8 +211,8 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             update_result = await s.execute(
                 update(MdChangeState)
                 .where(MdChangeState.md_path.in_(picks))
-                .where(MdChangeState.status == "pending")
-                .values(status="processing", last_attempt_at=now)
+                .where(MdChangeState.status == ChangeStatus.PENDING)
+                .values(status=ChangeStatus.PROCESSING, last_attempt_at=now)
             )
             await s.commit()
             if update_result.rowcount == 0:
@@ -221,7 +222,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                     await s.execute(
                         select(MdChangeState)
                         .where(MdChangeState.md_path.in_(picks))
-                        .where(MdChangeState.status == "processing")
+                        .where(MdChangeState.status == ChangeStatus.PROCESSING)
                         .order_by(MdChangeState.lsn)
                     )
                 )
@@ -248,9 +249,9 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             await s.execute(
                 update(MdChangeState)
                 .where(MdChangeState.md_path == md_path)
-                .where(MdChangeState.status == "processing")
+                .where(MdChangeState.status == ChangeStatus.PROCESSING)
                 .values(
-                    status="done",
+                    status=ChangeStatus.DONE,
                     last_attempt_at=now,
                     error=None,
                     retryable=None,
@@ -294,9 +295,9 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             await s.execute(
                 update(MdChangeState)
                 .where(MdChangeState.md_path == md_path)
-                .where(MdChangeState.status == "processing")
+                .where(MdChangeState.status == ChangeStatus.PROCESSING)
                 .values(
-                    status="failed",
+                    status=ChangeStatus.FAILED,
                     retryable=retryable,
                     last_attempt_at=now,
                     error=error,
@@ -319,8 +320,8 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         async with session_scope(self._factory) as s:
             result = await s.execute(
                 update(MdChangeState)
-                .where(MdChangeState.status == "processing")
-                .values(status="pending", last_attempt_at=None)
+                .where(MdChangeState.status == ChangeStatus.PROCESSING)
+                .values(status=ChangeStatus.PENDING, last_attempt_at=None)
             )
             await s.commit()
             return int(result.rowcount or 0)
@@ -338,7 +339,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                 (
                     await s.execute(
                         select(MdChangeState)
-                        .where(MdChangeState.status == "failed")
+                        .where(MdChangeState.status == ChangeStatus.FAILED)
                         .order_by(MdChangeState.lsn)
                     )
                 )
@@ -361,10 +362,10 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         async with session_scope(self._factory) as s:
             result = await s.execute(
                 update(MdChangeState)
-                .where(MdChangeState.status == "failed")
+                .where(MdChangeState.status == ChangeStatus.FAILED)
                 .where(MdChangeState.retryable.is_(True))
                 .values(
-                    status="pending",
+                    status=ChangeStatus.PENDING,
                     retryable=None,
                     retry_count=0,
                     error=None,
@@ -378,17 +379,20 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         """Aggregate the table for the ``cascade status`` CLI."""
         async with session_scope(self._factory) as s:
             pending = await _count_where(
-                s, MdChangeState.status.in_(["pending", "processing"])
+                s,
+                MdChangeState.status.in_(
+                    [ChangeStatus.PENDING, ChangeStatus.PROCESSING]
+                ),
             )
-            done = await _count_where(s, MdChangeState.status == "done")
+            done = await _count_where(s, MdChangeState.status == ChangeStatus.DONE)
             failed_retryable = await _count_where(
                 s,
-                (MdChangeState.status == "failed")
+                (MdChangeState.status == ChangeStatus.FAILED)
                 & (MdChangeState.retryable.is_(True)),
             )
             failed_permanent = await _count_where(
                 s,
-                (MdChangeState.status == "failed")
+                (MdChangeState.status == ChangeStatus.FAILED)
                 & (MdChangeState.retryable.is_(False)),
             )
             max_lsn_stmt = select(func.coalesce(func.max(MdChangeState.lsn), 0))
@@ -397,7 +401,9 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                 (
                     await s.execute(
                         select(func.coalesce(func.max(MdChangeState.lsn), 0)).where(
-                            MdChangeState.status.in_(["done", "failed"])
+                            MdChangeState.status.in_(
+                                [ChangeStatus.DONE, ChangeStatus.FAILED]
+                            )
                         )
                     )
                 ).scalar_one()

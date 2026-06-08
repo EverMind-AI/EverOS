@@ -8,9 +8,21 @@ unit-test without an event loop or IO mocks.
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal
 
-ChangeType = Literal["added", "modified", "deleted"]
+from everos.infra.persistence.sqlite.tables.md_change_state import (
+    ChangeKind,
+    ChangeStatus,
+    ChangeType,
+)
+
+__all__ = [
+    "ChangeKind",
+    "ChangeStatus",
+    "ChangeType",
+    "HandlerOutcome",
+    "ReconcileDecision",
+    "ScanInput",
+]
 
 
 @dataclasses.dataclass(frozen=True)
