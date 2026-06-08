@@ -13,6 +13,7 @@ DD-12; the four indexes below are required by ``13_cascade_design.md``
 
 from __future__ import annotations
 
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy import Index, text
 
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
@@ -59,10 +60,17 @@ class MdChangeState(BaseTable, table=True):
     """Path relative to the memory-root (e.g. ``users/u_jason/
     episodes/episode-2026-05-12.md``). Every reverse-link anchors here."""
 
-    kind: ChangeKind = Field(nullable=False, index=True)
+    kind: ChangeKind = Field(
+        nullable=False,
+        index=True,
+        sa_type=SAEnum(ChangeKind, values_callable=lambda e: [x.value for x in e]),
+    )
     """Kind registry name; worker dispatches the matching handler."""
 
-    change_type: ChangeType = Field(nullable=False)
+    change_type: ChangeType = Field(
+        nullable=False,
+        sa_type=SAEnum(ChangeType, values_callable=lambda e: [x.value for x in e]),
+    )
     """A hint for the worker — handler re-derives truth from the
     actual file state."""
 
@@ -86,7 +94,10 @@ class MdChangeState(BaseTable, table=True):
     ``MAX(lsn)`` and the last processed lsn is the queue lag."""
 
     status: ChangeStatus = Field(
-        default=ChangeStatus.PENDING, nullable=False, index=True
+        default=ChangeStatus.PENDING,
+        nullable=False,
+        index=True,
+        sa_type=SAEnum(ChangeStatus, values_callable=lambda e: [x.value for x in e]),
     )
     """Lifecycle: ``PENDING`` → ``PROCESSING`` → ``DONE`` | ``FAILED``."""
 

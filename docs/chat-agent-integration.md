@@ -127,10 +127,18 @@ documented in [api.md](api.md#post-apiv1memorysearch).
           "type": "string",
           "description": "Search query — what to look for in past memories. Be specific."
         },
+        "user_id": {
+          "type": "string",
+          "description": "Memory owner (user). Set exactly one of user_id or agent_id."
+        },
+        "agent_id": {
+          "type": "string",
+          "description": "Memory owner (agent). Set exactly one of user_id or agent_id."
+        },
         "top_k": {
           "type": "integer",
-          "default": 10,
-          "description": "Maximum number of results to return. -1 for server default."
+          "default": -1,
+          "description": "Maximum results. -1 uses server default."
         },
         "filters": {
           "type": "object",
@@ -158,6 +166,11 @@ documented in [api.md](api.md#post-apiv1memorysearch).
   }
 }
 ```
+
+> **Note:** The `/search` endpoint requires exactly one of `user_id` or
+> `agent_id`. Both are omitted from `required` above because JSON Schema
+> does not support XOR constraints. The server returns 422 if neither or
+> both are set.
 
 ### MCP Tool Reference
 

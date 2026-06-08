@@ -578,3 +578,40 @@ async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
         "idx_md_change_kind",
     ):
         assert expected in names, f"missing index {expected!r}; got {names!r}"
+
+
+async def test_db_stores_lowercase_enum_values(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Raw SQLite values must be lowercase (matching pre-StrEnum rows).
+
+    SQLAlchemy's ``Enum`` stores the *name* by default (e.g. ``EPISODE``).
+    Our ``values_callable`` forces it to store the *value* (``episode``)
+    so partial indexes and existing data keep working.
+    """
+    from sqlalchemy import text
+
+    await repo.upsert(
+        "users/u/episodes/episode-2026-05-12.md",
+        kind="episode",
+        change_type="added",
+        mtime=1.0,
+    )
+
+    async with repo.session_factory() as s:
+        result = await s.execute(
+            text(
+                "SELECT kind, change_type, status "
+                "FROM md_change_state "
+                "WHERE md_path = 'users/u/episodes/episode-2026-05-12.md'"
+            )
+        )
+        row = result.one()
+
+    assert row.kind == "episode", f"kind stored as {row.kind!r}, expected 'episode'"
+    assert row.change_type == "added", (
+        f"change_type stored as {row.change_type!r}, expected 'added'"
+    )
+    assert row.status == "pending", (
+        f"status stored as {row.status!r}, expected 'pending'"
+    )
