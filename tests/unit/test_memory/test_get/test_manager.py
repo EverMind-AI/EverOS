@@ -319,32 +319,88 @@ async def test_agent_case_populates_agent_cases(
 
 async def test_agent_skill_sort_by_silently_overridden_to_updated_at(
     manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``agent_skill`` always sorts by ``updated_at`` (no ``timestamp`` column)."""
+    """``agent_skill`` always sorts by ``updated_at`` (no ``timestamp`` column).
+
+    The override is observable: a structured warning is emitted and the
+    actual sort column is surfaced in ``response.data.effective_sort``
+    so the caller can diff against their request to detect the change.
+    """
+    from unittest.mock import MagicMock
+
     mgr, _, _, sk = manager
     sk.rows = [_agent_skill_row("planner")]
     sk.total = 1
     req = GetRequest(
         agent_id="a1",
         memory_type=GetMemoryType.AGENT_SKILL,
-        # User passes the default — should be silently downgraded.
+        # User passes the default — must be downgraded + made observable.
         sort_by="timestamp",
     )
+    # Patch the module-level structlog logger so we can assert the call
+    # directly (structlog + pytest caplog interaction is brittle).
+    fake_logger = MagicMock()
+    monkeypatch.setattr("everos.memory.get.manager.logger", fake_logger)
     resp = await mgr.get(req)
     assert sk.last.sort_by == "updated_at"
     assert resp.data.total_count == 1
     assert resp.data.agent_skills[0].name == "planner"
+    # The override is now observable in the response DTO.
+    assert resp.data.effective_sort == "updated_at"
+    assert resp.data.effective_sort != req.sort_by
+    # And a structured warning was emitted (structlog: event name + kwargs).
+    assert fake_logger.warning.call_count == 1
+    call_args = fake_logger.warning.call_args
+    assert call_args.args[0] == "get.sort_by.downgraded"
+    kw = call_args.kwargs
+    assert kw["memory_type"] == "agent_skill"
+    assert kw["requested_sort_by"] == "timestamp"
+    assert kw["effective_sort_by"] == "updated_at"
+    assert kw["owner_id"] == "a1"
+    assert isinstance(kw["request_id"], str) and len(kw["request_id"]) == 32
 
 
 async def test_agent_skill_explicit_updated_at_is_respected(
     manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``updated_at`` passes through unchanged (no double-override surprise)."""
+    """``updated_at`` passes through unchanged — and emits no warning."""
+    from unittest.mock import MagicMock
+
     mgr, _, _, sk = manager
     req = GetRequest(
         agent_id="a1",
         memory_type=GetMemoryType.AGENT_SKILL,
         sort_by="updated_at",
     )
-    await mgr.get(req)
+    fake_logger = MagicMock()
+    monkeypatch.setattr("everos.memory.get.manager.logger", fake_logger)
+    resp = await mgr.get(req)
     assert sk.last.sort_by == "updated_at"
+    # No downgrade happened — DTO echoes the request and no warning fires.
+    assert resp.data.effective_sort == "updated_at"
+    assert fake_logger.warning.call_count == 0
+
+
+async def test_other_kinds_surface_effective_sort(
+    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+) -> None:
+    """For kinds that have a ``timestamp`` column, ``effective_sort``
+    echoes the request verbatim — there's nothing to override."""
+    mgr, ep, ac, _ = manager
+    ep.rows = [_episode_row("ep_1")]
+    ep.total = 1
+    ac.rows = [_agent_case_row("ac_1")]
+    ac.total = 1
+
+    ep_resp = await mgr.get(
+        GetRequest(user_id="u1", memory_type=GetMemoryType.EPISODE, sort_by="timestamp")
+    )
+    assert ep_resp.data.effective_sort == "timestamp"
+
+    ac_req = GetRequest(
+        agent_id="a1", memory_type=GetMemoryType.AGENT_CASE, sort_by="updated_at"
+    )
+    ac_resp = await mgr.get(ac_req)
+    assert ac_resp.data.effective_sort == "updated_at"

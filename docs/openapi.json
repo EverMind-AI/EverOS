@@ -557,6 +557,17 @@
             "type": "integer",
             "title": "Count",
             "default": 0
+          },
+          "effective_sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Sort"
           }
         },
         "additionalProperties": false,
