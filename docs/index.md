@@ -37,6 +37,7 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
+| [chat-agent-integration.md](chat-agent-integration.md) | Chat Agent + EverOS integration guide — on-demand search, tool schema |
 
 ## Engineering / Internal
 

@@ -609,6 +609,11 @@ Hybrid retrieval over the memory store. Combines BM25, dense vector
 ANN, optional scalar filtering, optional cross-encoder rerank, and
 optional final LLM rerank. Returns ranked items grouped by kind.
 
+> **Integrating a Chat Agent?** See the
+> [Chat Agent Integration Guide](chat-agent-integration.md) for
+> recommended patterns (on-demand search vs per-turn RAG) and an
+> official tool schema.
+
 #### Request body
 
 | Field | Type | Required | Default | Constraints |
