@@ -9,11 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from everos.infra.persistence.sqlite.tables.md_change_state import (
-    ChangeKind,
-    ChangeStatus,
-    ChangeType,
-)
+from everos.core.enums import ChangeKind, ChangeStatus, ChangeType
 
 __all__ = [
     "ChangeKind",

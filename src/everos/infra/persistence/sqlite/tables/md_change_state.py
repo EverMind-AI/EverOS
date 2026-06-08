@@ -13,54 +13,12 @@ DD-12; the four indexes below are required by ``13_cascade_design.md``
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 from sqlalchemy import Index, text
 
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
+from everos.core.enums import ChangeKind, ChangeStatus, ChangeType
 from everos.core.persistence.sqlite import BaseTable, Field
 from everos.core.persistence.sqlite.base import UtcDateTimeColumn
-
-
-class ChangeKind(StrEnum):
-    """Registered cascade handler kinds.
-
-    Each value corresponds to a :class:`Handler` subclass's ``kind``
-    class attribute in :mod:`everos.memory.cascade.handlers`.
-    """
-
-    EPISODE = "episode"
-    ATOMIC_FACT = "atomic_fact"
-    FORESIGHT = "foresight"
-    AGENT_CASE = "agent_case"
-    AGENT_SKILL = "agent_skill"
-    USER_PROFILE = "user_profile"
-
-
-class ChangeType(StrEnum):
-    """Lifecycle hint for a single md path's work-queue row.
-
-    The handler re-derives truth from the actual file state at run
-    time (DD-3 in 12 doc); this field is a dispatch hint only.
-    """
-
-    ADDED = "added"
-    MODIFIED = "modified"
-    DELETED = "deleted"
-
-
-class ChangeStatus(StrEnum):
-    """Work-queue row lifecycle.
-
-    ``PROCESSING`` is an internal claim state used by
-    :meth:`MdChangeStateRepo.claim_one`; CLI output rolls it back
-    into ``PENDING`` for display (16 doc §4.2 — DD-12).
-    """
-
-    PENDING = "pending"
-    PROCESSING = "processing"
-    DONE = "done"
-    FAILED = "failed"
 
 
 class MdChangeState(BaseTable, table=True):
