@@ -37,6 +37,7 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
+| [multimodal.md](multimodal.md) | Ingest images, PDFs, audio, and office docs into memory |
 
 ## Engineering / Internal
 
