@@ -34,6 +34,8 @@ short-circuits low-quality cases internally via its own
 
 from __future__ import annotations
 
+import asyncio
+
 from everalgo.agent_memory import AgentSkillExtractor
 from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
@@ -86,6 +88,15 @@ too-aggressive cap here, nor overfilled by an unbounded lineage union
 when many top-K skills each carry a distinct ``source_case_ids`` list.
 Ranking is ``(quality_score desc, timestamp desc)`` — same ordering
 opensource ``AgentSkillExtractor._load_case_history`` applies."""
+
+CASE_VISIBILITY_ATTEMPTS = 6
+CASE_VISIBILITY_POLL_SECONDS = 0.2
+"""Bounded wait for cascade to surface the fresh AgentCase in LanceDB.
+
+``SkillClusterUpdated`` can arrive before the md→LanceDB write has
+become visible. A short local poll absorbs the normal watcher/indexer
+lag without consuming the whole OME retry budget in a tight loop.
+"""
 
 
 class _ClusterMissingError(RuntimeError):
@@ -198,16 +209,21 @@ async def _load_target_case(
     app_id: str,
     project_id: str,
 ) -> LanceAgentCase:
-    """Pull the target case row, raising a retry-class error on cascade lag."""
-    target = await agent_case_repo.find_by_owner_entry(
-        agent_id, case_entry_id, app_id=app_id, project_id=project_id
-    )
-    if target is None:
-        # Cascade hasn't indexed the freshly-written md yet.
-        raise _CaseNotYetIndexedError(
-            f"AgentCase entry_id={case_entry_id} not in LanceDB yet; retrying"
+    """Pull the target case row, allowing a short wait for cascade lag."""
+    for attempt in range(CASE_VISIBILITY_ATTEMPTS):
+        target = await agent_case_repo.find_by_owner_entry(
+            agent_id, case_entry_id, app_id=app_id, project_id=project_id
         )
-    return target
+        if target is not None:
+            return target
+        if attempt < CASE_VISIBILITY_ATTEMPTS - 1:
+            await asyncio.sleep(CASE_VISIBILITY_POLL_SECONDS)
+
+    raise _CaseNotYetIndexedError(
+        "AgentCase entry_id="
+        f"{case_entry_id} not in LanceDB after "
+        f"{CASE_VISIBILITY_ATTEMPTS} visibility checks; retrying"
+    )
 
 
 async def _select_existing_skills(

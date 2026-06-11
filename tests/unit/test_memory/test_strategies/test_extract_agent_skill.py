@@ -38,6 +38,7 @@ from everos.memory.strategies.extract_agent_skill import (
     _CaseNotYetIndexedError,
     _ClusterMissingError,
     _collect_supporting_entry_ids,
+    _load_target_case,
     _resolve_query_vector,
     _select_existing_skills,
     _select_supporting_cases,
@@ -161,11 +162,38 @@ async def test_raises_when_target_case_not_yet_in_lancedb() -> None:
         patch(
             "everos.memory.strategies.extract_agent_skill.agent_case_repo"
         ) as mock_case_repo,
+        patch("asyncio.sleep", new_callable=AsyncMock),
     ):
         mock_cluster_repo.get_with_members = AsyncMock(return_value=_algo_cluster())
         mock_case_repo.find_by_owner_entry = AsyncMock(return_value=None)
         with pytest.raises(_CaseNotYetIndexedError):
             await extract_agent_skill(_event(), FakeStrategyContext())
+
+
+async def test_load_target_case_waits_for_lancedb_visibility() -> None:
+    """Short cascade lag should not force an immediate retry/dead-letter."""
+    target = _lance_case("ac_20260517_0001")
+
+    with (
+        patch(
+            "everos.memory.strategies.extract_agent_skill.agent_case_repo"
+        ) as mock_case_repo,
+        patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+    ):
+        mock_case_repo.find_by_owner_entry = AsyncMock(
+            side_effect=[None, None, target]
+        )
+
+        got = await _load_target_case(
+            "agent_42",
+            "ac_20260517_0001",
+            app_id="default",
+            project_id="default",
+        )
+
+    assert got is target
+    assert mock_case_repo.find_by_owner_entry.await_count == 3
+    assert mock_sleep.await_count == 2
 
 
 # ── end-to-end orchestration (mocked) ────────────────────────────────────
