@@ -39,6 +39,7 @@ from everos.infra.ome.triggers import Immediate
 from everos.infra.persistence.markdown import AtomicFactWriter
 from everos.memory.events import UserPipelineStarted
 from everos.memory.models import AtomicFact
+from everos.memory.strategies._sender_utils import collect_user_sender_ids
 
 logger = get_logger(__name__)
 
@@ -63,7 +64,7 @@ async def extract_atomic_facts(
 ) -> None:
     # 1. List the user senders in this memcell; bail early if there are none.
     memcell = event.memcell
-    sender_ids = sorted({m.sender_id for m in memcell.items if m.role == "user"})
+    sender_ids = collect_user_sender_ids(memcell)
     if not sender_ids:
         logger.info(
             "atomic_facts_extracted",
