@@ -12,6 +12,7 @@ backend imports — the chassis stays portable.
 External usage::
 
     from everos.entrypoints.api.lifespans import (
+        BoundaryTokenizerLifespanProvider,
         LLMLifespanProvider,
         SqliteLifespanProvider,
         LanceDBLifespanProvider,
@@ -20,6 +21,9 @@ External usage::
     )
 """
 
+from .boundary_tokenizer import (
+    BoundaryTokenizerLifespanProvider as BoundaryTokenizerLifespanProvider,
+)
 from .cascade import CascadeLifespanProvider as CascadeLifespanProvider
 from .lancedb import LanceDBLifespanProvider as LanceDBLifespanProvider
 from .llm import LLMLifespanProvider as LLMLifespanProvider
@@ -27,6 +31,7 @@ from .ome import OmeLifespanProvider as OmeLifespanProvider
 from .sqlite import SqliteLifespanProvider as SqliteLifespanProvider
 
 __all__ = [
+    "BoundaryTokenizerLifespanProvider",
     "CascadeLifespanProvider",
     "LLMLifespanProvider",
     "LanceDBLifespanProvider",

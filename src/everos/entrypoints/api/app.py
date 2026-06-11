@@ -29,6 +29,7 @@ from everos.core.middleware import (
 from everos.core.observability.logging import get_logger
 
 from .lifespans import (
+    BoundaryTokenizerLifespanProvider,
     CascadeLifespanProvider,
     LanceDBLifespanProvider,
     LLMLifespanProvider,
@@ -67,7 +68,8 @@ def create_app(
         cors_allow_methods: Allowed CORS methods (default: ``["*"]``).
         cors_allow_headers: Allowed CORS headers (default: ``["*"]``).
         lifespan_providers: Optional list of LifespanProvider; defaults to
-            ``[MetricsLifespanProvider(), SqliteLifespanProvider(),
+            ``[MetricsLifespanProvider(), LLMLifespanProvider(),
+            BoundaryTokenizerLifespanProvider(), SqliteLifespanProvider(),
             LanceDBLifespanProvider(), CascadeLifespanProvider(),
             OmeLifespanProvider()]``.
 
@@ -80,6 +82,7 @@ def create_app(
         lifespan_providers = [
             MetricsLifespanProvider(),
             LLMLifespanProvider(),
+            BoundaryTokenizerLifespanProvider(),
             SqliteLifespanProvider(),
             LanceDBLifespanProvider(),
             CascadeLifespanProvider(),
