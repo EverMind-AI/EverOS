@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from everos import __version__
 from everos.core.lifespan import (
     LifespanProvider,
     MetricsLifespanProvider,
@@ -88,7 +89,7 @@ def create_app(
 
     app = FastAPI(
         title="everos",
-        version="0.1.0",
+        version=__version__,
         description="md-first memory extraction framework",
         lifespan=build_lifespan(lifespan_providers),
         docs_url="/docs" if enable_docs else None,

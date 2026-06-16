@@ -43,7 +43,7 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 
 ### 3. Algorithm-orchestration separation
 
-[`everalgo`](https://github.com/EverMind-AI/EverAlgo) (a separate library, published as the `everalgo-*` PyPI packages) holds the extraction algorithms (MemCell extraction, Episode generation, Profile evolution). EverOS calls everalgo via the PromptSlot interface; everalgo knows nothing about storage.
+`everalgo` (a set of separate PyPI packages — `everalgo-core` / `-boundary` / `-user-memory` / `-agent-memory` / `-rank`, plus the optional `-parser` extra) holds the extraction algorithms (MemCell extraction, Episode generation, Profile evolution). EverOS calls everalgo via the PromptSlot interface; everalgo knows nothing about storage.
 
 This boundary lets the same algorithm power both this open-source lightweight version and other product forms.
 
@@ -82,4 +82,5 @@ Strict single-direction dependency, enforced by `import-linter` in CI.
 
 ## Status
 
-**Alpha — v0.1.0 in active development**. Core API may change before v1.0.
+**Stable (v1.0.1)** — Released on PyPI; the v1 API is stable. Development
+continues on `dev` toward v1.1.

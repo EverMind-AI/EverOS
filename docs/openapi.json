@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "0.1.0"
+    "version": "1.0.1"
   },
   "paths": {
     "/health": {
@@ -827,7 +827,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
@@ -835,7 +835,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           },
@@ -868,7 +868,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
@@ -876,7 +876,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -891,7 +891,9 @@
         "properties": {
           "sender_id": {
             "type": "string",
+            "maxLength": 128,
             "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "Sender Id"
           },
           "sender_name": {

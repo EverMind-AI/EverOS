@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from everos.core.errors import PathTraversalError
 from everos.core.persistence import (
     EntryId,
     MarkdownReader,
@@ -227,3 +228,74 @@ async def test_append_entry_round_trip_with_reader(tmp_path: Path) -> None:
     for i, e in enumerate(parsed.entries):
         assert e.id == f"umc_20260422_{i + 1:08d}"
         assert e.body == f"content {i}"
+
+
+# ── memory-root containment (path-traversal defense in depth) ──────────────
+
+
+async def test_write_rejects_target_escaping_root(tmp_path: Path) -> None:
+    root = tmp_path / "memory_root"
+    root.mkdir()
+    writer = MarkdownWriter(MemoryRoot(root))
+    escaping = root / "users" / ".." / ".." / ".." / "ESCAPED" / "f.md"
+
+    with pytest.raises(PathTraversalError):
+        await writer.write(escaping, "x")
+
+    assert not (tmp_path / "ESCAPED").exists()
+
+
+async def test_write_markdown_rejects_escaping_target(tmp_path: Path) -> None:
+    root = tmp_path / "memory_root"
+    root.mkdir()
+    writer = MarkdownWriter(MemoryRoot(root))
+    escaping = root / ".." / "ESCAPED.md"
+
+    with pytest.raises(PathTraversalError):
+        await writer.write_markdown(escaping, body="x")
+    assert not (tmp_path / "ESCAPED.md").exists()
+
+
+async def test_append_entry_rejects_escaping_target(tmp_path: Path) -> None:
+    root = tmp_path / "memory_root"
+    root.mkdir()
+    writer = MarkdownWriter(MemoryRoot(root))
+    escaping = root / "users" / ".." / ".." / "ESCAPED" / "log.md"
+
+    with pytest.raises(PathTraversalError):
+        await writer.append_entry(
+            escaping,
+            entry_body="x",
+            entry_id=EntryId(prefix="umc", date=dt.date(2026, 4, 22), seq=1),
+        )
+    assert not (tmp_path / "ESCAPED").exists()
+
+
+async def test_append_entry_does_not_read_out_of_root_file(tmp_path: Path) -> None:
+    root = tmp_path / "memory_root"
+    root.mkdir()
+    secret = tmp_path / "secret.md"
+    secret.write_text("---\ntop: secret\n---\nbody\n", encoding="utf-8")
+    writer = MarkdownWriter(MemoryRoot(root))
+    escaping = root / "users" / ".." / ".." / "secret.md"
+
+    with (
+        patch.object(MarkdownReader, "read", wraps=MarkdownReader.read) as spy,
+        pytest.raises(PathTraversalError),
+    ):
+        await writer.append_entry(
+            escaping,
+            entry_body="x",
+            entry_id=EntryId(prefix="umc", date=dt.date(2026, 4, 22), seq=1),
+        )
+    spy.assert_not_called()
+    assert secret.read_text(encoding="utf-8") == "---\ntop: secret\n---\nbody\n"
+
+
+async def test_write_allows_target_inside_root(tmp_path: Path) -> None:
+    root = tmp_path / "memory_root"
+    root.mkdir()
+    writer = MarkdownWriter(MemoryRoot(root))
+    target = root / "users" / "u1" / "episodes" / "e.md"
+    written = await writer.write(target, "hello\n")
+    assert written.read_text(encoding="utf-8") == "hello\n"

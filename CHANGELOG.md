@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Unreleased changes on `dev` will be listed here._
 
+## [1.0.1] - 2026-06-16
+
+### Security
+
+- **Path-traversal hardening for caller-supplied identifiers.** `sender_id`
+  now carries the same path-safety guard as `app_id` / `project_id`: a
+  character whitelist plus rejection of the `.` / `..` tokens. The whitelist
+  admits `@` and `+` so email-style ids and plus-addressing still pass.
+- **Defense-in-depth write containment.** `MarkdownWriter` now rejects any
+  write target that resolves outside the configured memory root before reading,
+  creating parent directories, or writing files. The API layer maps this
+  backstop error to HTTP 400.
+
+### Documentation
+
+- Add a multimodal usage guide and correct the multimodal error semantics
+  after end-to-end verification.
+- Document the upcoming Knowledge Wiki and idle/offline Reflection/Dreaming
+  roadmap in the README and documentation set.
+- Rename outdated algorithm-library references to `everalgo` across docs and
+  code comments; no code identifiers changed.
+- Fix accuracy drift found in a documentation audit; reflect the `everalgo`
+  packages being published and the v1.0.0 stable status.
+
 ## [1.0.0] - 2026-06-03
 
 First public release of EverOS — a Markdown-first memory extraction framework
@@ -36,5 +60,6 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/EverMind-AI/EverOS/releases/tag/v1.0.1
 [1.0.0]: https://github.com/EverMind-AI/EverOS/releases/tag/v1.0.0

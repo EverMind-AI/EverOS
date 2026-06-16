@@ -9,6 +9,16 @@ not import ``memory`` directly).
 from __future__ import annotations
 
 
+class PathTraversalError(Exception):
+    """A write target resolved outside the configured memory root.
+
+    Raised by the markdown writer as a defense-in-depth backstop: any
+    caller-supplied identifier that becomes a path segment is validated at
+    the DTO layer, but this containment check does not depend on every such
+    id being sanitized upstream. The API layer maps it to HTTP 400.
+    """
+
+
 class MultimodalError(Exception):
     """Base for multimodal-parsing errors meant to reach the caller.
 

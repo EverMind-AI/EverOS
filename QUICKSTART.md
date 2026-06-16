@@ -296,8 +296,10 @@ LLM → metrics) before exiting.
   HTTP 415; PDF / image / audio / HTML still work.
 - **Filter DSL and search modes** — `/search` supports a filter DSL
   (`AND` / `OR` / scalar predicates) and four methods (`HYBRID` /
-  `KEYWORD` / `VECTOR` / `AGENTIC`). See the OpenAPI schema served at
-  `/docs`.
+  `KEYWORD` / `VECTOR` / `AGENTIC`). The OpenAPI docs UI is served at
+  `/docs` only when the server runs with `ENV=DEV`; the default (`prod`)
+  serves the API without the docs UI. The schema also lives at
+  [docs/openapi.json](docs/openapi.json).
 - **Architecture** — see [docs/architecture.md](docs/architecture.md)
   for the DDD layering and cascade design, and
   [docs/storage_layout.md](docs/storage_layout.md) for the on-disk

@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from everos.core.errors import MultimodalError
+from everos.core.errors import MultimodalError, PathTraversalError
 from everos.core.observability.tracing import gen_request_id
 from everos.service import memorize
 
@@ -23,12 +23,17 @@ router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
 
 
 # ── Path-safe identifier ────────────────────────────────────────────────────
-# ``app_id`` / ``project_id`` become directory segments under the memory
-# root, so they must reject ``.`` and ``..`` (path traversal). The basic
-# character whitelist is enforced via ``pattern`` (pydantic_core uses the
-# Rust regex engine, which does NOT support lookaround), and the two
-# reserved tokens are filtered out with a follow-up ``AfterValidator``.
-_PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.-]+$"
+# ``app_id`` / ``project_id`` / ``sender_id`` all become directory segments
+# under the memory root (``sender_id`` flows through to ``owner_id``), so they
+# must reject ``.`` and ``..`` (path traversal). The basic character whitelist
+# is enforced via ``pattern`` (pydantic_core uses the Rust regex engine, which
+# does NOT support lookaround), and the two reserved tokens are filtered out
+# with a follow-up ``AfterValidator``.
+#
+# ``@`` and ``+`` are admitted so real-world ids survive (email-style ids and
+# plus-addressing). Path separators and NUL stay out of the whitelist, while
+# the markdown writer's root-containment check is the final backstop.
+_PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.@+-]+$"
 _PATH_TRAVERSAL_TOKENS = frozenset({".", ".."})
 
 
@@ -70,7 +75,12 @@ class ContentItemDTO(BaseModel):
 
 
 class MessageItemDTO(BaseModel):
-    sender_id: str = Field(..., min_length=1)
+    sender_id: PathSafeId = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=_PATH_SAFE_CHARSET,
+    )
     sender_name: str | None = None
     role: Literal["user", "assistant", "tool"]
     timestamp: int = Field(
@@ -150,6 +160,8 @@ async def add_memory(
         result = await memorize(req.model_dump())
     except MultimodalError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SuccessEnvelope(
         request_id=request_id,
         data=AddResponseData(

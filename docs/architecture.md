@@ -111,10 +111,10 @@ External message
 User query
    │
    ▼
-1. service.retrieve
+1. service.search
    │
    ▼
-2. memory.search.hybrid       single LanceDB query =
+2. memory.search (hybrid)     single LanceDB query =
                                 BM25 + vector ANN + scalar filter
    │
    ▼
@@ -191,12 +191,15 @@ protection (L1 read-only / L2 system / L3 business / L4 user).
 
 ## everalgo boundary
 
-[`everalgo`](https://github.com/EverMind-AI/EverAlgo) is a separate Python library (published as the `everalgo-*` PyPI packages) holding **only memory extraction algorithms**:
+`everalgo` is a set of PyPI-published packages (`everalgo-core`,
+`everalgo-boundary`, `everalgo-user-memory`, `everalgo-agent-memory`,
+`everalgo-rank`, plus the optional `everalgo-parser` extra), imported under
+the `everalgo` namespace, holding **only memory extraction algorithms**:
 
-- `everalgo.parser` — multi-modal parsing
+- `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
 - `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
-- `everalgo.knowledge` — file-to-knowledge
+- `everalgo.boundary` / `everalgo.rank` — boundary detection / fusion + rerank
 
 everalgo is:
 
@@ -204,7 +207,7 @@ everalgo is:
 - **No I/O** — does not touch md files / LanceDB / SQLite
 - **No prompts inline** — receives `PromptSlot` parameter, project supplies defaults
 
-This boundary lets everalgo be reused across product forms (this open-source build, EverMind Cloud, OpenClaw plugins, etc.).
+This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
 
 ## Further reading
 

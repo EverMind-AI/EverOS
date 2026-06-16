@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.0.0"
+version = "1.0.1"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["memory", "ai-agent", "markdown", "lancedb", "rag", "everos"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -83,8 +83,8 @@ packages = ["src/everos"]
 # things like CLAUDE.md, .claude/, CI configs, or IDE settings. New top-level
 # files default to NOT-shipped — you have to opt them in here.
 #
-# exclude is kept as belt-and-suspenders for build artefacts that CI may
-# generate inside the project tree (e.g. UV_CACHE_DIR=.uv-cache).
+# exclude is kept as belt-and-suspenders for build artefacts that CI generates
+# inside the project tree (UV_CACHE_DIR=.uv-cache in .gitlab-ci.yml).
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",

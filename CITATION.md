@@ -33,7 +33,7 @@ To cite the software itself:
 
 ```
 EverOS: md-first memory extraction framework for AI agents
-Version: 1.0.0
+Version: 1.0.1
 URL: https://github.com/EverMind-AI/EverOS
 License: Apache 2.0
 ```
