@@ -1,4 +1,4 @@
-"""``build_llm_provider`` — settings validation + provider build."""
+"""``build_llm_provider`` -- settings validation + provider build."""
 
 from __future__ import annotations
 
@@ -26,3 +26,29 @@ def test_builds_openai_provider() -> None:
     s = LLMSettings(model="m", api_key=SecretStr("k"), base_url="https://x")
     p = build_llm_provider(s)
     assert isinstance(p, OpenAIProvider)
+
+
+def test_builds_litellm_provider() -> None:
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    s = LLMSettings(
+        provider="litellm", model="anthropic/claude-haiku", api_key=SecretStr("k")
+    )
+    p = build_llm_provider(s)
+    assert isinstance(p, LiteLLMProvider)
+
+
+def test_litellm_provider_without_base_url() -> None:
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    s = LLMSettings(provider="litellm", model="anthropic/claude-haiku", base_url=None)
+    p = build_llm_provider(s)
+    assert isinstance(p, LiteLLMProvider)
+
+
+def test_litellm_provider_without_api_key() -> None:
+    from everos.component.llm.litellm_provider import LiteLLMProvider
+
+    s = LLMSettings(provider="litellm", model="gpt-4o-mini", api_key=None)
+    p = build_llm_provider(s)
+    assert isinstance(p, LiteLLMProvider)

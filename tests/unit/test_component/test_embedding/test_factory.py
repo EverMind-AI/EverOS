@@ -1,4 +1,4 @@
-"""``build_embedding_provider`` — settings validation + provider build."""
+"""``build_embedding_provider`` -- settings validation + provider build."""
 
 from __future__ import annotations
 
@@ -40,7 +40,35 @@ def test_custom_dim_passes_through() -> None:
     s = EmbeddingSettings(model="m", api_key=SecretStr("k"), base_url="https://x")
     p = build_embedding_provider(s, dim=512)
     assert isinstance(p, OpenAIEmbeddingProvider)
-    # Provider stores dim on a private attr; assert via the public output shape
-    # only if straightforward. Skip introspection if attr name differs.
     if hasattr(p, "_dim"):
         assert p._dim == 512
+
+
+def test_builds_litellm_embedding_provider() -> None:
+    from everos.component.embedding.litellm_provider import LiteLLMEmbeddingProvider
+
+    s = EmbeddingSettings(
+        provider="litellm",
+        model="openai/text-embedding-3-small",
+        api_key=SecretStr("k"),
+    )
+    p = build_embedding_provider(s)
+    assert isinstance(p, LiteLLMEmbeddingProvider)
+
+
+def test_litellm_embedding_without_base_url() -> None:
+    from everos.component.embedding.litellm_provider import LiteLLMEmbeddingProvider
+
+    s = EmbeddingSettings(
+        provider="litellm",
+        model="openai/text-embedding-3-small",
+        base_url=None,
+    )
+    p = build_embedding_provider(s)
+    assert isinstance(p, LiteLLMEmbeddingProvider)
+
+
+def test_litellm_embedding_raises_when_model_missing() -> None:
+    s = EmbeddingSettings(provider="litellm", model=None)
+    with pytest.raises(ValueError, match="EVEROS_EMBEDDING__MODEL"):
+        build_embedding_provider(s)

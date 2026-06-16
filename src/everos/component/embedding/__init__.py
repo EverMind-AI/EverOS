@@ -19,6 +19,7 @@ External usage::
 from .accessor import EmbeddingNotConfiguredError as EmbeddingNotConfiguredError
 from .accessor import get_embedder as get_embedder
 from .factory import build_embedding_provider as build_embedding_provider
+from .litellm_provider import LiteLLMEmbeddingProvider as LiteLLMEmbeddingProvider
 from .openai_provider import OpenAIEmbeddingProvider as OpenAIEmbeddingProvider
 from .protocol import EmbeddingError as EmbeddingError
 from .protocol import EmbeddingProvider as EmbeddingProvider
@@ -27,6 +28,7 @@ __all__ = [
     "EmbeddingError",
     "EmbeddingNotConfiguredError",
     "EmbeddingProvider",
+    "LiteLLMEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "build_embedding_provider",
     "get_embedder",

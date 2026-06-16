@@ -66,6 +66,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+litellm = ["litellm>=1.80.0,<2.0"]
 multimodal = ["everalgo-parser[svg]>=0.1.0"]  # [svg] bundles cairosvg → SVG works by default
 
 [build-system]
