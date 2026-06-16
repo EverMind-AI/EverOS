@@ -47,11 +47,16 @@ environment first.
 Terminal A:
 
 ```bash
-export EVEROS_MEMORY__ROOT="$(mktemp -d /tmp/everos-agent-smoke-XXXXXX)"
+export EVEROS_MEMORY__ROOT="$(
+  python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="everos-agent-smoke-"))'
+)"
 echo "$EVEROS_MEMORY__ROOT"
 export EVEROS_MEMORY__TIMEZONE=UTC
 everos server start --host 127.0.0.1 --port 8000
 ```
+
+Using Python's `tempfile` avoids the `mktemp` flag/template differences
+between GNU and BSD/macOS environments.
 
 Terminal B:
 
@@ -167,10 +172,12 @@ then force cascade to reconcile the deletion:
 
 ```bash
 EPISODE_DIR="$EVEROS_MEMORY__ROOT/$APP_ID/$PROJECT_ID/users/$USER_ID/episodes"
-find "$EPISODE_DIR" -type f -name 'episode-*.md' -print
-rm "$EPISODE_DIR"/episode-*.md
+find "$EPISODE_DIR" -type f -name 'episode-*.md' -print -delete
 everos cascade sync
 ```
+
+If `find` prints no episode file, stop and debug the write/flush step before
+asserting deletion behavior.
 
 Now prove both browse and search paths no longer return the deleted
 episode:
