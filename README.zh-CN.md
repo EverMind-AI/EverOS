@@ -22,8 +22,8 @@
 <br>
 
 - [EverOS 1.0.0](#everos-100)
-- [EverMe: One Memory For All](#everme-one-memory-for-all)
-- [EverMe 的差异](#everme-的差异)
+- [EverOS: One Memory For All](#everos-one-memory-for-all)
+- [EverOS 的差异](#everos-的差异)
 - [快速开始](#快速开始)
 - [架构概览](#架构概览)
 - [存储布局](#存储布局)
@@ -61,7 +61,7 @@
 </div>
 
 
-## EverMe: One Memory For All
+## EverOS: One Memory For All
 
 <table>
 <tr>
@@ -100,8 +100,8 @@ Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<cod
 </tr>
 </table>
 
-EverMe 是构建在 EverOS 之上的个人记忆体验：通过 CLI 和 Agent plugin layer，
-让同一份记忆跟随 maker 穿过 coding assistants、apps、devices 和 workflows。
+EverOS 是面向 agents 和 makers 的本地记忆操作系统。它提供一层可携带的
+统一记忆层，让记忆穿过 coding assistants、apps、devices 和 workflows。
 目前它会把对话、文件和 Agent 轨迹保存为可读 Markdown，并同步本地 SQLite
 和 LanceDB 索引，用于快速检索和自进化复用。
 
@@ -113,16 +113,16 @@ EverMe 是构建在 EverOS 之上的个人记忆体验：通过 CLI 和 Agent pl
 </div>
 
 
-## EverMe 的差异
+## EverOS 的差异
 
 下面这张表比较的是常见 memory-library 架构类型，而不是点名具体仓库。
 有些项目会跨多个类型，也确实有项目提供 file-oriented 或 Markdown-like 能力。
-EverMe 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
+EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
 
 <table>
 <tr>
 <th width="28%">Title</th>
-<th width="36%">EverMe</th>
+<th width="36%">EverOS</th>
 <th width="36%">Agent Memory libraries</th>
 </tr>
 <tr>

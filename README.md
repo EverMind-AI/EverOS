@@ -22,8 +22,8 @@
 <br>
 
 - [EverOS 1.0.0](#everos-100)
-- [EverMe: One Memory For All](#everme-one-memory-for-all)
-- [How EverMe Is Different](#how-everme-is-different)
+- [EverOS: One Memory For All](#everos-one-memory-for-all)
+- [How EverOS Is Different](#how-everos-is-different)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
@@ -62,7 +62,7 @@
 </div>
 
 
-## EverMe: One Memory For All
+## EverOS: One Memory For All
 
 <table>
 <tr>
@@ -107,11 +107,11 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 </tr>
 </table>
 
-EverMe is the personal-memory experience built on EverOS: a CLI and agent
-plugin layer that lets one memory follow a maker across coding assistants,
-apps, devices, and workflows. Today it stores conversations, files, and agent
-trajectories as readable Markdown, then syncs local SQLite and LanceDB indexes
-for fast retrieval and self-evolving reuse.
+EverOS is the local memory operating system for agents and makers. It gives
+one portable memory layer across coding assistants, apps, devices, and
+workflows. Today it stores conversations, files, and agent trajectories as
+readable Markdown, then syncs local SQLite and LanceDB indexes for fast
+retrieval and self-evolving reuse.
 
 <br>
 <div align="right">
@@ -121,17 +121,17 @@ for fast retrieval and self-evolving reuse.
 </div>
 
 
-## How EverMe Is Different
+## How EverOS Is Different
 
 The table below compares common memory-library architectures rather than naming
 specific repos. Some projects overlap categories, and some do expose
-file-oriented or Markdown-like surfaces. EverMe is different because Markdown is
+file-oriented or Markdown-like surfaces. EverOS is different because Markdown is
 the canonical memory layer, not just an export, log, or integration target.
 
 <table>
 <tr>
 <th width="28%">Title</th>
-<th width="36%">EverMe</th>
+<th width="36%">EverOS</th>
 <th width="36%">Agent Memory libraries</th>
 </tr>
 <tr>
