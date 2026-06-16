@@ -134,77 +134,57 @@ The system is built around three boundaries:
 
 ## How EverOS Is Different
 
-The table below compares first-class, developer-visible capabilities from
-public memory-library repos and docs. It focuses on default product posture,
-not every optional backend or enterprise deployment.
+The table below compares common memory-library architectures rather than naming
+specific repos. Some projects overlap categories, and some do expose
+file-oriented or Markdown-like surfaces. EverOS is different because Markdown is
+the canonical memory layer, not just an export, log, or integration target.
 
 <table>
 <tr>
-<th width="22%">Capability</th>
-<th width="13%">EverOS</th>
-<th width="13%">Mem0</th>
-<th width="13%">MemOS</th>
-<th width="13%">MemPalace</th>
-<th width="13%">MemoryLake</th>
-<th width="13%">LangMem / Cognee / Graphiti</th>
+<th width="24%">Developer need</th>
+<th width="28%">EverOS default</th>
+<th width="24%">Typical memory libraries</th>
+<th width="24%">File / Markdown-adjacent tools</th>
 </tr>
 <tr>
 <td><strong>Markdown source of truth</strong><br><sub>Memory is readable, editable, diffable, and Git-versioned as files.</sub></td>
 <td>✅ Canonical <code>.md</code> memory</td>
-<td>❌ API / backend memory</td>
-<td>❌ Memory cubes / service state</td>
-<td>❌ Verbatim store + backend index</td>
-<td>❌ Hosted memory passport</td>
-<td>❌ Store / graph / platform state</td>
+<td>❌ Usually API, vector, graph, dashboard, or database state</td>
+<td>✅ Often readable, but not always the full runtime source of truth</td>
 </tr>
 <tr>
 <td><strong>Direct file editing</strong><br><sub>Edit memory with normal developer tools, then sync indexes.</sub></td>
 <td>✅ Edit <code>.md</code> files; cascade watcher syncs</td>
-<td>❌ SDK / API path</td>
-<td>❌ API / dashboard path</td>
-<td>❌ CLI / backend path</td>
-<td>❌ App / API path</td>
-<td>❌ Store / graph API path</td>
+<td>❌ Usually SDK, API, dashboard, or backend update paths</td>
+<td>✅ Sometimes possible, but often without entry-level index sync</td>
 </tr>
 <tr>
 <td><strong>Local three-part stack</strong><br><sub>Markdown + SQLite + LanceDB; no MongoDB, Elasticsearch, or Redis required.</sub></td>
 <td>✅ Built in</td>
-<td>❌ Vector / service stack</td>
-<td>❌ Cloud or self-hosted service stack</td>
-<td>❌ Chroma / pluggable backend stack</td>
-<td>❌ Hosted product stack</td>
-<td>❌ Graph / database / platform stack</td>
+<td>❌ Often depends on managed services, vector DBs, graph DBs, or server stacks</td>
+<td>❌ Often local, but commonly tied to a different index/backend model</td>
 </tr>
 <tr>
 <td><strong>User + agent memory tracks</strong><br><sub>User <code>episodes/profile</code> and agent <code>cases/skills</code> are separate first-class surfaces.</sub></td>
 <td>✅ Built in</td>
-<td>❌ User/session/agent state, not this dual track</td>
-<td>❌ Multi-layer memory, not this dual track</td>
-<td>❌ Conversation/project recall focus</td>
-<td>❌ Personal memory passport focus</td>
-<td>❌ App memory or graph focus</td>
+<td>❌ Usually centered on chat history, profiles, entities, facts, or retrieval records</td>
+<td>❌ Usually centered on logs, notes, projects, or conversations</td>
 </tr>
 <tr>
 <td><strong>Orthogonal retrieval scopes</strong><br><sub>Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.</sub></td>
 <td>✅ Built in</td>
-<td>❌ Different scoping model</td>
-<td>❌ Different scoping model</td>
-<td>❌ Wing / room style scoping</td>
-<td>❌ Product account / connector scoping</td>
-<td>❌ Namespace / graph / app scoping</td>
+<td>❌ Usually app, namespace, tenant, thread, or graph scoped</td>
+<td>❌ Usually folder, project, or conversation scoped</td>
 </tr>
 <tr>
 <td><strong>Markdown-native evolution</strong><br><sub>Skills, upcoming Knowledge Wiki, and Reflection evolve from inspectable source files.</sub></td>
 <td>✅ Built around files</td>
-<td>❌ Evolution is not Markdown-native</td>
-<td>❌ Evolution is not Markdown-native</td>
-<td>❌ Retrieval-first, no Markdown-native evolution</td>
-<td>❌ Reflection is product state, not Markdown-native</td>
-<td>❌ Evolution lives in stores or graphs</td>
+<td>❌ If evolution exists, it usually lives in service, graph, or database state</td>
+<td>❌ Usually recall-oriented rather than file-native self-evolution</td>
 </tr>
 </table>
 
-<sub>✅ = first-class/default in public docs. ❌ = not presented as a first-class/default capability in public docs. Mem0 is sometimes referred to as MemZero; MemoryLake covers the MemLake shorthand.</sub>
+<sub>✅ means first-class in the default posture. ❌ means it is usually absent or not the primary design center for that category. This is a product-shape comparison, not a claim that no individual project has an adjacent feature.</sub>
 
 <br>
 <div align="right">

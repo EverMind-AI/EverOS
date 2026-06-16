@@ -125,76 +125,56 @@ EverOS 会把对话、Agent 轨迹和文件保存为可读 Markdown，并同步�
 
 ## EverOS 的差异
 
-下面这张表对比的是公开 memory-library repos 和 docs 中的一等、默认、
-开发者可见能力。它比较的是产品默认取向，不覆盖每一种可选后端或企业部署模式。
+下面这张表比较的是常见 memory-library 架构类型，而不是点名具体仓库。
+有些项目会跨多个类型，也确实有项目提供 file-oriented 或 Markdown-like 能力。
+EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
 
 <table>
 <tr>
-<th width="22%">能力</th>
-<th width="13%">EverOS</th>
-<th width="13%">Mem0</th>
-<th width="13%">MemOS</th>
-<th width="13%">MemPalace</th>
-<th width="13%">MemoryLake</th>
-<th width="13%">LangMem / Cognee / Graphiti</th>
+<th width="24%">开发者关心什么</th>
+<th width="28%">EverOS default</th>
+<th width="24%">常见 memory libraries</th>
+<th width="24%">File / Markdown-adjacent tools</th>
 </tr>
 <tr>
 <td><strong>Markdown source of truth</strong><br><sub>记忆以文件形式可读、可编辑、可 diff、可 Git 版本化。</sub></td>
 <td>✅ 标准 <code>.md</code> 记忆</td>
-<td>❌ API / backend memory</td>
-<td>❌ Memory cubes / service state</td>
-<td>❌ Verbatim store + backend index</td>
-<td>❌ Hosted memory passport</td>
-<td>❌ Store / graph / platform state</td>
+<td>❌ 通常是 API、vector、graph、dashboard 或 database state</td>
+<td>✅ 往往可读，但不一定是完整 runtime source of truth</td>
 </tr>
 <tr>
 <td><strong>直接文件编辑</strong><br><sub>用普通开发者工具编辑记忆，然后同步索引。</sub></td>
 <td>✅ 编辑 <code>.md</code>；cascade watcher 同步</td>
-<td>❌ SDK / API 路径</td>
-<td>❌ API / dashboard 路径</td>
-<td>❌ CLI / backend 路径</td>
-<td>❌ App / API 路径</td>
-<td>❌ Store / graph API 路径</td>
+<td>❌ 通常需要 SDK、API、dashboard 或 backend update path</td>
+<td>✅ 有些可以做到，但常常缺少 entry-level index sync</td>
 </tr>
 <tr>
 <td><strong>本地三件套</strong><br><sub>Markdown + SQLite + LanceDB；不需要 MongoDB、Elasticsearch 或 Redis。</sub></td>
 <td>✅ 内置</td>
-<td>❌ Vector / service stack</td>
-<td>❌ Cloud 或 self-hosted service stack</td>
-<td>❌ Chroma / pluggable backend stack</td>
-<td>❌ Hosted product stack</td>
-<td>❌ Graph / database / platform stack</td>
+<td>❌ 常依赖 managed service、vector DB、graph DB 或 server stack</td>
+<td>❌ 往往本地，但通常绑定另一套 index/backend model</td>
 </tr>
 <tr>
 <td><strong>用户 + Agent 双轨</strong><br><sub>用户 <code>episodes/profile</code> 与 Agent <code>cases/skills</code> 是分离的一等记忆表面。</sub></td>
 <td>✅ 内置</td>
-<td>❌ User/session/agent state，不是这套双轨</td>
-<td>❌ Multi-layer memory，不是这套双轨</td>
-<td>❌ 偏 conversation/project recall</td>
-<td>❌ 偏 personal memory passport</td>
-<td>❌ 偏 app memory 或 graph</td>
+<td>❌ 通常围绕 chat history、profiles、entities、facts 或 retrieval records</td>
+<td>❌ 通常围绕 logs、notes、projects 或 conversations</td>
 </tr>
 <tr>
 <td><strong>正交检索作用域</strong><br><sub>按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索。</sub></td>
 <td>✅ 内置</td>
-<td>❌ 作用域模型不同</td>
-<td>❌ 作用域模型不同</td>
-<td>❌ Wing / room 式作用域</td>
-<td>❌ Product account / connector 作用域</td>
-<td>❌ Namespace / graph / app 作用域</td>
+<td>❌ 通常按 app、namespace、tenant、thread 或 graph 来组织</td>
+<td>❌ 通常按 folder、project 或 conversation 来组织</td>
 </tr>
 <tr>
 <td><strong>Markdown-native evolution</strong><br><sub>Skills、即将推出的 Knowledge Wiki 和 Reflection 都从可检查源文件中进化。</sub></td>
 <td>✅ 围绕文件构建</td>
-<td>❌ Evolution 不是 Markdown-native</td>
-<td>❌ Evolution 不是 Markdown-native</td>
-<td>❌ Retrieval-first，没有 Markdown-native evolution</td>
-<td>❌ Reflection 是产品状态，不是 Markdown-native</td>
-<td>❌ Evolution 存在于 stores 或 graphs 中</td>
+<td>❌ 如果支持 evolution，通常存在于 service、graph 或 database state</td>
+<td>❌ 通常偏 recall，而不是 file-native self-evolution</td>
 </tr>
 </table>
 
-<sub>✅ = 公开 docs 中的一等 / 默认能力。❌ = 公开 docs 中未作为一等 / 默认能力呈现。Mem0 有时也被写作 MemZero；MemoryLake 对应 MemLake 这个简称。</sub>
+<sub>✅ 表示默认取向中的一等能力。❌ 表示该类型通常没有，或并不是核心设计中心。这是 product-shape comparison，不表示没有任何单个项目具备相邻能力。</sub>
 
 <br>
 <div align="right">
