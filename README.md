@@ -21,7 +21,7 @@
 
 <br>
 
-- [EverOS 1.0.0 Highlights](#everos-100-highlights)
+- [EverOS 1.0.0](#everos-100)
 - [Why EverOS](#why-everos)
 - [How EverOS Is Different](#how-everos-is-different)
 - [Quick Start](#quick-start)
@@ -40,7 +40,7 @@
 </details>
 
 
-## EverOS 1.0.0 Highlights
+## EverOS 1.0.0
 
 > [!IMPORTANT]
 >
@@ -53,49 +53,6 @@
 > source-backed Markdown knowledge pages. Reflection, also called Dreaming,
 > will run offline to connect signals, compress history, and improve profiles
 > and skills between sessions.
-
-<table>
-<tr>
-<td width="33%" valign="top">
-<strong>Markdown As Source Of Truth</strong><br>
-<br>
-All memory is persisted as <code>.md</code> files: readable, editable,
-grep-able, Git-versioned, and openable directly in Obsidian.
-</td>
-<td width="33%" valign="top">
-<strong>Local Three-Part Stack</strong><br>
-<br>
-Markdown + SQLite + LanceDB keep vectors, BM25, and scalar filters
-local. No MongoDB, Elasticsearch, or Redis required.
-</td>
-<td width="33%" valign="top">
-<strong>Dual-Track Memory</strong><br>
-<br>
-Agent memory (<code>cases</code> / <code>skills</code>) and user memory
-(<code>episodes</code> / <code>profile</code>) are extracted independently.
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<strong>Multimodal Ingestion</strong><br>
-<br>
-Text, images, audio, documents, PDFs, HTML, and email are unified into
-searchable memory.
-</td>
-<td width="33%" valign="top">
-<strong>Self-Evolution</strong><br>
-<br>
-Common skills are extracted from real usage; repeated patterns become
-reusable workflows, no retraining required.
-</td>
-<td width="33%" valign="top">
-<strong>Orthogonal Retrieval</strong><br>
-<br>
-Search independently by <code>user_id</code>, <code>agent_id</code>,
-<code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.
-</td>
-</tr>
-</table>
 
 <br>
 <div align="right">
@@ -177,14 +134,20 @@ the canonical memory layer, not just an export, log, or integration target.
 <td>❌ Usually folder, project, or conversation scoped</td>
 </tr>
 <tr>
-<td><strong>Markdown-native evolution</strong><br><sub>Skills, upcoming Knowledge Wiki, and Reflection evolve from inspectable source files.</sub></td>
-<td>✅ Built around files</td>
-<td>❌ If evolution exists, it usually lives in service, graph, or database state</td>
-<td>❌ Usually recall-oriented rather than file-native self-evolution</td>
+<td><strong>Knowledge Wiki</strong><br><sub>Memory should become editable, source-backed knowledge pages.</sub></td>
+<td>✅ Coming next: Markdown wiki pages derived from memory</td>
+<td>❌ Usually retrieval, graph, dashboard, or generated summary state</td>
+<td>✅ Often wiki-like, but usually manual or separate from runtime memory</td>
+</tr>
+<tr>
+<td><strong>Dreaming / Reflection</strong><br><sub>Offline consolidation should connect signals and improve long-term behavior.</sub></td>
+<td>✅ Coming next: offline Reflection across profiles, skills, and wiki</td>
+<td>❌ Usually online read/write APIs rather than file-native self-improvement</td>
+<td>❌ Usually note recall or summaries, not runtime memory evolution</td>
 </tr>
 </table>
 
-<sub>✅ means first-class in the default posture. ❌ means it is usually absent or not the primary design center for that category. This is a product-shape comparison, not a claim that no individual project has an adjacent feature.</sub>
+<sub>✅ means first-class in the current or announced default posture. ❌ means it is usually absent or not the primary design center for that category. This is a product-shape comparison, not a claim that no individual project has an adjacent feature.</sub>
 
 <br>
 <div align="right">

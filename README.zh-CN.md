@@ -21,7 +21,7 @@
 
 <br>
 
-- [EverOS 1.0.0 亮点](#everos-100-亮点)
+- [EverOS 1.0.0](#everos-100)
 - [为什么选择 EverOS](#为什么选择-everos)
 - [EverOS 的差异](#everos-的差异)
 - [快速开始](#快速开始)
@@ -40,7 +40,7 @@
 </details>
 
 
-## EverOS 1.0.0 亮点
+## EverOS 1.0.0
 
 > [!IMPORTANT]
 >
@@ -52,43 +52,6 @@
 > **即将推出：** Knowledge Wiki 会把记忆整理成可编辑、可溯源的
 > Markdown 知识页。Reflection（也称 Dreaming）会在离线时连接信号、
 > 压缩历史，并持续改进 profile 和 skills。
-
-<table>
-<tr>
-<td width="33%" valign="top">
-<strong>Markdown As Source Of Truth</strong><br>
-<br>
-所有记忆持久化为 <code>.md</code> 文件：可读、可改、可 grep、可 Git 版本化，也可直接用 Obsidian 打开。
-</td>
-<td width="33%" valign="top">
-<strong>Local Three-Part Stack</strong><br>
-<br>
-Markdown + SQLite + LanceDB 在本地完成向量、BM25 和标量过滤检索，无需 MongoDB、Elasticsearch 或 Redis。
-</td>
-<td width="33%" valign="top">
-<strong>Dual-Track Memory</strong><br>
-<br>
-Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<code>episodes</code> / <code>profile</code>）独立提取，互不污染。
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<strong>Multimodal Ingestion</strong><br>
-<br>
-文本、图像、音频、文档、PDF、HTML 和邮件统一抽取为可检索的记忆形态。
-</td>
-<td width="33%" valign="top">
-<strong>Self-Evolution</strong><br>
-<br>
-从真实使用经验中自动抽取共性 skills，重复模式沉淀为可复用流程，无需重训。
-</td>
-<td width="33%" valign="top">
-<strong>Orthogonal Retrieval</strong><br>
-<br>
-按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 五维独立检索。
-</td>
-</tr>
-</table>
 
 <br>
 <div align="right">
@@ -167,14 +130,20 @@ EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log �
 <td>❌ 通常按 folder、project 或 conversation 来组织</td>
 </tr>
 <tr>
-<td><strong>Markdown-native evolution</strong><br><sub>Skills、即将推出的 Knowledge Wiki 和 Reflection 都从可检查源文件中进化。</sub></td>
-<td>✅ 围绕文件构建</td>
-<td>❌ 如果支持 evolution，通常存在于 service、graph 或 database state</td>
-<td>❌ 通常偏 recall，而不是 file-native self-evolution</td>
+<td><strong>Knowledge Wiki</strong><br><sub>记忆应该沉淀为可编辑、可溯源的知识页。</sub></td>
+<td>✅ 即将推出：由记忆生成 Markdown wiki 知识页</td>
+<td>❌ 通常是 retrieval、graph、dashboard 或 generated summary state</td>
+<td>✅ 往往像 wiki，但通常是手写内容，或与 runtime memory 分离</td>
+</tr>
+<tr>
+<td><strong>Dreaming / Reflection</strong><br><sub>离线整理应该连接信号，并改善长期行为。</sub></td>
+<td>✅ 即将推出：围绕 profiles、skills 和 wiki 做离线 Reflection</td>
+<td>❌ 通常是在线读写 API，而不是基于文件的自我改进</td>
+<td>❌ 通常偏笔记召回或摘要，不是运行时记忆进化</td>
 </tr>
 </table>
 
-<sub>✅ 表示默认取向中的一等能力。❌ 表示该类型通常没有，或并不是核心设计中心。这是 product-shape comparison，不表示没有任何单个项目具备相邻能力。</sub>
+<sub>✅ 表示当前或已宣布默认取向中的一等能力。❌ 表示该类型通常没有，或并不是核心设计中心。这是 product-shape comparison，不表示没有任何单个项目具备相邻能力。</sub>
 
 <br>
 <div align="right">
