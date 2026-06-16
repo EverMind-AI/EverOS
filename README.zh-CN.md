@@ -115,15 +115,11 @@ EverOS 是面向 agents 和 makers 的本地记忆操作系统。它提供一层
 
 ## EverOS 的差异
 
-下面这张表比较的是常见 memory-library 架构类型，而不是点名具体仓库。
-有些项目会跨多个类型，也确实有项目提供 file-oriented 或 Markdown-like 能力。
-EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
-
 <table>
 <tr>
 <th width="28%">Title</th>
 <th width="36%">EverOS</th>
-<th width="36%">Agent Memory libraries</th>
+<th width="36%">Other Agent Memory Libraries</th>
 </tr>
 <tr>
 <td><strong>Markdown source of truth</strong></td>
@@ -152,17 +148,15 @@ EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log �
 </tr>
 <tr>
 <td><strong>Knowledge Wiki</strong></td>
-<td>✅ 即将推出：由记忆生成 Markdown wiki 知识页</td>
-<td>❌ 通常是 retrieval、graph、dashboard 或 generated summary state</td>
+<td>✅ 即将推出：由记忆形成可编辑、可溯源的 Markdown 知识页</td>
+<td>❌ 通常是 retrieval、graph、dashboard 或 generated summaries，而不是可编辑、可溯源的知识页</td>
 </tr>
 <tr>
 <td><strong>Dreaming / Reflection</strong></td>
-<td>✅ 即将推出：围绕 profiles、skills 和 wiki 做离线 Reflection</td>
-<td>❌ 通常是在线读写 API，而不是基于文件的自我改进</td>
+<td>✅ 即将推出：离线连接信号、压缩历史，并在 session 之间改进 profiles 和 skills</td>
+<td>❌ 通常是在线读写 API、retrieval records 或 summaries，而不是离线记忆整理</td>
 </tr>
 </table>
-
-<sub>✅ 表示当前或已宣布默认取向中的一等能力。❌ 表示该类型通常没有，或并不是核心设计中心。这是 product-shape comparison，不表示没有任何单个项目具备相邻能力。</sub>
 
 <br>
 <div align="right">

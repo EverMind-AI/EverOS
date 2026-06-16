@@ -123,16 +123,11 @@ retrieval and self-evolving reuse.
 
 ## How EverOS Is Different
 
-The table below compares common memory-library architectures rather than naming
-specific repos. Some projects overlap categories, and some do expose
-file-oriented or Markdown-like surfaces. EverOS is different because Markdown is
-the canonical memory layer, not just an export, log, or integration target.
-
 <table>
 <tr>
 <th width="28%">Title</th>
 <th width="36%">EverOS</th>
-<th width="36%">Agent Memory libraries</th>
+<th width="36%">Other Agent Memory Libraries</th>
 </tr>
 <tr>
 <td><strong>Markdown source of truth</strong></td>
@@ -161,17 +156,15 @@ the canonical memory layer, not just an export, log, or integration target.
 </tr>
 <tr>
 <td><strong>Knowledge Wiki</strong></td>
-<td>✅ Coming next: Markdown wiki pages derived from memory</td>
-<td>❌ Usually retrieval, graph, dashboard, or generated summary state</td>
+<td>✅ Coming next: editable, source-backed Markdown knowledge pages built from memory</td>
+<td>❌ Usually retrieval, graph, dashboards, or generated summaries instead of editable source-backed pages</td>
 </tr>
 <tr>
 <td><strong>Dreaming / Reflection</strong></td>
-<td>✅ Coming next: offline Reflection across profiles, skills, and wiki</td>
-<td>❌ Usually online read/write APIs rather than file-native self-improvement</td>
+<td>✅ Coming next: offline Reflection that connects signals, compresses history, and improves profiles and skills between sessions</td>
+<td>❌ Usually online read/write APIs, retrieval records, or summaries rather than offline memory consolidation</td>
 </tr>
 </table>
-
-<sub>✅ means first-class in the current or announced default posture. ❌ means it is usually absent or not the primary design center for that category. This is a product-shape comparison, not a claim that no individual project has an adjacent feature.</sub>
 
 <br>
 <div align="right">
