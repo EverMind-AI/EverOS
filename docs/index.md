@@ -37,6 +37,7 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
+| [local-agent-smoke.md](local-agent-smoke.md) | Local agent integration smoke — write, cross-runtime read, delete, and absence proof |
 | [multimodal.md](multimodal.md) | Ingest images, PDFs, audio, and office docs into memory |
 
 ## Engineering / Internal
