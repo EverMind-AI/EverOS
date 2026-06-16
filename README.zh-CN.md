@@ -50,8 +50,8 @@
 > [EverAlgo](https://github.com/EverMind-AI/EverAlgo) 支撑的模块化算法。
 >
 > **即将推出：** Knowledge Wiki 会把记忆整理成可编辑、可溯源的
-> Markdown 知识页。Reflection（也称 Dreaming）会在离线时连接信号、
-> 压缩历史，并持续改进 profile 和 skills。
+> Markdown 知识页。Reflection（也称 Dreaming）会在系统空闲或离线时
+> 连接信号、压缩历史，并持续改进 profile 和 skills。
 
 <br>
 <div align="right">
@@ -62,6 +62,11 @@
 
 
 ## EverOS: One Memory For All
+
+EverOS 是面向 agents 和 makers 的本地记忆操作系统。它提供一层可携带的
+统一记忆层，让记忆穿过 coding assistants、apps、devices 和 workflows。
+目前它会把对话、文件和 Agent 轨迹保存为可读 Markdown，并同步本地 SQLite
+和 LanceDB 索引，用于快速检索和自进化复用。
 
 <table>
 <tr>
@@ -99,11 +104,6 @@ Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<cod
 </td>
 </tr>
 </table>
-
-EverOS 是面向 agents 和 makers 的本地记忆操作系统。它提供一层可携带的
-统一记忆层，让记忆穿过 coding assistants、apps、devices 和 workflows。
-目前它会把对话、文件和 Agent 轨迹保存为可读 Markdown，并同步本地 SQLite
-和 LanceDB 索引，用于快速检索和自进化复用。
 
 <br>
 <div align="right">
@@ -153,8 +153,8 @@ EverOS 是面向 agents 和 makers 的本地记忆操作系统。它提供一层
 </tr>
 <tr>
 <td><strong>Dreaming / Reflection</strong></td>
-<td>✅ 即将推出：离线连接信号、压缩历史，并在 session 之间改进 profiles 和 skills</td>
-<td>❌ 通常是在线读写 API、retrieval records 或 summaries，而不是离线记忆整理</td>
+<td>✅ 即将推出：在系统空闲或离线时运行，用来连接信号、压缩历史，并在 session 之间改进 profiles 和 skills</td>
+<td>❌ 通常是在线读写 API、retrieval records 或 summaries，而不是空闲态记忆整理</td>
 </tr>
 </table>
 
@@ -696,7 +696,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 ## 关注 EverOS
 
 EverOS 1.0.0 是更大规模记忆系统路线图的第一个发布版本。Watch 这个仓库，
-即可持续关注更深入的离线进化、benchmark releases，以及更多真实 Agent 集成。
+即可持续关注更深入的空闲态和离线进化、benchmark releases，以及更多真实 Agent 集成。
 
 <table>
 <tr>
@@ -710,8 +710,8 @@ EverOS 1.0.0 是更大规模记忆系统路线图的第一个发布版本。Watc
 <td width="50%" valign="top">
 <strong>Dreaming / Reflection</strong><br>
 <br>
-在活跃会话之间离线运行，重新审视已存储记忆，连接弱信号，把嘈杂历史压缩成稳定模式，
-并持续改进 profile 和 skills。目标是让 Agent 在你离开时也能变得更好，
+在系统空闲或离线时运行，重新审视已存储记忆，连接弱信号，把嘈杂历史压缩成稳定模式，
+并持续改进 profile 和 skills。目标是让 Agent 在活跃 session 之间也能变得更好，
 而不是只在你 prompt 它时才进步。
 </td>
 </tr>

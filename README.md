@@ -51,8 +51,8 @@
 >
 > **Coming next:** Knowledge Wiki will turn memory into editable,
 > source-backed Markdown knowledge pages. Reflection, also called Dreaming,
-> will run offline to connect signals, compress history, and improve profiles
-> and skills between sessions.
+> will run when the system is idle or offline to connect signals, compress
+> history, and improve profiles and skills between sessions.
 
 <br>
 <div align="right">
@@ -63,6 +63,12 @@
 
 
 ## EverOS: One Memory For All
+
+EverOS is the local memory operating system for agents and makers. It gives
+one portable memory layer across coding assistants, apps, devices, and
+workflows. Today it stores conversations, files, and agent trajectories as
+readable Markdown, then syncs local SQLite and LanceDB indexes for fast
+retrieval and self-evolving reuse.
 
 <table>
 <tr>
@@ -106,12 +112,6 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 </td>
 </tr>
 </table>
-
-EverOS is the local memory operating system for agents and makers. It gives
-one portable memory layer across coding assistants, apps, devices, and
-workflows. Today it stores conversations, files, and agent trajectories as
-readable Markdown, then syncs local SQLite and LanceDB indexes for fast
-retrieval and self-evolving reuse.
 
 <br>
 <div align="right">
@@ -161,8 +161,8 @@ retrieval and self-evolving reuse.
 </tr>
 <tr>
 <td><strong>Dreaming / Reflection</strong></td>
-<td>✅ Coming next: offline Reflection that connects signals, compresses history, and improves profiles and skills between sessions</td>
-<td>❌ Usually online read/write APIs, retrieval records, or summaries rather than offline memory consolidation</td>
+<td>✅ Coming next: Reflection that runs when the system is idle or offline to connect signals, compress history, and improve profiles and skills between sessions</td>
+<td>❌ Usually online read/write APIs, retrieval records, or summaries rather than idle-time memory consolidation</td>
 </tr>
 </table>
 
@@ -710,8 +710,8 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 ## Watch EverOS
 
 EverOS 1.0.0 is the first release of a larger memory-system roadmap.
-Watch this repository for upcoming work on deeper offline evolution, benchmark
-releases, and more real-world agent integrations.
+Watch this repository for upcoming work on deeper idle-time and offline evolution,
+benchmark releases, and more real-world agent integrations.
 
 <table>
 <tr>
@@ -726,9 +726,10 @@ existing Markdown tools.
 <td width="50%" valign="top">
 <strong>Dreaming / Reflection</strong><br>
 <br>
-Runs offline between active sessions to revisit stored memory, connect weak
+Runs when the system is idle or offline to revisit stored memory, connect weak
 signals, compress noisy history into durable patterns, and improve profiles and
-skills. The agent gets better while you are away, not only while you prompt it.
+skills. The agent gets better between active sessions, not only while you prompt
+it.
 </td>
 </tr>
 </table>
