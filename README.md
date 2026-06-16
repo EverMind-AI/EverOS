@@ -23,6 +23,7 @@
 
 - [EverOS 1.0.0 Highlights](#everos-100-highlights)
 - [Why EverOS](#why-everos)
+- [How EverOS Is Different](#how-everos-is-different)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
@@ -122,6 +123,60 @@ The system is built around three boundaries:
 1. **Memory content stays readable** - Markdown is the durable source of truth.
 2. **Runtime state stays local** - SQLite tracks state and LanceDB handles vector, BM25, and scalar-filter search.
 3. **Algorithms stay modular** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) owns memory algorithms; EverOS owns runtime, persistence, online flows, and offline evolution.
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+
+## How EverOS Is Different
+
+Most memory libraries are useful, but many optimize for managed APIs, vector or
+graph recall, or one narrow memory surface. EverOS is built as a local,
+inspectable memory workspace for both agents and people.
+
+<table>
+<tr>
+<th width="24%">Developer need</th>
+<th width="38%">EverOS</th>
+<th width="38%">Common memory-library default</th>
+</tr>
+<tr>
+<td><strong>Readable source of truth</strong></td>
+<td>✅ Markdown files are the canonical memory surface. Open them in Obsidian, review diffs, or version them with Git.</td>
+<td>❌ Memory usually lives behind APIs, dashboards, vector stores, graphs, or backend payloads.</td>
+</tr>
+<tr>
+<td><strong>Simple local runtime</strong></td>
+<td>✅ Markdown + SQLite + LanceDB keep content, state, BM25, vectors, and scalar filters local.</td>
+<td>❌ Many systems center on managed services, vector DBs, graph DBs, or pluggable backend services.</td>
+</tr>
+<tr>
+<td><strong>Human-editable memory</strong></td>
+<td>✅ Edit a <code>.md</code> file directly; the cascade watcher diffs entries and syncs derived indexes.</td>
+<td>❌ Memory updates usually go through an SDK, API, dashboard, or storage backend.</td>
+</tr>
+<tr>
+<td><strong>User and agent tracks</strong></td>
+<td>✅ User memory (<code>episodes</code> / <code>profile</code>) and agent memory (<code>cases</code> / <code>skills</code>) are first-class.</td>
+<td>❌ Most systems focus on chat history, profiles, graph facts, or retrieval records rather than both tracks.</td>
+</tr>
+<tr>
+<td><strong>Portable scopes</strong></td>
+<td>✅ Search orthogonally by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.</td>
+<td>❌ Scope is often centered on one app, thread, tenant, or custom schema.</td>
+</tr>
+<tr>
+<td><strong>Auditable evolution</strong></td>
+<td>✅ Repeated experience becomes reusable skills while raw memory remains editable Markdown; Knowledge Wiki and Reflection keep evolution inspectable.</td>
+<td>❌ Evolution, when available, usually happens inside service state, graphs, or dashboards rather than editable source files.</td>
+</tr>
+</table>
+
+<sub>Comparison is about default product posture across public memory-library repos, not every optional backend or deployment mode.</sub>
 
 <br>
 <div align="right">

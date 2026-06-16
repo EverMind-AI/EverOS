@@ -23,6 +23,7 @@
 
 - [EverOS 1.0.0 亮点](#everos-100-亮点)
 - [为什么选择 EverOS](#为什么选择-everos)
+- [EverOS 的差异](#everos-的差异)
 - [快速开始](#快速开始)
 - [架构概览](#架构概览)
 - [存储布局](#存储布局)
@@ -113,6 +114,60 @@ EverOS 会把对话、Agent 轨迹和文件保存为可读 Markdown，并同步�
 1. **记忆内容保持可读** - Markdown 是长期、耐用的 source of truth。
 2. **运行时状态保持本地** - SQLite 跟踪状态；LanceDB 处理向量、BM25 和结构化过滤搜索。
 3. **算法保持模块化** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) 负责记忆算法；EverOS 负责运行时、持久化、在线流程和离线进化。
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+
+## EverOS 的差异
+
+许多 memory libraries 都有价值，但它们通常围绕 managed API、向量 / 图召回，
+或某一种单一记忆形态来设计。EverOS 的定位是一个面向 Agent 和人的本地、
+可检查记忆工作区。
+
+<table>
+<tr>
+<th width="24%">开发者关心什么</th>
+<th width="38%">EverOS</th>
+<th width="38%">常见 memory-library 默认形态</th>
+</tr>
+<tr>
+<td><strong>可读的 source of truth</strong></td>
+<td>✅ Markdown 文件就是标准记忆表面。可以用 Obsidian 打开、review diff，也可以用 Git 版本化。</td>
+<td>❌ 记忆通常藏在 API、dashboard、vector store、graph 或后端 payload 里。</td>
+</tr>
+<tr>
+<td><strong>简单本地运行时</strong></td>
+<td>✅ Markdown + SQLite + LanceDB 在本地保存内容、状态、BM25、向量和标量过滤。</td>
+<td>❌ 很多系统以 managed service、vector DB、graph DB 或可插拔后端服务为中心。</td>
+</tr>
+<tr>
+<td><strong>人可直接编辑</strong></td>
+<td>✅ 直接编辑 <code>.md</code> 文件；cascade watcher 会做 entry-level diff 并同步衍生索引。</td>
+<td>❌ 记忆更新通常需要经过 SDK、API、dashboard 或 storage backend。</td>
+</tr>
+<tr>
+<td><strong>用户与 Agent 双轨</strong></td>
+<td>✅ 用户记忆（<code>episodes</code> / <code>profile</code>）和 Agent 记忆（<code>cases</code> / <code>skills</code>）都是一等公民。</td>
+<td>❌ 多数系统更偏向 chat history、profile、graph facts 或 retrieval records，而不是同时覆盖两条轨道。</td>
+</tr>
+<tr>
+<td><strong>可携带的作用域</strong></td>
+<td>✅ 可按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 正交检索。</td>
+<td>❌ 作用域常常围绕单一 app、thread、tenant 或自定义 schema 展开。</td>
+</tr>
+<tr>
+<td><strong>可审计的进化</strong></td>
+<td>✅ 重复经验可以沉淀为 reusable skills，同时原始记忆仍是可编辑 Markdown；Knowledge Wiki 和 Reflection 会让进化过程保持可检查。</td>
+<td>❌ 即使支持 evolution，通常也发生在 service state、graph 或 dashboard 内，而不是可编辑源文件上。</td>
+</tr>
+</table>
+
+<sub>这里比较的是公开 memory-library repos 的默认产品取向，不代表每一种可选后端或部署模式。</sub>
 
 <br>
 <div align="right">
