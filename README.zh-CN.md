@@ -125,49 +125,76 @@ EverOS 会把对话、Agent 轨迹和文件保存为可读 Markdown，并同步�
 
 ## EverOS 的差异
 
-许多 memory libraries 都有价值，但它们通常围绕 managed API、向量 / 图召回，
-或某一种单一记忆形态来设计。EverOS 的定位是一个面向 Agent 和人的本地、
-可检查记忆工作区。
+下面这张表对比的是公开 memory-library repos 和 docs 中的一等、默认、
+开发者可见能力。它比较的是产品默认取向，不覆盖每一种可选后端或企业部署模式。
 
 <table>
 <tr>
-<th width="24%">开发者关心什么</th>
-<th width="38%">EverOS</th>
-<th width="38%">常见 memory-library 默认形态</th>
+<th width="22%">能力</th>
+<th width="13%">EverOS</th>
+<th width="13%">Mem0</th>
+<th width="13%">MemOS</th>
+<th width="13%">MemPalace</th>
+<th width="13%">MemoryLake</th>
+<th width="13%">LangMem / Cognee / Graphiti</th>
 </tr>
 <tr>
-<td><strong>可读的 source of truth</strong></td>
-<td>✅ Markdown 文件就是标准记忆表面。可以用 Obsidian 打开、review diff，也可以用 Git 版本化。</td>
-<td>❌ 记忆通常藏在 API、dashboard、vector store、graph 或后端 payload 里。</td>
+<td><strong>Markdown source of truth</strong><br><sub>记忆以文件形式可读、可编辑、可 diff、可 Git 版本化。</sub></td>
+<td>✅ 标准 <code>.md</code> 记忆</td>
+<td>❌ API / backend memory</td>
+<td>❌ Memory cubes / service state</td>
+<td>❌ Verbatim store + backend index</td>
+<td>❌ Hosted memory passport</td>
+<td>❌ Store / graph / platform state</td>
 </tr>
 <tr>
-<td><strong>简单本地运行时</strong></td>
-<td>✅ Markdown + SQLite + LanceDB 在本地保存内容、状态、BM25、向量和标量过滤。</td>
-<td>❌ 很多系统以 managed service、vector DB、graph DB 或可插拔后端服务为中心。</td>
+<td><strong>直接文件编辑</strong><br><sub>用普通开发者工具编辑记忆，然后同步索引。</sub></td>
+<td>✅ 编辑 <code>.md</code>；cascade watcher 同步</td>
+<td>❌ SDK / API 路径</td>
+<td>❌ API / dashboard 路径</td>
+<td>❌ CLI / backend 路径</td>
+<td>❌ App / API 路径</td>
+<td>❌ Store / graph API 路径</td>
 </tr>
 <tr>
-<td><strong>人可直接编辑</strong></td>
-<td>✅ 直接编辑 <code>.md</code> 文件；cascade watcher 会做 entry-level diff 并同步衍生索引。</td>
-<td>❌ 记忆更新通常需要经过 SDK、API、dashboard 或 storage backend。</td>
+<td><strong>本地三件套</strong><br><sub>Markdown + SQLite + LanceDB；不需要 MongoDB、Elasticsearch 或 Redis。</sub></td>
+<td>✅ 内置</td>
+<td>❌ Vector / service stack</td>
+<td>❌ Cloud 或 self-hosted service stack</td>
+<td>❌ Chroma / pluggable backend stack</td>
+<td>❌ Hosted product stack</td>
+<td>❌ Graph / database / platform stack</td>
 </tr>
 <tr>
-<td><strong>用户与 Agent 双轨</strong></td>
-<td>✅ 用户记忆（<code>episodes</code> / <code>profile</code>）和 Agent 记忆（<code>cases</code> / <code>skills</code>）都是一等公民。</td>
-<td>❌ 多数系统更偏向 chat history、profile、graph facts 或 retrieval records，而不是同时覆盖两条轨道。</td>
+<td><strong>用户 + Agent 双轨</strong><br><sub>用户 <code>episodes/profile</code> 与 Agent <code>cases/skills</code> 是分离的一等记忆表面。</sub></td>
+<td>✅ 内置</td>
+<td>❌ User/session/agent state，不是这套双轨</td>
+<td>❌ Multi-layer memory，不是这套双轨</td>
+<td>❌ 偏 conversation/project recall</td>
+<td>❌ 偏 personal memory passport</td>
+<td>❌ 偏 app memory 或 graph</td>
 </tr>
 <tr>
-<td><strong>可携带的作用域</strong></td>
-<td>✅ 可按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 正交检索。</td>
-<td>❌ 作用域常常围绕单一 app、thread、tenant 或自定义 schema 展开。</td>
+<td><strong>正交检索作用域</strong><br><sub>按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索。</sub></td>
+<td>✅ 内置</td>
+<td>❌ 作用域模型不同</td>
+<td>❌ 作用域模型不同</td>
+<td>❌ Wing / room 式作用域</td>
+<td>❌ Product account / connector 作用域</td>
+<td>❌ Namespace / graph / app 作用域</td>
 </tr>
 <tr>
-<td><strong>可审计的进化</strong></td>
-<td>✅ 重复经验可以沉淀为 reusable skills，同时原始记忆仍是可编辑 Markdown；Knowledge Wiki 和 Reflection 会让进化过程保持可检查。</td>
-<td>❌ 即使支持 evolution，通常也发生在 service state、graph 或 dashboard 内，而不是可编辑源文件上。</td>
+<td><strong>Markdown-native evolution</strong><br><sub>Skills、即将推出的 Knowledge Wiki 和 Reflection 都从可检查源文件中进化。</sub></td>
+<td>✅ 围绕文件构建</td>
+<td>❌ Evolution 不是 Markdown-native</td>
+<td>❌ Evolution 不是 Markdown-native</td>
+<td>❌ Retrieval-first，没有 Markdown-native evolution</td>
+<td>❌ Reflection 是产品状态，不是 Markdown-native</td>
+<td>❌ Evolution 存在于 stores 或 graphs 中</td>
 </tr>
 </table>
 
-<sub>这里比较的是公开 memory-library repos 的默认产品取向，不代表每一种可选后端或部署模式。</sub>
+<sub>✅ = 公开 docs 中的一等 / 默认能力。❌ = 公开 docs 中未作为一等 / 默认能力呈现。Mem0 有时也被写作 MemZero；MemoryLake 对应 MemLake 这个简称。</sub>
 
 <br>
 <div align="right">

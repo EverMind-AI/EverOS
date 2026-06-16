@@ -134,49 +134,77 @@ The system is built around three boundaries:
 
 ## How EverOS Is Different
 
-Most memory libraries are useful, but many optimize for managed APIs, vector or
-graph recall, or one narrow memory surface. EverOS is built as a local,
-inspectable memory workspace for both agents and people.
+The table below compares first-class, developer-visible capabilities from
+public memory-library repos and docs. It focuses on default product posture,
+not every optional backend or enterprise deployment.
 
 <table>
 <tr>
-<th width="24%">Developer need</th>
-<th width="38%">EverOS</th>
-<th width="38%">Common memory-library default</th>
+<th width="22%">Capability</th>
+<th width="13%">EverOS</th>
+<th width="13%">Mem0</th>
+<th width="13%">MemOS</th>
+<th width="13%">MemPalace</th>
+<th width="13%">MemoryLake</th>
+<th width="13%">LangMem / Cognee / Graphiti</th>
 </tr>
 <tr>
-<td><strong>Readable source of truth</strong></td>
-<td>✅ Markdown files are the canonical memory surface. Open them in Obsidian, review diffs, or version them with Git.</td>
-<td>❌ Memory usually lives behind APIs, dashboards, vector stores, graphs, or backend payloads.</td>
+<td><strong>Markdown source of truth</strong><br><sub>Memory is readable, editable, diffable, and Git-versioned as files.</sub></td>
+<td>✅ Canonical <code>.md</code> memory</td>
+<td>❌ API / backend memory</td>
+<td>❌ Memory cubes / service state</td>
+<td>❌ Verbatim store + backend index</td>
+<td>❌ Hosted memory passport</td>
+<td>❌ Store / graph / platform state</td>
 </tr>
 <tr>
-<td><strong>Simple local runtime</strong></td>
-<td>✅ Markdown + SQLite + LanceDB keep content, state, BM25, vectors, and scalar filters local.</td>
-<td>❌ Many systems center on managed services, vector DBs, graph DBs, or pluggable backend services.</td>
+<td><strong>Direct file editing</strong><br><sub>Edit memory with normal developer tools, then sync indexes.</sub></td>
+<td>✅ Edit <code>.md</code> files; cascade watcher syncs</td>
+<td>❌ SDK / API path</td>
+<td>❌ API / dashboard path</td>
+<td>❌ CLI / backend path</td>
+<td>❌ App / API path</td>
+<td>❌ Store / graph API path</td>
 </tr>
 <tr>
-<td><strong>Human-editable memory</strong></td>
-<td>✅ Edit a <code>.md</code> file directly; the cascade watcher diffs entries and syncs derived indexes.</td>
-<td>❌ Memory updates usually go through an SDK, API, dashboard, or storage backend.</td>
+<td><strong>Local three-part stack</strong><br><sub>Markdown + SQLite + LanceDB; no MongoDB, Elasticsearch, or Redis required.</sub></td>
+<td>✅ Built in</td>
+<td>❌ Vector / service stack</td>
+<td>❌ Cloud or self-hosted service stack</td>
+<td>❌ Chroma / pluggable backend stack</td>
+<td>❌ Hosted product stack</td>
+<td>❌ Graph / database / platform stack</td>
 </tr>
 <tr>
-<td><strong>User and agent tracks</strong></td>
-<td>✅ User memory (<code>episodes</code> / <code>profile</code>) and agent memory (<code>cases</code> / <code>skills</code>) are first-class.</td>
-<td>❌ Most systems focus on chat history, profiles, graph facts, or retrieval records rather than both tracks.</td>
+<td><strong>User + agent memory tracks</strong><br><sub>User <code>episodes/profile</code> and agent <code>cases/skills</code> are separate first-class surfaces.</sub></td>
+<td>✅ Built in</td>
+<td>❌ User/session/agent state, not this dual track</td>
+<td>❌ Multi-layer memory, not this dual track</td>
+<td>❌ Conversation/project recall focus</td>
+<td>❌ Personal memory passport focus</td>
+<td>❌ App memory or graph focus</td>
 </tr>
 <tr>
-<td><strong>Portable scopes</strong></td>
-<td>✅ Search orthogonally by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.</td>
-<td>❌ Scope is often centered on one app, thread, tenant, or custom schema.</td>
+<td><strong>Orthogonal retrieval scopes</strong><br><sub>Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.</sub></td>
+<td>✅ Built in</td>
+<td>❌ Different scoping model</td>
+<td>❌ Different scoping model</td>
+<td>❌ Wing / room style scoping</td>
+<td>❌ Product account / connector scoping</td>
+<td>❌ Namespace / graph / app scoping</td>
 </tr>
 <tr>
-<td><strong>Auditable evolution</strong></td>
-<td>✅ Repeated experience becomes reusable skills while raw memory remains editable Markdown; Knowledge Wiki and Reflection keep evolution inspectable.</td>
-<td>❌ Evolution, when available, usually happens inside service state, graphs, or dashboards rather than editable source files.</td>
+<td><strong>Markdown-native evolution</strong><br><sub>Skills, upcoming Knowledge Wiki, and Reflection evolve from inspectable source files.</sub></td>
+<td>✅ Built around files</td>
+<td>❌ Evolution is not Markdown-native</td>
+<td>❌ Evolution is not Markdown-native</td>
+<td>❌ Retrieval-first, no Markdown-native evolution</td>
+<td>❌ Reflection is product state, not Markdown-native</td>
+<td>❌ Evolution lives in stores or graphs</td>
 </tr>
 </table>
 
-<sub>Comparison is about default product posture across public memory-library repos, not every optional backend or deployment mode.</sub>
+<sub>✅ = first-class/default in public docs. ❌ = not presented as a first-class/default capability in public docs. Mem0 is sometimes referred to as MemZero; MemoryLake covers the MemLake shorthand.</sub>
 
 <br>
 <div align="right">
