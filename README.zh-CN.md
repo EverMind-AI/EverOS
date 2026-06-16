@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![EverOS banner](https://github.com/EverMind-AI/EverOS/releases/download/v1.0.0/everos-readme-banner-optimized.jpg)
+![EverOS banner](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
@@ -48,8 +48,9 @@
 > 多模态摄取、用户记忆与 Agent 记忆作用域，以及由
 > [EverAlgo](https://github.com/EverMind-AI/EverAlgo) 支撑的模块化算法。
 >
-> **欢迎 Watch 这个仓库。** 下一阶段我们会继续推进记忆系统方法，
-> 包括 Wiki 式知识层和用于更深层离线进化的 Dreaming。
+> **即将推出：** Knowledge Wiki 会把记忆整理成可编辑、可溯源的
+> Markdown 知识页。Reflection（也称 Dreaming）会在离线时连接信号、
+> 压缩历史，并持续改进 profile 和 skills。
 
 <table>
 <tr>
@@ -651,8 +652,30 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 ## 关注 EverOS
 
 EverOS 1.0.0 是更大规模记忆系统路线图的第一个发布版本。Watch 这个仓库，
-即可持续关注 Wiki 式记忆、Dreaming、更深入的离线进化、benchmark releases，
-以及更多真实 Agent 集成。
+即可持续关注更深入的离线进化、benchmark releases，以及更多真实 Agent 集成。
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<strong>Knowledge Wiki</strong><br>
+<br>
+把分散的 episodes、files、facts 和 Agent traces 整理成有来源的 Markdown
+知识页，覆盖 people、projects、topics、decisions 和 workflows。记忆不再只是
+向量召回结果，而是用户可以阅读、修正、链接、版本化，并用现有 Markdown 工具打开的知识层。
+</td>
+<td width="50%" valign="top">
+<strong>Dreaming / Reflection</strong><br>
+<br>
+在活跃会话之间离线运行，重新审视已存储记忆，连接弱信号，把嘈杂历史压缩成稳定模式，
+并持续改进 profile 和 skills。目标是让 Agent 在你离开时也能变得更好，
+而不是只在你 prompt 它时才进步。
+</td>
+</tr>
+</table>
+
+许多记忆系统停留在聊天历史、黑盒 profile 或向量召回。EverOS 的差异在于：
+记忆保持本地、Markdown-native、可审计、可自进化；原始记忆仍然可读，
+衍生知识沉淀为 wiki，Reflection 则把重复经验转化为更有用的长期行为。
 
 如果 EverOS 对你的 Agent stack 有帮助，Star 这个仓库也会帮助更多 builders
 发现它。

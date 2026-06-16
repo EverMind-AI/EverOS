@@ -22,7 +22,6 @@
 <br>
 
 - [EverOS 1.0.0 Highlights](#everos-100-highlights)
-- [Coming Next: Knowledge Wiki And Reflection](#coming-next-knowledge-wiki-and-reflection)
 - [Why EverOS](#why-everos)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
@@ -49,8 +48,10 @@
 > multimodal ingestion, user and agent memory scopes, and modular algorithms
 > through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
 >
-> **Watch this repository** for the next wave of memory-system work, including
-> Knowledge Wiki and Dreaming / Reflection for deeper offline evolution.
+> **Coming next:** Knowledge Wiki will turn memory into editable,
+> source-backed Markdown knowledge pages. Reflection, also called Dreaming,
+> will run offline to connect signals, compress history, and improve profiles
+> and skills between sessions.
 
 <table>
 <tr>
@@ -94,41 +95,6 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 </td>
 </tr>
 </table>
-
-## Coming Next: Knowledge Wiki And Reflection
-
-Knowledge Wiki and Dreaming / Reflection are the next big EverOS features.
-They extend EverOS from long-term retrieval into an inspectable memory workspace
-that agents and humans can both improve.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-<strong>Knowledge Wiki</strong><br>
-<br>
-Knowledge Wiki turns scattered episodes, files, facts, and agent traces into
-source-backed Markdown pages for people, projects, topics, decisions, and
-workflows. Instead of hiding memory behind vectors, EverOS will expose a
-wiki-like knowledge layer that users can read, correct, link, version, and open
-directly in their existing Markdown tools.
-</td>
-<td width="50%" valign="top">
-<strong>Dreaming / Reflection</strong><br>
-<br>
-Dreaming, exposed as Reflection, is the offline evolution loop. It revisits
-stored memory between active sessions, connects weak signals, compresses noisy
-history into durable patterns, updates profiles and skills, and prepares better
-future context. The goal is an agent that improves while you are away, not only
-while you are prompting it.
-</td>
-</tr>
-</table>
-
-Most memory systems stop at chat history, opaque profiles, or vector recall.
-EverOS differentiates itself by keeping memory local, Markdown-native,
-auditable, and self-evolving: raw memory stays readable, derived knowledge
-becomes a wiki, and offline Reflection turns repeated experience into more
-useful long-term behavior.
 
 <br>
 <div align="right">
@@ -701,9 +667,33 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 ## Watch EverOS
 
 EverOS 1.0.0 is the first release of a larger memory-system roadmap.
-Watch this repository for upcoming work on Knowledge Wiki, Dreaming /
-Reflection, deeper offline evolution, benchmark releases, and more real-world
-agent integrations.
+Watch this repository for upcoming work on deeper offline evolution, benchmark
+releases, and more real-world agent integrations.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<strong>Knowledge Wiki</strong><br>
+<br>
+Turns scattered episodes, files, facts, and agent traces into source-backed
+Markdown pages for people, projects, topics, decisions, and workflows. Memory
+becomes something users can read, correct, link, version, and open in their
+existing Markdown tools.
+</td>
+<td width="50%" valign="top">
+<strong>Dreaming / Reflection</strong><br>
+<br>
+Runs offline between active sessions to revisit stored memory, connect weak
+signals, compress noisy history into durable patterns, and improve profiles and
+skills. The agent gets better while you are away, not only while you prompt it.
+</td>
+</tr>
+</table>
+
+Most memory systems stop at chat history, opaque profiles, or vector recall.
+EverOS keeps memory local, Markdown-native, auditable, and self-evolving: raw
+memory stays readable, derived knowledge becomes a wiki, and Reflection turns
+repeated experience into more useful long-term behavior.
 
 If EverOS is useful to your agent stack, starring the repo helps more
 builders discover it.
