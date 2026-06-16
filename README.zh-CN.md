@@ -22,8 +22,8 @@
 <br>
 
 - [EverOS 1.0.0](#everos-100)
-- [为什么选择 EverOS](#为什么选择-everos)
-- [EverOS 的差异](#everos-的差异)
+- [EverMe: One Memory For All](#everme-one-memory-for-all)
+- [EverMe 的差异](#everme-的差异)
 - [快速开始](#快速开始)
 - [架构概览](#架构概览)
 - [存储布局](#存储布局)
@@ -61,22 +61,49 @@
 </div>
 
 
-## 为什么选择 EverOS
+## EverMe: One Memory For All
 
-EverOS 是一个开源 Python 框架，用来构建**跨 Agent、跨平台的自进化长期记忆**。
-它为 maker 提供一层可携带的统一记忆层，适用于他们使用的每一个 Agent：
-Claude Code、Codex、OpenClaw、Hermes 等等。这样，上下文、决策、文件和
-Agent 轨迹可以跟着工作流走，而不是被锁在某一个工具里。
+<table>
+<tr>
+<td width="33%" valign="top">
+<strong>Markdown As Source Of Truth</strong><br>
+<br>
+所有记忆持久化为 <code>.md</code> 文件：可读、可改、可 grep、可 Git 版本化，也可直接用 Obsidian 打开。
+</td>
+<td width="33%" valign="top">
+<strong>Local Three-Part Stack</strong><br>
+<br>
+Markdown + SQLite + LanceDB 在本地完成向量、BM25 和标量过滤检索，无需 MongoDB、Elasticsearch 或 Redis。
+</td>
+<td width="33%" valign="top">
+<strong>Dual-Track Memory</strong><br>
+<br>
+Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<code>episodes</code> / <code>profile</code>）独立提取，互不污染。
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Multimodal Ingestion</strong><br>
+<br>
+文本、图像、音频、文档、PDF、HTML 和邮件统一抽取为可检索的记忆形态。
+</td>
+<td width="33%" valign="top">
+<strong>Self-Evolution</strong><br>
+<br>
+从真实使用经验中自动抽取共性 skills，重复模式沉淀为可复用流程，无需重训。
+</td>
+<td width="33%" valign="top">
+<strong>Orthogonal Retrieval</strong><br>
+<br>
+按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 五维独立检索。
+</td>
+</tr>
+</table>
 
-EverOS 会把对话、Agent 轨迹和文件保存为可读 Markdown，并同步本地 SQLite
-和 LanceDB 索引，以便快速检索。Agent 可以复用过去的 cases 和 skills，从重复
-工作流中自我改进，并逐渐变得更加主动。
-
-系统围绕三个边界设计：
-
-1. **记忆内容保持可读** - Markdown 是长期、耐用的 source of truth。
-2. **运行时状态保持本地** - SQLite 跟踪状态；LanceDB 处理向量、BM25 和结构化过滤搜索。
-3. **算法保持模块化** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) 负责记忆算法；EverOS 负责运行时、持久化、在线流程和离线进化。
+EverMe 是构建在 EverOS 之上的个人记忆体验：通过 CLI 和 Agent plugin layer，
+让同一份记忆跟随 maker 穿过 coding assistants、apps、devices 和 workflows。
+目前它会把对话、文件和 Agent 轨迹保存为可读 Markdown，并同步本地 SQLite
+和 LanceDB 索引，用于快速检索和自进化复用。
 
 <br>
 <div align="right">
@@ -86,60 +113,52 @@ EverOS 会把对话、Agent 轨迹和文件保存为可读 Markdown，并同步�
 </div>
 
 
-## EverOS 的差异
+## EverMe 的差异
 
 下面这张表比较的是常见 memory-library 架构类型，而不是点名具体仓库。
 有些项目会跨多个类型，也确实有项目提供 file-oriented 或 Markdown-like 能力。
-EverOS 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
+EverMe 的差异在于：Markdown 是标准记忆层，而不是 export、log 或 integration target。
 
 <table>
 <tr>
-<th width="24%">开发者关心什么</th>
-<th width="28%">EverOS default</th>
-<th width="24%">常见 memory libraries</th>
-<th width="24%">File / Markdown-adjacent tools</th>
+<th width="28%">Title</th>
+<th width="36%">EverMe</th>
+<th width="36%">Agent Memory libraries</th>
 </tr>
 <tr>
-<td><strong>Markdown source of truth</strong><br><sub>记忆以文件形式可读、可编辑、可 diff、可 Git 版本化。</sub></td>
-<td>✅ 标准 <code>.md</code> 记忆</td>
+<td><strong>Markdown source of truth</strong></td>
+<td>✅ 标准 <code>.md</code> 文件：可读、可编辑、可 diff、可 Git 版本化</td>
 <td>❌ 通常是 API、vector、graph、dashboard 或 database state</td>
-<td>✅ 往往可读，但不一定是完整 runtime source of truth</td>
 </tr>
 <tr>
-<td><strong>直接文件编辑</strong><br><sub>用普通开发者工具编辑记忆，然后同步索引。</sub></td>
+<td><strong>直接文件编辑</strong></td>
 <td>✅ 编辑 <code>.md</code>；cascade watcher 同步</td>
 <td>❌ 通常需要 SDK、API、dashboard 或 backend update path</td>
-<td>✅ 有些可以做到，但常常缺少 entry-level index sync</td>
 </tr>
 <tr>
-<td><strong>本地三件套</strong><br><sub>Markdown + SQLite + LanceDB；不需要 MongoDB、Elasticsearch 或 Redis。</sub></td>
-<td>✅ 内置</td>
+<td><strong>本地三件套</strong></td>
+<td>✅ Markdown + SQLite + LanceDB；不需要 MongoDB、Elasticsearch 或 Redis</td>
 <td>❌ 常依赖 managed service、vector DB、graph DB 或 server stack</td>
-<td>❌ 往往本地，但通常绑定另一套 index/backend model</td>
 </tr>
 <tr>
-<td><strong>用户 + Agent 双轨</strong><br><sub>用户 <code>episodes/profile</code> 与 Agent <code>cases/skills</code> 是分离的一等记忆表面。</sub></td>
-<td>✅ 内置</td>
+<td><strong>用户 + Agent 双轨</strong></td>
+<td>✅ 用户 <code>episodes/profile</code> 与 Agent <code>cases/skills</code> 是分离的一等记忆表面</td>
 <td>❌ 通常围绕 chat history、profiles、entities、facts 或 retrieval records</td>
-<td>❌ 通常围绕 logs、notes、projects 或 conversations</td>
 </tr>
 <tr>
-<td><strong>正交检索作用域</strong><br><sub>按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索。</sub></td>
-<td>✅ 内置</td>
+<td><strong>正交检索作用域</strong></td>
+<td>✅ 按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索</td>
 <td>❌ 通常按 app、namespace、tenant、thread 或 graph 来组织</td>
-<td>❌ 通常按 folder、project 或 conversation 来组织</td>
 </tr>
 <tr>
-<td><strong>Knowledge Wiki</strong><br><sub>记忆应该沉淀为可编辑、可溯源的知识页。</sub></td>
+<td><strong>Knowledge Wiki</strong></td>
 <td>✅ 即将推出：由记忆生成 Markdown wiki 知识页</td>
 <td>❌ 通常是 retrieval、graph、dashboard 或 generated summary state</td>
-<td>✅ 往往像 wiki，但通常是手写内容，或与 runtime memory 分离</td>
 </tr>
 <tr>
-<td><strong>Dreaming / Reflection</strong><br><sub>离线整理应该连接信号，并改善长期行为。</sub></td>
+<td><strong>Dreaming / Reflection</strong></td>
 <td>✅ 即将推出：围绕 profiles、skills 和 wiki 做离线 Reflection</td>
 <td>❌ 通常是在线读写 API，而不是基于文件的自我改进</td>
-<td>❌ 通常偏笔记召回或摘要，不是运行时记忆进化</td>
 </tr>
 </table>
 

@@ -22,8 +22,8 @@
 <br>
 
 - [EverOS 1.0.0](#everos-100)
-- [Why EverOS](#why-everos)
-- [How EverOS Is Different](#how-everos-is-different)
+- [EverMe: One Memory For All](#everme-one-memory-for-all)
+- [How EverMe Is Different](#how-everme-is-different)
 - [Quick Start](#quick-start)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
@@ -62,24 +62,56 @@
 </div>
 
 
-## Why EverOS
+## EverMe: One Memory For All
 
-EverOS is an open-source Python framework for self-evolving long-term
-memory across agents and platforms. It gives makers one portable memory
-layer for every agent they use - Claude Code, Codex, OpenClaw, Hermes,
-and more - so context, decisions, files, and trajectories can follow the
-work instead of staying trapped in one tool.
+<table>
+<tr>
+<td width="33%" valign="top">
+<strong>Markdown As Source Of Truth</strong><br>
+<br>
+All memory is persisted as <code>.md</code> files: readable, editable,
+grep-able, Git-versioned, and openable directly in Obsidian.
+</td>
+<td width="33%" valign="top">
+<strong>Local Three-Part Stack</strong><br>
+<br>
+Markdown + SQLite + LanceDB keep vectors, BM25, and scalar filters
+local. No MongoDB, Elasticsearch, or Redis required.
+</td>
+<td width="33%" valign="top">
+<strong>Dual-Track Memory</strong><br>
+<br>
+Agent memory (<code>cases</code> / <code>skills</code>) and user memory
+(<code>episodes</code> / <code>profile</code>) are extracted independently.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<strong>Multimodal Ingestion</strong><br>
+<br>
+Text, images, audio, documents, PDFs, HTML, and email are unified into
+searchable memory.
+</td>
+<td width="33%" valign="top">
+<strong>Self-Evolution</strong><br>
+<br>
+Common skills are extracted from real usage; repeated patterns become
+reusable workflows, no retraining required.
+</td>
+<td width="33%" valign="top">
+<strong>Orthogonal Retrieval</strong><br>
+<br>
+Search independently by <code>user_id</code>, <code>agent_id</code>,
+<code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.
+</td>
+</tr>
+</table>
 
-EverOS stores conversations, agent trajectories, and files as readable
-Markdown, then syncs local SQLite and LanceDB indexes for fast retrieval.
-Agents can reuse past cases and skills, improve from repeated workflows,
-and become more proactive over time.
-
-The system is built around three boundaries:
-
-1. **Memory content stays readable** - Markdown is the durable source of truth.
-2. **Runtime state stays local** - SQLite tracks state and LanceDB handles vector, BM25, and scalar-filter search.
-3. **Algorithms stay modular** - [EverAlgo](https://github.com/EverMind-AI/EverAlgo) owns memory algorithms; EverOS owns runtime, persistence, online flows, and offline evolution.
+EverMe is the personal-memory experience built on EverOS: a CLI and agent
+plugin layer that lets one memory follow a maker across coding assistants,
+apps, devices, and workflows. Today it stores conversations, files, and agent
+trajectories as readable Markdown, then syncs local SQLite and LanceDB indexes
+for fast retrieval and self-evolving reuse.
 
 <br>
 <div align="right">
@@ -89,61 +121,53 @@ The system is built around three boundaries:
 </div>
 
 
-## How EverOS Is Different
+## How EverMe Is Different
 
 The table below compares common memory-library architectures rather than naming
 specific repos. Some projects overlap categories, and some do expose
-file-oriented or Markdown-like surfaces. EverOS is different because Markdown is
+file-oriented or Markdown-like surfaces. EverMe is different because Markdown is
 the canonical memory layer, not just an export, log, or integration target.
 
 <table>
 <tr>
-<th width="24%">Developer need</th>
-<th width="28%">EverOS default</th>
-<th width="24%">Typical memory libraries</th>
-<th width="24%">File / Markdown-adjacent tools</th>
+<th width="28%">Title</th>
+<th width="36%">EverMe</th>
+<th width="36%">Agent Memory libraries</th>
 </tr>
 <tr>
-<td><strong>Markdown source of truth</strong><br><sub>Memory is readable, editable, diffable, and Git-versioned as files.</sub></td>
-<td>✅ Canonical <code>.md</code> memory</td>
+<td><strong>Markdown source of truth</strong></td>
+<td>✅ Canonical <code>.md</code> files that are readable, editable, diffable, and Git-versioned</td>
 <td>❌ Usually API, vector, graph, dashboard, or database state</td>
-<td>✅ Often readable, but not always the full runtime source of truth</td>
 </tr>
 <tr>
-<td><strong>Direct file editing</strong><br><sub>Edit memory with normal developer tools, then sync indexes.</sub></td>
+<td><strong>Direct file editing</strong></td>
 <td>✅ Edit <code>.md</code> files; cascade watcher syncs</td>
 <td>❌ Usually SDK, API, dashboard, or backend update paths</td>
-<td>✅ Sometimes possible, but often without entry-level index sync</td>
 </tr>
 <tr>
-<td><strong>Local three-part stack</strong><br><sub>Markdown + SQLite + LanceDB; no MongoDB, Elasticsearch, or Redis required.</sub></td>
-<td>✅ Built in</td>
+<td><strong>Local three-part stack</strong></td>
+<td>✅ Markdown + SQLite + LanceDB; no MongoDB, Elasticsearch, or Redis required</td>
 <td>❌ Often depends on managed services, vector DBs, graph DBs, or server stacks</td>
-<td>❌ Often local, but commonly tied to a different index/backend model</td>
 </tr>
 <tr>
-<td><strong>User + agent memory tracks</strong><br><sub>User <code>episodes/profile</code> and agent <code>cases/skills</code> are separate first-class surfaces.</sub></td>
-<td>✅ Built in</td>
+<td><strong>User + agent tracks</strong></td>
+<td>✅ User <code>episodes/profile</code> and agent <code>cases/skills</code> are separate first-class surfaces</td>
 <td>❌ Usually centered on chat history, profiles, entities, facts, or retrieval records</td>
-<td>❌ Usually centered on logs, notes, projects, or conversations</td>
 </tr>
 <tr>
-<td><strong>Orthogonal retrieval scopes</strong><br><sub>Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.</sub></td>
-<td>✅ Built in</td>
+<td><strong>Orthogonal retrieval</strong></td>
+<td>✅ Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code></td>
 <td>❌ Usually app, namespace, tenant, thread, or graph scoped</td>
-<td>❌ Usually folder, project, or conversation scoped</td>
 </tr>
 <tr>
-<td><strong>Knowledge Wiki</strong><br><sub>Memory should become editable, source-backed knowledge pages.</sub></td>
+<td><strong>Knowledge Wiki</strong></td>
 <td>✅ Coming next: Markdown wiki pages derived from memory</td>
 <td>❌ Usually retrieval, graph, dashboard, or generated summary state</td>
-<td>✅ Often wiki-like, but usually manual or separate from runtime memory</td>
 </tr>
 <tr>
-<td><strong>Dreaming / Reflection</strong><br><sub>Offline consolidation should connect signals and improve long-term behavior.</sub></td>
+<td><strong>Dreaming / Reflection</strong></td>
 <td>✅ Coming next: offline Reflection across profiles, skills, and wiki</td>
 <td>❌ Usually online read/write APIs rather than file-native self-improvement</td>
-<td>❌ Usually note recall or summaries, not runtime memory evolution</td>
 </tr>
 </table>
 
