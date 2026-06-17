@@ -108,7 +108,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   }"
 ```
 
-Response:
+Typical response:
 
 ```json
 {
@@ -122,7 +122,9 @@ Response:
 
 `status: "accumulated"` means the three messages are in the session
 buffer, but the boundary detector hasn't decided to extract a memory
-cell yet. For a quick demo we'll force it.
+cell yet. If you see `status: "extracted"` instead, EverOS already
+carved out a memory cell; you can still continue. For a deterministic
+quick demo we'll force the boundary in the next step.
 
 ## 5. Force boundary extraction
 
@@ -144,7 +146,7 @@ Response (this takes a few seconds — one LLM call for extraction):
 ```
 
 `status: "extracted"` means at least one memory cell was carved out and
-written to disk + indexed.
+written to disk; the local cascade process then indexes the Markdown.
 
 > `/flush` is **OSS-only**. The cloud edition decides boundary timing
 > server-side and does not expose this endpoint.
@@ -187,7 +189,8 @@ Response (trimmed):
         ],
         "profiles": [],
         "agent_cases": [],
-        "agent_skills": []
+        "agent_skills": [],
+        "unprocessed_messages": []
     }
 }
 ```
@@ -195,8 +198,13 @@ Response (trimmed):
 The hybrid retrieval (BM25 + vector + scalar) returns the episode
 that contains the climbing fact, with the matching atomic fact nested
 under it. Other response arrays (`profiles` / `agent_cases` /
-`agent_skills`) are always present for client-side symmetry, populated
-only when the requested kind matches.
+`agent_skills` / `unprocessed_messages`) are always present for
+client-side symmetry, populated only when the requested kind matches
+or when `filters.session_id` asks for in-flight buffer rows.
+
+If the result is empty on the first try, wait a moment and retry; the
+Markdown write is synchronous, while the local index catches up in the
+background.
 
 ## 7. Your memory is just Markdown
 

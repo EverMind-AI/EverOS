@@ -127,6 +127,7 @@ def test_response_default_arrays_present() -> None:
     assert resp.data.profiles == []
     assert resp.data.agent_cases == []
     assert resp.data.agent_skills == []
+    assert resp.data.unprocessed_messages == []
 
 
 def test_method_enum_serialises_to_lowercase() -> None:

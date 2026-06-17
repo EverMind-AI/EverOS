@@ -4,7 +4,7 @@ Contract per the final design:
 
 * ``owner_type`` is a hard partition. ``user`` returns ``episodes``
   (and optionally ``profiles``); ``agent`` returns ``agent_cases`` +
-  ``agent_skills``. The four ``data.*`` arrays always exist; routes not
+  ``agent_skills``. The five ``data.*`` arrays always exist; routes not
   applicable to the current ``owner_type`` stay as ``[]``.
 * ``atomic_facts`` are **nested** inside :class:`SearchEpisodeItem`,
   never returned as a top-level array.
