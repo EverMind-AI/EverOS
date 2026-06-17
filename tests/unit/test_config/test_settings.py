@@ -134,6 +134,52 @@ def test_rerank_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.rerank.max_concurrent == 8
 
 
+def test_dashscope_one_key_can_configure_llm_embedding_and_rerank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One DashScope key value can be reused across all three clients."""
+    key = "sk-dashscope"
+    compatible_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    monkeypatch.setenv("EVEROS_LLM__MODEL", "qwen-plus")
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", key)
+    monkeypatch.setenv("EVEROS_LLM__BASE_URL", compatible_base_url)
+    monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "text-embedding-v4")
+    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", key)
+    monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", compatible_base_url)
+    monkeypatch.setenv("EVEROS_RERANK__PROVIDER", "dashscope")
+    monkeypatch.setenv("EVEROS_RERANK__MODEL", "gte-rerank-v2")
+    monkeypatch.setenv("EVEROS_RERANK__API_KEY", key)
+    monkeypatch.setenv("EVEROS_RERANK__BASE_URL", "https://dashscope.aliyuncs.com")
+
+    s = Settings()
+
+    assert s.llm.api_key is not None
+    assert s.embedding.api_key is not None
+    assert s.rerank.api_key is not None
+    assert s.llm.api_key.get_secret_value() == key
+    assert s.embedding.api_key.get_secret_value() == key
+    assert s.rerank.api_key.get_secret_value() == key
+    assert s.llm.base_url == compatible_base_url
+    assert s.embedding.base_url == compatible_base_url
+    assert s.rerank.provider == "dashscope"
+
+    from everos.component.embedding import (
+        OpenAIEmbeddingProvider,
+        build_embedding_provider,
+    )
+    from everos.component.llm import build_llm_provider
+    from everos.component.llm.openai_provider import OpenAIProvider
+    from everos.component.rerank import (
+        DashScopeRerankProvider,
+        build_rerank_provider,
+    )
+
+    assert isinstance(build_llm_provider(s.llm), OpenAIProvider)
+    assert isinstance(build_embedding_provider(s.embedding), OpenAIEmbeddingProvider)
+    assert isinstance(build_rerank_provider(s.rerank), DashScopeRerankProvider)
+
+
 def test_user_toml_override_via_env_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

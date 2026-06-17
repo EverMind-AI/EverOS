@@ -24,6 +24,12 @@ def test_raises_when_api_key_missing() -> None:
         build_embedding_provider(s)
 
 
+def test_raises_when_api_key_empty() -> None:
+    s = EmbeddingSettings(model="m", api_key=SecretStr(""), base_url="https://x")
+    with pytest.raises(ValueError, match="EVEROS_EMBEDDING__API_KEY"):
+        build_embedding_provider(s)
+
+
 def test_raises_when_base_url_missing() -> None:
     s = EmbeddingSettings(model="m", api_key=SecretStr("k"), base_url=None)
     with pytest.raises(ValueError, match="EVEROS_EMBEDDING__BASE_URL"):

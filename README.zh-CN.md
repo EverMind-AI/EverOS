@@ -173,9 +173,10 @@ Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<cod
 ### 0. 前置条件
 
 - Python 3.12+
-- 默认 provider 需要 API keys：OpenRouter 用于 chat / multimodal，
-  DeepInfra 用于 embedding / rerank。也可以通过 `.env` 里的
-  `*__BASE_URL` 字段切换到其他 OpenAI-compatible providers。
+- 默认 provider 需要 API keys：[OpenRouter](https://openrouter.ai/) 用于
+  chat / multimodal，[DeepInfra](https://deepinfra.com/) 用于 embedding /
+  rerank。也可以通过 `.env` 里的 `*__BASE_URL` 字段切换到其他
+  OpenAI-compatible providers。
 
 ### 1. 安装
 
@@ -186,9 +187,18 @@ uv pip install everos
 
 ### 2. 配置
 
-生成一个 starter `.env` 文件，然后根据生成的注释填入四个 API key slots。
-默认配置只需要两把不同的 key：OpenRouter 用于 `LLM` / `MULTIMODAL`，
-DeepInfra 用于 `EMBEDDING` / `RERANK`。
+生成一个 starter `.env` 文件，然后根据生成的注释填入对应的 API key 字段。
+默认配置需要分别提供 [OpenRouter](https://openrouter.ai/) 和
+[DeepInfra](https://deepinfra.com/) 的 API key：OpenRouter 用于
+`LLM` / `MULTIMODAL`，DeepInfra 用于 `EMBEDDING` / `RERANK`。
+
+EverOS 也支持通过
+[阿里云百炼控制台](https://bailian.console.aliyun.com/) 创建一个
+DashScope API Key，统一配置 `LLM` / `EMBEDDING` / `RERANK`
+三个核心能力。把同一个值填到
+`EVEROS_LLM__API_KEY`、`EVEROS_EMBEDDING__API_KEY`、`EVEROS_RERANK__API_KEY`，
+并把对应 model/base_url 切到生成模板里的 Bailian / DashScope 示例。
+当前 EverOS 的百炼 rerank 路线推荐并支持 `gte-rerank-v2`。
 
 ```bash
 everos init
@@ -198,6 +208,22 @@ cp .env.example .env
 
 `everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`
 写入 `${XDG_CONFIG_HOME:-~/.config}/everos/.env`。
+
+百炼三件套示例：
+
+```env
+EVEROS_LLM__MODEL=qwen-plus
+EVEROS_LLM__API_KEY=<DASHSCOPE_API_KEY>
+EVEROS_LLM__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+EVEROS_EMBEDDING__MODEL=text-embedding-v4
+EVEROS_EMBEDDING__API_KEY=<DASHSCOPE_API_KEY>
+EVEROS_EMBEDDING__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+EVEROS_RERANK__MODEL=gte-rerank-v2
+EVEROS_RERANK__API_KEY=<DASHSCOPE_API_KEY>
+EVEROS_RERANK__BASE_URL=https://dashscope.aliyuncs.com
+```
 
 ### 3. 启动 EverOS
 
@@ -309,7 +335,7 @@ git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
-everos init                          # fill the four API key slots in .env (two distinct keys)
+everos init                          # fill the API key fields in .env
 
 everos --help
 make test

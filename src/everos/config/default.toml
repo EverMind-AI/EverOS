@@ -96,7 +96,14 @@ max_concurrent  = 5
 # `provider` picks the request-shape:
 #   - "deepinfra" -> POST {base_url}/{model} (DeepInfra inference API)
 #   - "vllm"      -> POST {base_url}/rerank (OpenAI-compat rerank endpoint)
-provider = "deepinfra"
+#   - "dashscope" -> POST {base_url}/api/v1/services/rerank/text-rerank/text-rerank
+#                    (Aliyun Bailian native text-rerank; currently
+#                     "gte-rerank-v2", base_url "https://dashscope.aliyuncs.com")
+# Left unset, the factory infers the provider from the base_url host
+# (dashscope.aliyuncs.com -> dashscope, *.deepinfra.com -> deepinfra) and
+# falls back to "deepinfra" for unknown hosts. Set it explicitly to
+# override — required for self-hosted "vllm" on an arbitrary host.
+# provider = "deepinfra"
 # model     = "Qwen/Qwen3-Reranker-4B"
 # api_key   = ""
 # base_url  = "https://api.deepinfra.com/v1/inference"

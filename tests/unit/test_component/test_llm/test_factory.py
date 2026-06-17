@@ -16,6 +16,12 @@ def test_raises_when_api_key_missing() -> None:
         build_llm_provider(s)
 
 
+def test_raises_when_api_key_empty() -> None:
+    s = LLMSettings(model="m", api_key=SecretStr(""), base_url="https://x")
+    with pytest.raises(ValueError, match="EVEROS_LLM__API_KEY"):
+        build_llm_provider(s)
+
+
 def test_raises_when_base_url_missing() -> None:
     s = LLMSettings(model="m", api_key=SecretStr("k"), base_url=None)
     with pytest.raises(ValueError, match="EVEROS_LLM__BASE_URL"):

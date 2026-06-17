@@ -59,10 +59,14 @@ def _get_embedding() -> EmbeddingProvider | None:
     from everos.config import load_settings
 
     cfg = load_settings().embedding
-    if not cfg.model or cfg.api_key is None:
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key else ""
+    if not cfg.model or not api_key or not cfg.base_url:
         logger.warning(
             "embedding_not_configured",
-            hint="set [embedding] model / api_key to enable vector / hybrid search",
+            hint=(
+                "set [embedding] model / api_key / base_url to enable "
+                "vector / hybrid search"
+            ),
         )
         _embedding = None
     else:
@@ -82,10 +86,14 @@ def _get_reranker() -> RerankProvider | None:
     from everos.config import load_settings
 
     cfg = load_settings().rerank
-    if not cfg.model or not cfg.base_url:
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key else ""
+    if not cfg.model or not cfg.base_url or (cfg.provider != "vllm" and not api_key):
         logger.warning(
             "rerank_not_configured",
-            hint="set [rerank] model / base_url to enable agentic search",
+            hint=(
+                "set [rerank] model / api_key / base_url to enable "
+                "agentic search; api_key is optional only for provider='vllm'"
+            ),
         )
         _reranker = None
     else:
@@ -105,7 +113,8 @@ def _get_llm_client() -> LLMClient | None:
     from everos.config import load_settings
 
     cfg = load_settings().llm
-    if cfg.api_key is None or not cfg.base_url:
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key else ""
+    if not api_key or not cfg.base_url:
         logger.warning(
             "llm_not_configured",
             hint="set [llm] api_key / base_url to enable hybrid / agentic search",

@@ -36,7 +36,8 @@ def build_embedding_provider(
             "Embedding model is not configured "
             "(set EVEROS_EMBEDDING__MODEL or [embedding] model in user toml)"
         )
-    if settings.api_key is None:
+    api_key = settings.api_key.get_secret_value() if settings.api_key else ""
+    if not api_key:
         raise ValueError(
             "Embedding api_key is not configured (set EVEROS_EMBEDDING__API_KEY)"
         )
@@ -46,7 +47,7 @@ def build_embedding_provider(
         )
     return OpenAIEmbeddingProvider(
         model=settings.model,
-        api_key=settings.api_key.get_secret_value(),
+        api_key=api_key,
         base_url=settings.base_url,
         dim=dim,
         timeout=settings.timeout_seconds,

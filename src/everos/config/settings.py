@@ -191,8 +191,16 @@ class RerankSettings(BaseModel):
     Unlike LLM / embedding (single OpenAI-compatible shape), rerank API
     schemas differ between providers — DeepInfra uses ``POST {base_url}/
     {model}`` with a custom body, vLLM uses ``POST {base_url}/rerank``
-    with ``{model, query, documents}``. ``provider`` picks which client
-    implementation the factory builds.
+    with ``{model, query, documents}``, DashScope (Aliyun Bailian)
+    ``gte-rerank-v2`` uses ``POST {base_url}/api/v1/services/rerank/
+    text-rerank/text-rerank`` with a nested ``{model, input, parameters}``
+    body. ``provider`` picks which client implementation the factory builds.
+
+    ``provider`` defaults to ``None`` — the factory then infers it from
+    the ``base_url`` host (e.g. ``dashscope.aliyuncs.com`` → DashScope,
+    ``*.deepinfra.com`` → DeepInfra), falling back to ``"deepinfra"`` when
+    the host is unrecognized. Set ``provider`` explicitly to override the
+    inference (required for self-hosted ``vllm`` on an arbitrary host).
 
     Env binding:
         EVEROS_RERANK__PROVIDER
@@ -205,7 +213,7 @@ class RerankSettings(BaseModel):
         EVEROS_RERANK__MAX_CONCURRENT
     """
 
-    provider: Literal["deepinfra", "vllm"] = "deepinfra"
+    provider: Literal["deepinfra", "vllm", "dashscope"] | None = None
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None

@@ -135,6 +135,31 @@ def test_template_resource_is_packaged_under_everos_templates() -> None:
     assert res.is_file()
     body = res.read_text(encoding="utf-8")
     assert "EVEROS_LLM__API_KEY" in body
+    assert "DASHSCOPE_API_KEY" in body
+    assert "text-embedding-v4" in body
+    assert "gte-rerank-v2" in body
+
+
+def test_template_has_single_active_value_per_env_key() -> None:
+    """Alternative provider examples must stay commented to avoid overrides."""
+    from collections import Counter
+    from importlib import resources
+
+    body = (
+        resources.files("everos.templates")
+        .joinpath("env.template")
+        .read_text(encoding="utf-8")
+    )
+    active_assignments = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    ]
+    assert all("<" not in line for line in active_assignments)
+
+    keys = [line.split("=", 1)[0] for line in active_assignments]
+    duplicates = [key for key, count in Counter(keys).items() if count > 1]
+    assert duplicates == []
 
 
 # ── 4-layer .env resolution for ``server start`` ────────────────────────
