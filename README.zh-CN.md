@@ -268,6 +268,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
 响应里应该能看到 Yosemite 相关记忆。如果第一次搜索为空，稍等片刻再试；
 Markdown 会同步写入，本地索引会在后台追上。
 
+> [!TIP]
+> **第一条记忆已经写入。**
+> 你刚刚把一个事实交给 EverOS，把它整理进可持久化的 Markdown-backed memory，
+> 并通过本地索引把它搜索回来。这就是 EverOS 的核心闭环。
+> 想看看 source of truth？打开 `~/.everos`，直接检查生成的 Markdown 文件。
+
 带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
 
 ### 可选：摄取多模态文件

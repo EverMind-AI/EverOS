@@ -277,6 +277,13 @@ You should see the Yosemite memory in the response. If the result is empty on
 the first try, wait a moment and retry; Markdown is written synchronously, while
 the local index catches up in the background.
 
+> [!TIP]
+> **First memory unlocked.**
+> You just gave EverOS a fact, flushed it into durable Markdown-backed memory,
+> and searched it back through the local index. That is the core loop.
+> Want to see the source of truth? Open `~/.everos` and inspect the generated
+> Markdown files.
+
 For annotated responses and the Markdown files EverOS creates, see
 [QUICKSTART.md](QUICKSTART.md).
 
