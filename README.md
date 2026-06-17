@@ -25,12 +25,12 @@
 - [EverOS: One Memory For All](#everos-one-memory-for-all)
 - [How EverOS Is Different](#how-everos-is-different)
 - [Quick Start](#quick-start)
+- [Use Cases](#use-cases)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Storage Layout](#storage-layout)
 - [Features](#features)
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
-- [Use Cases](#use-cases)
 - [Watch EverOS](#watch-everos)
 - [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
@@ -336,125 +336,11 @@ make test
 
 </div>
 
-## Architecture At A Glance
-
-```
-┌───────────────────────────────────────────────┐
-│  entrypoints/  (CLI + HTTP API)                │  presentation
-├───────────────────────────────────────────────┤
-│  service/      (use cases: memorize/retrieve)  │  application
-├───────────────────────────────────────────────┤
-│  memory/       (extract + search + cascade)    │  domain
-├───────────────────────────────────────────────┤
-│  infra/        (markdown / sqlite / lancedb)   │  infrastructure
-└───────────────────────────────────────────────┘
-        ↑                    ↑
-   component/            core/
-   (LLM/Embedding)       (observability/lifespan)
-```
-
-DDD 5 layers, single-direction dependency. See [docs/architecture.md](docs/architecture.md).
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Storage Layout
-
-```
-~/.everos/
-├── default_app/                  # app_id  ("default" → "default_app" on disk)
-│   └── default_project/          # project_id ("default" → "default_project")
-│       ├── users/<user_id>/
-│       │   ├── user.md           # profile
-│       │   ├── episodes/         # daily-log episodes (visible)
-│       │   ├── .atomic_facts/    # nested facts (dotfile-hidden)
-│       │   └── .foresights/      # predictive memory (dotfile-hidden)
-│       └── agents/<agent_id>/
-│           ├── agent.md
-│           ├── .cases/           # one task case per entry
-│           └── skills/           # named procedural memories
-├── .index/                       # derived indexes (rebuildable from md)
-│   ├── sqlite/system.db          # state + queue + audit
-│   └── lancedb/*.lance/          # vector + BM25 + scalar
-└── .tmp/                         # transient working files
-```
-
-Open any `<app>/<project>/users/<user_id>/` folder in Obsidian — your
-agent's brain is just files. The dotfile directories (`.atomic_facts/`,
-`.foresights/`, `.cases/`) stay hidden by default so the visible folder
-is the user-facing memory surface, while extracted derivatives sit
-quietly alongside.
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Features
-
-- **Hybrid retrieval**: BM25 + cosine vector ANN + scalar filters, backed by LanceDB
-- **Cascade index sync**: edit a `.md` → file watcher → entry-level diff → LanceDB sync, sub-second
-- **Multi-source extraction**: conversations / agent trajectories / file knowledge
-- **Dual-track memory**: user-track (Episodes / Profiles) + agent-track (Cases / Skills)
-- **Async-first**: full asyncio, single event loop
-- **Multi-modal**: text + small image / audio inline; large media via S3/OSS reference
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Project Structure
-
-```
-everos/                        # repo root
-├── src/everos/                # main package (src layout)
-│   ├── entrypoints/           # cli + api
-│   ├── service/               # use case orchestration
-│   ├── memory/                # domain: extract + search + cascade + prompt_slots
-│   ├── infra/                 # storage: markdown + lancedb + sqlite
-│   ├── component/             # cross-cutting: llm / embedding / config / utils
-│   ├── core/                  # runtime: observability / lifespan / context
-│   └── config/                # configuration data + Settings schema
-├── tests/                     # unit / integration / golden / fixtures
-├── docs/                      # design docs
-└── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
-```
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Documentation
-
-- [docs/overview.md](docs/overview.md) — Project overview & vision
-- [docs/architecture.md](docs/architecture.md) — DDD layered architecture & dependency rules
-- [docs/engineering.md](docs/engineering.md) — Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code)
-- [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
-- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API and infrastructure migration notes
-- [CHANGELOG.md](CHANGELOG.md) — Release notes
-- [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
-- [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-
 ## Use Cases
+
+Now that you have had your first successful EverOS moment, explore what people
+are building with persistent memory across agents, apps, and community
+integrations.
 
 Use cases show what persistent memory makes possible in real products and
 workflows. Some examples are packaged in this repository; others point to
@@ -782,6 +668,125 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 [![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
 
 </div>
+
+## Architecture At A Glance
+
+```
+┌───────────────────────────────────────────────┐
+│  entrypoints/  (CLI + HTTP API)                │  presentation
+├───────────────────────────────────────────────┤
+│  service/      (use cases: memorize/retrieve)  │  application
+├───────────────────────────────────────────────┤
+│  memory/       (extract + search + cascade)    │  domain
+├───────────────────────────────────────────────┤
+│  infra/        (markdown / sqlite / lancedb)   │  infrastructure
+└───────────────────────────────────────────────┘
+        ↑                    ↑
+   component/            core/
+   (LLM/Embedding)       (observability/lifespan)
+```
+
+DDD 5 layers, single-direction dependency. See [docs/architecture.md](docs/architecture.md).
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## Storage Layout
+
+```
+~/.everos/
+├── default_app/                  # app_id  ("default" → "default_app" on disk)
+│   └── default_project/          # project_id ("default" → "default_project")
+│       ├── users/<user_id>/
+│       │   ├── user.md           # profile
+│       │   ├── episodes/         # daily-log episodes (visible)
+│       │   ├── .atomic_facts/    # nested facts (dotfile-hidden)
+│       │   └── .foresights/      # predictive memory (dotfile-hidden)
+│       └── agents/<agent_id>/
+│           ├── agent.md
+│           ├── .cases/           # one task case per entry
+│           └── skills/           # named procedural memories
+├── .index/                       # derived indexes (rebuildable from md)
+│   ├── sqlite/system.db          # state + queue + audit
+│   └── lancedb/*.lance/          # vector + BM25 + scalar
+└── .tmp/                         # transient working files
+```
+
+Open any `<app>/<project>/users/<user_id>/` folder in Obsidian — your
+agent's brain is just files. The dotfile directories (`.atomic_facts/`,
+`.foresights/`, `.cases/`) stay hidden by default so the visible folder
+is the user-facing memory surface, while extracted derivatives sit
+quietly alongside.
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## Features
+
+- **Hybrid retrieval**: BM25 + cosine vector ANN + scalar filters, backed by LanceDB
+- **Cascade index sync**: edit a `.md` → file watcher → entry-level diff → LanceDB sync, sub-second
+- **Multi-source extraction**: conversations / agent trajectories / file knowledge
+- **Dual-track memory**: user-track (Episodes / Profiles) + agent-track (Cases / Skills)
+- **Async-first**: full asyncio, single event loop
+- **Multi-modal**: text + small image / audio inline; large media via S3/OSS reference
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## Project Structure
+
+```
+everos/                        # repo root
+├── src/everos/                # main package (src layout)
+│   ├── entrypoints/           # cli + api
+│   ├── service/               # use case orchestration
+│   ├── memory/                # domain: extract + search + cascade + prompt_slots
+│   ├── infra/                 # storage: markdown + lancedb + sqlite
+│   ├── component/             # cross-cutting: llm / embedding / config / utils
+│   ├── core/                  # runtime: observability / lifespan / context
+│   └── config/                # configuration data + Settings schema
+├── tests/                     # unit / integration / golden / fixtures
+├── docs/                      # design docs
+└── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
+```
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## Documentation
+
+- [docs/overview.md](docs/overview.md) — Project overview & vision
+- [docs/architecture.md](docs/architecture.md) — DDD layered architecture & dependency rules
+- [docs/engineering.md](docs/engineering.md) — Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code)
+- [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
+- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API and infrastructure migration notes
+- [CHANGELOG.md](CHANGELOG.md) — Release notes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
+- [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+
 
 ## Watch EverOS
 

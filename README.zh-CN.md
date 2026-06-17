@@ -25,12 +25,12 @@
 - [EverOS: One Memory For All](#everos-one-memory-for-all)
 - [EverOS 的差异](#everos-的差异)
 - [快速开始](#快速开始)
+- [使用场景](#使用场景)
 - [架构概览](#架构概览)
 - [存储布局](#存储布局)
 - [功能](#功能)
 - [项目结构](#项目结构)
 - [文档](#文档)
-- [使用场景](#使用场景)
 - [关注 EverOS](#关注-everos)
 - [EverMind 生态](#evermind-生态)
 - [参与贡献](#参与贡献)
@@ -322,124 +322,10 @@ make test
 
 </div>
 
-## 架构概览
-
-```
-┌───────────────────────────────────────────────┐
-│  entrypoints/  (CLI + HTTP API)                │  presentation
-├───────────────────────────────────────────────┤
-│  service/      (use cases: memorize/retrieve)  │  application
-├───────────────────────────────────────────────┤
-│  memory/       (extract + search + cascade)    │  domain
-├───────────────────────────────────────────────┤
-│  infra/        (markdown / sqlite / lancedb)   │  infrastructure
-└───────────────────────────────────────────────┘
-        ↑                    ↑
-   component/            core/
-   (LLM/Embedding)       (observability/lifespan)
-```
-
-DDD 5 层架构，单向依赖。详见 [docs/architecture.md](docs/architecture.md)。
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## 存储布局
-
-```
-~/.everos/
-├── default_app/                  # app_id  ("default" → "default_app" on disk)
-│   └── default_project/          # project_id ("default" → "default_project")
-│       ├── users/<user_id>/
-│       │   ├── user.md           # profile
-│       │   ├── episodes/         # daily-log episodes (visible)
-│       │   ├── .atomic_facts/    # nested facts (dotfile-hidden)
-│       │   └── .foresights/      # predictive memory (dotfile-hidden)
-│       └── agents/<agent_id>/
-│           ├── agent.md
-│           ├── .cases/           # one task case per entry
-│           └── skills/           # named procedural memories
-├── .index/                       # derived indexes (rebuildable from md)
-│   ├── sqlite/system.db          # state + queue + audit
-│   └── lancedb/*.lance/          # vector + BM25 + scalar
-└── .tmp/                         # transient working files
-```
-
-在 Obsidian 中打开任意 `<app>/<project>/users/<user_id>/` 文件夹即可。
-你的 Agent 大脑本质上就是一组文件。dotfile 目录（`.atomic_facts/`、
-`.foresights/`、`.cases/`）默认保持隐藏，因此可见文件夹仍然是面向用户的
-记忆表面，而提取出的衍生信息则安静地放在旁边。
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## 功能
-
-- **混合检索**: BM25 + vector（HNSW/IVF-PQ）+ scalar filter，在 LanceDB 中完成单次查询
-- **级联索引同步**: 编辑 `.md` → file watcher → entry-level diff → LanceDB sync，亚秒级同步
-- **多源提取**: conversations / agent trajectories / file knowledge
-- **双轨记忆**: user-track（Episodes / Profiles）+ agent-track（Cases / Skills）
-- **异步优先**: 完整 asyncio，单一 event loop
-- **多模态**: text + 小图片 / audio inline；大媒体通过 S3/OSS reference
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## 项目结构
-
-```
-everos/                        # repo root
-├── src/everos/                # main package (src layout)
-│   ├── entrypoints/           # cli + api
-│   ├── service/               # use case orchestration
-│   ├── memory/                # domain: extract + search + cascade + prompt_slots
-│   ├── infra/                 # storage: markdown + lancedb + sqlite
-│   ├── component/             # cross-cutting: llm / embedding / config / utils
-│   ├── core/                  # runtime: observability / lifespan / context
-│   └── config/                # configuration data + Settings schema
-├── tests/                     # unit / integration / golden / fixtures
-├── docs/                      # design docs
-└── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
-```
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## 文档
-
-- [docs/overview.md](docs/overview.md) - 项目概览与愿景
-- [docs/architecture.md](docs/architecture.md) - DDD 分层架构与依赖规则
-- [docs/engineering.md](docs/engineering.md) - 工程与开发效率基础设施（CI / tooling / Claude Code）
-- [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
-- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 与基础设施迁移说明
-- [CHANGELOG.md](CHANGELOG.md) - 发布记录
-- [CONTRIBUTING.md](CONTRIBUTING.md) - 如何贡献
-- [.claude/rules/](.claude/rules/) - 详细代码规范（Claude Code 会自动加载）
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-
 ## 使用场景
+
+现在你已经完成了第一个成功的 EverOS moment，可以继续看看大家如何把持久记忆
+用在 agents、apps 和社区集成里。
 
 这些使用场景展示了持久记忆可以在真实产品和工作流中带来什么能力。
 有些示例已经打包在本仓库中，另一些则指向外部 demo 或集成，你可以研究并复用。
@@ -766,6 +652,124 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 [![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
 
 </div>
+
+## 架构概览
+
+```
+┌───────────────────────────────────────────────┐
+│  entrypoints/  (CLI + HTTP API)                │  presentation
+├───────────────────────────────────────────────┤
+│  service/      (use cases: memorize/retrieve)  │  application
+├───────────────────────────────────────────────┤
+│  memory/       (extract + search + cascade)    │  domain
+├───────────────────────────────────────────────┤
+│  infra/        (markdown / sqlite / lancedb)   │  infrastructure
+└───────────────────────────────────────────────┘
+        ↑                    ↑
+   component/            core/
+   (LLM/Embedding)       (observability/lifespan)
+```
+
+DDD 5 层架构，单向依赖。详见 [docs/architecture.md](docs/architecture.md)。
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## 存储布局
+
+```
+~/.everos/
+├── default_app/                  # app_id  ("default" → "default_app" on disk)
+│   └── default_project/          # project_id ("default" → "default_project")
+│       ├── users/<user_id>/
+│       │   ├── user.md           # profile
+│       │   ├── episodes/         # daily-log episodes (visible)
+│       │   ├── .atomic_facts/    # nested facts (dotfile-hidden)
+│       │   └── .foresights/      # predictive memory (dotfile-hidden)
+│       └── agents/<agent_id>/
+│           ├── agent.md
+│           ├── .cases/           # one task case per entry
+│           └── skills/           # named procedural memories
+├── .index/                       # derived indexes (rebuildable from md)
+│   ├── sqlite/system.db          # state + queue + audit
+│   └── lancedb/*.lance/          # vector + BM25 + scalar
+└── .tmp/                         # transient working files
+```
+
+在 Obsidian 中打开任意 `<app>/<project>/users/<user_id>/` 文件夹即可。
+你的 Agent 大脑本质上就是一组文件。dotfile 目录（`.atomic_facts/`、
+`.foresights/`、`.cases/`）默认保持隐藏，因此可见文件夹仍然是面向用户的
+记忆表面，而提取出的衍生信息则安静地放在旁边。
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## 功能
+
+- **混合检索**: BM25 + vector（HNSW/IVF-PQ）+ scalar filter，在 LanceDB 中完成单次查询
+- **级联索引同步**: 编辑 `.md` → file watcher → entry-level diff → LanceDB sync，亚秒级同步
+- **多源提取**: conversations / agent trajectories / file knowledge
+- **双轨记忆**: user-track（Episodes / Profiles）+ agent-track（Cases / Skills）
+- **异步优先**: 完整 asyncio，单一 event loop
+- **多模态**: text + 小图片 / audio inline；大媒体通过 S3/OSS reference
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## 项目结构
+
+```
+everos/                        # repo root
+├── src/everos/                # main package (src layout)
+│   ├── entrypoints/           # cli + api
+│   ├── service/               # use case orchestration
+│   ├── memory/                # domain: extract + search + cascade + prompt_slots
+│   ├── infra/                 # storage: markdown + lancedb + sqlite
+│   ├── component/             # cross-cutting: llm / embedding / config / utils
+│   ├── core/                  # runtime: observability / lifespan / context
+│   └── config/                # configuration data + Settings schema
+├── tests/                     # unit / integration / golden / fixtures
+├── docs/                      # design docs
+└── .claude/                   # team-shared rules + skills (auto-loaded by Claude Code)
+```
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+## 文档
+
+- [docs/overview.md](docs/overview.md) - 项目概览与愿景
+- [docs/architecture.md](docs/architecture.md) - DDD 分层架构与依赖规则
+- [docs/engineering.md](docs/engineering.md) - 工程与开发效率基础设施（CI / tooling / Claude Code）
+- [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
+- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 与基础设施迁移说明
+- [CHANGELOG.md](CHANGELOG.md) - 发布记录
+- [CONTRIBUTING.md](CONTRIBUTING.md) - 如何贡献
+- [.claude/rules/](.claude/rules/) - 详细代码规范（Claude Code 会自动加载）
+
+<br>
+<div align="right">
+
+[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
+
+</div>
+
+
 
 ## 关注 EverOS
 
