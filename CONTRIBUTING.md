@@ -16,7 +16,7 @@ What we actively welcome from the community:
 | 🐛 Bug reports | [Open a bug issue](https://github.com/EverMind-AI/EverOS/issues/new?template=bug_report.yml) |
 | 💡 Feature ideas / use cases | [Open a feature issue](https://github.com/EverMind-AI/EverOS/issues/new?template=feature_request.yml) |
 | 🔧 Focused fixes | A pull request linked to a bug, design note, or clear reproduction |
-| ❓ Questions & discussion | [GitHub Discussions](https://github.com/EverMind-AI/EverOS/discussions) / [Discord](https://discord.gg/pfwwskxp) |
+| ❓ Questions & discussion | [GitHub Discussions](https://github.com/EverMind-AI/EverOS/discussions) / [Discord](https://discord.gg/gYep5nQRZJ) |
 
 Large architectural changes should start as an issue or discussion before code.
 Small documentation, test, CI, and bug-fix PRs can be opened directly.
@@ -65,7 +65,7 @@ are expected to uphold it. Report unacceptable behavior to evermind@shanda.com.
 ## Questions
 
 - [GitHub Discussions](https://github.com/EverMind-AI/EverOS/discussions) — general Q&A
-- [Discord](https://discord.gg/pfwwskxp) — community chat
+- [Discord](https://discord.gg/gYep5nQRZJ) — community chat
 - Email: evermind@shanda.com
 
 ---
