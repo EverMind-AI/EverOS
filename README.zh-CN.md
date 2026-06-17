@@ -168,16 +168,27 @@ Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<cod
 
 ## 快速开始
 
-### 1. 安装 EverOS
+> 目标：启动 EverOS，写入一条记忆，然后把它搜索回来。
+
+### 0. 前置条件
+
+- Python 3.12+
+- 默认 provider 需要 API keys：OpenRouter 用于 chat / multimodal，
+  DeepInfra 用于 embedding / rerank。也可以通过 `.env` 里的
+  `*__BASE_URL` 字段切换到其他 OpenAI-compatible providers。
+
+### 1. 安装
 
 ```bash
 uv pip install everos
 # or: pip install everos
 ```
 
-### 2. 初始化配置
+### 2. 配置
 
-生成一个 starter `.env` 文件，然后根据生成的注释填入 API key 字段。
+生成一个 starter `.env` 文件，然后根据生成的注释填入四个 API key slots。
+默认配置只需要两把不同的 key：OpenRouter 用于 `LLM` / `MULTIMODAL`，
+DeepInfra 用于 `EMBEDDING` / `RERANK`。
 
 ```bash
 everos init
@@ -186,11 +197,22 @@ everos init
 `everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`
 写入 `${XDG_CONFIG_HOME:-~/.config}/everos/.env`。
 
-### 3. 启动服务
+### 3. 启动 EverOS
 
 ```bash
-everos --help
 everos server start
+```
+
+保持服务运行，然后打开第二个 terminal 检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+预期响应：
+
+```json
+{"status":"ok"}
 ```
 
 `everos server start` 会按以下顺序查找 `.env`：`--env-file <path>` →
@@ -199,8 +221,52 @@ everos server start
 vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
 来指向任意这些模型服务。
 
-完整 walkthrough（添加对话、flush、search，然后读取 Markdown）见
-[QUICKSTART.md](QUICKSTART.md)。
+### 4. 试写第一条记忆
+
+添加一个很小的 conversation：
+
+```bash
+TS=$(($(date +%s)*1000))
+
+curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"session_id\": \"demo-001\",
+    \"app_id\": \"default\",
+    \"project_id\": \"default\",
+    \"messages\": [
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $TS, \"content\": \"I love climbing in Yosemite every spring.\"},
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $((TS+10000)), \"content\": \"My favorite coffee shop is Blue Bottle in SOMA.\"}
+    ]
+  }"
+```
+
+为了本地 demo，手动触发一次 extraction：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
+```
+
+再把这条记忆搜索回来：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "alice",
+    "app_id": "default",
+    "project_id": "default",
+    "query": "Where do I like to climb?",
+    "top_k": 5
+  }'
+```
+
+响应里应该能看到 Yosemite 相关记忆。如果第一次搜索为空，稍等片刻再试；
+Markdown 会同步写入，本地索引会在后台追上。
+
+带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
 
 ### 可选：摄取多模态文件
 

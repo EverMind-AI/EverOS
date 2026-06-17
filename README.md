@@ -176,17 +176,27 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 
 ## Quick Start
 
-### 1. Install EverOS
+> Goal: start EverOS, write one memory, and search it back.
+
+### 0. Prerequisites
+
+- Python 3.12+
+- API keys for the default providers: OpenRouter for chat / multimodal, and
+  DeepInfra for embedding / rerank. You can use other OpenAI-compatible
+  providers by changing the matching `*__BASE_URL` fields in `.env`.
+
+### 1. Install
 
 ```bash
 uv pip install everos
 # or: pip install everos
 ```
 
-### 2. Initialize Configuration
+### 2. Configure
 
-Generate a starter `.env` file, then fill the API key fields shown in
-the generated comments.
+Generate a starter `.env` file, then fill the four API key slots shown in the
+generated comments. Only two distinct keys are needed with the defaults:
+OpenRouter for `LLM` / `MULTIMODAL`, and DeepInfra for `EMBEDDING` / `RERANK`.
 
 ```bash
 everos init
@@ -195,11 +205,22 @@ everos init
 `everos init` writes `./.env` by default. Use `everos init --xdg` to
 write `${XDG_CONFIG_HOME:-~/.config}/everos/.env` instead.
 
-### 3. Start The Server
+### 3. Start EverOS
 
 ```bash
-everos --help
 everos server start
+```
+
+Keep the server running, then open a second terminal and check it:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
 ```
 
 `everos server start` searches for `.env` in this order: `--env-file <path>` →
@@ -208,8 +229,54 @@ The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
 Ollama / DeepInfra) - override `*__BASE_URL` in the generated `.env` to point
 at any of them.
 
-For a step-by-step walkthrough (add a conversation, flush, search, then
-read the markdown), see [QUICKSTART.md](QUICKSTART.md).
+### 4. Try Your First Memory
+
+Add a tiny conversation:
+
+```bash
+TS=$(($(date +%s)*1000))
+
+curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"session_id\": \"demo-001\",
+    \"app_id\": \"default\",
+    \"project_id\": \"default\",
+    \"messages\": [
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $TS, \"content\": \"I love climbing in Yosemite every spring.\"},
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $((TS+10000)), \"content\": \"My favorite coffee shop is Blue Bottle in SOMA.\"}
+    ]
+  }"
+```
+
+Force extraction for the local demo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
+```
+
+Search it back:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "alice",
+    "app_id": "default",
+    "project_id": "default",
+    "query": "Where do I like to climb?",
+    "top_k": 5
+  }'
+```
+
+You should see the Yosemite memory in the response. If the result is empty on
+the first try, wait a moment and retry; Markdown is written synchronously, while
+the local index catches up in the background.
+
+For annotated responses and the Markdown files EverOS creates, see
+[QUICKSTART.md](QUICKSTART.md).
 
 ### Optional: Ingest Multimodal Files
 
