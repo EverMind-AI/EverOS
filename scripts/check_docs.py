@@ -14,6 +14,8 @@ PRIMARY_LINK_RE = re.compile(
     r"^\[(?:Code|Plugin|Live Demo|Learn more)\]\(([^)]+)\)",
     flags=re.M,
 )
+ENV_EXAMPLE = Path(".env.example")
+ENV_TEMPLATE = Path("src/everos/templates/env.template")
 
 
 def _markdown_files() -> list[Path]:
@@ -88,10 +90,21 @@ def _check_use_case_banner_links() -> tuple[list[str], list[str]]:
     return failures, warnings
 
 
+def _check_env_example_matches_template() -> list[str]:
+    if not ENV_EXAMPLE.exists():
+        return [f"{ENV_EXAMPLE}: missing"]
+
+    if ENV_EXAMPLE.read_text() != ENV_TEMPLATE.read_text():
+        return [f"{ENV_EXAMPLE}: must match {ENV_TEMPLATE}"]
+
+    return []
+
+
 def main() -> int:
     failures = _check_active_relative_links()
     use_case_failures, warnings = _check_use_case_banner_links()
     failures.extend(use_case_failures)
+    failures.extend(_check_env_example_matches_template())
 
     if warnings:
         print("\n".join(f"warning: {warning}" for warning in warnings))

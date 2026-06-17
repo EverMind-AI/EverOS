@@ -33,6 +33,9 @@ Generate a starter `.env` and drop in your two keys:
 
 ```bash
 everos init                    # writes ./.env (use --xdg for ~/.config/everos/.env)
+# or, from a source checkout:
+cp .env.example .env
+
 # Edit .env and fill four API key slots (only two distinct keys needed):
 #   EVEROS_LLM__API_KEY         (OpenRouter — chat LLM)
 #   EVEROS_MULTIMODAL__API_KEY  (OpenRouter — same key works)

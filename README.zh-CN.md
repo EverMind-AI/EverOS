@@ -192,6 +192,8 @@ DeepInfra 用于 `EMBEDDING` / `RERANK`。
 
 ```bash
 everos init
+# or, from a source checkout:
+cp .env.example .env
 ```
 
 `everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`

@@ -200,6 +200,8 @@ OpenRouter for `LLM` / `MULTIMODAL`, and DeepInfra for `EMBEDDING` / `RERANK`.
 
 ```bash
 everos init
+# or, from a source checkout:
+cp .env.example .env
 ```
 
 `everos init` writes `./.env` by default. Use `everos init --xdg` to
