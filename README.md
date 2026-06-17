@@ -22,8 +22,7 @@
 <br>
 
 - [EverOS 1.0.0](#everos-100)
-- [EverOS: One Memory For All](#everos-one-memory-for-all)
-- [How EverOS Is Different](#how-everos-is-different)
+- [Why Ever OS](#why-ever-os)
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Architecture At A Glance](#architecture-at-a-glance)
@@ -50,8 +49,8 @@
 > through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
 >
 > **Coming next:** Knowledge Wiki will turn memory into editable,
-> source-backed Markdown knowledge pages. Reflection, also called Dreaming,
-> will run when the system is idle or offline to connect signals, compress
+> source-backed Markdown knowledge pages. Reflection will run when the
+> system is idle or offline to connect signals, compress
 > history, and improve profiles and skills between sessions.
 
 <br>
@@ -62,66 +61,13 @@
 </div>
 
 
-## EverOS: One Memory For All
+## Why Ever OS
 
 EverOS is the local memory operating system for agents and makers. It gives
 one portable memory layer across coding assistants, apps, devices, and
 workflows. Today it stores conversations, files, and agent trajectories as
 readable Markdown, then syncs local SQLite and LanceDB indexes for fast
 retrieval and self-evolving reuse.
-
-<table>
-<tr>
-<td width="33%" valign="top">
-<strong>Markdown As Source Of Truth</strong><br>
-<br>
-All memory is persisted as <code>.md</code> files: readable, editable,
-grep-able, Git-versioned, and openable directly in Obsidian.
-</td>
-<td width="33%" valign="top">
-<strong>Local Three-Part Stack</strong><br>
-<br>
-Markdown + SQLite + LanceDB keep vectors, BM25, and scalar filters
-local. No MongoDB, Elasticsearch, or Redis required.
-</td>
-<td width="33%" valign="top">
-<strong>Dual-Track Memory</strong><br>
-<br>
-Agent memory (<code>cases</code> / <code>skills</code>) and user memory
-(<code>episodes</code> / <code>profile</code>) are extracted independently.
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<strong>Multimodal Ingestion</strong><br>
-<br>
-Text, images, audio, documents, PDFs, HTML, and email are unified into
-searchable memory.
-</td>
-<td width="33%" valign="top">
-<strong>Self-Evolution</strong><br>
-<br>
-Common skills are extracted from real usage; repeated patterns become
-reusable workflows, no retraining required.
-</td>
-<td width="33%" valign="top">
-<strong>Orthogonal Retrieval</strong><br>
-<br>
-Search independently by <code>user_id</code>, <code>agent_id</code>,
-<code>app_id</code>, <code>project_id</code>, and <code>session_id</code>.
-</td>
-</tr>
-</table>
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-
-## How EverOS Is Different
 
 <table>
 <tr>
@@ -160,7 +106,7 @@ Search independently by <code>user_id</code>, <code>agent_id</code>,
 <td>❌ Usually retrieval, graph, dashboards, or generated summaries instead of editable source-backed pages</td>
 </tr>
 <tr>
-<td><strong>Dreaming / Reflection</strong></td>
+<td><strong>Reflection</strong></td>
 <td>✅ Coming next: Reflection that runs when the system is idle or offline to connect signals, compress history, and improve profiles and skills between sessions</td>
 <td>❌ Usually online read/write APIs, retrieval records, or summaries rather than idle-time memory consolidation</td>
 </tr>
@@ -805,7 +751,7 @@ becomes something users can read, correct, link, version, and open in their
 existing Markdown tools.
 </td>
 <td width="50%" valign="top">
-<strong>Dreaming / Reflection</strong><br>
+<strong>Reflection</strong><br>
 <br>
 Runs when the system is idle or offline to revisit stored memory, connect weak
 signals, compress noisy history into durable patterns, and improve profiles and

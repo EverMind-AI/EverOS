@@ -50,7 +50,7 @@
 > [EverAlgo](https://github.com/EverMind-AI/EverAlgo) 支撑的模块化算法。
 >
 > **即将推出：** Knowledge Wiki 会把记忆整理成可编辑、可溯源的
-> Markdown 知识页。Reflection（也称 Dreaming）会在系统空闲或离线时
+> Markdown 知识页。Reflection 会在系统空闲或离线时
 > 连接信号、压缩历史，并持续改进 profile 和 skills。
 
 <br>
@@ -152,7 +152,7 @@ Agent 记忆（<code>cases</code> / <code>skills</code>）与用户记忆（<cod
 <td>❌ 通常是 retrieval、graph、dashboard 或 generated summaries，而不是可编辑、可溯源的知识页</td>
 </tr>
 <tr>
-<td><strong>Dreaming / Reflection</strong></td>
+<td><strong>Reflection</strong></td>
 <td>✅ 即将推出：在系统空闲或离线时运行，用来连接信号、压缩历史，并在 session 之间改进 profiles 和 skills</td>
 <td>❌ 通常是在线读写 API、retrieval records 或 summaries，而不是空闲态记忆整理</td>
 </tr>
@@ -812,7 +812,7 @@ EverOS 1.0.0 是更大规模记忆系统路线图的第一个发布版本。Watc
 向量召回结果，而是用户可以阅读、修正、链接、版本化，并用现有 Markdown 工具打开的知识层。
 </td>
 <td width="50%" valign="top">
-<strong>Dreaming / Reflection</strong><br>
+<strong>Reflection</strong><br>
 <br>
 在系统空闲或离线时运行，重新审视已存储记忆，连接弱信号，把嘈杂历史压缩成稳定模式，
 并持续改进 profile 和 skills。目标是让 Agent 在活跃 session 之间也能变得更好，
