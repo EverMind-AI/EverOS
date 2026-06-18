@@ -53,14 +53,6 @@
 > system is idle or offline to connect signals, compress
 > history, and improve profiles and skills between sessions.
 
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-
 ## Why Ever OS
 
 EverOS is the local memory operating system for agents and makers. It gives
@@ -205,7 +197,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
   -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
 ```
 
-Search it back:
+Search it back and save the response:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
@@ -216,19 +208,76 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
     "project_id": "default",
     "query": "Where do I like to climb?",
     "top_k": 5
-  }'
+  }' | tee /tmp/everos-search.json
 ```
 
-You should see the Yosemite memory in the response. If the result is empty on
-the first try, wait a moment and retry; Markdown is written synchronously, while
-the local index catches up in the background.
+Now turn that raw response into a terminal receipt:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from textwrap import shorten
+
+response = json.loads(Path("/tmp/everos-search.json").read_text())
+episodes = response.get("data", {}).get("episodes", [])
+facts = [
+    fact.get("content", "")
+    for episode in episodes
+    for fact in episode.get("atomic_facts", [])
+    if fact.get("content")
+]
+
+best = episodes[0] if episodes else {}
+recalled = (
+    facts[0]
+    if facts
+    else best.get("summary")
+    or best.get("episode")
+    or "No hit yet. Wait a few seconds, then rerun the search."
+)
+recalled = " ".join(str(recalled).split())
+
+root = Path.home() / ".everos"
+markdown = []
+if root.exists():
+    markdown = sorted(
+        root.rglob("*.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )[:3]
+
+print()
+def row(label: str, value: str) -> None:
+    value = shorten(value, width=43, placeholder="...")
+    line = f"{label:<12}: {value}"
+    print("| " + line[:58].ljust(58) + " |")
+
+print("+------------------------------------------------------------+")
+print("| EverOS memory receipt                                      |")
+print("+------------------------------------------------------------+")
+row("You wrote", "I love climbing in Yosemite every spring.")
+row("You searched", "Where do I like to climb?")
+row("EverOS found", recalled)
+row("Evidence", f"{len(episodes)} episode(s), {len(facts)} extracted fact(s)")
+row("Source truth", "Markdown files under ~/.everos")
+print("+------------------------------------------------------------+")
+if markdown:
+    print("Recent Markdown memory files:")
+    for path in markdown:
+        print(f"  - {path}")
+PY
+```
+
+That is the core loop: a conversation becomes durable Markdown, the local index
+finds it again, and the source files stay readable outside the API. If the
+receipt says there is no hit yet, wait a moment and rerun the search; Markdown
+is written synchronously, while the local index catches up in the background.
 
 > [!TIP]
 > **First memory unlocked.**
-> You just gave EverOS a fact, flushed it into durable Markdown-backed memory,
-> and searched it back through the local index. That is the core loop.
-> Want to see the source of truth? Open `~/.everos` and inspect the generated
-> Markdown files.
+> Open one of the printed Markdown files. That file is the source of truth:
+> readable, editable, Git-friendly memory that the index can rebuild from.
 
 For annotated responses and the Markdown files EverOS creates, see
 [QUICKSTART.md](QUICKSTART.md).
