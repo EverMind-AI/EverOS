@@ -47,6 +47,7 @@ dependencies = [
 
     # CLI
     "typer>=0.12.0",
+    "textual>=8.2.7",
 
     # Tokenization (BM25 Chinese support)
     "jieba==0.42.1",
