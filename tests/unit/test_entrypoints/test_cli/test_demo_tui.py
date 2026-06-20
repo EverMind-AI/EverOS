@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from everos.entrypoints.cli.demo_tui import EverOSDemoApp, _hero_text
+import pytest
+
+from everos.entrypoints.cli.demo_tui import (
+    SPHERE_FRAME_HEIGHT,
+    SPHERE_FRAME_WIDTH,
+    TERMINAL_CELL_HEIGHT_RATIO,
+    EverOSDemoApp,
+    _hero_text,
+)
 
 
 def test_demo_tui_uses_poster_derived_brand_palette() -> None:
@@ -31,3 +39,11 @@ def test_demo_tui_uses_elevated_instrument_layout() -> None:
     assert "background: #F9B91C" in css
     assert "border: double" not in css
     assert "border: heavy" not in css
+
+
+def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
+    visual_ratio = SPHERE_FRAME_WIDTH / (
+        SPHERE_FRAME_HEIGHT * TERMINAL_CELL_HEIGHT_RATIO
+    )
+
+    assert visual_ratio == pytest.approx(1.0, abs=0.04)

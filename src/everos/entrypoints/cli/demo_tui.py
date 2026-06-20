@@ -24,6 +24,9 @@ EVEROS_SURFACE = "#24231E"
 EVEROS_SURFACE_RAISED = "#31302B"
 EVEROS_INK = "#F5EDDC"
 EVEROS_MUTED = "#918C80"
+SPHERE_FRAME_WIDTH = 39
+SPHERE_FRAME_HEIGHT = 19
+TERMINAL_CELL_HEIGHT_RATIO = 2.0
 
 
 class DotSphereWidget(Static):
@@ -60,8 +63,8 @@ class DotSphereWidget(Static):
         self._tick += 1
         state = self.STATES[(self._tick // 36) % len(self.STATES)]
         frame = build_dot_sphere(
-            width=43,
-            height=19,
+            width=SPHERE_FRAME_WIDTH,
+            height=SPHERE_FRAME_HEIGHT,
             phase=self._phase,
             state_key=state,
         )
