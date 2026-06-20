@@ -54,8 +54,8 @@ def test_readme_animation_default_plan_uses_smoother_frame_rate() -> None:
 
     plan = build_frame_plan(states)
 
-    assert len(plan) <= len(states) * 5 + 1
-    assert ANIMATION_FRAMES_PER_STATE == 5
+    assert len(plan) <= len(states) * 4 + 1
+    assert ANIMATION_FRAMES_PER_STATE == 4
     assert ANIMATION_FPS >= 24
     assert FRAME_SECONDS <= 1 / 24
 
@@ -105,3 +105,13 @@ async def test_export_frame_freezes_animation_before_rendering_requested_state(
     svg = html.unescape(path.read_text()).replace("\xa0", " ")
     assert "forming local memory field" in svg
     assert "ingesting conversation dots" not in svg
+
+
+async def test_export_frame_preserves_poster_palette(tmp_path) -> None:
+    path = tmp_path / "frame.svg"
+
+    await _export_frame(path, FramePlan(state="remembered", phase=0.5))
+
+    svg = path.read_text().lower()
+    assert "#f9b91c" in svg
+    assert "#f5eddc" in svg

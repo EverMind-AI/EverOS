@@ -49,6 +49,7 @@ class DotSphereWidget(Static):
         "recalling",
         "remembered",
         "source",
+        "celebrating",
     )
 
     def __init__(self) -> None:

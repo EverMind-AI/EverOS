@@ -242,18 +242,19 @@ everos demo
 ```
 
 It opens a full-screen TUI that turns the same loop into a visible successful
-moment: conversation -> memory sphere -> recall -> `episode.md`.
+moment: conversation -> memory sphere -> recall -> `episode.md` -> confetti.
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/4368a6f80ff5506671ca2f1ea44b548e/raw/08270179eb741dd7ee5927cf20847f61916dac21/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/4368a6f80ff5506671ca2f1ea44b548e/raw/de525f0ea620c04a7c5ab4b205e5054e21627ed2/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
 </p>
 
-The sphere moves through ingest, extraction, indexing, recall, and source
-reveal states, with `r` to replay and `q` to quit. The optimized preview is
-externally hosted so the repository stays light:
+The sphere moves through ingest, extraction, indexing, recall, source reveal,
+and a confetti burst after the first memory lands. Press `r` to replay and `q`
+to quit. The optimized preview is externally hosted so the repository stays
+light:
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/323cde1f2a73e602a775304024045de743e4c532/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/29c3a84a2783a3045ecf9333ffd95ece5ee9d3d7/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
 </p>
 
 If your shell is not interactive, or you want a copyable preview, use:

@@ -48,6 +48,8 @@ def test_dot_sphere_keeps_terminal_poles_visually_round() -> None:
 
 def test_dot_sphere_uses_braille_fine_dot_cells() -> None:
     for state_key in SPHERE_STATES:
+        if state_key == "celebrating":
+            continue
         frame = build_dot_sphere(
             width=37,
             height=17,
@@ -88,6 +90,31 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     assert _is_braille_cell(highlighted[0].glyph)
     assert highlighted[0].style == "#F9B91C"
     assert frame.caption == "remembered Yosemite preference"
+
+
+def test_dot_sphere_celebrating_state_bursts_into_confetti() -> None:
+    frame = build_dot_sphere(width=41, height=19, phase=0.93, state_key="celebrating")
+
+    assert frame.caption == "memory crystallized"
+    confetti = [cell for cell in frame.cells if cell.glyph in {"*", "+", ".", "x"}]
+    assert len(confetti) >= 70
+    assert all(not _is_braille_cell(cell.glyph) for cell in confetti)
+    assert not any(cell.style.startswith("bold ") for cell in confetti)
+
+    center_x = (frame.width - 1) / 2
+    center_y = (frame.height - 1) / 2
+    radius_x = max(1.0, center_x - 3)
+    radius_y = max(1.0, center_y - 2)
+    distances = [
+        ((cell.x - center_x) / radius_x) ** 2 + ((cell.y - center_y) / radius_y) ** 2
+        for cell in confetti
+    ]
+    assert max(distances) > 1.10
+    assert sum(distance > 0.72 for distance in distances) > len(distances) * 0.4
+
+    styles = {cell.style for cell in confetti}
+    assert "#F9B91C" in styles
+    assert "#F6C23B" in styles
 
 
 def test_dot_sphere_front_light_uses_poster_gold_primary() -> None:

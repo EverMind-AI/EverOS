@@ -6,18 +6,46 @@ import argparse
 import asyncio
 import base64
 import html
+import io
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import anyio
+from rich.console import Console
+from rich.terminal_theme import TerminalTheme
 
 TERMINAL_SIZE = (150, 48)
 ANIMATION_TERMINAL_SIZE = (132, 42)
 ANIMATION_FPS = 24
-ANIMATION_FRAMES_PER_STATE = 5
+ANIMATION_FRAMES_PER_STATE = 4
 FRAME_SECONDS = 1 / ANIMATION_FPS
+EVEROS_TERMINAL_THEME = TerminalTheme(
+    background=(29, 28, 24),
+    foreground=(245, 237, 220),
+    normal=[
+        (29, 28, 24),
+        (192, 149, 37),
+        (216, 205, 175),
+        (249, 185, 28),
+        (139, 118, 63),
+        (246, 194, 59),
+        (245, 237, 220),
+        (245, 237, 220),
+    ],
+    bright=[
+        (49, 48, 43),
+        (192, 149, 37),
+        (216, 205, 175),
+        (249, 185, 28),
+        (145, 140, 128),
+        (246, 194, 59),
+        (245, 237, 220),
+        (245, 237, 220),
+    ],
+)
 
 
 @dataclass(frozen=True)
@@ -122,21 +150,51 @@ async def _export_frame(
         EverOSDemoApp,
     )
 
-    app = EverOSDemoApp()
-    async with app.run_test(size=terminal_size) as pilot:
-        await pilot.pause(0.05)
-        widget = app.query_one(DotSphereWidget)
-        widget.pause_animation()
-        sphere = build_dot_sphere(
-            width=SPHERE_FRAME_WIDTH,
-            height=SPHERE_FRAME_HEIGHT,
-            phase=frame.phase,
-            state_key=frame.state,
-        )
-        widget.update(render_dot_sphere_text(sphere))
-        await pilot.pause(0.05)
-        app.save_screenshot(str(path))
-    path.write_text(normalize_svg_terminal_ids(path.read_text()))
+    no_color = os.environ.pop("NO_COLOR", None)
+    try:
+        app = EverOSDemoApp()
+        async with app.run_test(size=terminal_size) as pilot:
+            await pilot.pause(0.05)
+            widget = app.query_one(DotSphereWidget)
+            widget.pause_animation()
+            sphere = build_dot_sphere(
+                width=SPHERE_FRAME_WIDTH,
+                height=SPHERE_FRAME_HEIGHT,
+                phase=frame.phase,
+                state_key=frame.state,
+            )
+            widget.update(render_dot_sphere_text(sphere))
+            await pilot.pause(0.05)
+            screenshot = _export_screenshot_svg(app)
+    finally:
+        if no_color is not None:
+            os.environ["NO_COLOR"] = no_color
+    await anyio.Path(path).write_text(normalize_svg_terminal_ids(screenshot))
+
+
+def _export_screenshot_svg(app) -> str:
+    width, height = app.size
+    console = Console(
+        width=width,
+        height=height,
+        file=io.StringIO(),
+        force_terminal=True,
+        color_system="truecolor",
+        record=True,
+        legacy_windows=False,
+        safe_box=False,
+    )
+    screen_render = app.screen._compositor.render_update(
+        full=True,
+        screen_stack=app.app._background_screens,
+        simplify=False,
+    )
+    console.print(screen_render)
+    return console.export_svg(
+        title=app.title,
+        theme=EVEROS_TERMINAL_THEME,
+        unique_id="terminal-everos",
+    )
 
 
 def _build_animation_svg(frame_paths: Sequence[Path], plan: Sequence[FramePlan]) -> str:

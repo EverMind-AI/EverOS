@@ -24,6 +24,15 @@ BRAILLE_DOT_BITS = (
     (0x08, 0x10, 0x20, 0x80),
 )
 SPHERE_POINT_COUNT = 1300
+CONFETTI_POINT_COUNT = 150
+CONFETTI_GLYPHS = (".", "+", "*", "x")
+CONFETTI_STYLES = (
+    EVEROS_YELLOW,
+    EVEROS_YELLOW_SOFT,
+    EVEROS_CYAN,
+    EVEROS_ORANGE,
+    EVEROS_AMBER,
+)
 GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
 
 
@@ -98,6 +107,11 @@ SPHERE_STATES: dict[str, SphereState] = {
         caption="revealing episode.md source",
         accent=EVEROS_YELLOW_SOFT,
     ),
+    "celebrating": SphereState(
+        key="celebrating",
+        caption="memory crystallized",
+        accent=EVEROS_YELLOW,
+    ),
 }
 
 
@@ -111,6 +125,14 @@ def build_dot_sphere(
         state = SPHERE_STATES[state_key]
     except KeyError as exc:
         raise ValueError(f"unknown sphere state: {state_key}") from exc
+
+    if state.key == "celebrating":
+        return _build_confetti_burst(
+            width=width,
+            height=height,
+            phase=phase,
+            state=state,
+        )
 
     sub_width = width * 2
     sub_height = height * 4
@@ -182,6 +204,57 @@ def build_dot_sphere(
     )
 
 
+def _build_confetti_burst(
+    *, width: int, height: int, phase: float, state: SphereState
+) -> DotSphereFrame:
+    center_x = (width - 1) / 2
+    center_y = (height - 1) / 2
+    radius_x = max(1.0, center_x - 3)
+    radius_y = max(1.0, center_y - 2)
+    local_phase = _state_local_phase(phase, state.key)
+    bloom = 0.62 + 0.58 * math.sin(local_phase * math.pi)
+    rotation = phase * math.tau * 1.4
+
+    cells_by_position: dict[tuple[int, int], DotCell] = {}
+    for index in range(CONFETTI_POINT_COUNT):
+        shell = 0.55 + 0.45 * ((index % 17) / 16)
+        angle = index * GOLDEN_ANGLE + rotation
+        drift = math.sin(phase * math.tau * 2 + index * 0.23)
+        x = round(center_x + math.cos(angle) * radius_x * shell * bloom)
+        y = round(
+            center_y
+            + math.sin(angle) * radius_y * shell * bloom
+            + drift * 0.75 * local_phase
+        )
+        if not (0 <= x < width and 0 <= y < height):
+            continue
+
+        z = math.cos(angle - rotation) * shell
+        glyph = CONFETTI_GLYPHS[(index + int(local_phase * 10)) % len(CONFETTI_GLYPHS)]
+        style = CONFETTI_STYLES[
+            (index * 3 + int(local_phase * 7)) % len(CONFETTI_STYLES)
+        ]
+        position = (x, y)
+        existing = cells_by_position.get(position)
+        if existing is None or z > existing.z:
+            cells_by_position[position] = DotCell(
+                x=x,
+                y=y,
+                z=z,
+                glyph=glyph,
+                style=style,
+            )
+
+    return DotSphereFrame(
+        width=width,
+        height=height,
+        state=state,
+        cells=tuple(
+            sorted(cells_by_position.values(), key=lambda cell: (cell.y, cell.x))
+        ),
+    )
+
+
 def render_dot_sphere_lines(frame: DotSphereFrame) -> list[list[DotCell | None]]:
     """Render cells into a sparse row grid for Rich/Textual consumers."""
     grid: list[list[DotCell | None]] = [
@@ -242,3 +315,8 @@ def _style_for_depth(z: float, state: SphereState) -> str:
 
 def _highlight_target(width: int, height: int) -> tuple[int, int]:
     return (round((width - 1) * 0.66), round((height - 1) * 0.42))
+
+
+def _state_local_phase(phase: float, state_key: str) -> float:
+    state_keys = tuple(SPHERE_STATES)
+    return (phase * len(state_keys) - state_keys.index(state_key)) % 1.0

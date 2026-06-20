@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from everos.entrypoints.cli.demo_sphere import SPHERE_STATES
 from everos.entrypoints.cli.demo_tui import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
@@ -78,6 +79,11 @@ def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
     assert visual_ratio == pytest.approx(1.0, abs=0.04)
     assert SPHERE_FRAME_WIDTH == 37
     assert SPHERE_FRAME_HEIGHT == 17
+
+
+def test_demo_tui_celebrates_after_source_reveal() -> None:
+    assert DotSphereWidget.STATES[-2:] == ("source", "celebrating")
+    assert set(DotSphereWidget.STATES).issubset(SPHERE_STATES)
 
 
 def _css_block(css: str, selector: str) -> str:
