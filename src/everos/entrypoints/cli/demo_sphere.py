@@ -128,10 +128,14 @@ def build_dot_sphere(
             glyph = _glyph_for_depth(z3)
             highlighted = False
 
-            if state.key in {"recalling", "remembered", "source"} and (
-                x,
-                y,
-            ) == active_target:
+            if (
+                state.key in {"recalling", "remembered", "source"}
+                and (
+                    x,
+                    y,
+                )
+                == active_target
+            ):
                 highlighted = True
                 glyph = "◆"
                 style = (

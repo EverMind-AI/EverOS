@@ -233,6 +233,34 @@ the local index catches up in the background.
 For annotated responses and the Markdown files EverOS creates, see
 [QUICKSTART.md](QUICKSTART.md).
 
+### 5. Run The EverOS Demo
+
+Once the first memory works, run the terminal-native demo:
+
+```bash
+everos demo
+```
+
+It opens a full-screen TUI that turns the same loop into a visible moment:
+conversation -> memory sphere -> recall -> `episode.md`.
+
+<p align="center">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/455f6cb195fc28c06df17122814953f7/raw/e97d09e2f430ccb1e37fad3bb462fae25cd9b363/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
+</p>
+
+The sphere moves through ingest, extraction, indexing, recall, and source
+reveal states so the local memory flow is easy to see:
+
+<p align="center">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/455f6cb195fc28c06df17122814953f7/raw/e023d3a33cfd2f11785a81e910f476d8fc809c54/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
+</p>
+
+If your shell is not interactive, or you want a copyable preview, use:
+
+```bash
+everos demo --plain
+```
+
 ### Optional: Ingest Multimodal Files
 
 To ingest non-text content (image / pdf / audio / office documents)
