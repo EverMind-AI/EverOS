@@ -36,13 +36,14 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     highlighted = [cell for cell in frame.cells if cell.highlighted]
     assert len(highlighted) == 1
     assert highlighted[0].glyph == "◆"
-    assert highlighted[0].style == "bold #FFE600"
+    assert highlighted[0].style == "bold #F9B91C"
     assert frame.caption == "remembered Yosemite preference"
 
 
-def test_dot_sphere_front_light_uses_bright_yellow_primary() -> None:
+def test_dot_sphere_front_light_uses_poster_gold_primary() -> None:
     frame = build_dot_sphere(width=41, height=19, phase=0.0, state_key="booting")
 
     front_styles = {cell.style for cell in frame.cells if cell.z > 0.05}
-    assert "#FFE600" in front_styles
-    assert "bold #FFE600" in front_styles
+    assert "#F9B91C" in front_styles
+    assert "bold #F9B91C" in front_styles
+    assert "#FFE600" not in front_styles

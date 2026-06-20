@@ -19,11 +19,11 @@ from everos.entrypoints.cli.demo_sphere import (
     render_dot_sphere_text,
 )
 
-EVEROS_BLACK = "#050500"
-EVEROS_SURFACE = "#0B0900"
-EVEROS_SURFACE_RAISED = "#151200"
-EVEROS_INK = "#FFF8CC"
-EVEROS_MUTED = "#B7A55E"
+EVEROS_BLACK = "#1D1C18"
+EVEROS_SURFACE = "#24231E"
+EVEROS_SURFACE_RAISED = "#31302B"
+EVEROS_INK = "#F5EDDC"
+EVEROS_MUTED = "#918C80"
 
 
 class DotSphereWidget(Static):

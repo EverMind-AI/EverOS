@@ -7,7 +7,7 @@ from rich.panel import Panel
 from everos.entrypoints.cli.commands import demo as demo_command
 
 
-def test_plain_demo_uses_bright_yellow_brand_primary(monkeypatch) -> None:
+def test_plain_demo_uses_poster_gold_brand_primary(monkeypatch) -> None:
     printed: list[object] = []
 
     class FakeConsole:
@@ -20,6 +20,6 @@ def test_plain_demo_uses_bright_yellow_brand_primary(monkeypatch) -> None:
 
     panel = next(item for item in printed if isinstance(item, Panel))
     printed_text = "\n".join(str(item) for item in printed)
-    assert panel.border_style == "#FFE600"
-    assert "#FFE600" in printed_text
-    assert "#FFD23F" not in printed_text
+    assert panel.border_style == "#F9B91C"
+    assert "#F9B91C" in printed_text
+    assert "#FFE600" not in printed_text
