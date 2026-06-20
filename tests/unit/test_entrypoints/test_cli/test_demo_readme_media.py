@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 
 from scripts.render_demo_readme_media import (
+    FRAME_SECONDS,
     FramePlan,
     _export_frame,
     build_frame_plan,
@@ -14,15 +15,44 @@ from scripts.render_demo_readme_media import (
 
 
 def test_readme_animation_frame_plan_closes_on_first_frame() -> None:
-    plan = build_frame_plan(("booting", "ingesting", "source"))
+    plan = build_frame_plan(("booting", "ingesting", "source"), frames_per_state=3)
 
     assert plan[0] == plan[-1]
+    assert len(plan) == 10
     assert [frame.state for frame in plan] == [
         "booting",
+        "booting",
+        "booting",
         "ingesting",
+        "ingesting",
+        "ingesting",
+        "source",
+        "source",
         "source",
         "booting",
     ]
+    assert [frame.phase for frame in plan] == [
+        0 / 9,
+        1 / 9,
+        2 / 9,
+        3 / 9,
+        4 / 9,
+        5 / 9,
+        6 / 9,
+        7 / 9,
+        8 / 9,
+        0.0,
+    ]
+
+
+def test_readme_animation_default_plan_uses_smoother_frame_rate() -> None:
+    states = ("booting", "ingesting", "source")
+
+    plan = build_frame_plan(states)
+
+    assert len(plan) >= len(states) * 7 + 1
+    assert FRAME_SECONDS <= 0.10
+    assert 1 / FRAME_SECONDS >= 10
 
 
 def test_readme_animation_opacity_schedule_has_no_blank_gap() -> None:

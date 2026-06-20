@@ -14,7 +14,8 @@ from pathlib import Path
 import anyio
 
 TERMINAL_SIZE = (150, 48)
-FRAME_SECONDS = 0.85
+ANIMATION_FRAMES_PER_STATE = 7
+FRAME_SECONDS = 0.10
 
 
 @dataclass(frozen=True)
@@ -29,15 +30,25 @@ class OpacitySchedule:
     values: str
 
 
-def build_frame_plan(states: Sequence[str]) -> tuple[FramePlan, ...]:
+def build_frame_plan(
+    states: Sequence[str],
+    *,
+    frames_per_state: int = ANIMATION_FRAMES_PER_STATE,
+) -> tuple[FramePlan, ...]:
     """Return animation frames, closed by a duplicate of the first frame."""
     if not states:
         raise ValueError("at least one animation state is required")
+    if frames_per_state < 1:
+        raise ValueError("frames_per_state must be at least 1")
 
     state_count = len(states)
+    frame_count = state_count * frames_per_state
     frames = [
-        FramePlan(state=state, phase=index / state_count)
-        for index, state in enumerate(states)
+        FramePlan(
+            state=states[index // frames_per_state],
+            phase=index / frame_count,
+        )
+        for index in range(frame_count)
     ]
     frames.append(FramePlan(state=states[0], phase=0.0))
     return tuple(frames)
