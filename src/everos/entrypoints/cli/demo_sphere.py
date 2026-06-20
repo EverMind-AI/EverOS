@@ -117,8 +117,8 @@ def build_dot_sphere(
         yn = (y - center_y) / radius_y
         if abs(yn) > 1:
             continue
-        ring_radius = math.sqrt(max(0.0, 1.0 - yn * yn))
-        dot_count = max(4, round(ring_radius * width * 0.72))
+        ring_radius = max(0.0, 1.0 - yn * yn) ** 0.85
+        dot_count = max(1, round(ring_radius * width * 0.72))
         for index in range(dot_count):
             theta = math.tau * (index / dot_count) + rotation + y * 0.37
             x3 = ring_radius * math.cos(theta)
