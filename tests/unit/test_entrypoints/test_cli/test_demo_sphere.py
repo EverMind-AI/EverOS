@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from everos.entrypoints.cli.demo_sphere import DotSphereFrame, build_dot_sphere
+from everos.entrypoints.cli.demo_sphere import (
+    SPHERE_STATES,
+    DotSphereFrame,
+    build_dot_sphere,
+)
 
 
 def test_dot_sphere_forms_round_bounded_cloud() -> None:
@@ -31,15 +35,38 @@ def test_dot_sphere_forms_round_bounded_cloud() -> None:
 
 
 def test_dot_sphere_keeps_terminal_poles_visually_round() -> None:
-    frame = build_dot_sphere(width=35, height=17, phase=0.0, state_key="booting")
+    frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
     row_spans = _row_spans(frame)
 
     assert row_spans[0] == 1
-    assert row_spans[1] <= 12
-    assert row_spans[2] <= 20
-    assert row_spans[frame.height // 2] >= 33
-    assert row_spans[frame.height - 2] <= 12
+    assert row_spans[1] <= 18
+    assert row_spans[2] <= 24
+    assert row_spans[frame.height // 2] >= 35
+    assert row_spans[frame.height - 2] <= 18
     assert row_spans[frame.height - 1] == 1
+
+
+def test_dot_sphere_uses_uniform_fine_dot_cells() -> None:
+    for state_key in SPHERE_STATES:
+        frame = build_dot_sphere(
+            width=35,
+            height=17,
+            phase=0.25,
+            state_key=state_key,
+        )
+
+        assert {cell.glyph for cell in frame.cells} == {"•"}
+        assert not any(cell.style.startswith("bold ") for cell in frame.cells)
+
+
+def test_dot_sphere_avoids_flat_sides_in_terminal_frame() -> None:
+    frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
+    row_spans = _row_spans(frame)
+
+    assert max(row_spans.values()) <= frame.width - 2
+    assert row_spans[frame.height // 2] >= frame.width - 4
+    for y in range(frame.height // 2):
+        assert abs(row_spans[y] - row_spans[frame.height - 1 - y]) <= 4
 
 
 def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
@@ -47,8 +74,8 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
 
     highlighted = [cell for cell in frame.cells if cell.highlighted]
     assert len(highlighted) == 1
-    assert highlighted[0].glyph == "◆"
-    assert highlighted[0].style == "bold #F9B91C"
+    assert highlighted[0].glyph == "•"
+    assert highlighted[0].style == "#F9B91C"
     assert frame.caption == "remembered Yosemite preference"
 
 
@@ -57,7 +84,7 @@ def test_dot_sphere_front_light_uses_poster_gold_primary() -> None:
 
     front_styles = {cell.style for cell in frame.cells if cell.z > 0.05}
     assert "#F9B91C" in front_styles
-    assert "bold #F9B91C" in front_styles
+    assert "bold #F9B91C" not in front_styles
     assert "#FFE600" not in front_styles
 
 

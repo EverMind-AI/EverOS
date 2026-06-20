@@ -71,12 +71,12 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
 
 
 def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
-    visual_ratio = SPHERE_FRAME_WIDTH / (
+    visual_ratio = (SPHERE_FRAME_WIDTH - 2) / (
         SPHERE_FRAME_HEIGHT * TERMINAL_CELL_HEIGHT_RATIO
     )
 
     assert visual_ratio == pytest.approx(1.0, abs=0.04)
-    assert SPHERE_FRAME_WIDTH == 35
+    assert SPHERE_FRAME_WIDTH == 37
     assert SPHERE_FRAME_HEIGHT == 17
 
 

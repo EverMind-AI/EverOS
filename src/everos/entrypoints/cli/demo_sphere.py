@@ -18,6 +18,8 @@ EVEROS_AMBER = "#8B763F"
 EVEROS_CYAN = "#F5EDDC"
 EVEROS_GREEN = "#D8CDAF"
 EVEROS_ORANGE = "#C09525"
+DOT_GLYPH = "•"
+DOT_DENSITY = 0.62
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,7 @@ def build_dot_sphere(
 
     center_x = (width - 1) / 2
     center_y = (height - 1) / 2
-    radius_x = center_x
+    radius_x = max(1.0, center_x - 1)
     radius_y = center_y
     rotation = phase * math.tau
     active_target = _highlight_target(width, height)
@@ -117,15 +119,27 @@ def build_dot_sphere(
         yn = (y - center_y) / radius_y
         if abs(yn) > 1:
             continue
-        ring_radius = max(0.0, 1.0 - yn * yn) ** 0.85
-        dot_count = max(1, round(ring_radius * width * 0.72))
-        for index in range(dot_count):
-            theta = math.tau * (index / dot_count) + rotation + y * 0.37
-            x3 = ring_radius * math.cos(theta)
-            z3 = ring_radius * math.sin(theta)
-            x = round(center_x + x3 * radius_x)
+        row_radius = math.sqrt(max(0.0, 1.0 - yn * yn))
+        left = math.ceil(center_x - row_radius * radius_x)
+        right = math.floor(center_x + row_radius * radius_x)
+        row_width = right - left + 1
+        dot_count = max(1, round(row_width * DOT_DENSITY))
+        candidate_xs = {round(center_x)} if row_width <= 2 else {left, right}
+        interior_xs = list(range(left + 1, right))
+        interior_xs.sort(key=lambda x: _stable_noise(x, y))
+        candidate_xs.update(interior_xs[: max(0, dot_count - len(candidate_xs))])
+
+        for x in candidate_xs:
+            x3 = (x - center_x) / radius_x
+            z_radius = math.sqrt(max(0.0, 1.0 - x3 * x3 - yn * yn))
+            z3 = (
+                math.sin(
+                    rotation + x * 0.61 + y * 0.37 + _stable_noise(x, y) * math.tau
+                )
+                * z_radius
+            )
             style = _style_for_depth(z3, state)
-            glyph = _glyph_for_depth(z3)
+            glyph = DOT_GLYPH
             highlighted = False
 
             if (
@@ -137,12 +151,7 @@ def build_dot_sphere(
                 == active_target
             ):
                 highlighted = True
-                glyph = "◆"
-                style = (
-                    f"bold {EVEROS_CYAN}"
-                    if state.key == "recalling"
-                    else f"bold {EVEROS_YELLOW}"
-                )
+                style = EVEROS_CYAN if state.key == "recalling" else EVEROS_YELLOW
 
             existing = by_position.get((x, y))
             if existing is None or z3 > existing.z or highlighted:
@@ -163,12 +172,8 @@ def build_dot_sphere(
             x=hx,
             y=hy,
             z=1.0,
-            glyph="◆",
-            style=(
-                f"bold {EVEROS_CYAN}"
-                if state.key == "recalling"
-                else f"bold {EVEROS_YELLOW}"
-            ),
+            glyph=DOT_GLYPH,
+            style=(EVEROS_CYAN if state.key == "recalling" else EVEROS_YELLOW),
             highlighted=True,
         )
 
@@ -209,26 +214,21 @@ def render_dot_sphere_text(frame: DotSphereFrame) -> Text:
 
 def _style_for_depth(z: float, state: SphereState) -> str:
     if state.key == "extracting" and z > 0.38:
-        return f"bold {EVEROS_ORANGE}"
+        return EVEROS_ORANGE
     if state.key == "indexing" and z > 0.45:
-        return f"bold {EVEROS_CYAN}"
+        return EVEROS_CYAN
     if state.key == "ingesting" and z > 0.5:
-        return f"bold {EVEROS_CYAN}"
+        return EVEROS_CYAN
     if z > 0.58:
-        return f"bold {EVEROS_YELLOW}"
+        return EVEROS_YELLOW
     if z > 0.05:
-        return f"{EVEROS_YELLOW}"
-    if z > -0.45:
-        return f"{EVEROS_AMBER}"
-    return f"{EVEROS_AMBER_DIM}"
+        return EVEROS_YELLOW
+    return EVEROS_AMBER
 
 
-def _glyph_for_depth(z: float) -> str:
-    if z > 0.62:
-        return "●"
-    if z > 0.1:
-        return "•"
-    return "·"
+def _stable_noise(x: int, y: int) -> float:
+    value = math.sin(x * 12.9898 + y * 78.233) * 43758.5453
+    return value - math.floor(value)
 
 
 def _highlight_target(width: int, height: int) -> tuple[int, int]:
