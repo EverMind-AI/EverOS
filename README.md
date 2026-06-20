@@ -241,18 +241,18 @@ Once the first memory works, run the terminal-native demo:
 everos demo
 ```
 
-It opens a full-screen TUI that turns the same loop into a visible moment:
-conversation -> memory sphere -> recall -> `episode.md`.
+It opens a full-screen TUI that turns the same loop into a visible successful
+moment: conversation -> memory sphere -> recall -> `episode.md`.
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/455f6cb195fc28c06df17122814953f7/raw/e97d09e2f430ccb1e37fad3bb462fae25cd9b363/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/8f8504084e4615e83b4f84c906044a13/raw/c260322b0693b2632e86598482b8f89792562a44/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
 </p>
 
 The sphere moves through ingest, extraction, indexing, recall, and source
-reveal states so the local memory flow is easy to see:
+reveal states, with `r` to replay and `q` to quit:
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/455f6cb195fc28c06df17122814953f7/raw/e023d3a33cfd2f11785a81e910f476d8fc809c54/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/8f8504084e4615e83b4f84c906044a13/raw/bec463c1021913db1c289a48f4fd9ffa81e81e66/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
 </p>
 
 If your shell is not interactive, or you want a copyable preview, use:

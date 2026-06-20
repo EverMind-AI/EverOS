@@ -8,6 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Static
 
 from everos.entrypoints.cli.demo_sphere import (
+    EVEROS_AMBER,
+    EVEROS_AMBER_DIM,
     EVEROS_CYAN,
     EVEROS_GREEN,
     EVEROS_ORANGE,
@@ -29,7 +31,7 @@ class DotSphereWidget(Static):
 
     DEFAULT_CSS = """
     DotSphereWidget {
-        height: 27;
+        height: 21;
         content-align: center middle;
     }
     """
@@ -58,8 +60,8 @@ class DotSphereWidget(Static):
         self._tick += 1
         state = self.STATES[(self._tick // 36) % len(self.STATES)]
         frame = build_dot_sphere(
-            width=57,
-            height=23,
+            width=43,
+            height=19,
             phase=self._phase,
             state_key=state,
         )
@@ -88,12 +90,14 @@ class EverOSDemoApp(App[None]):
         padding: 1;
     }}
 
-    #hero {{
+    #command-strip {{
         height: 4;
-        border: double {EVEROS_YELLOW};
+        border-left: thick {EVEROS_YELLOW};
+        border-bottom: hkey {EVEROS_AMBER_DIM};
         background: {EVEROS_SURFACE_RAISED};
-        padding: 0 2;
+        padding: 0 3;
         color: {EVEROS_INK};
+        content-align: left middle;
     }}
 
     #main {{
@@ -101,71 +105,104 @@ class EverOSDemoApp(App[None]):
         margin-top: 1;
     }}
 
-    #sphere-panel {{
+    #memory-field {{
         width: 1fr;
-        border: double {EVEROS_YELLOW};
+        border: round {EVEROS_AMBER};
         background: {EVEROS_SURFACE};
-        padding: 1 2;
+        padding: 1 3;
     }}
 
-    #side {{
-        width: 42;
+    #field-header {{
+        height: 3;
+    }}
+
+    #field-answer {{
+        height: 2;
+        border-left: vkey {EVEROS_GREEN};
+        background: {EVEROS_SURFACE_RAISED};
+        padding: 0 2;
+    }}
+
+    #signal-rail {{
+        width: 46;
         margin-left: 1;
-    }}
-
-    .panel {{
-        border: round {EVEROS_YELLOW};
+        border: vkey {EVEROS_AMBER};
         background: {EVEROS_SURFACE};
         padding: 1 2;
-        margin-bottom: 1;
     }}
 
-    .cyan-panel {{
-        border: round {EVEROS_CYAN};
-    }}
-
-    .green-panel {{
-        border: round {EVEROS_GREEN};
-    }}
-
-    #bottom {{
-        height: 10;
+    #provenance-strip {{
+        height: 6;
         margin-top: 1;
     }}
 
-    #markdown {{
+    #source-lock {{
         width: 1fr;
+        border: round {EVEROS_CYAN};
+        background: {EVEROS_SURFACE};
+        padding: 0 2;
         margin-right: 1;
     }}
 
-    #proof {{
+    #recall-lock {{
         width: 58;
+        border: round {EVEROS_GREEN};
+        background: {EVEROS_SURFACE};
+        padding: 0 2;
+    }}
+
+    #payoff {{
+        height: 3;
+        background: {EVEROS_YELLOW};
+        color: {EVEROS_BLACK};
+        padding: 0 3;
+        margin-top: 1;
+        content-align: left middle;
+    }}
+
+    Footer {{
+        background: {EVEROS_BLACK};
+        color: {EVEROS_MUTED};
+    }}
+
+    FooterKey {{
+        background: {EVEROS_BLACK};
+    }}
+
+    FooterKey > .footer-key--key {{
+        color: {EVEROS_BLACK};
+        background: {EVEROS_YELLOW};
+        text-style: bold;
+    }}
+
+    FooterKey > .footer-key--description {{
+        color: {EVEROS_INK};
+        background: {EVEROS_BLACK};
     }}
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
-            yield Static(_hero_text(), id="hero")
+            yield Static(_hero_text(), id="command-strip")
             with Horizontal(id="main"):
-                with Vertical(id="sphere-panel"):
-                    yield Static(
-                        Text("EverOS Memory Sphere", style=f"bold {EVEROS_YELLOW}"),
-                        classes="title",
-                    )
+                memory_field = Vertical(id="memory-field")
+                memory_field.border_title = "memory field"
+                with memory_field:
+                    yield Static(_field_header_text(), id="field-header")
                     yield DotSphereWidget()
-                    yield Static(_sphere_caption(), classes="green-panel panel")
-                with Vertical(id="side"):
-                    yield Static(_live_run_text(), classes="panel")
-                    yield Static(_source_tree_text(), classes="cyan-panel panel")
-            with Horizontal(id="bottom"):
-                yield Static(_markdown_preview_text(), id="markdown", classes="panel")
-                yield Static(
-                    _recall_proof_text(),
-                    id="proof",
-                    classes="green-panel panel",
-                )
-            yield Static(_payoff_text(), classes="panel")
-            yield Footer()
+                    yield Static(_sphere_caption(), id="field-answer")
+                signal_rail = Static(_signal_rail_text(), id="signal-rail")
+                signal_rail.border_title = "signal rail"
+                yield signal_rail
+            with Horizontal(id="provenance-strip"):
+                source_lock = Static(_source_tree_text(), id="source-lock")
+                source_lock.border_title = "source lock"
+                yield source_lock
+                recall_lock = Static(_recall_proof_text(), id="recall-lock")
+                recall_lock.border_title = "recall lock"
+                yield recall_lock
+            yield Static(_payoff_text(), id="payoff")
+            yield Footer(show_command_palette=False)
 
     def action_replay(self) -> None:
         widget = self.query_one(DotSphereWidget)
@@ -180,98 +217,96 @@ def run_demo_tui() -> None:
 
 def _hero_text() -> Text:
     return Text.assemble(
-        ("EverOS", f"bold {EVEROS_YELLOW}"),
-        ("  Memory Core Demo\n", f"bold {EVEROS_INK}"),
+        (" everos demo ", f"bold black on {EVEROS_YELLOW}"),
+        ("  local memory instrument\n", f"bold {EVEROS_INK}"),
         ("conversation", f"bold {EVEROS_YELLOW_SOFT}"),
         ("  ->  ", EVEROS_MUTED),
-        ("dot sphere", f"bold {EVEROS_YELLOW}"),
+        ("memory sphere", f"bold {EVEROS_YELLOW}"),
         ("  ->  ", EVEROS_MUTED),
         ("recall", f"bold {EVEROS_GREEN}"),
         ("  ->  ", EVEROS_MUTED),
         ("episode.md", f"bold {EVEROS_CYAN}"),
+        ("  source-backed", EVEROS_MUTED),
+    )
+
+
+def _field_header_text() -> Text:
+    return Text.assemble(
+        ("user=alice", f"bold {EVEROS_INK}"),
+        ("  project=default", EVEROS_MUTED),
+        ("  scope=local-first", f"bold {EVEROS_YELLOW_SOFT}"),
+        ("\n"),
+        ("trace ", EVEROS_MUTED),
+        ("conversation -> facts -> index", f"bold {EVEROS_YELLOW}"),
+        ("  extraction live", f"bold {EVEROS_ORANGE}"),
     )
 
 
 def _sphere_caption() -> Text:
     return Text.assemble(
-        ("Q ", f"bold {EVEROS_CYAN}"),
-        ("Where does Alice like to climb?\n", EVEROS_INK),
-        ("A ", f"bold {EVEROS_GREEN}"),
-        ("Alice likes climbing in Yosemite every spring.", f"bold {EVEROS_GREEN}"),
+        ("query  ", f"bold {EVEROS_CYAN}"),
+        ("Where does Alice like to climb?  ", EVEROS_INK),
+        ("->  ", EVEROS_MUTED),
+        ("answer ", f"bold {EVEROS_GREEN}"),
+        ("Yosemite every spring", f"bold {EVEROS_GREEN}"),
     )
 
 
-def _live_run_text() -> Text:
+def _signal_rail_text() -> Text:
     return Text.assemble(
-        ("Live Run\n", f"bold {EVEROS_YELLOW}"),
-        ("01 ", f"bold {EVEROS_GREEN}"),
-        ("Wake server                 ", EVEROS_INK),
-        ("OK\n", f"bold {EVEROS_GREEN}"),
-        ("02 ", f"bold {EVEROS_GREEN}"),
-        ("Ingest conversation          ", EVEROS_INK),
-        ("OK\n", f"bold {EVEROS_GREEN}"),
-        ("03 ", f"bold {EVEROS_YELLOW}"),
-        ("Extract memory               ", EVEROS_INK),
-        ("LIVE\n", f"bold {EVEROS_YELLOW}"),
-        ("04 ", f"bold {EVEROS_CYAN}"),
-        ("Index SQLite + LanceDB       ", EVEROS_INK),
-        ("SYNC\n", f"bold {EVEROS_CYAN}"),
-        ("05 ", f"bold {EVEROS_GREEN}"),
-        ("Recall Yosemite              ", EVEROS_INK),
-        ("HIT", f"bold {EVEROS_GREEN}"),
+        ("● ", f"bold {EVEROS_GREEN}"),
+        ("server wake       ", EVEROS_INK),
+        ("ready\n", f"bold {EVEROS_GREEN}"),
+        ("● ", f"bold {EVEROS_YELLOW_SOFT}"),
+        ("conversation      ", EVEROS_INK),
+        ("captured\n", f"bold {EVEROS_YELLOW_SOFT}"),
+        ("● ", f"bold {EVEROS_ORANGE}"),
+        ("episode -> facts  ", EVEROS_INK),
+        ("live\n", f"bold {EVEROS_ORANGE}"),
+        ("● ", f"bold {EVEROS_CYAN}"),
+        ("SQLite + LanceDB  ", EVEROS_INK),
+        ("synced\n", f"bold {EVEROS_CYAN}"),
+        ("● ", f"bold {EVEROS_GREEN}"),
+        ("Yosemite recall   ", EVEROS_INK),
+        ("hit\n\n", f"bold {EVEROS_GREEN}"),
+        ("field integrity\n", EVEROS_MUTED),
+        ("█████████░  92%\n", f"bold {EVEROS_YELLOW}"),
+        ("latency  ", EVEROS_MUTED),
+        ("42 ms\n", f"bold {EVEROS_GREEN}"),
+        ("mode     ", EVEROS_MUTED),
+        ("local-first", f"bold {EVEROS_INK}"),
     )
 
 
 def _source_tree_text() -> Text:
     return Text.assemble(
-        ("Markdown Source\n", f"bold {EVEROS_CYAN}"),
-        ("~/.everos/default_app/default_project\n", EVEROS_MUTED),
-        ("├── users/alice\n", f"bold {EVEROS_YELLOW}"),
-        ("│   ├── episodes/\n", EVEROS_INK),
-        ("│   │   └── episode-2026-06-20.md\n", f"bold {EVEROS_YELLOW_SOFT}"),
-        ("│   ├── .atomic_facts/\n", EVEROS_INK),
-        ("│   │   └── atomic_fact-2026-06-20.md\n", f"bold {EVEROS_ORANGE}"),
-        ("│   └── user.md\n", EVEROS_INK),
-        ("└── .index/\n", EVEROS_MUTED),
-        ("    ├── sqlite/system.db\n", EVEROS_CYAN),
-        ("    └── lancedb/*.lance", EVEROS_CYAN),
-    )
-
-
-def _markdown_preview_text() -> Text:
-    return Text.assemble(
-        ("Markdown Preview\n", f"bold {EVEROS_YELLOW}"),
-        ("## ep_20260620_00000001\n", f"bold {EVEROS_YELLOW}"),
-        ("### Content\n", EVEROS_MUTED),
-        (
-            "Alice shared that she loves climbing in Yosemite every spring.\n",
-            f"bold {EVEROS_GREEN}",
-        ),
-        (
-            "She also mentioned Blue Bottle in SOMA as a favorite coffee shop.",
-            EVEROS_INK,
-        ),
+        ("episode ", EVEROS_MUTED),
+        ("episode-2026-06-20.md\n", f"bold {EVEROS_YELLOW_SOFT}"),
+        ("facts   ", EVEROS_MUTED),
+        ("atomic_fact-2026-06-20.md\n", f"bold {EVEROS_ORANGE}"),
+        ("index   ", EVEROS_MUTED),
+        ("sqlite/system.db + lancedb/*.lance\n", EVEROS_CYAN),
+        ("root    ", EVEROS_MUTED),
+        ("~/.everos/default_app/default_project", EVEROS_INK),
     )
 
 
 def _recall_proof_text() -> Text:
     return Text.assemble(
-        ("Recall Proof\n", f"bold {EVEROS_GREEN}"),
-        ("score  ", EVEROS_MUTED),
+        ("score   ", EVEROS_MUTED),
         ("0.628\n", f"bold {EVEROS_GREEN}"),
-        ("scope  ", EVEROS_MUTED),
+        ("scope   ", EVEROS_MUTED),
         ("user=alice project=default\n", EVEROS_INK),
-        ("source ", EVEROS_MUTED),
-        ("episode-2026-06-20.md", f"bold {EVEROS_YELLOW}"),
+        ("answer  ", EVEROS_MUTED),
+        ("Yosemite every spring", f"bold {EVEROS_YELLOW}"),
     )
 
 
 def _payoff_text() -> Text:
     return Text.assemble(
-        ("SUCCESSFUL MOMENT ", f"bold black on {EVEROS_YELLOW}"),
+        ("memory formed  ", f"bold {EVEROS_BLACK}"),
         (
-            "The sphere becomes a visible local memory field, then resolves to a "
-            "recall answer and Markdown source.",
-            f"bold {EVEROS_INK}",
+            "EverOS recalled Yosemite and kept the Markdown source attached.",
+            f"bold {EVEROS_BLACK}",
         ),
     )
