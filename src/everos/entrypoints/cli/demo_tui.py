@@ -5,6 +5,7 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.timer import Timer
 from textual.widgets import Footer, Static
 
 from everos.entrypoints.cli.demo_sphere import (
@@ -54,10 +55,15 @@ class DotSphereWidget(Static):
         super().__init__()
         self._phase = 0.0
         self._tick = 0
+        self._animation_timer: Timer | None = None
 
     def on_mount(self) -> None:
-        self.set_interval(1 / 12, self._advance)
+        self._animation_timer = self.set_interval(1 / 12, self._advance)
         self._advance()
+
+    def pause_animation(self) -> None:
+        if self._animation_timer is not None:
+            self._animation_timer.pause()
 
     def _advance(self) -> None:
         self._phase = (self._phase + 0.025) % 1.0

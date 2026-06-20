@@ -18,8 +18,13 @@ EVEROS_AMBER = "#8B763F"
 EVEROS_CYAN = "#F5EDDC"
 EVEROS_GREEN = "#D8CDAF"
 EVEROS_ORANGE = "#C09525"
-DOT_GLYPH = "•"
-DOT_DENSITY = 0.62
+BRAILLE_BASE = 0x2800
+BRAILLE_DOT_BITS = (
+    (0x01, 0x02, 0x04, 0x40),
+    (0x08, 0x10, 0x20, 0x80),
+)
+SPHERE_POINT_COUNT = 1300
+GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
 
 
 @dataclass(frozen=True)
@@ -107,81 +112,73 @@ def build_dot_sphere(
     except KeyError as exc:
         raise ValueError(f"unknown sphere state: {state_key}") from exc
 
-    center_x = (width - 1) / 2
-    center_y = (height - 1) / 2
-    radius_x = max(1.0, center_x - 1)
-    radius_y = center_y
+    sub_width = width * 2
+    sub_height = height * 4
+    sub_center_x = (sub_width - 1) / 2
+    sub_center_y = (sub_height - 1) / 2
+    radius_x = max(1.0, sub_center_x - 5)
+    radius_y = max(1.0, sub_center_y - 3)
     rotation = phase * math.tau
     active_target = _highlight_target(width, height)
 
-    by_position: dict[tuple[int, int], DotCell] = {}
-    for y in range(height):
-        yn = (y - center_y) / radius_y
-        if abs(yn) > 1:
+    masks: dict[tuple[int, int], int] = {}
+    depths: dict[tuple[int, int], float] = {}
+    highlighted_positions: set[tuple[int, int]] = set()
+    for index in range(SPHERE_POINT_COUNT):
+        y3 = 1 - 2 * ((index + 0.5) / SPHERE_POINT_COUNT)
+        ring_radius = math.sqrt(max(0.0, 1.0 - y3 * y3))
+        theta = index * GOLDEN_ANGLE + rotation
+        x3 = ring_radius * math.cos(theta)
+        z3 = ring_radius * math.sin(theta)
+        sub_x = round(sub_center_x + x3 * radius_x)
+        sub_y = round(sub_center_y + y3 * radius_y)
+        if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
             continue
-        row_radius = math.sqrt(max(0.0, 1.0 - yn * yn))
-        left = math.ceil(center_x - row_radius * radius_x)
-        right = math.floor(center_x + row_radius * radius_x)
-        row_width = right - left + 1
-        dot_count = max(1, round(row_width * DOT_DENSITY))
-        candidate_xs = {round(center_x)} if row_width <= 2 else {left, right}
-        interior_xs = list(range(left + 1, right))
-        interior_xs.sort(key=lambda x: _stable_noise(x, y))
-        candidate_xs.update(interior_xs[: max(0, dot_count - len(candidate_xs))])
+        _add_braille_dot(
+            masks=masks,
+            depths=depths,
+            sub_x=sub_x,
+            sub_y=sub_y,
+            z=z3,
+        )
 
-        for x in candidate_xs:
-            x3 = (x - center_x) / radius_x
-            z_radius = math.sqrt(max(0.0, 1.0 - x3 * x3 - yn * yn))
-            z3 = (
-                math.sin(
-                    rotation + x * 0.61 + y * 0.37 + _stable_noise(x, y) * math.tau
-                )
-                * z_radius
-            )
-            style = _style_for_depth(z3, state)
-            glyph = DOT_GLYPH
-            highlighted = False
-
-            if (
-                state.key in {"recalling", "remembered", "source"}
-                and (
-                    x,
-                    y,
-                )
-                == active_target
-            ):
-                highlighted = True
-                style = EVEROS_CYAN if state.key == "recalling" else EVEROS_YELLOW
-
-            existing = by_position.get((x, y))
-            if existing is None or z3 > existing.z or highlighted:
-                by_position[(x, y)] = DotCell(
-                    x=x,
-                    y=y,
-                    z=z3,
-                    glyph=glyph,
-                    style=style,
-                    highlighted=highlighted,
-                )
-
-    if state.key in {"recalling", "remembered", "source"} and not any(
-        cell.highlighted for cell in by_position.values()
-    ):
-        hx, hy = active_target
-        by_position[(hx, hy)] = DotCell(
-            x=hx,
-            y=hy,
+    if state.key in {"recalling", "remembered", "source"}:
+        highlighted_positions.add(active_target)
+        target_sub_x = active_target[0] * 2 + 1
+        target_sub_y = active_target[1] * 4 + 1
+        _add_braille_dot(
+            masks=masks,
+            depths=depths,
+            sub_x=target_sub_x,
+            sub_y=target_sub_y,
             z=1.0,
-            glyph=DOT_GLYPH,
-            style=(EVEROS_CYAN if state.key == "recalling" else EVEROS_YELLOW),
-            highlighted=True,
+        )
+
+    cells = []
+    for (x, y), mask in masks.items():
+        highlighted = (x, y) in highlighted_positions
+        if highlighted and state.key == "recalling":
+            style = EVEROS_CYAN
+        elif highlighted:
+            style = EVEROS_YELLOW
+        else:
+            style = _style_for_depth(depths[(x, y)], state)
+        cells.append(
+            DotCell(
+                x=x,
+                y=y,
+                z=depths[(x, y)],
+                glyph=chr(BRAILLE_BASE + mask),
+                style=style,
+                highlighted=highlighted,
+            )
         )
 
     return DotSphereFrame(
         width=width,
         height=height,
         state=state,
-        cells=tuple(sorted(by_position.values(), key=lambda cell: (cell.y, cell.x))),
+        cells=tuple(sorted(cells, key=lambda cell: (cell.y, cell.x))),
     )
 
 
@@ -212,6 +209,23 @@ def render_dot_sphere_text(frame: DotSphereFrame) -> Text:
     return text
 
 
+def _add_braille_dot(
+    *,
+    masks: dict[tuple[int, int], int],
+    depths: dict[tuple[int, int], float],
+    sub_x: int,
+    sub_y: int,
+    z: float,
+) -> None:
+    cell_x = sub_x // 2
+    cell_y = sub_y // 4
+    local_x = sub_x % 2
+    local_y = sub_y % 4
+    position = (cell_x, cell_y)
+    masks[position] = masks.get(position, 0) | BRAILLE_DOT_BITS[local_x][local_y]
+    depths[position] = max(z, depths.get(position, -1.0))
+
+
 def _style_for_depth(z: float, state: SphereState) -> str:
     if state.key == "extracting" and z > 0.38:
         return EVEROS_ORANGE
@@ -224,11 +238,6 @@ def _style_for_depth(z: float, state: SphereState) -> str:
     if z > 0.05:
         return EVEROS_YELLOW
     return EVEROS_AMBER
-
-
-def _stable_noise(x: int, y: int) -> float:
-    value = math.sin(x * 12.9898 + y * 78.233) * 43758.5453
-    return value - math.floor(value)
 
 
 def _highlight_target(width: int, height: int) -> tuple[int, int]:

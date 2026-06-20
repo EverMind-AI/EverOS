@@ -104,6 +104,7 @@ async def _export_frame(path: Path, frame: FramePlan) -> None:
     async with app.run_test(size=TERMINAL_SIZE) as pilot:
         await pilot.pause(0.05)
         widget = app.query_one(DotSphereWidget)
+        widget.pause_animation()
         sphere = build_dot_sphere(
             width=SPHERE_FRAME_WIDTH,
             height=SPHERE_FRAME_HEIGHT,
@@ -113,6 +114,7 @@ async def _export_frame(path: Path, frame: FramePlan) -> None:
         widget.update(render_dot_sphere_text(sphere))
         await pilot.pause(0.05)
         app.save_screenshot(str(path))
+    path.write_text(normalize_svg_terminal_ids(path.read_text()))
 
 
 def _build_animation_svg(frame_paths: Sequence[Path], plan: Sequence[FramePlan]) -> str:
@@ -156,6 +158,11 @@ def _read_svg_dimensions(path: Path) -> tuple[str, str, str]:
     view_box = view_box_match.group(1)
     _, _, width, height = view_box.split()
     return view_box, width, height
+
+
+def normalize_svg_terminal_ids(svg: str) -> str:
+    """Normalize Rich's random terminal SVG prefix for deterministic media."""
+    return re.sub(r"terminal-\d+", "terminal-everos", svg)
 
 
 def _time(value: float) -> str:

@@ -71,7 +71,7 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
 
 
 def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
-    visual_ratio = (SPHERE_FRAME_WIDTH - 2) / (
+    visual_ratio = (SPHERE_FRAME_WIDTH - 4) / (
         SPHERE_FRAME_HEIGHT * TERMINAL_CELL_HEIGHT_RATIO
     )
 

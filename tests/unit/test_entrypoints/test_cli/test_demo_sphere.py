@@ -38,32 +38,43 @@ def test_dot_sphere_keeps_terminal_poles_visually_round() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
     row_spans = _row_spans(frame)
 
-    assert row_spans[0] == 1
-    assert row_spans[1] <= 18
-    assert row_spans[2] <= 24
-    assert row_spans[frame.height // 2] >= 35
-    assert row_spans[frame.height - 2] <= 18
-    assert row_spans[frame.height - 1] == 1
+    assert row_spans[0] <= 8
+    assert row_spans[1] <= 20
+    assert row_spans[2] <= 26
+    assert row_spans[frame.height // 2] >= 31
+    assert row_spans[frame.height - 2] <= 20
+    assert row_spans[frame.height - 1] <= 8
 
 
-def test_dot_sphere_uses_uniform_fine_dot_cells() -> None:
+def test_dot_sphere_uses_braille_fine_dot_cells() -> None:
     for state_key in SPHERE_STATES:
         frame = build_dot_sphere(
-            width=35,
+            width=37,
             height=17,
             phase=0.25,
             state_key=state_key,
         )
 
-        assert {cell.glyph for cell in frame.cells} == {"•"}
+        assert all(_is_braille_cell(cell.glyph) for cell in frame.cells)
+        assert not any(cell.glyph in {"·", "•", "●", "◆"} for cell in frame.cells)
         assert not any(cell.style.startswith("bold ") for cell in frame.cells)
+
+
+def test_dot_sphere_packs_multiple_subdots_per_terminal_cell() -> None:
+    frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
+
+    subdot_count = sum(_braille_subdot_count(cell.glyph) for cell in frame.cells)
+
+    assert subdot_count > len(frame.cells) * 1.8
+    assert subdot_count > frame.width * frame.height * 0.9
+    assert any(_braille_subdot_count(cell.glyph) >= 4 for cell in frame.cells)
 
 
 def test_dot_sphere_avoids_flat_sides_in_terminal_frame() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
     row_spans = _row_spans(frame)
 
-    assert max(row_spans.values()) <= frame.width - 2
+    assert max(row_spans.values()) <= frame.width - 4
     assert row_spans[frame.height // 2] >= frame.width - 4
     for y in range(frame.height // 2):
         assert abs(row_spans[y] - row_spans[frame.height - 1 - y]) <= 4
@@ -74,7 +85,7 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
 
     highlighted = [cell for cell in frame.cells if cell.highlighted]
     assert len(highlighted) == 1
-    assert highlighted[0].glyph == "•"
+    assert _is_braille_cell(highlighted[0].glyph)
     assert highlighted[0].style == "#F9B91C"
     assert frame.caption == "remembered Yosemite preference"
 
@@ -94,3 +105,12 @@ def _row_spans(frame: DotSphereFrame) -> dict[int, int]:
         xs = [cell.x for cell in frame.cells if cell.y == y]
         spans[y] = max(xs) - min(xs) + 1 if xs else 0
     return spans
+
+
+def _is_braille_cell(glyph: str) -> bool:
+    return len(glyph) == 1 and 0x2800 < ord(glyph) <= 0x28FF
+
+
+def _braille_subdot_count(glyph: str) -> int:
+    assert _is_braille_cell(glyph)
+    return (ord(glyph) - 0x2800).bit_count()
