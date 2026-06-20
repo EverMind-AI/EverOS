@@ -14,8 +14,9 @@ from pathlib import Path
 import anyio
 
 TERMINAL_SIZE = (150, 48)
-ANIMATION_FRAMES_PER_STATE = 7
-FRAME_SECONDS = 0.10
+ANIMATION_FPS = 60
+ANIMATION_FRAMES_PER_STATE = 24
+FRAME_SECONDS = 1 / ANIMATION_FPS
 
 
 @dataclass(frozen=True)

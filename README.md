@@ -252,7 +252,7 @@ The sphere moves through ingest, extraction, indexing, recall, and source
 reveal states, with `r` to replay and `q` to quit:
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/9bd4a26d659bf2b7906a95014aa1466a/raw/7875990e83bbd5d778d6781826731e7abfb725de/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/e87337bd8d973996031865027a4252d5/raw/f4aa32398383c363bb6e04985ed681d488bc666e/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
 </p>
 
 If your shell is not interactive, or you want a copyable preview, use:

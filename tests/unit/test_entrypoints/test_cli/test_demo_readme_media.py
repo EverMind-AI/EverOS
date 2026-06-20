@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 
 from scripts.render_demo_readme_media import (
+    ANIMATION_FPS,
     FRAME_SECONDS,
     FramePlan,
     _export_frame,
@@ -50,9 +51,9 @@ def test_readme_animation_default_plan_uses_smoother_frame_rate() -> None:
 
     plan = build_frame_plan(states)
 
-    assert len(plan) >= len(states) * 7 + 1
-    assert FRAME_SECONDS <= 0.10
-    assert 1 / FRAME_SECONDS >= 10
+    assert len(plan) >= len(states) * 24 + 1
+    assert ANIMATION_FPS >= 60
+    assert FRAME_SECONDS <= 1 / 60
 
 
 def test_readme_animation_opacity_schedule_has_no_blank_gap() -> None:
