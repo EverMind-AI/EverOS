@@ -249,11 +249,11 @@ moment: conversation -> memory sphere -> recall -> `episode.md`.
 </p>
 
 The sphere moves through ingest, extraction, indexing, recall, and source
-reveal states, with `r` to replay and `q` to quit. The 60 FPS preview is
+reveal states, with `r` to replay and `q` to quit. The optimized preview is
 externally hosted so the repository stays light:
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/e87337bd8d973996031865027a4252d5/raw/f4aa32398383c363bb6e04985ed681d488bc666e/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/323cde1f2a73e602a775304024045de743e4c532/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall states" width="720">
 </p>
 
 If your shell is not interactive, or you want a copyable preview, use:

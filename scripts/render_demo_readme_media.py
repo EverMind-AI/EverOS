@@ -14,8 +14,9 @@ from pathlib import Path
 import anyio
 
 TERMINAL_SIZE = (150, 48)
-ANIMATION_FPS = 60
-ANIMATION_FRAMES_PER_STATE = 24
+ANIMATION_TERMINAL_SIZE = (132, 42)
+ANIMATION_FPS = 24
+ANIMATION_FRAMES_PER_STATE = 5
 FRAME_SECONDS = 1 / ANIMATION_FPS
 
 
@@ -86,13 +87,17 @@ async def render_media(out_dir: Path) -> tuple[Path, Path]:
         state=DotSphereWidget.STATES[remembered_index],
         phase=remembered_index / len(DotSphereWidget.STATES),
     )
-    await _export_frame(screenshot, remembered)
+    await _export_frame(screenshot, remembered, terminal_size=TERMINAL_SIZE)
 
     plan = build_frame_plan(DotSphereWidget.STATES)
     frame_paths: list[Path] = []
     for index, frame in enumerate(plan):
         frame_path = out_dir / f"frame-{index:02d}-{frame.state}.svg"
-        await _export_frame(frame_path, frame)
+        await _export_frame(
+            frame_path,
+            frame,
+            terminal_size=ANIMATION_TERMINAL_SIZE,
+        )
         frame_paths.append(frame_path)
 
     animation = out_dir / "everos-demo-tui-animation.svg"
@@ -100,7 +105,12 @@ async def render_media(out_dir: Path) -> tuple[Path, Path]:
     return screenshot, animation
 
 
-async def _export_frame(path: Path, frame: FramePlan) -> None:
+async def _export_frame(
+    path: Path,
+    frame: FramePlan,
+    *,
+    terminal_size: tuple[int, int] = TERMINAL_SIZE,
+) -> None:
     from everos.entrypoints.cli.demo_sphere import (
         build_dot_sphere,
         render_dot_sphere_text,
@@ -113,7 +123,7 @@ async def _export_frame(path: Path, frame: FramePlan) -> None:
     )
 
     app = EverOSDemoApp()
-    async with app.run_test(size=TERMINAL_SIZE) as pilot:
+    async with app.run_test(size=terminal_size) as pilot:
         await pilot.pause(0.05)
         widget = app.query_one(DotSphereWidget)
         widget.pause_animation()

@@ -6,7 +6,10 @@ import html
 
 from scripts.render_demo_readme_media import (
     ANIMATION_FPS,
+    ANIMATION_FRAMES_PER_STATE,
+    ANIMATION_TERMINAL_SIZE,
     FRAME_SECONDS,
+    TERMINAL_SIZE,
     FramePlan,
     _export_frame,
     build_frame_plan,
@@ -51,9 +54,16 @@ def test_readme_animation_default_plan_uses_smoother_frame_rate() -> None:
 
     plan = build_frame_plan(states)
 
-    assert len(plan) >= len(states) * 24 + 1
-    assert ANIMATION_FPS >= 60
-    assert FRAME_SECONDS <= 1 / 60
+    assert len(plan) <= len(states) * 5 + 1
+    assert ANIMATION_FRAMES_PER_STATE == 5
+    assert ANIMATION_FPS >= 24
+    assert FRAME_SECONDS <= 1 / 24
+
+
+def test_readme_animation_uses_compact_terminal_size_for_load_speed() -> None:
+    assert ANIMATION_TERMINAL_SIZE[0] < TERMINAL_SIZE[0]
+    assert ANIMATION_TERMINAL_SIZE[1] < TERMINAL_SIZE[1]
+    assert ANIMATION_TERMINAL_SIZE[0] * ANIMATION_TERMINAL_SIZE[1] <= 5600
 
 
 def test_readme_animation_opacity_schedule_has_no_blank_gap() -> None:
