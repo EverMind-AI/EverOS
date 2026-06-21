@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 import typer
 from rich.panel import Panel
@@ -18,7 +20,7 @@ def test_demo_help_exposes_cinematic_mode() -> None:
     result = CliRunner().invoke(app, ["demo", "--help"], terminal_width=120)
 
     assert result.exit_code == 0
-    assert "--cinematic" in result.stdout
+    assert "--cinematic" in _strip_ansi(result.stdout)
 
 
 def test_collect_playable_story_prompts_for_memory_then_query(monkeypatch) -> None:
@@ -98,3 +100,7 @@ def test_plain_demo_prints_custom_story(monkeypatch) -> None:
     assert "EverOS remembered" in printed_text
     assert "I keep my Monday design review notes in Notion." in printed_text
     assert "episode-demo.md" in printed_text
+
+
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
