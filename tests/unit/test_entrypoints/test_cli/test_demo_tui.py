@@ -5,15 +5,20 @@ from __future__ import annotations
 import pytest
 
 from everos.entrypoints.cli.demo_sphere import SPHERE_STATES
+from everos.entrypoints.cli.demo_story import build_demo_story
 from everos.entrypoints.cli.demo_tui import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
     TERMINAL_CELL_HEIGHT_RATIO,
     DotSphereWidget,
     EverOSDemoApp,
+    _field_header_text,
     _hero_text,
     _payoff_text,
+    _recall_proof_text,
     _signal_rail_text,
+    _source_tree_text,
+    _sphere_caption,
 )
 
 
@@ -84,6 +89,31 @@ def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
 def test_demo_tui_celebrates_after_source_reveal() -> None:
     assert DotSphereWidget.STATES[-2:] == ("source", "celebrating")
     assert set(DotSphereWidget.STATES).issubset(SPHERE_STATES)
+
+
+def test_demo_tui_renders_playable_story_copy() -> None:
+    story = build_demo_story(
+        "I keep my Monday design review notes in Notion.",
+        "Where are my Monday review notes?",
+    )
+
+    assert "user=you" in _field_header_text(story).plain
+    assert "Where are my Monday review notes?" in _sphere_caption(story).plain
+    assert story.answer in _sphere_caption(story).plain
+    assert "server wake" not in _signal_rail_text(story).plain
+    assert "memory core" in _signal_rail_text(story).plain
+    assert story.source_filename in _source_tree_text(story).plain
+    assert story.fact_filename in _source_tree_text(story).plain
+    assert story.answer in _recall_proof_text(story).plain
+    assert story.answer in _payoff_text(story).plain
+
+
+def test_demo_tui_signal_rail_keeps_source_status_columns_separate() -> None:
+    rail = _signal_rail_text().plain
+
+    assert "mdattached" not in rail
+    assert "md7 nodes" not in rail
+    assert "..." in rail
 
 
 def _css_block(css: str, selector: str) -> str:

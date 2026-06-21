@@ -14,6 +14,13 @@ from everos.entrypoints.cli.demo_sphere import (
     build_dot_sphere,
     render_dot_sphere_text,
 )
+from everos.entrypoints.cli.demo_story import (
+    DEFAULT_MEMORY_SEED,
+    DEFAULT_QUERY,
+    DemoStory,
+    build_demo_story,
+    default_demo_story,
+)
 
 
 def register(parent: typer.Typer) -> None:
@@ -26,29 +33,61 @@ def register(parent: typer.Typer) -> None:
             "--plain",
             help="Print a static terminal preview instead of launching the TUI.",
         ),
+        cinematic: bool = typer.Option(
+            False,
+            "--cinematic",
+            help="Skip prompts and launch the looping README-style demo.",
+        ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
         if plain or not sys.stdout.isatty():
             _print_plain_demo()
             return
 
-        try:
-            from everos.entrypoints.cli.demo_tui import run_demo_tui
-        except ModuleNotFoundError as exc:
-            if exc.name != "textual":
-                raise
-            typer.secho(
-                "error: Textual is required for `everos demo`; install the "
-                "package with TUI dependencies or run `everos demo --plain`.",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(code=1) from exc
-
-        run_demo_tui()
+        _run_interactive_demo(cinematic=cinematic)
 
 
-def _print_plain_demo() -> None:
+def _run_interactive_demo(*, cinematic: bool) -> None:
+    run_demo_tui = _load_run_demo_tui()
+    story = None if cinematic else _collect_playable_story()
+    run_demo_tui(story=story)
+
+
+def _load_run_demo_tui():
+    try:
+        from everos.entrypoints.cli.demo_tui import run_demo_tui
+    except ModuleNotFoundError as exc:
+        if exc.name != "textual":
+            raise
+        typer.secho(
+            "error: Textual is required for `everos demo`; install the "
+            "package with TUI dependencies or run `everos demo --plain`.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    return run_demo_tui
+
+
+def _collect_playable_story() -> DemoStory:
+    Console().print(
+        f"[bold {EVEROS_YELLOW}]EverOS demo[/] "
+        "Give it one memory, then ask for it back."
+    )
+    memory = typer.prompt(
+        "Give EverOS one thing to remember",
+        default=DEFAULT_MEMORY_SEED,
+    )
+    query = typer.prompt(
+        "Ask EverOS to recall it",
+        default=DEFAULT_QUERY,
+    )
+    return build_demo_story(memory, query)
+
+
+def _print_plain_demo(story: DemoStory | None = None) -> None:
+    story = story or default_demo_story()
     console = Console()
     frame = build_dot_sphere(
         width=57,
@@ -64,6 +103,6 @@ def _print_plain_demo() -> None:
         )
     )
     console.print(f"[bold {EVEROS_GREEN}]EverOS remembered:[/]")
-    console.print("Alice likes climbing in Yosemite every spring.")
+    console.print(story.memory)
     console.print()
-    console.print(f"[bold {EVEROS_YELLOW}]Source:[/] episode-2026-06-20.md")
+    console.print(f"[bold {EVEROS_YELLOW}]Source:[/] {story.source_filename}")

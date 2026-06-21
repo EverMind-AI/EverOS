@@ -19,6 +19,7 @@ from everos.entrypoints.cli.demo_sphere import (
     build_dot_sphere,
     render_dot_sphere_text,
 )
+from everos.entrypoints.cli.demo_story import DemoStory, default_demo_story
 
 EVEROS_BLACK = "#1D1C18"
 EVEROS_SURFACE = "#24231E"
@@ -29,6 +30,7 @@ EVEROS_BORDER = "#5A5549"
 SPHERE_FRAME_WIDTH = 37
 SPHERE_FRAME_HEIGHT = 17
 TERMINAL_CELL_HEIGHT_RATIO = 2.0
+SIGNAL_RAIL_SOURCE_WIDTH = 18
 
 
 class DotSphereWidget(Static):
@@ -193,6 +195,10 @@ class EverOSDemoApp(App[None]):
     }}
     """
 
+    def __init__(self, *, story: DemoStory | None = None) -> None:
+        super().__init__()
+        self._story = story or default_demo_story()
+
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
             yield Static(_hero_text(), id="command-strip")
@@ -200,20 +206,20 @@ class EverOSDemoApp(App[None]):
                 memory_field = Vertical(id="memory-field")
                 memory_field.border_title = "memory field"
                 with memory_field:
-                    yield Static(_field_header_text(), id="field-header")
+                    yield Static(_field_header_text(self._story), id="field-header")
                     yield DotSphereWidget()
-                    yield Static(_sphere_caption(), id="field-answer")
-                signal_rail = Static(_signal_rail_text(), id="signal-rail")
+                    yield Static(_sphere_caption(self._story), id="field-answer")
+                signal_rail = Static(_signal_rail_text(self._story), id="signal-rail")
                 signal_rail.border_title = "signal rail"
                 yield signal_rail
             with Horizontal(id="provenance-strip"):
-                source_lock = Static(_source_tree_text(), id="source-lock")
+                source_lock = Static(_source_tree_text(self._story), id="source-lock")
                 source_lock.border_title = "source lock"
                 yield source_lock
-                recall_lock = Static(_recall_proof_text(), id="recall-lock")
+                recall_lock = Static(_recall_proof_text(self._story), id="recall-lock")
                 recall_lock.border_title = "recall lock"
                 yield recall_lock
-            yield Static(_payoff_text(), id="payoff")
+            yield Static(_payoff_text(self._story), id="payoff")
             yield Footer(show_command_palette=False)
 
     def action_replay(self) -> None:
@@ -223,8 +229,8 @@ class EverOSDemoApp(App[None]):
         widget._advance()
 
 
-def run_demo_tui() -> None:
-    EverOSDemoApp().run()
+def run_demo_tui(*, story: DemoStory | None = None) -> None:
+    EverOSDemoApp(story=story).run()
 
 
 def _hero_text() -> Text:
@@ -235,9 +241,10 @@ def _hero_text() -> Text:
     )
 
 
-def _field_header_text() -> Text:
+def _field_header_text(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
-        ("user=alice", f"bold {EVEROS_INK}"),
+        (f"user={story.owner}", f"bold {EVEROS_INK}"),
         ("  scope=local-first", f"bold {EVEROS_YELLOW_SOFT}"),
         ("  trace ", EVEROS_MUTED),
         ("conversation -> facts -> index", f"bold {EVEROS_YELLOW}"),
@@ -245,20 +252,22 @@ def _field_header_text() -> Text:
     )
 
 
-def _sphere_caption() -> Text:
+def _sphere_caption(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
         ("query  ", f"bold {EVEROS_CYAN}"),
-        ("Where does Alice like to climb?  ", EVEROS_INK),
+        (f"{story.query}  ", EVEROS_INK),
         ("->  ", EVEROS_MUTED),
         ("answer ", f"bold {EVEROS_GREEN}"),
-        ("Yosemite every spring", f"bold {EVEROS_GREEN}"),
+        (story.answer, f"bold {EVEROS_GREEN}"),
     )
 
 
-def _signal_rail_text() -> Text:
+def _signal_rail_text(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
         ("● ", f"bold {EVEROS_GREEN}"),
-        ("server wake        ", EVEROS_INK),
+        ("memory core        ", EVEROS_INK),
         ("ready\n", f"bold {EVEROS_GREEN}"),
         ("● ", f"bold {EVEROS_YELLOW_SOFT}"),
         ("conversation       ", EVEROS_INK),
@@ -270,20 +279,20 @@ def _signal_rail_text() -> Text:
         ("SQLite + LanceDB   ", EVEROS_INK),
         ("synced\n", f"bold {EVEROS_CYAN}"),
         ("● ", f"bold {EVEROS_GREEN}"),
-        ("Yosemite recall    ", EVEROS_INK),
+        ("memory recall      ", EVEROS_INK),
         ("hit\n", f"bold {EVEROS_GREEN}"),
         ("\nsource route\n", EVEROS_MUTED),
-        ("episode.md         ", EVEROS_INK),
-        ("attached\n", f"bold {EVEROS_YELLOW_SOFT}"),
-        ("atomic_fact.md     ", EVEROS_INK),
-        ("7 nodes\n", f"bold {EVEROS_ORANGE}"),
+        (_rail_cell(story.source_filename), EVEROS_INK),
+        (" attached\n", f"bold {EVEROS_YELLOW_SOFT}"),
+        (_rail_cell(story.fact_filename), EVEROS_INK),
+        (" 7 nodes\n", f"bold {EVEROS_ORANGE}"),
         ("lancedb orbit      ", EVEROS_INK),
         ("synced\n", f"bold {EVEROS_CYAN}"),
         ("\nrecall proof\n", EVEROS_MUTED),
         ("score              ", EVEROS_INK),
         ("0.628\n", f"bold {EVEROS_GREEN}"),
         ("source             ", EVEROS_INK),
-        ("episode.md\n", f"bold {EVEROS_CYAN}"),
+        (f"{story.source_filename}\n", f"bold {EVEROS_CYAN}"),
         ("field integrity\n", EVEROS_MUTED),
         ("█████████░  92%\n", f"bold {EVEROS_YELLOW}"),
         ("latency            ", EVEROS_MUTED),
@@ -293,12 +302,19 @@ def _signal_rail_text() -> Text:
     )
 
 
-def _source_tree_text() -> Text:
+def _rail_cell(value: str, *, width: int = SIGNAL_RAIL_SOURCE_WIDTH) -> str:
+    if len(value) > width:
+        return f"{value[: width - 3]}..."
+    return f"{value:<{width}}"
+
+
+def _source_tree_text(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
         ("episode ", EVEROS_MUTED),
-        ("episode-2026-06-20.md\n", f"bold {EVEROS_YELLOW_SOFT}"),
+        (f"{story.source_filename}\n", f"bold {EVEROS_YELLOW_SOFT}"),
         ("facts   ", EVEROS_MUTED),
-        ("atomic_fact-2026-06-20.md\n", f"bold {EVEROS_ORANGE}"),
+        (f"{story.fact_filename}\n", f"bold {EVEROS_ORANGE}"),
         ("index   ", EVEROS_MUTED),
         ("sqlite/system.db + lancedb/*.lance\n", EVEROS_CYAN),
         ("root    ", EVEROS_MUTED),
@@ -306,22 +322,24 @@ def _source_tree_text() -> Text:
     )
 
 
-def _recall_proof_text() -> Text:
+def _recall_proof_text(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
         ("score   ", EVEROS_MUTED),
         ("0.628\n", f"bold {EVEROS_GREEN}"),
         ("scope   ", EVEROS_MUTED),
-        ("user=alice project=default\n", EVEROS_INK),
+        (f"user={story.owner} project=default\n", EVEROS_INK),
         ("answer  ", EVEROS_MUTED),
-        ("Yosemite every spring", f"bold {EVEROS_YELLOW}"),
+        (story.answer, f"bold {EVEROS_YELLOW}"),
     )
 
 
-def _payoff_text() -> Text:
+def _payoff_text(story: DemoStory | None = None) -> Text:
+    story = story or default_demo_story()
     return Text.assemble(
         ("memory formed: ", f"bold {EVEROS_YELLOW}"),
         (
-            "EverOS recalled Yosemite and kept the source attached.",
+            f"EverOS recalled {story.answer} and kept the source attached.",
             f"bold {EVEROS_INK}",
         ),
     )
