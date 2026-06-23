@@ -21,12 +21,11 @@
 
 <br>
 
-- [EverOS 1.0.0](#everos-100)
+- [Upcoming Features](#upcoming-features)
 - [Why Ever OS](#why-ever-os)
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Documentation](#documentation)
-- [Watch EverOS](#watch-everos)
 - [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
@@ -35,19 +34,16 @@
 </details>
 
 
-## EverOS 1.0.0
+## Upcoming Features
 
 > [!IMPORTANT]
 >
-> **EverOS 1.0.0 is a major release for self-evolving memory.** It brings a
-> local-first runtime, Markdown as the source of truth, hybrid retrieval,
-> multimodal ingestion, user and agent memory scopes, and modular algorithms
-> through [EverAlgo](https://github.com/EverMind-AI/EverAlgo).
+> **Knowledge Wiki:** editable, source-backed Markdown knowledge pages built
+> from memory.
 >
-> **Coming next:** Knowledge Wiki will turn memory into editable,
-> source-backed Markdown knowledge pages. Reflection will run when the
-> system is idle or offline to connect signals, compress
-> history, and improve profiles and skills between sessions.
+> **Reflection:** idle-time and offline memory evolution that connects
+> signals, compresses history, and improves profiles and skills between
+> sessions.
 
 <br>
 <div align="right">
@@ -96,16 +92,6 @@ for fast retrieval and self-evolving reuse.
 <td>✅ Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code></td>
 <td>❌ Usually app, namespace, tenant, thread, or graph scoped</td>
 </tr>
-<tr>
-<td><strong>Knowledge Wiki</strong></td>
-<td>✅ Coming next: editable, source-backed Markdown knowledge pages built from memory</td>
-<td>❌ Usually retrieval, graph, dashboards, or generated summaries instead of editable source-backed pages</td>
-</tr>
-<tr>
-<td><strong>Reflection</strong></td>
-<td>✅ Coming next: Reflection that runs when the system is idle or offline to connect signals, compress history, and improve profiles and skills between sessions</td>
-<td>❌ Usually online read/write APIs, retrieval records, or summaries rather than idle-time memory consolidation</td>
-</tr>
 </table>
 
 <br>
@@ -149,23 +135,20 @@ local to the CLI, and does not connect to the EverOS server. Its job is to make
 the memory lifecycle visible: conversation -> memory sphere -> recall -> source
 proof -> confetti.
 
-<p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/4368a6f80ff5506671ca2f1ea44b548e/raw/6b38291629cafc35cc4bc59ca95cd177951593e3/everos-demo-tui-screenshot.svg" alt="EverOS demo TUI showing the memory sphere, recall proof, Markdown source, and successful moment" width="920">
-</p>
-
 The sphere moves through ingest, extraction, indexing, recall, source reveal,
 and a confetti burst after the first memory lands. Press `r` to replay and `q`
-to quit. For the looping showroom view used in README media, run:
-
-```bash
-everos demo --cinematic
-```
-
-The optimized preview is externally hosted so the repository stays light:
+to quit. The optimized animated preview is externally hosted so the repository
+stays light:
 
 <p align="center">
   <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
 </p>
+
+For the looping showroom view used in README media, run:
+
+```bash
+everos demo --cinematic
+```
 
 If your shell is not interactive, or you want a copyable preview, use:
 
@@ -576,7 +559,7 @@ A context-native AI wearable that listens to everyday life and converts conversa
 
 #### Legacy OpenClaw Agent Memory
 
-Archived pre-1.0.0 plugin reference. New integrations should use the EverOS 1.0.0 API.
+Archived pre-1.0.0 plugin reference. New integrations should use the current EverOS API.
 
 [Learn more](docs/migration-to-1.0.0.md)
 
@@ -652,64 +635,12 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 ## Documentation
 
-- [docs/overview.md](docs/overview.md) — Project overview & vision
-- [docs/architecture.md](docs/architecture.md) — DDD layered architecture & dependency rules
 - [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
-- [docs/storage_layout.md](docs/storage_layout.md) — On-disk memory tree and frontmatter encoding
-- [docs/engineering.md](docs/engineering.md) — Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code)
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
-- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API and infrastructure migration notes
+- [docs/engineering.md](docs/engineering.md) — Engineering and CI tooling
+- [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
-- [.claude/rules/](.claude/rules/) — Detailed coding conventions (auto-loaded by Claude Code)
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-
-
-## Watch EverOS
-
-EverOS 1.0.0 is the first release of a larger memory-system roadmap.
-Watch this repository for upcoming work on deeper idle-time and offline evolution,
-benchmark releases, and more real-world agent integrations.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-<strong>Knowledge Wiki</strong><br>
-<br>
-Turns scattered episodes, files, facts, and agent traces into source-backed
-Markdown pages for people, projects, topics, decisions, and workflows. Memory
-becomes something users can read, correct, link, version, and open in their
-existing Markdown tools.
-</td>
-<td width="50%" valign="top">
-<strong>Reflection</strong><br>
-<br>
-Runs when the system is idle or offline to revisit stored memory, connect weak
-signals, compress noisy history into durable patterns, and improve profiles and
-skills. The agent gets better between active sessions, not only while you prompt
-it.
-</td>
-</tr>
-</table>
-
-Most memory systems stop at chat history, opaque profiles, or vector recall.
-EverOS keeps memory local, Markdown-native, auditable, and self-evolving: raw
-memory stays readable, derived knowledge becomes a wiki, and Reflection turns
-repeated experience into more useful long-term behavior.
-
-If EverOS is useful to your agent stack, starring the repo helps more
-builders discover it.
-
-### Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
 
 <br>
 <div align="right">
@@ -727,7 +658,7 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 <th colspan="2">EverMind Open-Source Ecosystem</th>
 </tr>
 <tr>
-<td><strong>Core Memory Architecture</strong></td>
+<td><strong>Memory Runtime</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - the local memory operating system and research-backed runtime for agent and user memory.</td>
 </tr>
 <tr>
@@ -735,7 +666,7 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 <td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
 </tr>
 <tr>
-<td><strong>Alternative Architecture</strong></td>
+<td><strong>Hypergraph Memory</strong></td>
 <td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - hypergraph memory for long-term conversations, with its own benchmark-backed topic -> episode -> fact retrieval method.</td>
 </tr>
 <tr>
@@ -769,7 +700,7 @@ Together, these repositories form EverMind's research-to-runtime stack: new memo
 
 ## Contributing
 
-Contributions are welcome across the whole repository: architecture methods, benchmark coverage, use-case examples, documentation, and bug fixes. Browse [Issues](https://github.com/EverMind-AI/EverOS/issues) to find a good entry point, then open a PR when you are ready.
+Contributions are welcome across the whole repository: memory methods, benchmark coverage, use-case examples, documentation, and bug fixes. Browse [Issues](https://github.com/EverMind-AI/EverOS/issues) to find a good entry point, then open a PR when you are ready.
 
 <br>
 
