@@ -134,7 +134,7 @@ conversation -> memory sphere -> recall -> source proof -> confetti。Demo
 
 Sphere 会经历 ingest、extraction、indexing、recall、source reveal，
 并在第一条记忆落地后进入 confetti successful moment。按 `r` 可以 replay，
-按 `q` 可以退出。下面的优化动图托管在外部，避免仓库变重：
+按 `q` 可以退出。
 
 <p align="center">
   <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
