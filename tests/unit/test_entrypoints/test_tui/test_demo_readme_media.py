@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 
-from scripts.render_demo_readme_media import (
+from everos.entrypoints.tui.demo.readme_media import (
     ANIMATION_FPS,
     ANIMATION_FRAMES_PER_STATE,
     ANIMATION_TERMINAL_SIZE,
@@ -91,7 +91,7 @@ def test_readme_media_normalizes_rich_terminal_random_ids() -> None:
 async def test_export_frame_freezes_animation_before_rendering_requested_state(
     tmp_path, monkeypatch
 ) -> None:
-    from everos.entrypoints.cli.demo_tui import DotSphereWidget
+    from everos.entrypoints.tui.demo.app import DotSphereWidget
 
     def fast_mount(self: DotSphereWidget) -> None:
         self._animation_timer = self.set_interval(0.001, self._advance)

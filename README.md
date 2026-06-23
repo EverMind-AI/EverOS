@@ -134,7 +134,8 @@ The command asks for one memory and one recall question, then opens a
 full-screen terminal UI. This is an educational visualizer: it is hardcoded,
 local to the CLI, and does not connect to the EverOS server. Its job is to make
 the memory lifecycle visible: conversation -> memory sphere -> recall -> source
-proof -> confetti.
+proof -> confetti. See [docs/everos-demo.md](docs/everos-demo.md) for the demo
+scope and TUI source layout.
 
 The sphere moves through ingest, extraction, indexing, recall, source reveal,
 and a confetti burst after the first memory lands. Press `r` to replay and `q`
@@ -636,6 +637,7 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 ## Documentation
 
+- [docs/everos-demo.md](docs/everos-demo.md) — Demo scope and TUI source layout
 - [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
 - [docs/engineering.md](docs/engineering.md) — Engineering and CI tooling

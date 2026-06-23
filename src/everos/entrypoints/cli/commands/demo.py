@@ -8,18 +8,18 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from everos.entrypoints.cli.demo_sphere import (
-    EVEROS_GREEN,
-    EVEROS_YELLOW,
-    build_dot_sphere,
-    render_dot_sphere_text,
-)
-from everos.entrypoints.cli.demo_story import (
+from everos.entrypoints.tui.demo.data import (
     DEFAULT_MEMORY_SEED,
     DEFAULT_QUERY,
     DemoStory,
     build_demo_story,
     default_demo_story,
+)
+from everos.entrypoints.tui.demo.widgets.sphere import (
+    EVEROS_GREEN,
+    EVEROS_YELLOW,
+    build_dot_sphere,
+    render_dot_sphere_text,
 )
 
 
@@ -55,7 +55,7 @@ def _run_interactive_demo(*, cinematic: bool) -> None:
 
 def _load_run_demo_tui():
     try:
-        from everos.entrypoints.cli.demo_tui import run_demo_tui
+        from everos.entrypoints.tui.demo.app import run_demo_tui
     except ModuleNotFoundError as exc:
         if exc.name != "textual":
             raise

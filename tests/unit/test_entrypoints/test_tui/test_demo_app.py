@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from everos.entrypoints.cli.demo_sphere import SPHERE_STATES
-from everos.entrypoints.cli.demo_story import build_demo_story
-from everos.entrypoints.cli.demo_tui import (
+from everos.entrypoints.tui.demo.app import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
     TERMINAL_CELL_HEIGHT_RATIO,
@@ -20,6 +18,8 @@ from everos.entrypoints.cli.demo_tui import (
     _source_tree_text,
     _sphere_caption,
 )
+from everos.entrypoints.tui.demo.data import build_demo_story
+from everos.entrypoints.tui.demo.widgets.sphere import SPHERE_STATES
 
 
 def test_demo_tui_uses_poster_derived_brand_palette() -> None:

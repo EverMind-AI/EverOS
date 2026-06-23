@@ -10,7 +10,7 @@ from rich.panel import Panel
 from typer.testing import CliRunner
 
 from everos.entrypoints.cli.commands import demo as demo_command
-from everos.entrypoints.cli.demo_story import build_demo_story
+from everos.entrypoints.tui.demo.data import build_demo_story
 
 
 def test_demo_help_exposes_cinematic_mode() -> None:

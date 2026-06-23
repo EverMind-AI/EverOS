@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from everos.entrypoints.cli.demo_sphere import (
+from everos.entrypoints.tui.demo.widgets.sphere import (
     SPHERE_STATES,
     DotSphereFrame,
     build_dot_sphere,

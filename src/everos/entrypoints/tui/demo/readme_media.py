@@ -106,7 +106,7 @@ def opacity_schedule(*, index: int, total: int) -> OpacitySchedule:
 
 async def render_media(out_dir: Path) -> tuple[Path, Path]:
     """Render the static screenshot and looping animated SVG."""
-    from everos.entrypoints.cli.demo_tui import DotSphereWidget
+    from everos.entrypoints.tui.demo.app import DotSphereWidget
 
     await anyio.Path(out_dir).mkdir(parents=True, exist_ok=True)
     screenshot = out_dir / "everos-demo-tui-screenshot.svg"
@@ -139,15 +139,15 @@ async def _export_frame(
     *,
     terminal_size: tuple[int, int] = TERMINAL_SIZE,
 ) -> None:
-    from everos.entrypoints.cli.demo_sphere import (
-        build_dot_sphere,
-        render_dot_sphere_text,
-    )
-    from everos.entrypoints.cli.demo_tui import (
+    from everos.entrypoints.tui.demo.app import (
         SPHERE_FRAME_HEIGHT,
         SPHERE_FRAME_WIDTH,
         DotSphereWidget,
         EverOSDemoApp,
+    )
+    from everos.entrypoints.tui.demo.widgets.sphere import (
+        build_dot_sphere,
+        render_dot_sphere_text,
     )
 
     no_color = os.environ.pop("NO_COLOR", None)

@@ -8,7 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import Footer, Static
 
-from everos.entrypoints.cli.demo_sphere import (
+from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
+from everos.entrypoints.tui.demo.widgets.sphere import (
     EVEROS_AMBER,
     EVEROS_AMBER_DIM,
     EVEROS_CYAN,
@@ -19,7 +20,6 @@ from everos.entrypoints.cli.demo_sphere import (
     build_dot_sphere,
     render_dot_sphere_text,
 )
-from everos.entrypoints.cli.demo_story import DemoStory, default_demo_story
 
 EVEROS_BLACK = "#1D1C18"
 EVEROS_SURFACE = "#24231E"

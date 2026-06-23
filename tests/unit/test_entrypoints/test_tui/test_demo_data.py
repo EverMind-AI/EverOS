@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from everos.entrypoints.cli.demo_story import (
+from everos.entrypoints.tui.demo.data import (
     DEFAULT_MEMORY_SEED,
     DEFAULT_QUERY,
     build_demo_story,
