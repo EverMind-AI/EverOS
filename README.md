@@ -193,6 +193,17 @@ The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
 Ollama / DeepInfra) - override `*__BASE_URL` in the generated `.env` to point
 at any of them.
 
+Now make the demo real. In the second terminal, run:
+
+```bash
+everos demo --live
+```
+
+Live demo mode connects to the running server and performs the real
+`/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
+`/api/v1/memory/search` flow before opening the same memory sphere UI. Use
+`--server-url <url>` if your server is not on `http://127.0.0.1:8000`.
+
 ### 5. Try Your First Memory
 
 Add a tiny conversation:

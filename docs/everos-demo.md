@@ -26,11 +26,32 @@ For the looping showroom view used by README media, use:
 everos demo --cinematic
 ```
 
+## Run It Against A Server
+
+After `everos init` and `everos server start`, run:
+
+```bash
+everos demo --live
+```
+
+Live mode keeps the same TUI, but the memory lifecycle is backed by real
+server calls:
+
+1. `GET /health`
+2. `POST /api/v1/memory/add`
+3. `POST /api/v1/memory/flush`
+4. `POST /api/v1/memory/search`
+
+If your server is not running on `http://127.0.0.1:8000`, pass
+`--server-url <url>`.
+
 ## What It Does Not Do
 
-The demo does not connect to the EverOS server, call LLM providers, or write
-production memory files. It is intentionally hardcoded so users can try the
-experience before configuring the full runtime.
+By default, `everos demo` does not connect to the EverOS server, call LLM
+providers, or write production memory files. It is intentionally hardcoded so
+users can try the experience before configuring the full runtime. Use
+`everos demo --live` when you want the same visual flow backed by a running
+server.
 
 ## Source Layout
 

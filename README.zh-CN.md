@@ -208,6 +208,17 @@ curl http://127.0.0.1:8000/health
 vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
 来指向任意这些模型服务。
 
+现在可以把 demo 跑成真实 server flow。在第二个 terminal 里运行：
+
+```bash
+everos demo --live
+```
+
+Live demo mode 会连接正在运行的 server，并在打开同一个 memory sphere UI
+之前真实执行 `/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
+`/api/v1/memory/search`。如果 server 不在 `http://127.0.0.1:8000`，可以使用
+`--server-url <url>`。
+
 ### 5. 试写第一条记忆
 
 添加一个很小的 conversation：
