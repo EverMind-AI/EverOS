@@ -1,4 +1,4 @@
-# EverOS 1.1.0 Release Notes
+# EverOS 1.1.0
 
 EverOS 1.1.0 expands the memory system beyond user episodes with first-class
 knowledge management, reflection, and stronger operational guarantees around
@@ -21,10 +21,10 @@ search, persistence, and API contracts.
 
 ## Compatibility Notes
 
-- Existing local TUI demo registration remains available in this PR.
+- Existing local TUI demo registration remains available.
 - Existing DashScope rerank support is preserved; the DashScope provider file
-  is not replaced by the 1.1.0 archive.
-- The update intentionally leaves directories outside the 1.1.0 archive scope,
+  is not replaced by the 1.1.0 update.
+- The release intentionally leaves directories outside the 1.1.0 update scope,
   including existing use-case and iOS demo material, untouched.
 - Knowledge search requires configured embedding and rerank providers. Missing
   providers now fail explicitly with configuration errors rather than silently
@@ -42,7 +42,7 @@ search, persistence, and API contracts.
 
 ## Verification
 
-This PR was checked with:
+This release was checked with:
 
 - `uv run ruff check .`
 - `uv run pytest tests/unit`
