@@ -21,7 +21,6 @@
 
 <br>
 
-- [即将推出](#即将推出)
 - [为什么选择 EverOS](#为什么选择-everos)
 - [快速开始](#快速开始)
 - [使用场景](#使用场景)
@@ -34,17 +33,6 @@
 
 </details>
 
-
-## 即将推出
-
-> [!IMPORTANT]
->
-> **Knowledge Wiki：** 由记忆生成可编辑、可溯源的 Markdown 知识页。
->
-> **Reflection：** 在系统空闲或离线时运行，连接信号、压缩历史，
-> 并在 session 之间持续改进 profiles 和 skills。
-
-<br>
 
 ## 为什么选择 EverOS
 
@@ -84,6 +72,16 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 <td><strong>正交检索作用域</strong></td>
 <td>✅ 按 <code>user_id</code>、<code>agent_id</code>、<code>app_id</code>、<code>project_id</code> 和 <code>session_id</code> 检索</td>
 <td>❌ 通常按 app、namespace、tenant、thread 或 graph 来组织</td>
+</tr>
+<tr>
+<td><strong>Knowledge Wiki</strong></td>
+<td>✅ 可编辑、可溯源的 Markdown 知识页，支持 taxonomy、CRUD APIs 和 topic search</td>
+<td>❌ 通常和 memory 分离，被锁在 dashboard 里，或者无法回溯到源文件</td>
+</tr>
+<tr>
+<td><strong>Reflection</strong></td>
+<td>✅ 离线记忆进化：在 session 之间合并 episode clusters，并持续改进 profiles 和 skills</td>
+<td>❌ 通常只是 retrieval-only memory，缺少后台 consolidation 和长周期改进</td>
 </tr>
 </table>
 
