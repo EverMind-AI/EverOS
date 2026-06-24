@@ -10,31 +10,59 @@ Verify the contract that callers downstream depend on:
 The tokenizer is symmetric — cascade write side and search query side
 both go through this code path, so changes here change BM25 recall on
 both ends.
+
+``JiebaTokenizer`` is imported inside each test (not at module level)
+because ``jieba==0.42.1`` contains invalid escape sequences that
+Python 3.12 treats as DeprecationWarning; our strict
+``filterwarnings=["error"]`` converts those to errors during pytest
+collection.  Deferring the import to test-run time lets the per-module
+``ignore`` filter take effect.
 """
 
 from __future__ import annotations
 
-from everos.component.tokenizer import JiebaTokenizer, build_tokenizer
+import warnings
+
+import pytest
+
+from everos.component.tokenizer import build_tokenizer
+
+
+def _make_tokenizer(**kwargs):
+    """Import JiebaTokenizer at call time, suppressing jieba's warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "invalid escape sequence", DeprecationWarning)
+        from everos.component.tokenizer.jieba_provider import JiebaTokenizer
+
+    return JiebaTokenizer(**kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _suppress_jieba_warnings():
+    """Suppress jieba's invalid-escape DeprecationWarnings for all tests."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "invalid escape sequence", DeprecationWarning)
+        yield
 
 
 def test_tokenize_returns_list_for_english() -> None:
-    tokens = JiebaTokenizer().tokenize("hello world")
+    tokens = _make_tokenizer().tokenize("hello world")
     assert tokens == ["hello", "world"]
 
 
 def test_tokenize_drops_pure_whitespace() -> None:
     """Whitespace-only tokens never reach the BM25 column."""
-    tokens = JiebaTokenizer().tokenize("foo   bar")
+    tokens = _make_tokenizer().tokenize("foo   bar")
     assert all(t.strip() for t in tokens)
 
 
 def test_tokenize_empty_input() -> None:
-    assert JiebaTokenizer().tokenize("") == []
+    assert _make_tokenizer().tokenize("") == []
 
 
 def test_tokenize_cjk_keeps_multichar_words() -> None:
     """``cut_for_search`` keeps multi-character compounds usable by BM25."""
-    tokens = JiebaTokenizer().tokenize("我爱北京天安门")
+    tokens = _make_tokenizer().tokenize("我爱北京天安门")
     # Single-char tokens (我 / 爱) are filtered by min_length=2 (and 我
     # is also in the default stopword set). Multi-char compounds survive.
     assert "我" not in tokens
@@ -44,7 +72,7 @@ def test_tokenize_cjk_keeps_multichar_words() -> None:
 
 
 def test_tokenize_drops_default_english_stopwords() -> None:
-    tokens = JiebaTokenizer().tokenize("the quick brown fox")
+    tokens = _make_tokenizer().tokenize("the quick brown fox")
     assert "the" not in tokens
     assert "quick" in tokens
     assert "brown" in tokens
@@ -53,7 +81,7 @@ def test_tokenize_drops_default_english_stopwords() -> None:
 
 def test_tokenize_drops_short_tokens_below_min_length() -> None:
     """Single-char ASCII tokens are dropped by the default ``min_length=2``."""
-    tokens = JiebaTokenizer().tokenize("a quick b run")
+    tokens = _make_tokenizer().tokenize("a quick b run")
     assert "a" not in tokens
     assert "b" not in tokens
     assert "quick" in tokens
@@ -62,12 +90,12 @@ def test_tokenize_drops_short_tokens_below_min_length() -> None:
 
 def test_tokenize_is_case_insensitive() -> None:
     """Lowercasing is part of the symmetric contract."""
-    tokens = JiebaTokenizer().tokenize("HELLO World")
+    tokens = _make_tokenizer().tokenize("HELLO World")
     assert tokens == ["hello", "world"]
 
 
 def test_extra_stopwords_extend_defaults() -> None:
-    tk = JiebaTokenizer(extra_stopwords=frozenset({"hello"}))
+    tk = _make_tokenizer(extra_stopwords=frozenset({"hello"}))
     tokens = tk.tokenize("hello world")
     assert "hello" not in tokens
     assert "world" in tokens
@@ -79,7 +107,7 @@ def test_custom_min_token_length_relaxes_filter() -> None:
     Stopword filter still applies — even at ``min_length=1`` the English
     article ``"a"`` stays filtered because it's in the default stopwords.
     """
-    tokens = JiebaTokenizer(min_token_length=1).tokenize("a quick b")
+    tokens = _make_tokenizer(min_token_length=1).tokenize("a quick b")
     # 'a' is in the default English stopword set even at min_length=1.
     assert "a" not in tokens
     assert "b" in tokens
@@ -87,7 +115,7 @@ def test_custom_min_token_length_relaxes_filter() -> None:
 
 
 def test_tokenize_batch_preserves_order() -> None:
-    tk = JiebaTokenizer()
+    tk = _make_tokenizer()
     out = tk.tokenize_batch(["foo bar", "baz", ""])
     assert len(out) == 3
     assert out[2] == []
@@ -95,4 +123,8 @@ def test_tokenize_batch_preserves_order() -> None:
 
 def test_build_tokenizer_returns_jieba_default() -> None:
     """Factory exposes the same JiebaTokenizer the cascade handler uses."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "invalid escape sequence", DeprecationWarning)
+        from everos.component.tokenizer.jieba_provider import JiebaTokenizer
+
     assert isinstance(build_tokenizer(), JiebaTokenizer)

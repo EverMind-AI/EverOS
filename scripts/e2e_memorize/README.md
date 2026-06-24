@@ -16,9 +16,9 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
 1. **LLM client configured** in `.env`:
    - `EVEROS_LLM__API_KEY=...`
    - `EVEROS_LLM__BASE_URL=...` (OpenAI-compatible)
-   - `EVEROS_LLM__MODEL=...` (defaults to `gpt-4o-mini`)
+   - `EVEROS_LLM__MODEL=...` (defaults to `gpt-4.1-mini`)
    - Without these, the boundary stage logs `memorize_no_llm_client` and skips the run.
-2. **Memory root**: defaults to `~/.everos`; override with `EVEROS_MEMORY__ROOT=...`.
+2. **Memory root**: defaults to `~/.everos`; override with `EVEROS_ROOT=...`.
 3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `memorize()` call.
 
 ## Run

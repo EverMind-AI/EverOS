@@ -28,12 +28,15 @@ import asyncio
 import dataclasses
 from typing import Any, ClassVar
 
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, StructuredEntry
 
 from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
 from ._common import resolve_owner, resolve_scope
 from .base import Handler
+
+logger = get_logger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -103,17 +106,50 @@ class BaseDailyLogHandler(Handler):
             )
             for entry in parsed.entries
         ]
-        new_by_id = {e.entry_id: e for e in new_entries}
 
         existing = await self.lance_repo.find_where(
             f"md_path = '{_q(md_path)}'",
             limit=10_000,
         )
-        existing_by_entry = {row.entry_id: row for row in existing}
-
         owner_id, owner_type = resolve_owner(parsed.frontmatter, md_path)
         app_id, project_id = resolve_scope(md_path)
 
+        to_build, skipped = self._diff_entries(new_entries, existing)
+        to_upsert = await self._embed_entries(
+            to_build,
+            owner_id,
+            owner_type,
+            app_id,
+            project_id,
+            md_path,
+        )
+        new_by_id = {e.entry_id for e in new_entries}
+        to_delete_ids = [
+            row.entry_id for row in existing if row.entry_id not in new_by_id
+        ]
+
+        await self._apply_lance_changes(to_upsert, to_delete_ids, md_path)
+        await self._propagate_deprecations(
+            parsed.frontmatter,
+            owner_id,
+            app_id,
+            project_id,
+        )
+        return HandlerOutcome(
+            md_path=md_path,
+            kind=self.kind,
+            upserted=len(to_upsert),
+            deleted=len(to_delete_ids),
+            skipped=skipped,
+        )
+
+    @staticmethod
+    def _diff_entries(
+        new_entries: list[ParsedEntry],
+        existing: list[Any],
+    ) -> tuple[list[ParsedEntry], int]:
+        """Compare new entries against existing rows, return changed + skip count."""
+        existing_by_entry = {row.entry_id: row for row in existing}
         to_build: list[ParsedEntry] = []
         skipped = 0
         for entry in new_entries:
@@ -122,35 +158,43 @@ class BaseDailyLogHandler(Handler):
                 skipped += 1
                 continue
             to_build.append(entry)
+        return to_build, skipped
 
-        # Build rows concurrently; ``_build_row`` calls ``embedder.embed``
-        # which is already capped by a process-global ``asyncio.Semaphore``
-        # at ``max_concurrent`` (see OpenAIEmbeddingProvider). This unblocks
-        # per-md-path embedding pipelining without uncapping embed-API rate.
-        to_upsert: list[Any] = (
-            list(
-                await asyncio.gather(
-                    *(
-                        self._build_row(
-                            owner_id=owner_id,
-                            owner_type=owner_type,
-                            app_id=app_id,
-                            project_id=project_id,
-                            md_path=md_path,
-                            entry=entry,
-                        )
-                        for entry in to_build
+    async def _embed_entries(
+        self,
+        to_build: list[ParsedEntry],
+        owner_id: str,
+        owner_type: str,
+        app_id: str,
+        project_id: str,
+        md_path: str,
+    ) -> list[Any]:
+        """Build LanceDB rows for changed entries (embed concurrently)."""
+        if not to_build:
+            return []
+        return list(
+            await asyncio.gather(
+                *(
+                    self._build_row(
+                        owner_id=owner_id,
+                        owner_type=owner_type,
+                        app_id=app_id,
+                        project_id=project_id,
+                        md_path=md_path,
+                        entry=entry,
                     )
+                    for entry in to_build
                 )
             )
-            if to_build
-            else []
         )
 
-        to_delete_ids = [
-            row.entry_id for row in existing if row.entry_id not in new_by_id
-        ]
-
+    async def _apply_lance_changes(
+        self,
+        to_upsert: list[Any],
+        to_delete_ids: list[str],
+        md_path: str,
+    ) -> None:
+        """Flush upserts and deletes to LanceDB."""
         if to_upsert:
             await self.lance_repo.upsert(to_upsert)
         if to_delete_ids:
@@ -158,14 +202,6 @@ class BaseDailyLogHandler(Handler):
             await self.lance_repo.delete(
                 f"md_path = '{_q(md_path)}' AND entry_id IN ({in_list})"
             )
-
-        return HandlerOutcome(
-            md_path=md_path,
-            kind=self.kind,
-            upserted=len(to_upsert),
-            deleted=len(to_delete_ids),
-            skipped=skipped,
-        )
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:
         deleted = await self.lance_repo.delete_by_md_path(md_path)
@@ -176,6 +212,65 @@ class BaseDailyLogHandler(Handler):
             deleted=deleted,
             skipped=0,
         )
+
+    async def _propagate_deprecations(
+        self,
+        frontmatter: Any,
+        owner_id: str,
+        app_id: str,
+        project_id: str,
+    ) -> None:
+        """Propagate deprecated_entries from frontmatter to LanceDB.
+
+        The md file is the source of truth; cascade reconstructs the
+        ``deprecated_by`` column on every sync/rebuild.
+        """
+        deprecated = getattr(frontmatter, "deprecated_entries", None)
+        if not deprecated and isinstance(frontmatter, dict):
+            deprecated = frontmatter.get("deprecated_entries")
+        if not deprecated:
+            return
+        scope = (app_id, project_id)
+        await asyncio.gather(
+            *(
+                self._mark_deprecated(owner_id, entry_id, deprecated_by_val, scope)
+                for entry_id, deprecated_by_val in deprecated.items()
+            )
+        )
+
+    async def _mark_deprecated(
+        self,
+        owner_id: str,
+        entry_id: str,
+        deprecated_by: str,
+        scope: tuple[str, str],
+    ) -> None:
+        """Set ``deprecated_by`` on a LanceDB row matching ``entry_id``.
+
+        Scoped to ``(app_id, project_id, owner_id, entry_id)`` to avoid
+        cross-space collisions. A missing row is silently ignored — the
+        entry may have been deleted or not yet indexed.
+        """
+        app_id, project_id = scope
+        predicate = (
+            f"owner_id = '{_q(owner_id)}' "
+            f"AND entry_id = '{_q(entry_id)}' "
+            f"AND app_id = '{_q(app_id)}' "
+            f"AND project_id = '{_q(project_id)}'"
+        )
+        try:
+            await self.lance_repo.update(
+                {"deprecated_by": deprecated_by},
+                where=predicate,
+            )
+        except Exception:
+            logger.warning(
+                "failed to mark entry deprecated",
+                entry_id=entry_id,
+                deprecated_by=deprecated_by,
+                kind=self.kind,
+                exc_info=True,
+            )
 
     @abc.abstractmethod
     async def _build_row(

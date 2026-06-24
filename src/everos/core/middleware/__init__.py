@@ -1,6 +1,7 @@
 """Cross-cutting HTTP middleware components.
 
-External usage:
+External usage::
+
     from everos.core.middleware import (
         DEFAULT_CORS_ALLOW_CREDENTIALS,
         DEFAULT_CORS_ALLOW_HEADERS,
@@ -8,7 +9,6 @@ External usage:
         DEFAULT_CORS_ORIGINS,
         ProfileMiddleware,
         PrometheusMiddleware,
-        global_exception_handler,
     )
 """
 
@@ -16,7 +16,6 @@ from .cors import DEFAULT_CORS_ALLOW_CREDENTIALS as DEFAULT_CORS_ALLOW_CREDENTIA
 from .cors import DEFAULT_CORS_ALLOW_HEADERS as DEFAULT_CORS_ALLOW_HEADERS
 from .cors import DEFAULT_CORS_ALLOW_METHODS as DEFAULT_CORS_ALLOW_METHODS
 from .cors import DEFAULT_CORS_ORIGINS as DEFAULT_CORS_ORIGINS
-from .global_exception import global_exception_handler as global_exception_handler
 from .profile import ProfileMiddleware as ProfileMiddleware
 from .prometheus import PrometheusMiddleware as PrometheusMiddleware
 
@@ -27,5 +26,4 @@ __all__ = [
     "DEFAULT_CORS_ORIGINS",
     "ProfileMiddleware",
     "PrometheusMiddleware",
-    "global_exception_handler",
 ]

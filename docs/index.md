@@ -12,10 +12,11 @@ already know what you want to do and need to know exactly how.
 | Doc | Purpose |
 |---|---|
 | [api.md](api.md) | HTTP API v1 reference — endpoints, request / response, error contracts |
+| [knowledge.md](knowledge.md) | Knowledge base module — upload, search, taxonomy, storage layout |
+| [reflection.md](reflection.md) | Reflection — offline memory consolidation: enable, schedule, storage, triggering |
 | [cli.md](cli.md) | `everos` CLI subcommands + env var conventions |
 | [storage_layout.md](storage_layout.md) | Memory-root tree + frontmatter chassis + EntryId encoding |
 | [prompt_slots.md](prompt_slots.md) | YamlConfigLoader + three-layer prompt override |
-| [migration-to-1.0.0.md](migration-to-1.0.0.md) | Legacy API and infrastructure migration notes for EverOS 1.0.0 |
 
 ## Explanation
 
@@ -37,7 +38,6 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
-| [multimodal.md](multimodal.md) | Ingest images, PDFs, audio, and office docs into memory |
 
 ## Engineering / Internal
 
@@ -54,7 +54,6 @@ Top-level project files live next to the repo root:
 
 - [README.md](../README.md) — quick start & feature overview
 - [QUICKSTART.md](../QUICKSTART.md) — 5-minute walkthrough (install → service → search)
-- [use-cases.md](use-cases.md) — full use-case gallery and integration examples
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — how to contribute (issue-only model)
 - [CHANGELOG.md](../CHANGELOG.md) — release notes
 - [SECURITY.md](../SECURITY.md) — security policy & private vulnerability reporting

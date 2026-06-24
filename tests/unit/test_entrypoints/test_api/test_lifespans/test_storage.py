@@ -18,7 +18,7 @@ from everos.infra.persistence.sqlite import sqlite_manager
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Redirect both managers at an isolated memory-root."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     sqlite_manager._engine = None
     sqlite_manager._session_factory = None
     lancedb_manager._conn = None

@@ -37,6 +37,8 @@ from .base import BaseDailyReader as BaseDailyReader
 from .episode_reader import EpisodeReader as EpisodeReader
 from .foresight_reader import ForesightReader as ForesightReader
 from .profile_reader import ProfileReader as ProfileReader
+from .taxonomy_reader import ensure_taxonomy as ensure_taxonomy
+from .taxonomy_reader import parse_taxonomy as parse_taxonomy
 
 __all__ = [
     "AgentCaseReader",
@@ -46,4 +48,6 @@ __all__ = [
     "EpisodeReader",
     "ForesightReader",
     "ProfileReader",
+    "ensure_taxonomy",
+    "parse_taxonomy",
 ]

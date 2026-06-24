@@ -17,7 +17,7 @@ Layout::
 
     search_client  (function-scoped)
         └── per-test ``httpx.AsyncClient`` wired to a freshly built
-            FastAPI app, ``EVEROS_MEMORY__ROOT`` pointed at the
+            FastAPI app, ``EVEROS_ROOT`` pointed at the
             session corpus. Singletons are reset so each test starts
             with cold caches and the lifespan is the only thing
             constructing them.
@@ -47,7 +47,7 @@ from sqlalchemy import text
 # Set ``EVEROS_REUSE_CORPUS=<path>`` to skip ingest and point the
 # session fixture at an existing memory_root (md + lancedb already
 # populated). Search is a read-only path, so no copy is needed — the
-# fixture just sets ``EVEROS_MEMORY__ROOT`` to that directory.
+# fixture just sets ``EVEROS_ROOT`` to that directory.
 _REUSE_ENV = "EVEROS_REUSE_CORPUS"
 
 # Memorize-service module-level lazy singletons; reset between phases so
@@ -85,7 +85,7 @@ def _session_monkeypatch() -> Generator[pytest.MonkeyPatch, None, None]:
 def _reset_memorize_singletons(mp: pytest.MonkeyPatch) -> None:
     """Null out memorize/strategy/LLM-client lazy singletons.
 
-    Called once before ingest (so the freshly-set ``EVEROS_MEMORY__ROOT``
+    Called once before ingest (so the freshly-set ``EVEROS_ROOT``
     actually wins) and once per test (so the session corpus's lifespan
     sees clean caches).
     """
@@ -138,8 +138,9 @@ def _ingested_memory_root(
     else:
         memory_root = tmp_path_factory.mktemp("search_corpus")
 
-    _session_monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(memory_root))
+    _session_monkeypatch.setenv("EVEROS_ROOT", str(memory_root))
     _reset_memorize_singletons(_session_monkeypatch)
+    (memory_root / "ome.toml").write_text("# test\n")
 
     if reuse:
         # Search is read-only; the corpus is consumed in place, no copy.
@@ -217,7 +218,7 @@ async def search_client(
     manager builds a fresh embedding / rerank / LLM client per test —
     we don't want cross-test client state to mask a regression.
     """
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(_ingested_memory_root))
+    monkeypatch.setenv("EVEROS_ROOT", str(_ingested_memory_root))
     _reset_memorize_singletons(monkeypatch)
 
     # The search service has its own module-level singletons; reset

@@ -9,8 +9,8 @@ derived indexes that can be rebuilt from markdown alone.
 ## 1. Memory-root tree
 
 A memory-root is a single directory holding all persisted memory. The
-default location is `~/.everos/`; override via `EVEROS_MEMORY__ROOT`
-env var or `[memory] root` in the TOML config.
+default location is `~/.everos/`; override via the `EVEROS_ROOT`
+env var or `--root` on the CLI.
 
 Memory is partitioned by **`<app_id>/<project_id>`** *before* the
 user-visible scope dirs, so different `(app, project)` spaces never share
@@ -64,9 +64,9 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
-runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`) and copies the
-OME template to `ome.toml`; the user-visible dirs are *not* pre-created —
-they appear on first write.
+runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`); the
+user-visible dirs are *not* pre-created — they appear on first write.
+Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
 
 > The single-file writer also supports `agent.md` / `soul.md` / `tools.md`
 > / `behaviors.md`, but no shipped strategy produces those today — only
@@ -89,11 +89,8 @@ business-aware writers live in
 [`infra/persistence/markdown/writers/`](../src/everos/infra/persistence/markdown/writers/)
 and pick the right strategy via a base class.
 
-To add a new memory kind, define its per-kind frontmatter schema under
-[`infra/persistence/markdown/mds/`](../src/everos/infra/persistence/markdown/mds/)
-and add a matching writer/reader pair under
-[`writers/`](../src/everos/infra/persistence/markdown/writers/) and
-[`readers/`](../src/everos/infra/persistence/markdown/readers/).
+For a step-by-step recipe to add a new memory kind, see the
+[`/add-memory-kind`](../.claude/skills/add-memory-kind/SKILL.md) skill.
 
 ## 3. Frontmatter chassis (YAML)
 
@@ -178,20 +175,30 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 ```
 .index/
 ├── sqlite/
-│   └── system.db          state / audit log / task queue / LSN watermark
-│                           + per-kind business state tables (composite key)
+│   └── system.db          state / audit / cascade queue + buffer / LSN
+│                           (system tables: md_change_state, memcell,
+│                            unprocessed_buffer, conversation_status, cluster)
 └── lancedb/
-    └── <kind>.lance/      one Arrow-based table per kind
-                            stores text / vector / tags / metadata
+    └── <kind>.lance/      one Arrow table per business kind — the per-kind
+                            rows (text / vector / tokens / metadata) live here
 ```
 
-- **SQLite** schema lives in
-  [`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/);
-  every business table that joins back to markdown declares a
-  `UniqueConstraint("user_id", "entry_id")` (or `agent_id` symmetric).
-- **LanceDB** schemas live in
-  [`infra/persistence/lancedb/tables/`](../src/everos/infra/persistence/lancedb/tables/);
-  `Vector(N)` dimension matches the embedding model output.
+- **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
+  holds only system / coordination tables — `md_change_state` (cascade
+  queue), `memcell` (boundary ledger), `unprocessed_buffer`,
+  `conversation_status`, `cluster`, `reflection_report` — **not**
+  per-kind business rows. `reflection_report` is the audit trail for
+  Reflection merges (cluster_id, mode, source_members, merged_entry_id,
+  status).
+- **LanceDB** ([`infra/persistence/lancedb/tables/`](../src/everos/infra/persistence/lancedb/tables/))
+  holds the per-kind business rows, keyed `<owner_id>_<entry_id>` (so
+  cross-table joins use `(owner_id, entry_id)`); each table's `Vector(N)`
+  dimension matches the embedding model output.
+
+Episode and AtomicFact LanceDB tables carry a `deprecated_by: str | None`
+column. When an episode is superseded by a Reflection merge,
+`deprecated_by` is set to the merged episode's entry_id. Search filters
+automatically exclude rows where `deprecated_by IS NOT NULL`.
 
 Both layers are **fully derivable from markdown** — wipe `.index/`
 and the in-process cascade subsystem re-builds everything by scanning the
@@ -210,13 +217,14 @@ appends an entry block → atomic write back. The caller passes a full
 `EntryId` (built via `EntryId.next_for(prefix, date, current_count)`);
 this primitive is **schema-agnostic** — field-level semantics
 (`entry_count` / `last_appended_at`) are a business writer's job
-(see `BaseDailyAppender._frontmatter_updates` in
+(see `BaseDailyWriter._frontmatter_updates` in
 [`infra/persistence/markdown/writers/base.py`](../src/everos/infra/persistence/markdown/writers/base.py)).
 
 ## 7. References
 
+- Skill: [`/add-memory-kind`](../.claude/skills/add-memory-kind/SKILL.md)
 - Code:
-  - [`core/persistence/memory_root.py`](../src/everos/core/persistence/memory_root.py) — memory-root resolution
-  - [`core/persistence/markdown/`](../src/everos/core/persistence/markdown/) — schema-agnostic read/write chassis
-  - [`infra/persistence/markdown/mds/`](../src/everos/infra/persistence/markdown/mds/) — per-kind frontmatter schemas
-  - [`infra/persistence/{markdown,sqlite,lancedb}/`](../src/everos/infra/persistence/) — business-aware adapters
+  - [`core/persistence/memory_root.py`](../src/everos/core/persistence/memory_root.py)
+  - [`core/persistence/markdown/`](../src/everos/core/persistence/markdown/)
+  - [`infra/persistence/{markdown,sqlite,lancedb}/`](../src/everos/infra/persistence/)
+  - [`memory/cascade/`](../src/everos/memory/cascade/) (md → LanceDB sync)

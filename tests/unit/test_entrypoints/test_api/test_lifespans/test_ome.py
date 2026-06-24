@@ -21,6 +21,7 @@ async def test_lifespan_starts_and_stops_engine(
     monkeypatch.setattr(
         MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    (tmp_path / "ome.toml").write_text("# test\n")
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
 
     provider = OmeLifespanProvider()

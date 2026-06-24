@@ -3,12 +3,12 @@
 Public surface:
 
 - :class:`RerankProvider` — Protocol every provider satisfies.
-- :class:`RerankResult` / :class:`RerankError` — value type + error.
+- :class:`RerankResult` / :class:`RerankServiceError` — value type + error.
+- :class:`RerankError` — backward-compat alias for :class:`RerankServiceError`.
 - :class:`DeepInfraRerankProvider` — DeepInfra inference-API rerank.
+- :class:`DashScopeRerankProvider` — Aliyun Bailian / DashScope rerank.
 - :class:`VllmRerankProvider` — OpenAI-compat ``/v1/rerank`` (vLLM,
   self-hosted, other compatible servers).
-- :class:`DashScopeRerankProvider` — Aliyun Bailian / DashScope
-  ``gte-rerank-v2`` native ``text-rerank`` endpoint.
 - :func:`build_rerank_provider` — settings-driven factory that picks
   the concrete provider via ``settings.rerank.provider``.
 
@@ -18,6 +18,8 @@ External usage::
     provider = build_rerank_provider(settings.rerank)
     scored = await provider.rerank("how to file a claim", documents)
 """
+
+from everos.core.errors import RerankServiceError as RerankServiceError
 
 from .dashscope_provider import DashScopeRerankProvider as DashScopeRerankProvider
 from .deepinfra_provider import DeepInfraRerankProvider as DeepInfraRerankProvider
@@ -33,6 +35,7 @@ __all__ = [
     "RerankError",
     "RerankProvider",
     "RerankResult",
+    "RerankServiceError",
     "VllmRerankProvider",
     "build_rerank_provider",
 ]

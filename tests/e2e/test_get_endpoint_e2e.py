@@ -1,7 +1,7 @@
 """End-to-end integration tests for ``POST /api/v1/memory/get``.
 
 These tests spin up the FastAPI app with **no lifespan providers**
-against a tmp ``EVEROS_MEMORY__ROOT``, populate a real LanceDB
+against a tmp ``EVEROS_ROOT``, populate a real LanceDB
 ``episode`` table directly via the repo singleton, and exercise the
 HTTP route. They cover the wiring that unit tests cannot: pydantic
 422s from the route, JSON envelope shape, and the full
@@ -130,7 +130,7 @@ async def client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
     """Build the FastAPI app against a tmp memory root with no lifespan."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
     # Reset every module-level singleton the get-path touches.

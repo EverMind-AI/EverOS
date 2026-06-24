@@ -48,6 +48,7 @@ def _episode_row(
             "subject": f"subj {eid}",
             "summary": f"summary {eid}",
             "episode": f"body {eid}",
+            "entry_id": eid,
             "parent_id": memcell_id if memcell_id is not None else f"mc_{eid}",
         },
     )
@@ -113,10 +114,14 @@ class _StubEpisodeRecaller:
     async def fetch_by_parent_ids(
         self, parent_ids: Sequence[str], where: str
     ) -> list[Candidate]:
-        # Index dense rows by their parent_id (memcell id) so the maxsim
-        # path's reverse-resolve has something to return.
         by_parent = {str(c.metadata.get("parent_id", "")): c for c in self._dense}
         return [by_parent[p] for p in parent_ids if p in by_parent]
+
+    async def fetch_by_entry_ids(
+        self, entry_ids: Sequence[str], where: str
+    ) -> list[Candidate]:
+        by_entry = {str(c.metadata.get("entry_id", "")): c for c in self._dense}
+        return [by_entry[e] for e in entry_ids if e in by_entry]
 
 
 class _StubAtomicFactRecaller:
@@ -140,16 +145,15 @@ class _StubAtomicFactRecaller:
 
     async def facts_for_episodes(
         self,
-        ep_to_memcell: Mapping[str, str],
+        ep_to_parents: Mapping[str, Sequence[str]],
         where: str,
         *,
         per_episode: int,
         query_vector: Any = None,
     ) -> dict[str, list[FactCandidate]]:
-        # ``query_vector`` accepted to match the real recaller signature
         # Accepted to match the real recaller signature; stub doesn't use it.
         return {
-            eid: self._facts_map.get(eid, [])[:per_episode] for eid in ep_to_memcell
+            eid: self._facts_map.get(eid, [])[:per_episode] for eid in ep_to_parents
         }
 
 
@@ -428,8 +432,8 @@ async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vector_strategy=maxsim_atomic`` should ANN atomic_facts → max-pool by
-    memcell parent → reverse-resolve to episode, ordering episodes by the
-    per-memcell maximum fact score."""
+    episode entry_id → resolve to episode, ordering episodes by the
+    per-episode maximum fact score."""
     from everos.config.settings import load_settings
 
     monkeypatch.setenv("EVEROS_SEARCH__VECTOR_STRATEGY", "maxsim_atomic")
@@ -442,9 +446,9 @@ async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
             _episode_row("ep_B", memcell_id="mc_B"),
         ],
         atomic_fact_dense=[
-            _atomic_fact_row("f_A1", parent_id="mc_A", score=0.95),
-            _atomic_fact_row("f_A2", parent_id="mc_A", score=0.40),
-            _atomic_fact_row("f_B1", parent_id="mc_B", score=0.75),
+            _atomic_fact_row("f_A1", parent_id="ep_A", score=0.95),
+            _atomic_fact_row("f_A2", parent_id="ep_A", score=0.40),
+            _atomic_fact_row("f_B1", parent_id="ep_B", score=0.75),
         ],
         embedding=_StubEmbedding(),
     )

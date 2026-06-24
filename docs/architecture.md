@@ -10,7 +10,7 @@
 │    cli + api                                          │
 ├──────────────────────────────────────────────────────┤
 │  service/      (Application — Use Case orchestration) │
-│    memorize / retrieve / evolve / manage              │
+│    memorize / search / get / knowledge                │
 ├──────────────────────────────────────────────────────┤
 │  memory/       (Domain — Business core)               │
 │    models + extract + search + cascade + prompt_slots │
@@ -20,8 +20,8 @@
 └──────────────────────────────────────────────────────┘
 
 Cross-cutting (used by all layers, depends on none):
-  component/  ← Injectable providers (LLM / Embedding / config / utils)
-  core/       ← Runtime base (observability / lifespan / context)
+  component/  ← Injectable providers (LLM / Embedding / parser / config / utils)
+  core/       ← Runtime base (observability / lifespan / context / errors)
   config/     ← Configuration data (Settings schema + default.toml)
 ```
 
@@ -170,7 +170,7 @@ Three-piece observability:
 ## Markdown layout
 
 ```
-~/.everos/                                  # memory root (default; EVEROS_MEMORY__ROOT)
+~/.everos/                                  # memory root (default; EVEROS_ROOT)
 └── <app_id>/<project_id>/                  # scope ("default" → default_app/default_project)
     ├── users/<user_id>/
     │   ├── user.md                                     # profile (single-file rewrite)
@@ -208,6 +208,55 @@ everalgo is:
 - **No prompts inline** — receives `PromptSlot` parameter, project supplies defaults
 
 This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
+
+## Error handling architecture
+
+### Exception hierarchy
+
+All application exceptions derive from `AppError` (`core/errors.py`),
+split into four branches by nature:
+
+```
+AppError
+├── DomainError                    (client-side / business-rule violations)
+│   ├── NotFoundError              → 404 NOT_FOUND
+│   │   ├── DocumentNotFoundError
+│   │   └── TopicNotFoundError
+│   ├── ConflictError              → 409 CONFLICT
+│   │   └── DuplicateDocumentError
+│   ├── InvalidInputError          → 422 INVALID_INPUT
+│   │   ├── ExtractionEmptyError   → 422 EXTRACTION_EMPTY
+│   │   └── FilterError
+│   ├── PathTraversalError         → 400 BAD_REQUEST
+│   └── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
+├── InfrastructureError            (transient, retryable)     → 503
+│   ├── StorageError
+│   ├── VectorStoreError
+│   └── ExternalServiceError
+│       ├── LLMServiceError
+│       ├── EmbeddingServiceError
+│       └── RerankServiceError
+├── CapabilityError                (permanent, not retryable) → 503
+│   └── MultimodalNotEnabledError
+└── ConfigurationError             (misconfiguration)         → 500
+```
+
+### Error propagation strategy
+
+Exceptions are raised at the layer where the error is detected and
+propagate naturally — **service and route layers do not catch-and-wrap**.
+The entrypoints layer registers per-type exception handlers
+(`entrypoints/api/exception_handlers.py`) via Starlette's MRO dispatch.
+Each handler converts the exception into a canonical error envelope with
+an `ErrorCode` enum value and the appropriate HTTP status code.
+
+### Boundary translation
+
+Third-party exception types are translated at the component boundary to
+prevent external types from leaking into upper layers:
+
+- `everalgo.llm.LLMError` → `LLMServiceError` at `component/parser/_core.py`
+- Embedding / rerank provider errors → `EmbeddingServiceError` / `RerankServiceError` at their respective protocol modules
 
 ## Further reading
 

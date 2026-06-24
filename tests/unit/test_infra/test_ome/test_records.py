@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from everos.component.utils.datetime import get_now_with_timezone
+from everos.component.utils.datetime import get_now_with_timezone, get_utc_now
 from everos.infra.ome.records import RunRecord, RunStatus, StrategyRouteInfo
 
 
@@ -21,6 +21,7 @@ def _ok_kwargs(**overrides: Any) -> dict[str, Any]:
         "event_topic": "x:Y",
         "event_payload": "{}",
         "max_retries_snapshot": 1,
+        "event_id": "evt_test",
     }
     base.update(overrides)
     return base
@@ -44,6 +45,7 @@ def test_run_record_minimal() -> None:
         event_topic="my_app.events:EpisodeSaved",
         event_payload="{}",
         max_retries_snapshot=1,
+        event_id="evt_test",
     )
     assert rec.finished_at is None
     assert rec.error is None
@@ -60,6 +62,7 @@ def test_run_record_round_trips_json() -> None:
         event_topic="x:Y",
         event_payload='{"a":1}',
         max_retries_snapshot=1,
+        event_id="evt_test",
     )
     blob = rec.model_dump_json()
     restored = RunRecord.model_validate_json(blob)
@@ -175,3 +178,24 @@ def test_strategy_route_info_rejects_empty_strategy_name() -> None:
             applies_to_pass=True,
             counter_pass=True,
         )
+
+
+def test_run_record_accepts_event_id() -> None:
+    rec = RunRecord(
+        run_id="r1",
+        strategy_name="s",
+        status=RunStatus.RUNNING,
+        attempt=0,
+        started_at=get_utc_now(),
+        event_topic="x:Y",
+        event_payload="{}",
+        max_retries_snapshot=1,
+        event_id="abc123",
+    )
+    assert rec.event_id == "abc123"
+
+
+def test_run_record_accepts_empty_event_id_for_migration_compat() -> None:
+    """Empty event_id is valid for pre-existing rows migrated from older schema."""
+    rec = RunRecord(**_ok_kwargs(event_id=""))
+    assert rec.event_id == ""

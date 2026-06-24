@@ -75,7 +75,7 @@ class EpisodeHandler(BaseDailyLogHandler):
             owner_type=owner_type,
             app_id=app_id,
             project_id=project_id,
-            session_id=s.inline.get("session_id", ""),
+            session_id=s.inline.get("session_id"),
             timestamp=require_iso_timestamp(s.inline.get("timestamp")),
             parent_type=s.inline.get("parent_type") or ParentType.MEMCELL.value,
             parent_id=s.inline.get("parent_id", ""),

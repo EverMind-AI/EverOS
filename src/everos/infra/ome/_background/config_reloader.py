@@ -207,6 +207,11 @@ class ConfigReloader:
         """Fire-and-forget the watch loop. Idempotent: raises on double-start."""
         if self._path is None:
             return
+        if not self._path.exists():
+            raise FileNotFoundError(
+                f"{self._path} not found. "
+                "Run `everos init` to create configuration files."
+            )
         if self._task is not None and not self._task.done():
             raise RuntimeError("ConfigReloader already started")
         self._task = asyncio.create_task(self._loop())

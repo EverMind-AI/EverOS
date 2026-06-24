@@ -33,8 +33,8 @@ To cite the software itself:
 
 ```
 EverOS: md-first memory extraction framework for AI agents
-Version: 1.0.1
-URL: https://github.com/EverMind-AI/EverOS
+Version: 0.1.0
+URL: https://github.com/EverMind-AI/everos
 License: Apache 2.0
 ```
 
@@ -52,9 +52,9 @@ If you use EverOS, we appreciate:
 
 ## Stay updated
 
-- Watch the [GitHub repository](https://github.com/EverMind-AI/EverOS) for paper announcements
+- Watch the [GitHub repository](https://github.com/EverMind-AI/everos) for paper announcements
 - Follow [@EverMindAI](https://x.com/EverMindAI) on X / Twitter
-- Join [GitHub Discussions](https://github.com/EverMind-AI/EverOS/discussions)
+- Join [GitHub Discussions](https://github.com/EverMind-AI/everos/discussions)
 
 ---
 

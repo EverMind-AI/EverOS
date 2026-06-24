@@ -13,7 +13,7 @@ Sampling rules:
   bridge-consistent.
 - **atomic_fact**: every row whose ``parent_id`` is in the episode-
   parent set above, capped at 50 to keep the seed compact. This
-  guarantees MRAG-fusion testing can verify "facts sharing a
+  guarantees hierarchical-eviction testing can verify "facts sharing a
   memcell with the matched episode get embedded".
 - **foresight**: 5 per owner. Archived for future use; current
   ``/search`` does not query foresight, so the seed only exists so
@@ -85,7 +85,7 @@ def main() -> None:
             parent_memcells.add(r["parent_id"])
 
     # 2) atomic_facts — every fact whose parent_id is in the episode
-    #    parent set, capped to keep the seed compact (and so MRAG
+    #    parent set, capped to keep the seed compact (and so hierarchical
     #    ``facts_for_episodes`` has a useful but bounded pool to
     #    bucket back into episodes).
     afs_all = _read(db, "atomic_fact")
@@ -93,7 +93,7 @@ def main() -> None:
     # mentions two users gets two rows, one for each owner) — sampling
     # naively can leave one owner with zero facts. Take per-owner caps
     # so both caroline and melanie have facts whose parent_id matches
-    # their own episodes' parent_id (MRAG bridge).
+    # their own episodes' parent_id (memcell bridge).
     afs: list[dict[str, Any]] = []
     for owner in ALL_OWNERS:
         afs.extend(

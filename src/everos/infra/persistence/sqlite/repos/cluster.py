@@ -23,7 +23,7 @@ import uuid
 
 import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -42,6 +42,13 @@ def mint_cluster_id() -> str:
 
 
 class _ClusterRepo(RepoBase[Cluster]):
+    """CRUD repository for the ``cluster`` + ``cluster_member`` table pair.
+
+    Bridges between the SQLite row shape and the algo-side
+    :class:`everalgo.clustering.Cluster` value object, handling centroid
+    bytes round-trip, preview JSON serialisation, and membership joins.
+    """
+
     model = Cluster
 
     def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
@@ -120,6 +127,144 @@ class _ClusterRepo(RepoBase[Cluster]):
                 .limit(1)
             )
             return (await s.execute(stmt)).scalar_one_or_none()
+
+    # ── Member-level CRUD ───────────────────────────────────────────────────
+
+    async def remove_members(self, cluster_id: str, member_ids: set[str]) -> None:
+        """Hard-delete specific member rows from cluster_member.
+
+        Args:
+            cluster_id: Target cluster identifier.
+            member_ids: Set of member ids to remove; no-op when empty.
+        """
+        if not member_ids:
+            return
+        async with session_scope(self._factory) as s:
+            await s.execute(
+                delete(ClusterMember)
+                .where(ClusterMember.cluster_id == cluster_id)
+                .where(ClusterMember.member_id.in_(member_ids))
+            )
+            await s.commit()
+
+    async def add_member(
+        self, cluster_id: str, member_id: str, member_type: str
+    ) -> None:
+        """Add a single member to an existing cluster.
+
+        Args:
+            cluster_id: Target cluster identifier.
+            member_id: Unique id of the member entity.
+            member_type: Kind discriminator (e.g. ``"episode"``).
+        """
+        async with session_scope(self._factory) as s:
+            s.add(
+                ClusterMember(
+                    cluster_id=cluster_id,
+                    member_id=member_id,
+                    member_type=member_type,
+                    added_ts=get_utc_now(),
+                )
+            )
+            await s.commit()
+
+    async def update_metadata(
+        self,
+        cluster_id: str,
+        *,
+        centroid_blob: bytes,
+        count: int,
+        last_ts_ms: int,
+        preview_json: str,
+    ) -> None:
+        """Update cluster metadata after member changes.
+
+        Args:
+            cluster_id: Target cluster identifier.
+            centroid_blob: Serialised float32 centroid vector bytes.
+            count: Updated member count.
+            last_ts_ms: Latest member timestamp in epoch milliseconds.
+            preview_json: JSON-encoded preview text list.
+        """
+        async with session_scope(self._factory) as s:
+            await s.execute(
+                update(Cluster)
+                .where(Cluster.cluster_id == cluster_id)
+                .values(
+                    centroid_blob=centroid_blob,
+                    count=count,
+                    last_ts_ms=last_ts_ms,
+                    preview_json=preview_json,
+                )
+            )
+            await s.commit()
+
+    # ── Lightweight queries ───────────────────────────────────────────────
+
+    async def list_ids_and_member_counts(
+        self,
+        owner_id: str,
+        kind: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list[tuple[str, int]]:
+        """Return ``(cluster_id, member_count)`` from actual member rows.
+
+        Args:
+            owner_id: Scope owner identifier.
+            kind: Cluster kind discriminator.
+            app_id: Application scope (default ``"default"``).
+            project_id: Project scope (default ``"default"``).
+        """
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(
+                    Cluster.cluster_id,
+                    func.count(ClusterMember.member_id),
+                )
+                .join(
+                    ClusterMember,
+                    Cluster.cluster_id == ClusterMember.cluster_id,
+                )
+                .where(Cluster.owner_id == owner_id)
+                .where(Cluster.kind == kind)
+                .where(Cluster.app_id == app_id)
+                .where(Cluster.project_id == project_id)
+                .group_by(Cluster.cluster_id)
+            )
+            return list((await s.execute(stmt)).all())
+
+    async def get_members_with_type(self, cluster_id: str) -> list[tuple[str, str]]:
+        """Return ``(member_id, member_type)`` pairs for a cluster.
+
+        Args:
+            cluster_id: Target cluster identifier.
+        """
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(ClusterMember.member_id, ClusterMember.member_type)
+                .where(ClusterMember.cluster_id == cluster_id)
+                .order_by(ClusterMember.added_ts)
+            )
+            return list((await s.execute(stmt)).all())
+
+    async def list_distinct_owners(
+        self,
+    ) -> list[tuple[str, str, str, str]]:
+        """Return distinct ``(owner_id, owner_type, app_id, project_id)`` tuples.
+
+        Used by the Reflection cron strategy to enumerate all scope
+        combinations that may have clusters to reflect.
+        """
+        async with session_scope(self._factory) as s:
+            stmt = select(
+                Cluster.owner_id,
+                Cluster.owner_type,
+                Cluster.app_id,
+                Cluster.project_id,
+            ).distinct()
+            return list((await s.execute(stmt)).all())
 
     # ── Write ──────────────────────────────────────────────────────────────
 

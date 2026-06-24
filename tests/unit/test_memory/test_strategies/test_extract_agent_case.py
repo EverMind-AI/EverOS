@@ -68,7 +68,7 @@ def _algo_case(
 
 
 async def test_strategy_meta_is_attached() -> None:
-    meta = extract_agent_case._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = extract_agent_case.meta
     assert meta.name == "extract_agent_case"
     assert AgentPipelineStarted in meta.trigger.on
     assert meta.emits == frozenset({AgentCaseExtracted})

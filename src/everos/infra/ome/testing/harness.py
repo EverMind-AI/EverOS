@@ -12,6 +12,7 @@ from tempfile import mkdtemp
 from typing import Any
 
 from everos.infra.ome.config import OMEConfig
+from everos.infra.ome.decorator import Strategy
 from everos.infra.ome.engine import OfflineEngine
 from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.records import RunRecord, RunStatus
@@ -55,13 +56,13 @@ class StrategyTestHarness:
         finally:
             shutil.rmtree(self._tmpdir, ignore_errors=True)  # noqa: SLF001
 
-    def register(self, func: Any) -> None:
-        """Register a strategy function.
+    def register(self, strategy: Strategy) -> None:
+        """Register a :class:`Strategy` returned by ``@offline_strategy``.
 
         Args:
-            func: A function decorated with @offline_strategy.
+            strategy: A Strategy instance produced by the decorator.
         """
-        self._engine.register(func)
+        self._engine.register(strategy)
 
     async def start(self) -> None:
         """Start the OfflineEngine."""

@@ -33,7 +33,7 @@ from _run_full_report import (  # noqa: E402
 async def main() -> None:
     if not (CORPUS_ROOT / "users").is_dir():
         raise SystemExit(f"{CORPUS_ROOT} not populated — run _run_full_report.py first")
-    os.environ["EVEROS_MEMORY__ROOT"] = str(CORPUS_ROOT)
+    os.environ["EVEROS_ROOT"] = str(CORPUS_ROOT)
     from everos.config import load_settings
 
     load_settings.cache_clear()

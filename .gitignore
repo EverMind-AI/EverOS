@@ -1,3 +1,6 @@
+# VS Code workspace files
+*.code-workspace
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -50,10 +53,6 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-.ruff_cache/
-.import_linter_cache/
-.uv-cache/
-.package-smoke/
 
 # Translations
 *.mo
@@ -107,6 +106,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -132,73 +132,139 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# ───────────────────────────────────────────────────────────────────────────
 # Project specific
-# ───────────────────────────────────────────────────────────────────────────
+outputs/
+.pytest_cache/
+
+evaluation/static_memory_evaluation/logs/
+evaluation/static_memory_evaluation/retrieval/
+evaluation/static_memory_evaluation/retrieval_bk/
+evaluation/static_memory_evaluation/analysis/
+memory_base/static_memory_base/bm25_index/
+memory_base/static_memory_base/hipporag/
+memory_base/static_memory_base/vector_search/
+
+# Demo related files
+demo/.chat_history
+demo/chat_history/
+demo/memcell_outputs/
 
 # macOS
 .DS_Store
-
-# Editor / IDE
-.trae/
-.cursor/
-
-# Claude Code: track team-shared rules/skills/settings; ignore personal + runtime
-.claude/*
-!.claude/rules/
-!.claude/skills/
-!.claude/settings.json
-.claude/settings.local.json
-.claude/worktrees/
-.worktrees/
-worktrees/
-
-# Runtime data (the default memory root + local databases)
-.everos/
 *.duckdb
 
-# Large / generated artefacts that should never be committed
+
+# Evaluation and memory data files
+evaluation_memory_offline/data/
+evaluation_memory_offline/temporary/
+
+# Dynamic memory files (runtime generated)
+memory_base/dynamic_memory_base/memory/
+# Evaluation results and large files
+evaluation/dynamic_memory_evaluation/locomo_results/*.json
+evaluation/dynamic_memory_evaluation/locomo_results/hipporag_index*/
+evaluation/dynamic_memory_evaluation/locomo_results/vector_index*/
+evaluation/dynamic_memory_evaluation/locomo_results/storages*
+# Large data files
+memory_base/static_memory_base/raw_data/*.json
 *.tar
 *.zip
-tmp/
-outputs/
-logs/
+
+# Large evaluation files
+evaluation/memory_evaluation/converted_messages_all_from_1_1.jsonl
+evaluation/memory_evaluation/*.jsonl
+evaluation/memory_evaluation/*.json
+
+# Large log files
+*.log
+su_ser.log
+service.log
+service_*.log
 nohup.out
+mongodb_backup/
 
-# Repository media policy: do not commit images, videos, or asset/media folders.
-# Use external hosting, release artifacts, or approved storage and link from docs.
-asset/
-assets/
-image/
-images/
-img/
-media/
-video/
-videos/
-*.avif
-*.bmp
-*.gif
-*.heic
-*.heif
-*.icns
-*.ico
-*.jpeg
-*.jpg
-*.png
-*.svg
-*.tif
-*.tiff
-*.webp
-*.avi
-*.flv
-*.m4v
-*.mkv
-*.mov
-*.mp4
-*.mpeg
-*.mpg
-*.webm
-*.wmv
+# Log directories
+logs/
+log/
 
-# Use-cases: exclude lock files to keep the repo lean
-use-cases/**/package-lock.json
+# Apollo config
+apollo_config/
+
+# Exclude specific files from git tracking
+simple_query_memcell.py
+evaluation/memory_evaluation/extract_room_data.py
+evaluation/memory_evaluation/test.py
+evaluation/results/
+
+# Large test files
+unit_test/memcell_outputs/
+unit_test/profile_outputs/
+unit_test/memcell_outputs.zip
+
+#temp test files
+export_mongodb_data.py
+
+#backup files
+src/memory_layer/memory_extractor/profile_memory_extractor keep llm merge.py
+
+# JetBrains IDE
+.idea/
+
+# Local design plans
+docs/plans/
+
+# Git worktrees
+.worktrees/
+
+#LLM related
+AGENTS.mk
+.cursor/*
+
+# .claude/ team-shared (rules, skills, settings.json, CLAUDE.md) goes IN git
+# Only personal overrides are ignored:
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Work context: personal design drafts, not part of the codebase
+.work_context/
+
+# Local personal workspace: spec drafts, plans, scratch, recovery scripts
+local/
+
+#tmp_data
+demo/memcell_outputs/
+demo/results/
+evaluation/locomo_evaluation/results/
+evaluation/locomo_evaluation/results_ref/
+tmp/
+evaluation/locomo_evaluation/results_ref/demo/results/
+
+# i18n translation progress
+.translation_progress.json
+.review_progress.json
+
+# Single "output/" directory (plural "outputs/" already covered above)
+output/
+demo/output/
+
+# Adapter prompt dumps (runtime generated, sometimes several MB)
+evaluation/src/adapters/*/prompts/profile/*.json
+
+# Locomo source dataset (downloadable, not source code)
+data/locomo10.json
+evaluation/data/locomo/locomo10.json
+evaluation/locomo_evaluation/data/locomo10.json
+
+# Legacy src kept locally for migration reference; not under version control.
+src_old/
+
+# Benchmark checkpoints — Phase-level intermediate JSON dumps produced by
+# tests/test_locomo.py / tests/run_locomo_batch.sh. Per-conv final results
+# (benchmark_results/run_*/convN.json) and reports (REPORT.md / REPORT.html)
+# stay tracked; checkpoints are large, regeneratable, and not useful in
+# code review.
+benchmark_results/
+benchmark_checkpoints/
+
+# Local everos runtime data (memory root, indexes, OME state)
+.everos/

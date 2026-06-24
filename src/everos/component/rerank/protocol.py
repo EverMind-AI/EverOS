@@ -14,9 +14,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple, Protocol, runtime_checkable
 
+from everos.core.errors import RerankServiceError as RerankServiceError
 
-class RerankError(Exception):
-    """Raised on any provider-side rerank failure."""
+# Backward compat alias.
+RerankError = RerankServiceError
 
 
 class RerankResult(NamedTuple):

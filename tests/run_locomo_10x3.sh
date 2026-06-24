@@ -46,7 +46,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)"
 # ── Defaults ──────────────────────────────────────────────────────────
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 DATA_PATH="${DATA_PATH:-data/locomo10.json}"
-MEMORY_ROOT="${EVEROS_MEMORY__ROOT:-$HOME/.everos-report-corpus}"
+MEMORY_ROOT="${EVEROS_ROOT:-$HOME/.everos-report-corpus}"
 MODE="skip-add"        # default; toggle via --fresh-corpus
 TS="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_ROOT="$REPO_ROOT/benchmark_results/run_${TS}_10x3"
@@ -83,7 +83,7 @@ echo
 # 1. Server up?
 if ! curl -fsS -o /dev/null "$BASE_URL/health" 2>/dev/null; then
   echo "❌ server at $BASE_URL is not responding"
-  echo "   start with: EVEROS_MEMORY__ROOT=$MEMORY_ROOT PYTHONPATH=src \\"
+  echo "   start with: EVEROS_ROOT=$MEMORY_ROOT PYTHONPATH=src \\"
   echo "     python -m everos.entrypoints.cli.main server start --port 8000"
   exit 1
 fi
@@ -127,7 +127,7 @@ if [[ "$MODE" == "fresh" ]]; then
   echo "  starting fresh server..."
   (
     cd "$REPO_ROOT"
-    EVEROS_MEMORY__ROOT="$MEMORY_ROOT" \
+    EVEROS_ROOT="$MEMORY_ROOT" \
     PYTHONPATH=src \
     nohup python -m everos.entrypoints.cli.main server start --port 8000 \
       > /tmp/everos-server-${TS}.log 2>&1 &

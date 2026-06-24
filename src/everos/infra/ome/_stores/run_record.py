@@ -40,14 +40,15 @@ class RunRecordStore:
         event_topic: str,
         event_payload: str,
         max_retries_snapshot: int,
+        event_id: str,
     ) -> None:
         """Insert a new RUNNING row and trim the strategy's ring buffer atomically."""
         async with self._storage.transaction() as conn:
             await conn.execute(
                 "INSERT INTO run_record "
                 "(run_id, strategy_name, status, attempt, started_at, "
-                " event_topic, event_payload, max_retries_snapshot) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " event_topic, event_payload, max_retries_snapshot, event_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     strategy_name,
@@ -57,6 +58,7 @@ class RunRecordStore:
                     event_topic,
                     event_payload,
                     max_retries_snapshot,
+                    event_id,
                 ),
             )
             await conn.execute(
@@ -145,10 +147,20 @@ class RunRecordStore:
             rows = await cur.fetchall()
         return [_row_to_record(r) for r in rows]
 
+    async def list_by_event_id(self, event_id: str) -> list[RunRecord]:
+        """Return all runs triggered by the given ``event_id``."""
+        async with self._storage.connect() as conn:
+            cur = await conn.execute(
+                _SELECT_COLUMNS + " WHERE event_id = ? ORDER BY started_at DESC",
+                (event_id,),
+            )
+            rows = await cur.fetchall()
+        return [_row_to_record(r) for r in rows]
+
 
 _SELECT_COLUMNS = (
     "SELECT run_id, strategy_name, status, attempt, started_at, finished_at, "
-    "       error, event_topic, event_payload, max_retries_snapshot "
+    "       error, event_topic, event_payload, max_retries_snapshot, event_id "
     "FROM run_record"
 )
 
@@ -165,4 +177,5 @@ def _row_to_record(row: tuple) -> RunRecord:
         event_topic=row[7],
         event_payload=row[8],
         max_retries_snapshot=row[9],
+        event_id=row[10],
     )

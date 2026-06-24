@@ -424,7 +424,7 @@ def test_sqlite_round_trip_under_shanghai_display_tz(
     import asyncio
     import json as _json
 
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "Asia/Shanghai")
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
@@ -591,7 +591,7 @@ def test_reverse_tz_switch_utc_to_shanghai_no_drift(
     import asyncio
     import json as _json
 
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "UTC")
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
@@ -681,7 +681,7 @@ def test_sqlite_before_insert_event_normalises_aware_non_utc_to_utc(
     import asyncio
     import json as _json
 
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "Asia/Shanghai")
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
@@ -795,7 +795,7 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
     import asyncio
     import json as _json
 
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "Asia/Shanghai")
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
@@ -920,7 +920,7 @@ def test_sqlite_load_hook_attaches_utc_on_all_base_table_subclasses(
 
 def _build_engine_for_test(monkeypatch, tmp_path, tz: str = "Asia/Shanghai"):
     """Common setup: tmp memory root + tz + fresh engine."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", tz)
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()

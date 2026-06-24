@@ -27,11 +27,9 @@ def has_unparsed_multimodal(items: list[dict[str, Any]]) -> bool:
 
 def multimodal_available() -> bool:
     """Whether the ``everalgo.parser`` extra is importable."""
-    try:
-        import everalgo.parser  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    from everos.component.parser import parser_available  # Deferred: optional dep probe
+
+    return parser_available()
 
 
 def require_multimodal() -> None:

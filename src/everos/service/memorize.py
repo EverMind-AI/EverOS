@@ -47,6 +47,7 @@ from everos.memory.strategies import (
     extract_atomic_facts,
     extract_foresight,
     extract_user_profile,
+    reflect_episodes,
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
@@ -135,6 +136,7 @@ def _get_engine() -> OfflineEngine:
         engine.register(extract_agent_skill)
         engine.register(trigger_profile_clustering)
         engine.register(extract_user_profile)
+        engine.register(reflect_episodes)
         _ome_engine = engine
     return _ome_engine
 

@@ -4,7 +4,6 @@
 > hard coding constraints live in [../.claude/rules/](../.claude/rules/).
 > This document covers the surrounding tooling, configuration, and processes
 > — what we adopted, what role each piece plays, and how they fit together.
-> CI runs on GitHub Actions; all checks are invoked through the `Makefile`.
 
 ---
 
@@ -56,7 +55,7 @@ Reasons this is documented separately:
 │   │   .claude/                                                 │    │
 │   │   ├── CLAUDE.md          subdir context (optional)        │    │
 │   │   ├── rules/  (10)       path-scoped hard coding rules    │    │
-│   │   ├── skills/ (3)        slash command workflows          │    │
+│   │   ├── skills/ (5)        slash command workflows          │    │
 │   │   └── settings.json      permissions allowlist            │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
@@ -69,13 +68,11 @@ Reasons this is documented separately:
 │   │     ├ check-yaml / check-toml                              │    │
 │   │     ├ check-added-large-files (≥1MB warn)                  │    │
 │   │     ├ detect-private-key                                   │    │
-│   │     ├ no committed images/videos/assets                    │    │
 │   │     └ gitlint (commit-msg stage)                           │    │
 │   │                                                            │    │
 │   │   ruff                lint + format                        │    │
 │   │                       (replaces black / isort / flake8)    │    │
 │   │   import-linter       DDD layer-direction enforcement      │    │
-│   │   repo asset gate     blocks images/videos/assets in git   │    │
 │   │   pytest              unit / integration                   │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
@@ -88,26 +85,25 @@ Reasons this is documented separately:
 │   │   uv.lock             checked in; CI uses --frozen         │    │
 │   │   hatchling           wheel build backend                  │    │
 │   │   Makefile            unified entry; CI calls it           │    │
-│   │   src/everos/templates/env.template                       │    │
-│   │                       environment variable template        │    │
+│   │   config/default.toml  default settings (shipped)           │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
 │                                                                     │
-│   ┌─ CI/CD (GitHub Actions) ───────────────────────────────────┐    │
+│   ┌─ Dual-platform CI/CD ──────────────────────────────────────┐    │
 │   │                                                            │    │
-│   │   CI:    .github/workflows/ci.yml    lint / test / integ   │    │
-│   │                                      / package build        │    │
-│   │   Docs:  .github/workflows/docs.yml  Markdown + YAML check │    │
-│   │   Gates invoke Makefile targets; the Makefile is the       │    │
+│   │   Primary:  GitLab CI       .gitlab-ci.yml                 │    │
+│   │   Mirror:   GitHub Actions  .github/workflows/ci.yml       │    │
+│   │   Both invoke Makefile targets; the Makefile is the        │    │
 │   │   single source of truth for commands.                     │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
 │                                                                     │
 │   ┌─ Collaboration workflow ───────────────────────────────────┐    │
 │   │                                                            │    │
-│   │   Branch model: protected main + short-lived PR branches   │    │
-│   │   PR template: .github/PULL_REQUEST_TEMPLATE.md            │    │
-│   │   ISSUE_TEMPLATE: bug / feature / use-case / docs / config │    │
+│   │   Branch model: dev / master (GitFlow Lite)                │    │
+│   │   PR / MR templates: same template across platforms        │    │
+│   │   CODEOWNERS: by DDD layer ownership                       │    │
+│   │   ISSUE_TEMPLATE: bug / feature / config                   │    │
 │   │   CONTRIBUTING.md: contributor onboarding                  │    │
 │   │                                                            │    │
 │   └────────────────────────────────────────────────────────────┘    │
@@ -158,13 +154,15 @@ session start (no manual import):
 load (~1.5–2K tokens); the rest load on demand when Claude Code reads a
 matching `.py` file.
 
-### 3.3 Skills (3 slash commands)
+### 3.3 Skills (5 slash commands)
 
 | Command | Purpose | When to use |
 |---|---|---|
-| `/commit` | Generate a Conventional Commits message | After a focused change, ready to commit |
-| `/new-branch` | Create branch from protected main | Starting a new feat / fix / ci branch |
-| `/pr` | Open a GitHub PR with the repo template | Ready to merge |
+| `/commit` | Generate Gitmoji-format commit message | After a focused change, ready to commit |
+| `/new-branch` | Create branch under dev/master strategy | Starting a new feat / fix / hotfix |
+| `/pr` | Create GitLab MR or GitHub PR with template | Ready to merge |
+| `/add-memory-kind` | Scaffold a new business memory kind end-to-end | Adding a new memory type (md + sqlite + lancedb) |
+| `/release` | Cut a PyPI release (rc / stable) | Shipping a version |
 
 Skills and rules use **independent loading mechanisms**: rules auto-load
 into the system prompt, skills only trigger when the user types `/<name>`.
@@ -206,26 +204,25 @@ Stage 2: pre-commit (triggered by `git commit`)
      ├ trailing-whitespace, end-of-file-fixer
      ├ check-yaml, check-toml
      ├ check-added-large-files (≥1MB)
+     ├ check-merge-conflict
      ├ detect-private-key
-     ├ no-repo-assets (rejects images/videos/assets in git)
      └ gitlint  (commit-msg stage; rejects malformed messages)
 
      │
      ▼
 Stage 3: local `make ci` (manual, before push)
-     ├ make lint        (ruff + import-linter + repo hygiene gates)
+     ├ make lint        (ruff + format-check + import-linter + datetime + openapi-drift)
      ├ make test        (pytest tests/unit)
-     ├ make integration (pytest tests/integration)
-     └ make package     (sdist/wheel build + import smoke test)
+     └ make integration (pytest tests/integration)
 
      │
      ▼
-Stage 4: CI (GitHub Actions, push + PR triggered)
-     └ re-runs the same `make lint / test / integration / package` targets
+Stage 4: CI (PR triggered, GitLab + GitHub)
+     └ re-runs the same `make lint / test / integration` targets
 
      │
      ▼
-Stage 5: PR review
+Stage 5: PR / MR review
      ├ ≥ 1 approval
      └ all threads resolved + all CI green
 ```
@@ -260,12 +257,13 @@ everos = "everos.entrypoints.cli.main:app"  # exposes CLI command
 
 [tool.ruff]                        # code style
 [tool.pytest.ini_options]          # tests
-[tool.coverage.run]                # coverage config (gate lives in `make cov`)
+[tool.coverage.run]                # coverage (unit+integration; make cov gates at 80%)
 [tool.importlinter]                # dependency direction
 
 [dependency-groups]
 dev = ["ruff", "pytest", "pytest-asyncio", "pytest-cov",
-       "import-linter", "pre-commit", "ipdb"]
+       "pytest-rerunfailures", "import-linter", "pre-commit",
+       "pyinstrument", "ipdb"]
 ```
 
 **Single-file principle**: configuration that used to live in `pylintrc`,
@@ -277,60 +275,68 @@ dev = ["ruff", "pytest", "pytest-asyncio", "pytest-cov",
 make help          list all targets
 make install       uv sync --frozen
 make format        ruff fix + format
-make lint          ruff + import-linter + repo asset/media + datetime discipline + openapi drift
+make lint          ruff + format --check + import-linter + datetime + openapi-drift
 make test          pytest tests/unit
 make integration   pytest tests/integration
-make package       build sdist/wheel + smoke-test wheel import
-make cov           pytest unit + integration, coverage gate (fail under 80%)
-make ci            lint + test + integration + package
+make cov           pytest unit+integration with coverage, gate at 80%
+make ci            lint + test + integration   ← CI invokes these targets
 make clean         clear caches
 ```
 
-**Single source of truth**: CI only invokes `make <target>`, so local and CI
-run identical commands and cannot drift.
+> Plus `install-deps` (CI's `uv sync --frozen`), `openapi` (regenerate
+> `docs/openapi.json`), `check-openapi` / `check-datetime` (the lint
+> sub-gates), and `check-cjk` (advisory) — see the `Makefile` for the
+> full list.
 
-### 5.3 env.template (slimmed down)
+**Single source of truth**: CI configuration only invokes `make <target>`,
+preventing drift between GitHub and GitLab. Local and CI run identical
+commands.
 
-The template lives at `src/everos/templates/env.template` (bundled
-inside the wheel as package data, copied to `./.env` via `everos init`).
-It groups settings by provider, each block sharing the OpenAI-protocol
-`MODEL` / `API_KEY` / `BASE_URL` triple:
+### 5.3 Configuration model
+
+Settings are loaded in ascending priority:
+
+1. `config/default.toml` (shipped with the package; lowest priority)
+2. `<memory-root>/everos.toml` (user config; optional)
+3. `EVEROS_*` environment variables (highest priority)
+
+`everos init [--root PATH]` generates starter config files
+(`everos.toml` + `ome.toml`) in the memory root. `everos.toml` holds
+all config (API keys, model, storage); override individual fields with
+`EVEROS_*` env vars. Inspect the effective config with
+`everos config show [--root PATH]`.
+
+Key `EVEROS_*` env vars:
 
 ```
-EVEROS_LLM__*           # text model (model / api_key / base_url)
-EVEROS_MULTIMODAL__*    # vision model for image/office inputs
-EVEROS_EMBEDDING__*     # embedding model (vector index)
-EVEROS_RERANK__*        # cross-encoder reranker
-EVEROS_MEMORY__ROOT     # memory-root (md files + .index/{sqlite,lancedb}/)
-EVEROS_LOG_LEVEL        # DEBUG | INFO | WARNING | ERROR
-EVEROS_LOG_FORMAT       # json | text
-TZ                      # display timezone (storage is always UTC)
+EVEROS_LLM__MODEL          # model name (provider-agnostic)
+EVEROS_LLM__API_KEY        # any OpenAI-protocol API key
+EVEROS_LLM__BASE_URL       # optional: custom endpoint (Ollama bridge etc.)
+EVEROS_ROOT                # memory-root (default ~/.everos)
+EVEROS_LOG_LEVEL
+TZ
 ```
-
-Every key has a sensible default except the `API_KEY` fields, which you fill in.
 
 ---
 
-## 6. CI/CD (GitHub Actions)
+## 6. Dual-platform CI/CD
 
-### 6.1 Strategy
+### 6.1 Dual-platform strategy
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                                                          │
-│   GitHub Actions   (.github/workflows/)                  │
-│     ci.yml    push (main) + PR                           │
-│       ├ lint              make lint                      │
-│       ├ unit tests        make test                      │
-│       ├ integration tests make integration               │
-│       └ package build     make package                   │
-│     docs.yml  Markdown link check + issue-template YAML  │
-│       └ make docs-check                                  │
-│     commits.yml Conventional Commit subject check        │
-│       └ make check-commits                               │
+│   Primary: GitLab CI         (.gitlab-ci.yml)            │
+│     ├ internal team dev          stages: lint / test     │
+│     ├ MR triggered                                       │
+│     └ uv cache (keyed by uv.lock)                        │
+│                                                          │
+│   Mirror: GitHub Actions     (.github/workflows/ci.yml)  │
+│     ├ public OSS mirror          same make targets       │
+│     ├ push + PR triggered                                │
+│     └ astral-sh/setup-uv@v3                              │
 │                                                          │
 │   Consistency:                                           │
-│     ├ astral-sh/setup-uv (cache keyed by uv.lock)        │
 │     ├ Makefile is the single source of CI commands       │
 │     └ pre-commit runs locally first to reduce CI churn   │
 │                                                          │
@@ -339,77 +345,102 @@ Every key has a sensible default except the `API_KEY` fields, which you fill in.
 
 ### 6.2 CI checklist
 
-| Check | Tool | Failure condition |
-|---|---|---|
-| Lint | `make lint` (ruff check + ruff format --check) | any error |
-| Layer direction | `make lint` (lint-imports inside) | layer violation |
-| Repository media | `make lint` (check_repo_assets.py) | images/videos/assets committed |
-| Datetime discipline | `make lint` (check_datetime_discipline.py) | bypasses helper module |
-| OpenAPI drift | `make lint` (dump_openapi.py --check) | schema ≠ committed openapi.json |
-| Unit | `make test` (pytest tests/unit) | any failure |
-| Integration | `make integration` (pytest tests/integration) | any failure |
-| Package build | `make package` (sdist/wheel + import smoke test) | build or import failure |
-| Commit message | `Commit lint` workflow | non-Conventional Commit subject |
+| Check | Tool | Platform | Failure condition |
+|---|---|---|---|
+| Lint | `make lint` (ruff + format-check + import-linter + datetime + openapi-drift) | both | any error |
+| Layer direction | `make lint` (lint-imports inside) | both | layer violation |
+| Unit | `make test` (pytest tests/unit) | both | any failure |
+| Integration | `make integration` (pytest tests/integration) | both | any failure (PR + master/dev push only) |
 
-Integration tests run with a `FakeLLMClient` — no live credentials are needed in CI.
-Commit message format is enforced locally via `gitlint` in the `commit-msg`
-pre-commit stage and remotely via the `Commit lint` workflow.
+Commit message format is enforced **locally** via `gitlint` in the
+`commit-msg` pre-commit stage; it does not run in CI.
 
 ### 6.3 Branch protection
 
-| Branch | Rule |
-|---|---|
-| **main** | branch protection: PR + two reviews + green required checks; no direct push |
-| feat / fix / docs / ci | contributor branches; merge through PR |
+| Branch | GitLab rule | GitHub rule |
+|---|---|---|
+| **master** | no direct push; MR + 1 approval + green pipeline | branch protection + 1 review + status checks |
+| **dev** | same as above | same as above |
+| feat / fix / hotfix | free push; rebase parent before merge | same |
 
 ---
 
 ## 7. Collaboration workflow
 
-### 7.1 Branch model
-
-EverOS uses a simple protected-main model after the 1.0 history reset:
+### 7.1 Branch model (GitFlow Lite)
 
 ```
-main  ●────●────●────●────► protected, releasable
-       ▲    ▲    ▲
-       │    │    └─ PR from ci/*
-       │    └────── PR from fix/*
-       └─────────── PR from feat/*
+                              v0.1                              v0.2                                v1.0
+                                ▲                                 ▲                                   ▲
+                                │ release PR                      │ release PR                        │ release PR
+                                │ (dev→master+tag)                │ (dev→master+tag)                  │ (dev→master+tag)
+master   ●──────────────────────●─────────────●──────────────────●──────────────────────────────────●────►  stable / released
+                                │             ▲                  │                                  │
+                                │             │ merge hotfix     │                                  │
+                                │             │                  │                                  │
+                                │       ●──●──┘                  │                                  │
+                                │       │ hotfix branch          │                                  │
+                                │       │ (cut from master)      │                                  │
+                                │       │                        │                                  │
+                                │       ▼ sync to dev            │                                  │
+                                │       │                        │                                  │
+dev   ●──●──●──●──●──●──●──●──●─●──●──●─●──●──●──●──●──●──●──●──●─●──●──●──●──●──●──●──●──●──●──●──●─────►  integration
+            ▲                   ↑                                ↑                                  ↑
+            │             release point                   release point                       release point
+       feat/A             (dev HEAD →                     (dev HEAD →                         (dev HEAD →
+       ●──●──●             master + v0.1)                  master + v0.2)                      master + v1.0)
+
+
+  feat/*   : cut from dev → PR → merge into dev
+  hotfix/* : cut from master → merge into master + sync into dev (double merge)
+  release  : dev → master + tag on master (no separate release branch)
+
+  Vertical │ in the diagram = "dev HEAD merged into master via release PR + v0.x tag"
 ```
 
-All work starts from `main`, lands through a pull request, and requires green
-checks. Force-pushing `main` is reserved only for repository recovery work.
+Details in [../.claude/skills/new-branch/SKILL.md](../.claude/skills/new-branch/SKILL.md).
 
-### 7.2 PR template
+### 7.2 PR / MR template (shared across platforms)
 
-A single PR template at [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)
-with five sections: **Summary / Area / Verification / Checklist / Notes for
-Reviewers**. The `/pr` skill fills it in (see
-[../.claude/skills/pr/SKILL.md](../.claude/skills/pr/SKILL.md)).
+Six sections: changes / target branch / scope / API impact / tests /
+checklist.
 
-### 7.3 Commit convention (Conventional Commits)
+File locations:
 
-Format: `<type>[(scope)][!]: <description>` per
-[Conventional Commits](https://www.conventionalcommits.org).
+- GitLab: `.gitlab/merge_request_templates/default.md`
+- GitHub: `.github/PULL_REQUEST_TEMPLATE.md`
+
+### 7.3 CODEOWNERS (by DDD layer)
 
 ```
-feat:     new feature
-fix:      bug fix
-refactor: restructuring (no behavior change)
-test:     add / update tests
-docs:     documentation
-style:    formatting
-perf:     performance optimization
-chore:    configuration / build / tooling
-build:    build system or dependencies
-ci:       CI configuration
-revert:   revert a previous commit
+/src/everos/memory/         @chandler.zhang @libin.zhang001
+/src/everos/infra/          @chandler.zhang @yeanhua
+/src/everos/component/      @chandler.zhang
+/src/everos/core/           @chandler.zhang
+/src/everos/service/        @chandler.zhang @libin.zhang001
+/src/everos/entrypoints/    @chandler.zhang
+/.claude/                   @chandler.zhang
+/.gitlab-ci.yml             @chandler.zhang @jianhua.yao
 ```
 
-`gitlint` enforces the format locally via its `contrib-title-conventional-commits`
-rule in the commit-msg pre-commit stage. GitHub Actions runs the same policy on
-pushes to `main` and pull requests. See
+At least one owner per directory; two owners for critical modules. Edits
+auto-mention the corresponding owners.
+
+### 7.4 Commit convention (Gitmoji)
+
+```
+✨ feat: new feature
+🐛 fix: bug fix
+♻️ refactor: refactoring (no behavior change)
+✅ test: add / update tests
+📝 docs: documentation
+🎨 style: formatting
+⚡️ perf: performance optimization
+🔧 chore: configuration / build
+🚧 wip: work in progress (must not land on master)
+```
+
+`gitlint` enforces format **locally** (commit-msg pre-commit stage). See
 [../.claude/skills/commit/SKILL.md](../.claude/skills/commit/SKILL.md).
 
 ---
@@ -418,11 +449,9 @@ pushes to `main` and pull requests. See
 
 ```
 .github/ISSUE_TEMPLATE/
-├── bug_report.yml           structured bug report (form)
-├── feature_request.yml      feature proposal (form)
-├── use_case.yml             share a use case / integration
-├── docs.yml                 documentation issue
-└── config.yml               disable blank issues + community links
+├── bug_report.md            software deps: lancedb / sqlite / ruff
+├── feature_request.md       generic template
+└── config.yml               disable blank issue + Discord / Discussions links
 
 CONTRIBUTING.md              contributor onboarding: setup / code style /
                              branch / commit / PR / testing
@@ -441,7 +470,7 @@ CONTRIBUTING.md              contributor onboarding: setup / code style /
 │                      │                                      │  context    │
 │  Team rules          │  /.claude/rules/ (10)                │  cc unaware │
 │                      │                                      │  of conv.   │
-│  Team skills         │  /.claude/skills/ (3)                │  no slash   │
+│  Team skills         │  /.claude/skills/ (5)                │  no slash   │
 │                      │                                      │  workflows  │
 │  Permissions         │  /.claude/settings.json              │  cc prompts │
 │                      │                                      │  on each op │
@@ -452,15 +481,18 @@ CONTRIBUTING.md              contributor onboarding: setup / code style /
 │                      │                                      │  entry      │
 │  pre-commit          │  /.pre-commit-config.yaml            │  no local   │
 │                      │                                      │  gate       │
-│  env template        │  /src/everos/templates/env.template │  newcomers  │
-│                      │                                      │  lost on env│
+│  default config      │  /src/everos/config/default.toml    │  newcomers  │
+│                      │                                      │  lost on cfg│
 ├─────────────────────┼──────────────────────────────────────┼─────────────┤
-│  CI                  │  /.github/workflows/ci.yml           │  PR cannot  │
+│  GitLab CI           │  /.gitlab-ci.yml                     │  MR cannot  │
 │                      │                                      │  merge      │
-│  Docs CI             │  /.github/workflows/docs.yml         │  broken     │
-│                      │                                      │  doc links  │
-│  PR template         │  /.github/PULL_REQUEST_TEMPLATE.md   │  no PR temp │
-│  Issue templates     │  /.github/ISSUE_TEMPLATE/ (5)        │  scattered  │
+│  GitHub Actions      │  /.github/workflows/ci.yml           │  PR cannot  │
+│                      │                                      │  merge      │
+│  CODEOWNERS          │  /.gitlab/CODEOWNERS                 │  no auto    │
+│                      │                                      │  reviewer   │
+│  GitLab MR template  │  /.gitlab/merge_request_templates/   │  no MR temp │
+│  GitHub PR template  │  /.github/PULL_REQUEST_TEMPLATE.md   │  no PR temp │
+│  Issue templates     │  /.github/ISSUE_TEMPLATE/ (3)        │  scattered  │
 │  CONTRIBUTING        │  /CONTRIBUTING.md                    │  contrib.   │
 │                      │                                      │  confused   │
 └─────────────────────┴──────────────────────────────────────┴─────────────┘
@@ -472,19 +504,22 @@ CONTRIBUTING.md              contributor onboarding: setup / code style /
 
 ```
 Near-term
+  ☑ Coverage threshold — `make cov` now gates at 80% (unit + integration)
   □ /new-module    skill: scaffold a subpackage that complies with rules
+  □ /run-eval      skill: run behavior-consistency eval
   □ ruff rule sets: add D (docstring), ANN (annotations)
-  □ Static type checking (pyright or mypy) once hot paths stabilize
 
-Mid-term
+Mid-term (before v0.5)
+  □ Type checking re-introduction (pyright or mypy) once hot paths stabilize
   □ release-please / Conventional Commits → automated changelog
-  □ Automated PyPI wheel upload on tag
-  □ Multi-Python version matrix (3.12 / 3.13)
+  □ pre-commit autoupdate cadence
   □ Performance benchmark CI with historical comparison
 
-Long-term
+Long-term (after v1.0)
+  □ /security-review  skill: automated security review
   □ Mutation testing (mutmut)
-  □ Coverage ratchet (raise the 80% gate as the suite matures)
+  □ Multi-Python version matrix (3.12 / 3.13)
+  □ Automated PyPI wheel upload
 ```
 
 ---
@@ -500,7 +535,8 @@ Long-term
 │                         coding rules +                    │
 │                         quality gates (pre-commit + CI) + │
 │                         automation (Makefile + skills) +  │
-│                         collaboration (branch + PR) +     │
+│                         collaboration (branch + PR +      │
+│                                        CODEOWNERS) +      │
 │                         knowledge base (CLAUDE.md +       │
 │                                         rules + docs)     │
 │                                                          │
@@ -518,10 +554,10 @@ Old project vs. new project after this rewrite:
 | Config files | pyproject + pylintrc + pyrightconfig + pytest.ini | unified pyproject.toml |
 | pre-commit | basic | adds gitlint commit-msg + import / yaml / private-key checks |
 | Layer direction | not enforced | import-linter enforced in CI |
-| Commit format | freeform | gitlint pre-commit hook (Conventional Commits) |
+| Commit format | freeform | gitlint pre-commit hook (Gitmoji) |
 | Claude Code integration | partial rules | rules + skills + settings (full) |
-| CI platform | ad hoc | GitHub Actions calling Makefile targets |
-| Tests | basic | unit + integration + e2e + coverage report |
+| CI platform | GitLab only | GitLab + GitHub mirror, both calling Makefile |
+| Tests | basic | unit + integration + golden + coverage report |
 
 These are not perfectionism — they are baseline requirements for
 **multi-person collaboration, long-term maintenance, and sustainable
@@ -542,5 +578,7 @@ evolution**.
 - gitlint: [jorisroovers.com/gitlint](https://jorisroovers.com/gitlint/)
 - uv: [docs.astral.sh/uv](https://docs.astral.sh/uv/)
 - pre-commit: [pre-commit.com](https://pre-commit.com/)
-- Conventional Commits: [conventionalcommits.org](https://www.conventionalcommits.org/)
+- Gitmoji: [gitmoji.dev](https://gitmoji.dev/)
+- GitLab CI: [docs.gitlab.com/ee/ci](https://docs.gitlab.com/ee/ci/)
 - GitHub Actions: [docs.github.com/en/actions](https://docs.github.com/en/actions)
+- CODEOWNERS: [docs.gitlab.com/ee/user/project/codeowners](https://docs.gitlab.com/ee/user/project/codeowners/)

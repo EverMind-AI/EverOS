@@ -7,11 +7,27 @@ KeyboardInterrupt / OSError exit paths.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from typer.testing import CliRunner
 
 from everos.entrypoints.cli.commands import server as server_mod
 from everos.entrypoints.cli.main import app as root_app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Strip EVEROS_* env vars so default resolution is deterministic."""
+    for k in list(os.environ):
+        if k.startswith("EVEROS_"):
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("EVEROS_LOG_LEVEL", raising=False)
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    (tmp_path / "everos.toml").write_text("# test\n")
+    from everos.config import load_settings
+
+    load_settings.cache_clear()
 
 
 @pytest.fixture
@@ -24,20 +40,11 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured["kwargs"] = kwargs
 
     monkeypatch.setattr(server_mod.uvicorn, "run", fake_run)
-    # Strip env so default resolution path is deterministic.
-    for k in ("EVEROS_HOST", "EVEROS_PORT", "EVEROS_LOG_LEVEL"):
-        monkeypatch.delenv(k, raising=False)
     return captured
 
 
-# Typer lifts single-command sub-apps to root; we invoke via the real
-# ``everos server start`` path through the assembled root app.
-
-
 def test_start_uses_default_host_port_log_level(captured: dict[str, object]) -> None:
-    result = CliRunner().invoke(
-        root_app, ["server", "start", "--env-file", "/nonexistent"]
-    )
+    result = CliRunner().invoke(root_app, ["server", "start"])
     assert result.exit_code == 0, result.stdout
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
@@ -55,13 +62,14 @@ def test_start_cli_flags_override_env(
     monkeypatch.setenv("EVEROS_API__HOST", "1.2.3.4")
     monkeypatch.setenv("EVEROS_API__PORT", "9000")
     monkeypatch.setenv("EVEROS_API__LOG_LEVEL", "debug")
+    from everos.config import load_settings
+
+    load_settings.cache_clear()
     result = CliRunner().invoke(
         root_app,
         [
             "server",
             "start",
-            "--env-file",
-            "/nonexistent",
             "--host",
             "127.0.0.1",
             "--port",
@@ -83,9 +91,10 @@ def test_start_falls_back_to_env_when_flags_omitted(
 ) -> None:
     monkeypatch.setenv("EVEROS_API__HOST", "10.0.0.1")
     monkeypatch.setenv("EVEROS_API__PORT", "8765")
-    result = CliRunner().invoke(
-        root_app, ["server", "start", "--env-file", "/nonexistent"]
-    )
+    from everos.config import load_settings
+
+    load_settings.cache_clear()
+    result = CliRunner().invoke(root_app, ["server", "start"])
     assert result.exit_code == 0, result.stdout
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
@@ -98,10 +107,7 @@ def test_start_swallows_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
         raise KeyboardInterrupt
 
     monkeypatch.setattr(server_mod.uvicorn, "run", boom)
-    result = CliRunner().invoke(
-        root_app, ["server", "start", "--env-file", "/nonexistent"]
-    )
-    # KeyboardInterrupt path returns normally — exit 0.
+    result = CliRunner().invoke(root_app, ["server", "start"])
     assert result.exit_code == 0
 
 
@@ -110,25 +116,19 @@ def test_start_exits_one_on_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("port in use")
 
     monkeypatch.setattr(server_mod.uvicorn, "run", boom)
-    result = CliRunner().invoke(
-        root_app, ["server", "start", "--env-file", "/nonexistent"]
-    )
+    result = CliRunner().invoke(root_app, ["server", "start"])
     assert result.exit_code == 1
 
 
-def test_load_env_file_missing_path_is_noop(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    # Function should not raise when the file does not exist.
-    server_mod._load_env_file(str(tmp_path / "does-not-exist.env"))
+def test_start_with_root_option(
+    captured: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """``--root`` sets EVEROS_ROOT for settings resolution."""
+    from everos.config import load_settings
 
-
-def test_load_env_file_reads_present_file(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.delenv("EVEROS_TEST_DOTENV_VAR", raising=False)
-    env_file = tmp_path / ".env"
-    env_file.write_text("EVEROS_TEST_DOTENV_VAR=loaded\n")
-    server_mod._load_env_file(str(env_file))
-    import os
-
-    assert os.environ.get("EVEROS_TEST_DOTENV_VAR") == "loaded"
-    monkeypatch.delenv("EVEROS_TEST_DOTENV_VAR", raising=False)
+    load_settings.cache_clear()
+    result = CliRunner().invoke(root_app, ["server", "start", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "kwargs" in captured

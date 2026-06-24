@@ -12,9 +12,8 @@
   the keyword / vector / hybrid recall tests so the assertion logic
   is in one place.
 
-* :func:`flatten_hits` — collapses ``SearchData``'s four scored result
-  arrays into one ``(owner_id, score, text)`` tuple list for relevance
-  checks.
+* :func:`flatten_hits` — collapses ``SearchData``'s four arrays into
+  one ``(owner_id, score, text)`` tuple list for relevance checks.
 
 The helpers do **not** hardcode topical keywords ("hiking" / "work")
 — they are derived from what the pipeline produced. This keeps the
@@ -145,7 +144,7 @@ def _extract_fact_sections(md: Path) -> list[str]:
 
 
 def flatten_hits(data: dict[str, Any]) -> list[tuple[str | None, float, str]]:
-    """Collapse the four scored arrays into ``(owner_id, score, text)``.
+    """Collapse ``SearchData``'s four arrays into ``(owner_id, score, text)``.
 
     Stable shape across track-kinds so the recall / partition tests
     don't have to branch. Episodes / profiles carry ``user_id`` on the
@@ -201,7 +200,7 @@ async def assert_recall(
     """Hit ``/search`` and lock the four standard recall invariants.
 
     1. **Status** 200 — the route compiled.
-    2. **Existence** — ``total >= 1`` across the four scored arrays.
+    2. **Existence** — ``total >= 1`` across the four arrays.
     3. **Owner partition** — every non-``None`` ``owner_id`` matches
        the queried owner. Profile hits may carry ``None`` so they're
        skipped from the check.

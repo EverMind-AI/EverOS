@@ -49,12 +49,6 @@ _DEFAULT_SCOPE_ID = "default"
 _DEFAULT_APP_DIR = "default_app"
 _DEFAULT_PROJECT_DIR = "default_project"
 
-# Path to the shipped OME override template; copied to ``<root>/ome.toml`` on
-# first ``ensure()`` so users have a real file to edit instead of having to
-# create one from scratch. ``parents[2]`` is the ``src/everos/`` package root
-# (memory_root.py sits at ``core/persistence/memory_root.py``).
-_OME_TEMPLATE_PATH = Path(__file__).parents[2] / "config" / "default_ome.toml"
-
 
 def app_dir_name(app_id: str) -> str:
     """Map an ``app_id`` to its on-disk directory name."""
@@ -98,16 +92,18 @@ class MemoryRoot:
         object.__setattr__(self, "root", resolved)
 
     @classmethod
-    def default(cls) -> MemoryRoot:
-        """Return the memory-root from :class:`everos.config.Settings`.
+    def default(cls, *, explicit_root: str | None = None) -> MemoryRoot:
+        """Return the memory-root resolved from CLI / env / default.
 
-        The effective default lives in ``config/default.toml`` (``[memory]
-        root``); environment variable ``EVEROS_MEMORY__ROOT`` overrides it.
+        Resolution: ``explicit_root`` > ``EVEROS_ROOT`` env > ``~/.everos``.
+
+        Args:
+            explicit_root: Caller-supplied path (e.g. from ``--root`` CLI flag).
         """
         # Lazy import to keep this module dependency-free at import time.
-        from everos.config import load_settings
+        from everos.config.settings import resolve_root
 
-        return cls(load_settings().memory.root)
+        return cls(resolve_root(explicit_root))
 
     # ── User-visible (partitioned by app / project) ──────────────────────────
     #
@@ -184,19 +180,17 @@ class MemoryRoot:
 
     @property
     def ome_config(self) -> Path:
-        """``<root>/ome.toml`` — user-editable OME strategy overrides.
+        """``<root>/ome.toml`` — single entry point for strategy configuration.
 
-        Drop a file here to toggle strategies on/off or tweak per-strategy
-        knobs (max_retries, gate, cron …) without restarting the server.
-        The engine watches this file and hot-reloads changes within ~2 s.
+        All strategy settings (enabled, cron, max_retries, gate) are managed
+        here. The engine watches this file and hot-reloads changes within ~2 s.
+        No server restart needed.
 
-        Example to disable foresight and user-profile extraction::
+        Example — enable Reflection with a custom cron::
 
-            [strategies.extract_foresight]
-            enabled = false
-
-            [strategies.extract_user_profile]
-            enabled = false
+            [strategies.reflect_episodes]
+            enabled = true
+            cron = "0 3 * * *"
         """
         return self.root / "ome.toml"
 
@@ -237,7 +231,3 @@ class MemoryRoot:
         self.sqlite_dir.mkdir(parents=True, exist_ok=True)
         self.lancedb_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        # Materialize the OME override template on first run; existence-only
-        # check preserves any edits the user has already made.
-        if not self.ome_config.exists():
-            self.ome_config.write_bytes(_OME_TEMPLATE_PATH.read_bytes())

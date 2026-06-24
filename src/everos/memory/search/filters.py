@@ -35,13 +35,9 @@ import datetime as _dt
 from typing import Any, Final
 
 from everos.component.utils.datetime import from_timestamp, to_iso_format
+from everos.core.errors import FilterError as FilterError  # noqa: F401
 
 from .dto import FilterNode
-
-
-class FilterError(ValueError):
-    """Raised when the DSL contains a disallowed field, operator, or value."""
-
 
 # ── Allow-lists ──────────────────────────────────────────────────────────
 
@@ -96,6 +92,7 @@ def compile_filters(
     owner_type: str,
     app_id: str = "default",
     project_id: str = "default",
+    exclude_deprecated: bool = True,
 ) -> str:
     """Compile a request's filters into a single LanceDB ``where`` string.
 
@@ -112,6 +109,8 @@ def compile_filters(
         f"app_id = '{_escape_str(app_id)}'",
         f"project_id = '{_escape_str(project_id)}'",
     ]
+    if exclude_deprecated:
+        base.append("deprecated_by IS NULL")
     if node is None:
         return " AND ".join(base)
     compiled = _compile_node(node.model_dump(exclude_none=True))

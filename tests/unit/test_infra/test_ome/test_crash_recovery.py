@@ -28,6 +28,7 @@ async def test_marks_old_running_as_crashed(rec_store: RunRecordStore) -> None:
         event_topic="x:E",
         event_payload="{}",
         max_retries_snapshot=1,
+        event_id="evt_test",
     )
     async with rec_store._storage.connect() as conn:
         rewind = to_iso_format(get_now_with_timezone() - timedelta(hours=2))
@@ -68,6 +69,7 @@ async def test_recent_running_skipped(rec_store: RunRecordStore) -> None:
         event_topic="x:E",
         event_payload="{}",
         max_retries_snapshot=1,
+        event_id="evt_test",
     )
     resumed: list = []
 
@@ -120,6 +122,7 @@ async def test_add_job_failure_does_not_abort_loop(
             event_topic="x:E",
             event_payload="{}",
             max_retries_snapshot=1,
+            event_id="evt_test",
         )
     async with rec_store._storage.connect() as conn:
         rewind = to_iso_format(get_now_with_timezone() - timedelta(hours=2))

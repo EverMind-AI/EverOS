@@ -2,19 +2,15 @@
 #
 # Lookup order (later overrides earlier):
 #   1. This file (shipped defaults; lowest priority)
-#   2. ~/.everos/config.toml — user-level overrides (optional;
-#      path is overridable via EVEROS_CONFIG_FILE)
-#   3. .env file in the working directory
-#   4. Environment variables — EVEROS_<SECTION>__<KEY>
+#   2. <root>/everos.toml — user config (optional; root resolved by
+#      resolve_root(): EVEROS_ROOT env > ~/.everos)
+#   3. Environment variables — EVEROS_<SECTION>__<KEY>
 #         e.g. EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000
-#   5. Programmatic init args (highest priority)
+#   4. Programmatic init args (highest priority)
 #
 # `null` (omitted in TOML) means "use the Pydantic default declared in code".
 
 [memory]
-# memory-root is the single directory holding all persisted memory.
-# `~` is expanded; the path is resolved when MemoryRoot is constructed.
-root = "~/.everos"
 # Effective timezone for date buckets and timestamps. Drives
 # component.utils.datetime; this is the SOLE source — OS `TZ` is not
 # read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
@@ -57,8 +53,8 @@ cache_size_kb = 2048
 [llm]
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
-# Or via a ``.env`` file next to the project root (auto-loaded).
-model = "gpt-4o-mini"
+# Or set the field directly in this file (<root>/everos.toml).
+model = "gpt-4.1-mini"
 # api_key = ""
 # base_url = ""
 
@@ -135,6 +131,22 @@ vector_strategy = "maxsim_atomic"
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
 
+[knowledge]
+# Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
+# uploads are rejected with HTTP 422 before parsing/extraction. Note: the
+# multipart body is still buffered by the server first, so set a reverse-proxy
+# / gateway body-size limit for hard ingress protection.
+# Override via EVEROS_KNOWLEDGE__MAX_UPLOAD_BYTES.
+max_upload_bytes = 52_428_800  # 50 MiB
+
+[knowledge.search]
+recall_n = 200
+rerank_n = 50
+# "lambda" is a Python keyword — aliased as "lam" in Settings
+lambda = 0.1
+mass_top_m = 50
+top_k_cap = 100
+
 # Maximum wall-clock for one memorize() invocation while holding the
 # per-session lock. On timeout the outer asyncio.timeout cancels the call
 # and the lock auto-releases so subsequent concurrent /add on the same
@@ -142,3 +154,11 @@ mode = "agent"
 # synchronous portion of pipeline dispatch.
 # Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
 session_lock_timeout_seconds = 360.0
+
+[clustering]
+# Geometry-clustering: cosine similarity threshold and time window.
+# Episodes older than ``time_window_days`` from the newest cluster
+# member are excluded from merge consideration.
+# Override via EVEROS_CLUSTERING__THRESHOLD, EVEROS_CLUSTERING__TIME_WINDOW_DAYS.
+threshold = 0.65
+time_window_days = 7.0

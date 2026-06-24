@@ -30,6 +30,7 @@ business semantics the raw spec does not carry.
   - [POST /api/v1/memory/flush](#post-apiv1memoryflush)
   - [POST /api/v1/memory/search](#post-apiv1memorysearch)
   - [POST /api/v1/memory/get](#post-apiv1memoryget)
+  - [POST /api/v1/ome/trigger](#post-apiv1ometrigger)
 - [OpenAPI spec source](#openapi-spec-source)
 
 ## Overview
@@ -166,32 +167,54 @@ the top level (mirroring the success envelope) alongside a nested
 {
   "request_id": "<32-char hex>",
   "error": {
-    "code": "HTTP_ERROR",
-    "message": "Value error, exactly one of user_id / agent_id must be provided",
+    "code": "NOT_FOUND",
+    "message": "Document 'abc123' not found",
     "timestamp": "2026-06-01T12:24:46+00:00",
-    "path": "/api/v1/memory/search"
+    "path": "/api/v1/knowledge/documents/abc123"
   }
 }
 ```
 
-| HTTP | `error.code` | `error.message` | When |
+### error.code values
+
+`error.code` is a machine-readable `ErrorCode` enum. Clients can switch
+on this value to decide retry / display / routing behaviour without
+parsing the human-readable `message` field.
+
+| `error.code` | HTTP | Retryable? | When |
 |---|---|---|---|
-| `415 Unsupported Media Type` | `HTTP_ERROR` | the parse-failure reason | `/add` only — a `ContentItem` could not be parsed (unsupported modality for the configured multimodal LLM, or a payload that cannot be fetched / dispatched) |
-| `422 Unprocessable Entity` | `HTTP_ERROR` | the **first** validation error (see below) | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
-| `500 Internal Server Error` | `SYSTEM_ERROR` | `"Internal server error"` (fixed; internal details are logged, never leaked) | Unhandled exception caught by the global handler |
+| `NOT_FOUND` | `404` | No | Requested resource does not exist |
+| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document) |
+| `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
+| `EXTRACTION_EMPTY` | `422` | No | Document extraction produced no topics (empty or whitespace-only content) |
+| `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
+| `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
+| `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
+| `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
+| `INTERNAL_ERROR` | `500` | No | Unhandled exception (internal details are logged, never leaked) |
 
 ### error object
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | `string` | `"HTTP_ERROR"` for 4xx (validation / business / `HTTPException`); `"SYSTEM_ERROR"` for 5xx |
-| `message` | `string` | Human-readable reason. For `422`, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. the XOR example above) |
+| `code` | `string` | One of the `ErrorCode` values listed above |
+| `message` | `string` | Human-readable reason. For `INVALID_INPUT` from request validation, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. `"Value error, exactly one of user_id / agent_id must be provided"`) |
 | `timestamp` | `string` | ISO-8601 with timezone offset (display tz) |
 | `path` | `string` | Request path, e.g. `/api/v1/memory/add` |
 
 > Unlike FastAPI's default, the full per-field validation array is **not**
 > returned — only the first error's message. A client that needs the
 > offending field can read the `<loc>` suffix in `message`.
+
+### Search degradation
+
+When a `/search` call uses `method: "vector"` or `"hybrid"` and the
+embedding or rerank service is temporarily unavailable, the server does
+**not** return `503`. Instead, it degrades gracefully — the response
+suggests an alternative method in the error detail so the client can
+retry with `"keyword"` (which requires no embedding). This keeps search
+available during transient provider outages.
 
 ## Common types
 
@@ -793,7 +816,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 | `sender_id` | `string` | Original sender id from `/add` |
 | `sender_name` | `string \| null` | Original sender name; `null` if not provided |
 | `role` | `"user" \| "assistant" \| "tool"` | Original role |
-| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#messageitem)) |
+| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#addmessage)) |
 | `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
 | `tool_calls` | `array<object> \| null` | Original tool_calls payload if any |
 | `tool_call_id` | `string \| null` | Original tool_call_id if any |
@@ -1020,6 +1043,41 @@ Response (real capture):
     }
 }
 ```
+
+### POST /api/v1/ome/trigger
+
+Manually trigger a registered OME strategy.
+
+#### Request body
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `string` | yes | — | Strategy name (e.g. `reflect_episodes`) |
+| `timeout` | `float` | no | `120.0` | Max seconds to wait for completion |
+| `force` | `bool` | no | `false` | Bypass the `enabled` gate in `ome.toml` |
+
+#### Response body
+
+`200 OK` returns:
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"ok" \| "timeout"` | Whether the strategy completed within the timeout |
+| `name` | `string` | Echoes the requested strategy name |
+
+#### Errors
+
+- `404` — strategy name not found in the OME registry.
+
+#### cURL example
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/ome/trigger \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "reflect_episodes", "force": true}'
+```
+
+---
 
 ## OpenAPI spec source
 

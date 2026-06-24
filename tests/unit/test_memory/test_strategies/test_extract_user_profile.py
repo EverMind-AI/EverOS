@@ -20,8 +20,8 @@ from everalgo.types import Profile as AlgoProfile
 
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.infra.persistence.markdown import UserProfileFrontmatter
+from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import ProfileClusterUpdated
-from everos.memory.strategies._partition_locks import _reset_for_tests
 from everos.memory.strategies.extract_user_profile import extract_user_profile
 
 
@@ -54,6 +54,15 @@ def _algo_cluster(*, cluster_id: str, members: list[str], last_ts: int) -> AlgoC
     )
 
 
+def _episode_row(entry_id: str, parent_id: str) -> MagicMock:
+    """Stand-in for a LanceDB Episode row with parent_type=memcell."""
+    row = MagicMock()
+    row.entry_id = entry_id
+    row.parent_type = "memcell"
+    row.parent_id = parent_id
+    return row
+
+
 def _memcell_row(memcell_id: str, *, sender_id: str, ts_ms: int) -> MagicMock:
     """Stand-in for a sqlite Memcell row — only ``payload_json`` is read."""
     cell = MemCell(
@@ -75,7 +84,7 @@ def _memcell_row(memcell_id: str, *, sender_id: str, ts_ms: int) -> MagicMock:
 
 
 async def test_strategy_meta_is_attached() -> None:
-    meta = extract_user_profile._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = extract_user_profile.meta
     assert meta.name == "extract_user_profile"
     assert ProfileClusterUpdated in meta.trigger.on
     assert meta.emits == frozenset()
@@ -89,10 +98,11 @@ async def test_init_mode_writes_profile_when_no_existing(
     """No prior profile → ProfileExtractor invoked without ``old_profile``."""
     cluster = _algo_cluster(
         cluster_id="cl_user00000001",
-        members=["mc_aaaaaaaaaaa1"],
+        members=["ep_20260101_0001"],
         last_ts=1_700_000_001_000,
     )
-    rows = [
+    ep_rows = [_episode_row("ep_20260101_0001", "mc_aaaaaaaaaaa1")]
+    mc_rows = [
         _memcell_row("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_001_000)
     ]
     new_profile = AlgoProfile.model_validate(
@@ -109,6 +119,9 @@ async def test_init_mode_writes_profile_when_no_existing(
         patch(
             "everos.memory.strategies.extract_user_profile.cluster_repo"
         ) as mock_cluster_repo,
+        patch(
+            "everos.memory.strategies.extract_user_profile.episode_repo"
+        ) as mock_episode_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.memcell_repo"
         ) as mock_memcell_repo,
@@ -127,7 +140,8 @@ async def test_init_mode_writes_profile_when_no_existing(
         ) as mock_writer_cls,
     ):
         mock_cluster_repo.list_for_owner = AsyncMock(return_value=[cluster])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=rows)
+        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=ep_rows)
+        mock_memcell_repo.find_by_ids = AsyncMock(return_value=mc_rows)
         mock_reader_cls.return_value.read = AsyncMock(return_value=None)
         mock_writer_cls.return_value.write = AsyncMock(return_value=None)
         mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
@@ -162,10 +176,11 @@ async def test_update_mode_rehydrates_old_profile(
     """Existing profile → algo Profile rehydrated and passed as old_profile."""
     cluster = _algo_cluster(
         cluster_id="cl_user00000001",
-        members=["mc_aaaaaaaaaaa1"],
+        members=["ep_20260101_0001"],
         last_ts=1_700_000_002_000,
     )
-    rows = [
+    ep_rows = [_episode_row("ep_20260101_0001", "mc_aaaaaaaaaaa1")]
+    mc_rows = [
         _memcell_row("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_002_000)
     ]
     existing_fm = UserProfileFrontmatter(
@@ -191,6 +206,9 @@ async def test_update_mode_rehydrates_old_profile(
             "everos.memory.strategies.extract_user_profile.cluster_repo"
         ) as mock_cluster_repo,
         patch(
+            "everos.memory.strategies.extract_user_profile.episode_repo"
+        ) as mock_episode_repo,
+        patch(
             "everos.memory.strategies.extract_user_profile.memcell_repo"
         ) as mock_memcell_repo,
         patch(
@@ -208,7 +226,8 @@ async def test_update_mode_rehydrates_old_profile(
         ) as mock_writer_cls,
     ):
         mock_cluster_repo.list_for_owner = AsyncMock(return_value=[cluster])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=rows)
+        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=ep_rows)
+        mock_memcell_repo.find_by_ids = AsyncMock(return_value=mc_rows)
         mock_reader_cls.return_value.read = AsyncMock(
             return_value=(existing_fm, "prior summary")
         )
@@ -238,7 +257,7 @@ async def test_skips_when_no_members(monkeypatch: pytest.MonkeyPatch) -> None:
     # to a non-existent value to drop everything.
     stale_cluster = _algo_cluster(
         cluster_id="cl_other000001",
-        members=["mc_other00000"],
+        members=["ep_other00000"],
         last_ts=1_600_000_000_000,
     )
     existing_fm = UserProfileFrontmatter(
@@ -308,16 +327,19 @@ async def _run_serialisation_probe(
         )
 
     cluster_a = _algo_cluster(
-        cluster_id="cl_a", members=["mc_a"], last_ts=1_700_000_000_000
+        cluster_id="cl_a", members=["ep_a"], last_ts=1_700_000_000_000
     )
     cluster_b = _algo_cluster(
-        cluster_id="cl_b", members=["mc_b"], last_ts=1_700_000_000_000
+        cluster_id="cl_b", members=["ep_b"], last_ts=1_700_000_000_000
     )
 
     with (
         patch(
             "everos.memory.strategies.extract_user_profile.cluster_repo"
         ) as mock_cluster_repo,
+        patch(
+            "everos.memory.strategies.extract_user_profile.episode_repo"
+        ) as mock_episode_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.memcell_repo"
         ) as mock_memcell_repo,
@@ -339,6 +361,11 @@ async def _run_serialisation_probe(
             side_effect=lambda owner, _kind, **_kw: (
                 [cluster_a] if owner == owner_a else [cluster_b]
             )
+        )
+        mock_episode_repo.find_by_owner_entries = AsyncMock(
+            side_effect=lambda _owner, ids, **_kw: [
+                _episode_row(ids[0], f"mc_{ids[0]}")
+            ]
         )
         mock_memcell_repo.find_by_ids = AsyncMock(
             side_effect=lambda ids: [

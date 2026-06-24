@@ -4,7 +4,7 @@ help:
 	@echo "Targets:"
 	@echo "  install       Install deps + pre-commit hooks (full dev setup)"
 	@echo "  install-deps  Install deps only (uv sync --frozen, used by CI)"
-	@echo "  lint          ruff + import-linter + repo hygiene + datetime discipline + openapi drift"
+	@echo "  lint          ruff (check + format-check) + import-linter + datetime discipline + openapi drift"
 	@echo "  docs-check    Validate Markdown links, use-case banners, and issue template YAML"
 	@echo "  check-commits Validate Conventional Commit subjects for a git range"
 	@echo "  check-pr-title Validate PR title uses Conventional Commit format"

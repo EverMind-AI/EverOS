@@ -298,3 +298,47 @@ class AgentScopedFrontmatter(BaseFrontmatter):
 
     agent_id: str
     track: Literal["agent"] = "agent"
+
+
+class KnowledgeScopedMixin:
+    """Records in the knowledge scope (no owner_id).
+
+    Unlike user/agent scopes, knowledge records are not owned by an
+    individual entity. The scope directory is ``knowledge/``.
+    """
+
+    SCOPE_DIR: ClassVar[str] = "knowledge"
+
+
+class KnowledgeDocumentPathMixin:
+    """Path strategy for ``knowledge/{category}/{doc_title}/index.md``.
+
+    Place this mixin first so MRO resolves ``path_glob()`` here::
+
+        class KnowledgeDocumentFrontmatter(
+            KnowledgeDocumentPathMixin, KnowledgeScopedMixin, BaseFrontmatter
+        ): ...
+    """
+
+    SCOPE_DIR: ClassVar[str]
+
+    @classmethod
+    def path_glob(cls) -> str:
+        return f"*/*/{cls.SCOPE_DIR}/*/*/index.md"
+
+
+class KnowledgeTopicPathMixin:
+    """Path strategy for ``knowledge/{category}/{doc_title}/<n>_<name>.md``.
+
+    Place this mixin first so MRO resolves ``path_glob()`` here::
+
+        class KnowledgeTopicFrontmatter(
+            KnowledgeTopicPathMixin, KnowledgeScopedMixin, BaseFrontmatter
+        ): ...
+    """
+
+    SCOPE_DIR: ClassVar[str]
+
+    @classmethod
+    def path_glob(cls) -> str:
+        return f"*/*/{cls.SCOPE_DIR}/*/*/[0-9]*.md"

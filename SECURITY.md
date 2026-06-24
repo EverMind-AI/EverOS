@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-EverOS is in active alpha development. Security fixes are applied to the latest
-release line only.
+EverOS is released and at v1.0.0 (stable). Security fixes are applied to the
+latest release line only.
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | ✅        |
-| < 0.1   | ❌        |
+| 1.x     | ✅        |
+| < 1.0   | ❌        |
 
 ## Reporting a Vulnerability
 

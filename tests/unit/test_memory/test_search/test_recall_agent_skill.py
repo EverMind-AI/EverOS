@@ -65,7 +65,7 @@ def _skill_row(
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Isolate LanceDB under tmp memory root per test."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
     yield

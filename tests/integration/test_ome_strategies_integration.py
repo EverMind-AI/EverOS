@@ -136,21 +136,34 @@ async def test_emit_dispatches_both_strategies_to_success(
         ),
         capture_logs() as logs,
     ):
-        mock_af.return_value.aextract = AsyncMock(return_value=[fake_fact])
+        mock_af.return_value.aextract_from_text = AsyncMock(return_value=[fake_fact])
         mock_fs.return_value.aextract = AsyncMock(return_value=[fake_foresight])
 
         # Ensure the sqlite dir exists before the engine creates ome.db.
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "ome.toml").write_text("# test\n")
         await _setup_system_db_schema(monkeypatch)
 
         engine = svc._get_engine()
         await engine.start()
         try:
+            # Foresight still subscribes to UserPipelineStarted.
             await engine.emit(
                 UserPipelineStarted(
                     memcell_id="mc_a",
                     session_id="s1",
                     memcell=_sample_memcell(),
+                )
+            )
+            # Atomic facts now subscribes to EpisodeExtracted.
+            await engine.emit(
+                EpisodeExtracted(
+                    memcell_id="mc_a",
+                    episode_entry_id="ep_20260517_0001",
+                    episode_text="alice likes hiking",
+                    episode_timestamp_ms=1_700_000_000_000,
+                    owner_id="u_alice",
+                    session_id="s1",
                 )
             )
 
@@ -180,11 +193,9 @@ async def test_emit_dispatches_both_strategies_to_success(
     fs_logs = [r for r in logs if r.get("event") == "foresights_extracted"]
     assert af_logs, "expected atomic_facts_extracted log line"
     assert fs_logs, "expected foresights_extracted log line"
-    # The sample MemCell has 2 user senders (u_alice, u_bob), so each
-    # strategy gathers one result per sender and flattens them:
-    # extract_atomic_facts: 2 senders × 1 fake_fact each = 2
-    # extract_foresight:    2 senders × 1 fake_foresight each = 2
-    assert af_logs[0]["count"] == 2
+    # extract_atomic_facts: 1 EpisodeExtracted → 1 fact for u_alice
+    # extract_foresight: 2 senders × 1 foresight each = 2
+    assert af_logs[0]["count"] == 1
     assert fs_logs[0]["count"] == 2
 
 
@@ -297,6 +308,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         mock_ac.return_value.aextract = AsyncMock(return_value=[fake_case])
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "ome.toml").write_text("# test\n")
         await _setup_system_db_schema(monkeypatch)
 
         engine = svc._get_engine()
@@ -433,6 +445,7 @@ async def test_skill_chain_e2e(
         mock_writer_cls.return_value.write_main = AsyncMock(return_value=None)
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "ome.toml").write_text("# test\n")
         await _setup_system_db_schema(monkeypatch)
 
         engine = svc._get_engine()
@@ -543,11 +556,19 @@ async def test_profile_chain_e2e(
         }
     )
 
+    fake_episode_row = MagicMock()
+    fake_episode_row.parent_type = "memcell"
+    fake_episode_row.parent_id = "mc_aaaaaaaaaaa1"
+    fake_episode_row.entry_id = "ep_20260517_0001"
+
     with (
         patch(
             "everos.memory.strategies.trigger_profile_clustering.get_embedder",
             return_value=embedder,
         ),
+        patch(
+            "everos.memory.strategies.extract_user_profile.episode_repo"
+        ) as mock_episode_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.memcell_repo"
         ) as mock_memcell_repo,
@@ -566,12 +587,16 @@ async def test_profile_chain_e2e(
         ),
         capture_logs() as logs,
     ):
+        mock_episode_repo.find_by_owner_entries = AsyncMock(
+            return_value=[fake_episode_row]
+        )
         mock_memcell_repo.find_by_ids = AsyncMock(return_value=[fake_memcell_row])
         mock_reader_cls.return_value.read = AsyncMock(return_value=None)
         mock_writer_cls.return_value.write = AsyncMock(return_value=None)
         mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "ome.toml").write_text("# test\n")
         await _setup_system_db_schema(monkeypatch)
 
         engine = svc._get_engine()
@@ -584,6 +609,7 @@ async def test_profile_chain_e2e(
                     episode_text="alice likes hiking",
                     episode_timestamp_ms=1_700_000_001_000,
                     owner_id="u_alice",
+                    session_id="s_integration",
                 )
             )
 

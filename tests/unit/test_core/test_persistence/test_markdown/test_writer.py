@@ -234,6 +234,8 @@ async def test_append_entry_round_trip_with_reader(tmp_path: Path) -> None:
 
 
 async def test_write_rejects_target_escaping_root(tmp_path: Path) -> None:
+    # A path-segment id carrying ``..`` (e.g. an unsanitised owner_id) would
+    # otherwise walk the write out of the configured root.
     root = tmp_path / "memory_root"
     root.mkdir()
     writer = MarkdownWriter(MemoryRoot(root))
@@ -242,6 +244,7 @@ async def test_write_rejects_target_escaping_root(tmp_path: Path) -> None:
     with pytest.raises(PathTraversalError):
         await writer.write(escaping, "x")
 
+    # The escaping path must not even have its parent directories created.
     assert not (tmp_path / "ESCAPED").exists()
 
 
@@ -272,6 +275,9 @@ async def test_append_entry_rejects_escaping_target(tmp_path: Path) -> None:
 
 
 async def test_append_entry_does_not_read_out_of_root_file(tmp_path: Path) -> None:
+    # The containment guard must fire BEFORE the read-modify-write read, so an
+    # escaping target can never open + parse an existing out-of-root file (an
+    # arbitrary-file-read precursor) even though its write would be rejected.
     root = tmp_path / "memory_root"
     root.mkdir()
     secret = tmp_path / "secret.md"
@@ -289,10 +295,12 @@ async def test_append_entry_does_not_read_out_of_root_file(tmp_path: Path) -> No
             entry_id=EntryId(prefix="umc", date=dt.date(2026, 4, 22), seq=1),
         )
     spy.assert_not_called()
+    # The out-of-root file is left untouched.
     assert secret.read_text(encoding="utf-8") == "---\ntop: secret\n---\nbody\n"
 
 
 async def test_write_allows_target_inside_root(tmp_path: Path) -> None:
+    # Containment guard must not reject legitimate in-root writes.
     root = tmp_path / "memory_root"
     root.mkdir()
     writer = MarkdownWriter(MemoryRoot(root))

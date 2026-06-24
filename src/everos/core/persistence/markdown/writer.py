@@ -52,7 +52,7 @@ from everos.core.errors import PathTraversalError
 
 from ..memory_root import MemoryRoot
 from .entries import EntryId
-from .frontmatter import dump_frontmatter
+from .frontmatter import dump_frontmatter, parse_frontmatter
 from .reader import MarkdownReader
 
 
@@ -60,9 +60,11 @@ class MarkdownWriter:
     """Atomic writer for markdown files inside a memory-root.
 
     The ``memory_root`` reference anchors a containment check: every write
-    target must resolve inside ``memory_root.root``. This is defense-in-depth
-    against path traversal via caller-supplied identifiers that become path
-    segments.
+    target must resolve inside ``memory_root.root`` (see
+    :meth:`_ensure_within_root`). This is defense-in-depth against path
+    traversal via any caller-supplied identifier that becomes a path
+    segment — the DTO layer also rejects ``.``/``..`` in such ids, but this
+    check does not depend on every id being sanitised upstream.
     """
 
     def __init__(self, memory_root: MemoryRoot) -> None:
@@ -100,8 +102,30 @@ class MarkdownWriter:
         return lock
 
     def _ensure_within_root(self, target: Path) -> Path:
-        """Reject a write target that resolves outside the memory root."""
-        root = self._memory_root.root
+        """Reject a write target that resolves outside the memory root.
+
+        Defense-in-depth against path traversal: a caller-supplied id that
+        becomes a path segment (e.g. ``sender_id`` -> ``owner_id``) could
+        otherwise smuggle ``..`` segments and walk the write out of the
+        configured root. ``resolve()`` collapses ``..`` and symlinks
+        lexically/physically before the comparison, so the check holds even
+        though ``target`` does not exist yet.
+
+        Must run *before* any filesystem touch — the ``mkdir`` on the write
+        path and the read-modify-write read on the append path both call this
+        first, so an escaping path never creates parent directories nor opens
+        an out-of-root file.
+
+        Args:
+            target: The intended write path.
+
+        Returns:
+            The resolved, root-contained absolute path.
+
+        Raises:
+            PathTraversalError: If the resolved path is not within the root.
+        """
+        root = self._memory_root.root  # already absolute + resolved
         resolved = target.resolve()
         if not resolved.is_relative_to(root):
             raise PathTraversalError(
@@ -121,6 +145,9 @@ class MarkdownWriter:
 
         Returns:
             ``path`` (resolved as written).
+
+        Raises:
+            PathTraversalError: If ``path`` resolves outside the memory root.
         """
         target = Path(path)
         self._ensure_within_root(target)
@@ -145,6 +172,43 @@ class MarkdownWriter:
         """Assemble ``frontmatter`` + ``body`` then atomic-write to ``path``."""
         head = dump_frontmatter(frontmatter or {})
         return await self.write(path, head + body)
+
+    async def patch_frontmatter(self, path: Path, updates: Mapping[str, Any]) -> None:
+        """Update frontmatter fields on an existing md file in-place.
+
+        Reads the file, merges ``updates`` into frontmatter, writes back.
+        Only the frontmatter portion is rewritten; entries are untouched.
+        Uses the same per-path lock as ``append_entries`` for concurrency
+        safety.
+
+        For dict-type fields (e.g. ``deprecated_entries``) the merge is
+        additive: existing keys are preserved, new keys are added or
+        overwritten. Scalar fields are replaced wholesale.
+
+        Args:
+            path: Target markdown file (must exist).
+            updates: Mapping of frontmatter keys to merge.
+
+        Raises:
+            FileNotFoundError: If ``path`` does not exist.
+        """
+        target = Path(path)
+        async with self.lock_for(target):
+            # 1. Read raw text.
+            raw = await anyio.Path(target).read_text(encoding="utf-8")
+
+            # 2. Split into frontmatter + remainder (entries body).
+            existing_fm, remainder = parse_frontmatter(raw)
+
+            # 3. Deep-merge dict fields; replace scalars.
+            for key, value in updates.items():
+                if isinstance(value, dict) and isinstance(existing_fm.get(key), dict):
+                    existing_fm[key].update(value)
+                else:
+                    existing_fm[key] = value
+
+            # 4. Atomic write with merged frontmatter + original body.
+            await self.write(target, dump_frontmatter(existing_fm) + remainder)
 
     async def append_entry(
         self,
@@ -239,6 +303,9 @@ class MarkdownWriter:
         breaks the safety contract.
         """
         target = Path(path)
+        # Guard the read too, not just the final write: an escaping path must
+        # not even reach MarkdownReader (otherwise an out-of-root file would be
+        # opened and parsed before the write-side check rejected it).
         self._ensure_within_root(target)
 
         # 1. Load existing markdown (or initialise empty).

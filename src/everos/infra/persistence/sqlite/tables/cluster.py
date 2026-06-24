@@ -88,12 +88,12 @@ class ClusterMember(BaseTable, table=True):
     """Parent cluster id."""
 
     member_id: str = Field(primary_key=True)
-    """``memcell_id`` (member_type=``memcell``) or md entry_id
-    (member_type=``case``) — the entity grouped into this cluster."""
+    """Opaque entity id grouped into this cluster. Semantics depend on
+    ``member_type`` (e.g. episode entry_id, case entry_id)."""
 
     member_type: str
-    """``"memcell"`` or ``"case"``. Echoes the parent cluster's ``kind``
-    domain but kept on the row so the reverse index is self-contained."""
+    """Caller-defined entity kind (e.g. ``"episode"``, ``"case"``). Kept
+    on the row so the reverse index is self-contained."""
 
     added_ts: UtcDatetime = Field(sa_type=UtcDateTimeColumn)
     """When this entity was first attached to the cluster."""

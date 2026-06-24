@@ -106,6 +106,7 @@ async def memorize_env(
         MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "ome.toml").write_text("# test\n")
 
     svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")

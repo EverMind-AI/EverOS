@@ -234,6 +234,18 @@ class BaseDailyWriter:
             )
             return eid
 
+    async def patch_frontmatter(self, path: Path, updates: Mapping[str, Any]) -> None:
+        """Merge ``updates`` into the frontmatter of an existing daily-log file.
+
+        Delegates to the underlying :class:`MarkdownWriter` so that callers
+        do not need to reach through the private ``_writer`` attribute.
+
+        Args:
+            path: Target markdown file (must exist).
+            updates: Mapping of frontmatter keys to merge.
+        """
+        await self._writer.patch_frontmatter(path, updates)
+
     # ── Hooks (subclass override) ─────────────────────────────────────────
 
     async def _current_count(self, path: Path) -> int:

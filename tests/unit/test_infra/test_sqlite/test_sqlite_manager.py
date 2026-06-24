@@ -16,7 +16,7 @@ from everos.infra.persistence.sqlite import sqlite_manager
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Point the singleton at an isolated memory-root and reset module state."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     sqlite_manager._engine = None
     sqlite_manager._session_factory = None
     yield

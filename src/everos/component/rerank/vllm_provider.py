@@ -41,7 +41,8 @@ from typing import Any
 
 import httpx
 
-from .protocol import RerankError, RerankResult
+from ._errors import retries_exhausted_error, transport_error, upstream_http_error
+from .protocol import RerankResult, RerankServiceError
 
 
 class VllmRerankProvider:
@@ -133,9 +134,7 @@ class VllmRerankProvider:
                         )
                 except httpx.HTTPError as exc:
                     if attempt == self._max_retries:
-                        raise RerankError(
-                            f"vLLM rerank transport failure: {exc}"
-                        ) from exc
+                        raise transport_error("vLLM", exc) from exc
                     continue
 
                 if response.status_code == 200:
@@ -143,22 +142,17 @@ class VllmRerankProvider:
 
                 if response.status_code >= 500 or response.status_code == 429:
                     if attempt == self._max_retries:
-                        raise RerankError(
-                            f"vLLM rerank HTTP {response.status_code}: "
-                            f"{response.text[:200]}"
-                        )
+                        raise upstream_http_error("vLLM", response)
                     continue
-                raise RerankError(
-                    f"vLLM rerank HTTP {response.status_code}: {response.text[:200]}"
-                )
+                raise upstream_http_error("vLLM", response)
 
-            raise RerankError(f"vLLM rerank exhausted retries ({self._max_retries})")
+            raise retries_exhausted_error("vLLM", self._max_retries)
 
 
 def _parse_rerank_results(body: dict[str, Any]) -> list[RerankResult]:
     items = body.get("results")
     if not isinstance(items, list):
-        raise RerankError(f"vLLM rerank response missing results: {body!r}")
+        raise RerankServiceError(f"vLLM rerank response missing results: {body!r}")
     parsed: list[RerankResult] = []
     for item in items:
         try:
@@ -169,5 +163,7 @@ def _parse_rerank_results(body: dict[str, Any]) -> list[RerankResult]:
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise RerankError(f"malformed rerank result entry: {item!r}") from exc
+            raise RerankServiceError(
+                f"malformed rerank result entry: {item!r}"
+            ) from exc
     return parsed

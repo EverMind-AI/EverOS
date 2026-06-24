@@ -17,7 +17,7 @@ Coverage matrix (see 21_test_taxonomy_debate.md context):
 - include_profile (true / false)
 - filter DSL: session_id eq / timestamp range / sender_id in /
   parent_id (= memcell bridge) / top-level OR / nested AND-OR
-- MRAG fact embedding: hybrid method embeds atomic_facts that share
+- Hierarchical fact eviction: hybrid method embeds atomic_facts that share
   the matched episode's memcell parent
 
 Methods other than ``keyword`` require ``EMBEDDING_*`` creds in .env —
@@ -76,7 +76,7 @@ async def client(
     from everos.core.persistence.sqlite import SQLModel as _SQLModel
     from everos.infra.persistence.sqlite import sqlite_manager
 
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
     # Lance: reset connection + cached table handles.
@@ -370,7 +370,7 @@ async def test_vector_search_returns_episode_hits(
     for ep in data["episodes"]:
         assert ep["user_id"] == "caroline"
         assert ep["score"] > 0  # cosine similarity in [0, 1]
-        # vector path doesn't run MRAG, so no nested facts.
+        # vector path doesn't run hierarchical fact eviction, so no nested facts.
         assert ep["atomic_facts"] == []
 
 
@@ -419,15 +419,17 @@ async def test_agentic_search_returns_episode_hits(
 # ── Agent owner_type dispatch (separate path: agent_case + agent_skill) ─
 
 
-async def _seed_one_agent_corpus(owner: str = "a1") -> None:
+async def _seed_one_agent_corpus(
+    owner: str = "a1", *, use_real_embeddings: bool = False
+) -> None:
     """Single seed used by the parametrized agent dispatch test.
 
     One case + one skill sharing surface tokens with the test query
     ("refactor authentication") so BM25 deterministically hits both
-    tables; dense / agentic methods exercise the same rows. Both rows
-    are embedded with the real embedder so LanceDB's ``nearest_to``
-    can rank them (zero vectors are undefined under cosine distance —
-    the dense path returns 0 hits for them).
+    tables. Dense / agentic methods exercise the same rows and opt into
+    real embeddings so LanceDB's ``nearest_to`` can rank them (zero
+    vectors are undefined under cosine distance — the dense path returns
+    0 hits for them).
     """
     from everos.service.search import _get_embedding
 
@@ -436,16 +438,16 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     skill_desc = "refactor authentication middleware reliably"
     skill_body = "step-by-step approach for auth refactors"
 
-    embedder = _get_embedding()
+    embedder = _get_embedding() if use_real_embeddings else None
     if embedder is not None:
         case_vec, skill_vec = await embedder.embed_batch(
             [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
         )
     else:
-        # No embedder credentials → leave zeros; only keyword assertions
-        # will pass, vector/hybrid/agentic methods are skipped anyway.
-        case_vec = [0.0] * 1024
-        skill_vec = [0.0] * 1024
+        # Keyword-only default runs offline in CI; live dense variants
+        # pass real embeddings via ``use_real_embeddings=True``.
+        case_vec = [1.0, *([0.0] * 1023)]
+        skill_vec = [1.0, *([0.0] * 1023)]
 
     await _seed_agent_cases(
         [
@@ -509,7 +511,7 @@ async def test_search_agent_dispatch_per_method(
     All methods must enforce the owner_type hard partition:
     ``episodes`` / ``profiles`` stay empty.
     """
-    await _seed_one_agent_corpus()
+    await _seed_one_agent_corpus(use_real_embeddings=method != "keyword")
 
     resp = await _post(
         client,
@@ -543,7 +545,7 @@ async def test_hybrid_with_llm_rerank_returns_hits(
 ) -> None:
     """``method=hybrid`` + ``enable_llm_rerank=true`` runs the phase-5 LLM pass.
 
-    Default hybrid stops after MRAG / LR fusion; opting in adds one
+    Default hybrid stops after hierarchical eviction / LR fusion; opting in adds one
     ``chat`` call that re-ranks the top-K. The route must accept the
     flag and still return well-formed episodes.
     """
@@ -1045,16 +1047,16 @@ async def test_search_filter_no_match_returns_empty(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 7. MRAG fact embedding — the memcell-bridge contract
+# 7. Hierarchical fact eviction — the memcell-bridge contract
 # ═══════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.slow
 @pytest.mark.live_llm
-async def test_search_hybrid_mrag_path_runs_with_memcell_facts(
+async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
     client: AsyncClient, search_seed: dict
 ) -> None:
-    """HYBRID + MRAG path executes end-to-end with shared-memcell facts seeded.
+    """HYBRID + hierarchical eviction end-to-end with memcell facts.
 
     Verifies the wiring:
     - hybrid recall over episodes returns hits
@@ -1065,7 +1067,7 @@ async def test_search_hybrid_mrag_path_runs_with_memcell_facts(
        asserted because ``atomic_fact_recaller.facts_for_episodes``
        currently emits ``FactCandidate(score=0.0)`` for every prefetched
        fact (it's a parent_id lookup, not a query-aware recall). The
-       MRAG ``_expand_heap`` skips facts with non-positive scores, so
+       Hierarchical eviction ``_expand_heap`` skips facts with non-positive scores, so
        they never promote into the top-N. Once facts get a real
        query-aware relevance score (e.g. by running a separate dense
        recall on atomic_fact too), tighten this assertion to verify
@@ -1099,14 +1101,14 @@ async def test_search_hybrid_mrag_path_runs_with_memcell_facts(
 
 @pytest.mark.slow
 @pytest.mark.live_llm
-async def test_hybrid_mrag_injects_facts_with_alpha_zero(
+async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """MRAG end-to-end fact injection, exercised with ``alpha=0``.
+    """Hierarchical eviction end-to-end fact injection, exercised with ``alpha=0``.
 
-    Companion to :func:`test_search_hybrid_mrag_path_runs_with_memcell_facts`.
+    Companion to :func:`test_search_hybrid_hierarchical_eviction_with_memcell_facts`.
     The sibling asserts the contract under prod defaults
     (``alpha=1`` × ``fact.score=0`` → final ≤ 0 → fact never enters the
     top-N). This test patches ``RankConfig.alpha=0`` so facts inherit
@@ -1139,7 +1141,9 @@ async def test_hybrid_mrag_injects_facts_with_alpha_zero(
     assert data["episodes"], "hybrid should return at least one episode"
 
     facts_attached = sum(len(ep["atomic_facts"]) for ep in data["episodes"])
-    assert facts_attached >= 1, "alpha=0 should let MRAG promote ≥1 fact into the top-N"
+    assert facts_attached >= 1, (
+        "alpha=0 should let hierarchical eviction promote >=1 fact"
+    )
 
     # Memcell-bridge invariant — every attached fact's parent_id must
     # match its host episode's parent_id.
@@ -1286,7 +1290,7 @@ async def test_search_filter_error_returns_422(
     # FastAPI's default ``{"detail": ...}``). The FilterError text
     # lands in ``error.message``.
     body = resp.json()
-    assert body["error"]["code"] == "HTTP_ERROR"
+    assert body["error"]["code"] == "INVALID_INPUT"
     assert "this_field_does_not_exist" in body["error"]["message"]
 
 

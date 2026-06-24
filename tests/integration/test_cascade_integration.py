@@ -67,7 +67,7 @@ async def cascade_runtime(
     guarantee no state leaks in from neighbouring tests, then dispose
     on the way out so the next test sees a clean slate.
     """
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     # Embedding settings are required for the lifespan factory; the
     # stub bypasses real network, but the orchestrator still expects
     # the env to be valid-looking.
@@ -82,6 +82,7 @@ async def cascade_runtime(
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     await ensure_business_indexes()
+    (tmp_path / "ome.toml").write_text("# test\n")
 
     yield MemoryRoot.default()
 

@@ -7,10 +7,9 @@ return the envelope verbatim. ``request_id`` is generated inside the
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from everos.memory.get import GetRequest, GetResponse
-from everos.memory.search import FilterError
 from everos.service import get as get_service
 
 router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
@@ -19,8 +18,4 @@ router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
 @router.post("/get", response_model=GetResponse)
 async def post_get(req: GetRequest) -> GetResponse:
     """Paginated listing over the requested ``memory_type``."""
-    try:
-        return await get_service(req)
-    except FilterError as exc:
-        # Filter-DSL violations surface as 422 with the compile message.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await get_service(req)

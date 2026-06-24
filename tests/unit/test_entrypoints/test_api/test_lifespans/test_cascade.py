@@ -30,7 +30,7 @@ def test_provider_metadata() -> None:
 async def test_startup_constructs_and_starts_orchestrator(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
@@ -59,7 +59,7 @@ async def test_shutdown_without_startup_is_noop() -> None:
 async def test_shutdown_stops_orchestrator_and_clears_reference(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")

@@ -39,8 +39,8 @@ from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.component.embedding import (
-    EmbeddingError,
     EmbeddingNotConfiguredError,
+    EmbeddingServiceError,
     get_embedder,
 )
 from everos.component.llm import get_llm_client
@@ -64,8 +64,8 @@ from everos.infra.persistence.markdown import (
     AgentSkillWriter,
 )
 from everos.infra.persistence.sqlite import cluster_repo
+from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import SkillClusterUpdated
-from everos.memory.strategies._partition_locks import get_partition_lock
 
 logger = get_logger(__name__)
 
@@ -272,7 +272,7 @@ async def _resolve_query_vector(target: LanceAgentCase) -> list[float]:
     try:
         embedder = get_embedder()
         return list(await embedder.embed(target.task_intent))
-    except (EmbeddingNotConfiguredError, EmbeddingError) as exc:
+    except (EmbeddingNotConfiguredError, EmbeddingServiceError) as exc:
         logger.warning(
             "agent_skill_query_embed_failed",
             case_entry_id=target.entry_id,

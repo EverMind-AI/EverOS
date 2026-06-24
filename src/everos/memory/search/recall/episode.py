@@ -77,53 +77,42 @@ class EpisodeRecaller:
             for r in rows
         ]
 
-    async def fetch_by_parent_ids(
-        self, parent_ids: Sequence[str], where: str
-    ) -> list[Candidate]:
-        """Batch-fetch episodes whose ``parent_id`` (memcell id) is in the set.
-
-        One LanceDB scan per call (``WHERE parent_id IN (...)``) — used by
-        the MaxSim-style vector strategy that first ranks memcells via
-        ``atomic_fact`` cosine and then reverse-resolves the episode.
-        ``score`` on the returned candidates is left at ``0.0``; the
-        caller re-attaches the upstream max-pool score before sorting.
-        """
-        if not parent_ids:
-            return []
-        table = await get_table(Episode.TABLE_NAME, Episode)
-        quoted = ", ".join(f"'{_q(p)}'" for p in parent_ids)
-        full_where = f"({where}) AND (parent_id IN ({quoted}))"
-        rows = await table.query().where(full_where).limit(len(parent_ids)).to_list()
-        return [row_to_candidate(r, source="vector", score=0.0) for r in rows]
-
     async def fetch_all_for_owner(self, where: str) -> list[Candidate]:
-        """Flat scan — all episodes for this owner, keyed by memcell id.
+        """Flat scan — all episodes for this owner, keyed by entry_id.
 
-        Returns every episode row as a ``Candidate`` with ``id = parent_id``
-        (the memcell id) so ``acluster_retrieve`` membership matching against
-        ``cluster.members`` (also memcell ids) works without extra mapping.
-        The real LanceDB episode id travels in ``metadata["episode_id"]`` so
-        the agentic orchestrator can restore canonical episode identity after
-        ``aagentic_retrieve`` returns.
+        Cluster membership matching in ``acluster_retrieve`` compares
+        ``Candidate.id`` against ``Cluster.members``. Both are now
+        episode entry_ids regardless of parent_type.
 
-        No ``limit`` is applied — the full owner partition is required for
-        cluster membership matching (``acluster_retrieve`` needs ``all_docs``
-        to cover every member of every cluster).
+        No ``limit`` — the full owner partition is required for cluster
+        membership matching.
         """
         table = await get_table(Episode.TABLE_NAME, Episode)
         rows = await table.query().where(where).to_list()
         result: list[Candidate] = []
         for r in rows:
-            mc_id = r.get("parent_id")
-            if not isinstance(mc_id, str) or not mc_id:
+            entry_id = r.get("entry_id")
+            if not isinstance(entry_id, str) or not entry_id:
                 continue
             base = row_to_candidate(r, source="vector", score=0.0)
             result.append(
                 Candidate(
-                    id=mc_id,
+                    id=entry_id,
                     score=0.0,
                     source="vector",
                     metadata={**base.metadata, "episode_id": base.id},
                 )
             )
         return result
+
+    async def fetch_by_entry_ids(
+        self, entry_ids: list[str], where: str
+    ) -> list[Candidate]:
+        """Fetch episodes by entry_id (for facts whose parent_id is an entry_id)."""
+        if not entry_ids:
+            return []
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        quoted = ", ".join(f"'{_q(eid)}'" for eid in entry_ids)
+        full_where = f"({where}) AND (entry_id IN ({quoted}))"
+        rows = await table.query().where(full_where).limit(len(entry_ids)).to_list()
+        return [row_to_candidate(r, source="vector", score=0.0) for r in rows]

@@ -7,31 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Unreleased changes on `dev` will be listed here._
+## [1.1.0] - 2026-06-24
+
+### Added
+
+- **Knowledge base subsystem** — full-stack document management exposed via
+  `/api/v1/knowledge/*`. Upload documents (PDF / HTML / DOCX via multimodal
+  parser), CRUD operations, and hybrid search (BM25 + vector + rerank +
+  category boost). Ships with a 20-category default taxonomy
+  (`.taxonomy.md`, auto-generated on first use). Original uploaded files are
+  preserved alongside extracted Markdown. New settings group:
+  `knowledge.*` (search tuning, `max_upload_bytes`, etc.).
+- **Reflection V1** — offline memory self-improvement engine.
+  Select → Merge → Re-extract → Deprecate: clusters related episodes within
+  existing 7-day windows, merges them via LLM, re-extracts consolidated
+  episodes, and deprecates the originals. Runs as an OME strategy
+  (`reflect_episodes`); configure via `ome.toml`
+  (`[strategies.reflect_episodes]`, cron `0 2 * * 1`), changes are
+  hot-reloaded within ~2 s, no restart needed; **disabled by default**.
+  Requires `everalgo-user-memory>=0.3.1`.
+- **Standardized error response contract.** All API errors now return a
+  canonical envelope with a semantic `ErrorCode` (10 codes: `NOT_FOUND`,
+  `CONFLICT`, `INVALID_INPUT`, `EXTRACTION_EMPTY`, `UNSUPPORTED_FORMAT`,
+  `EXTERNAL_SERVICE_UNAVAILABLE`, `CAPABILITY_UNAVAILABLE`,
+  `CONFIGURATION_ERROR`, `INTERNAL_ERROR`, `BAD_REQUEST`), per-type
+  exception handlers with MRO dispatch, and an `ErrorResponse` Pydantic
+  model visible in OpenAPI docs. Replaces the v1.0 two-code scheme
+  (`HTTP_ERROR` / `SYSTEM_ERROR`).
+- **Search: hierarchical fact eviction** (Layer-4) with `min_score` floor —
+  low-confidence atomic facts are evicted before fusion, improving
+  precision.
+- **Search degradation guidance** — when embedding or rerank providers fail,
+  the response now includes a `degradation` field explaining which
+  capability is unavailable and how results are affected.
+- **Knowledge topic recaller** — dual-column BM25 recall for knowledge
+  topics, integrated into the search manager alongside existing recall
+  types.
+
+### Changed
+
+- **`everos init` now generates `gpt-4.1-mini`** as the default LLM model
+  (was `gpt-4o-mini`). Existing user configurations are not affected.
+- **API error `code` values have changed.** v1.0 returned only `HTTP_ERROR`
+  (all 4xx) and `SYSTEM_ERROR` (all 5xx). v1.1 returns fine-grained
+  semantic codes (see Added above). Clients that match on `error.code`
+  string values need to update. The envelope structure
+  (`request_id` + `error.{code, message, timestamp, path}`) is unchanged.
+- **DDD-aligned exception hierarchy** — domain errors reorganized:
+  `ValidationError` → `InvalidInputError`;
+  `DocumentAlreadyExistsError` → `DuplicateDocumentError`;
+  `EmbeddingError` → `EmbeddingServiceError`;
+  `RerankError` → `RerankServiceError`;
+  `LLMError` → `LLMServiceError` (at the boundary);
+  `MultimodalError` split into `UnsupportedModalityError` (domain) +
+  `MultimodalNotEnabledError` (infrastructure).
+  New base classes: `CapabilityError`, `ConfigurationError`.
+- **`infra/` restructured** — storage adapters moved under
+  `infra/persistence/{markdown,sqlite,lancedb}`; each sub-package's
+  `__init__.py` is the sole public API (enforced by import-linter).
+- **Parser capability extracted** to `component/parser` (shared by memorize
+  and knowledge upload paths).
+
+### Fixed
+
+- **Knowledge search no longer returns a bare `500 INTERNAL_ERROR` when the
+  embedding or rerank provider is unconfigured.** `_require_search_providers`
+  now raises `ConfigurationError` → `500 CONFIGURATION_ERROR`. A provider
+  that is configured but fails at call time still surfaces as
+  `503 EXTERNAL_SERVICE_UNAVAILABLE`.
+- **Knowledge document uploads are capped** at `knowledge.max_upload_bytes`
+  (default 50 MiB); oversized uploads are rejected with `422` before parsing.
+- **Knowledge search `query` is bounded** to 2000 chars.
+- **`GET /knowledge/documents?sort_by=updated_at`** is now accepted.
+- **`POST /knowledge/documents` returns `original_file_path`** so callers no
+  longer need a follow-up `GET` to locate the preserved upload.
+- **Rerank providers no longer echo the upstream HTTP response body** into the
+  client-facing `503` message (vLLM / DeepInfra); the body is logged instead.
+- **Knowledge FK cascade race** — removed the foreign key on
+  `knowledge_topics.doc_id` that caused delete-order race conditions;
+  cascade cleanup handled at application level.
+- **Knowledge `replace_document`** — atomic PUT: backup old Markdown before
+  re-extraction; removed explicit SQLite delete for atomicity.
+- **Knowledge duplicate `doc_id`** rejected on create; title collision
+  resolved by appending `doc_id` to directory name.
+- **Knowledge `md_path` resolution** fixed in `delete_document` (was not
+  resolved against `memory_root`).
+- **OME file-handle leak** — portalocker file handle is now closed on lock
+  contention instead of being left open.
+- **jieba / Python 3.12 compatibility** — deferred jieba import to avoid
+  `SyntaxError` from invalid escape sequences; suppressed
+  `DeprecationWarning` in tests.
+- **Test isolation** — tests no longer leak `.env` state or depend on module
+  import ordering.
+
+### Documentation
+
+- Added knowledge base technical documentation.
+- Corrected the onboarding flow: `everos init` writes `everos.toml` +
+  `ome.toml` (TOML), not a `.env` file; removed the nonexistent
+  `--xdg` / `--env-file` options and the false `0600`-permissions claim
+  from `README.md` / `QUICKSTART.md`; fixed the stable-version line
+  (`v1.0.1`) and completed the `docs/cli.md` command tree.
+- Updated error handling docs to match the new DDD exception hierarchy.
 
 ## [1.0.1] - 2026-06-16
 
 ### Security
 
 - **Path-traversal hardening for caller-supplied identifiers.** `sender_id`
-  now carries the same path-safety guard as `app_id` / `project_id`: a
-  character whitelist plus rejection of the `.` / `..` tokens. The whitelist
-  admits `@` and `+` so email-style ids and plus-addressing still pass.
+  (which flows through to `owner_id` and becomes a directory segment on the
+  episode write path) now carries the same path-safety guard as `app_id` /
+  `project_id`: a character whitelist plus rejection of the `.` / `..` tokens.
+  The whitelist admits `@` and `+` so real-world ids (email-style,
+  plus-addressing) still pass.
 - **Defense-in-depth write containment.** `MarkdownWriter` now rejects any
-  write target that resolves outside the configured memory root before reading,
-  creating parent directories, or writing files. The API layer maps this
-  backstop error to HTTP 400.
+  write target that resolves outside the configured memory root, before any
+  filesystem touch (both the write `mkdir` and the append read-modify-write
+  read). This backstop holds even if an identifier reaches the writer
+  unsanitised (e.g. an `owner_id` set in the extract pipeline rather than from
+  the DTO). The API layer maps the resulting error to HTTP 400.
 
 ### Documentation
 
 - Add a multimodal usage guide and correct the multimodal error semantics
   after end-to-end verification.
-- Document the upcoming Knowledge Wiki and idle/offline Reflection/Dreaming
-  roadmap in the README and documentation set.
-- Rename outdated algorithm-library references to `everalgo` across docs and
-  code comments; no code identifiers changed.
-- Fix accuracy drift found in a documentation audit; reflect the `everalgo`
-  packages being published and the v1.0.0 stable status.
+- Rename the algorithm library from the previous package name to `everalgo`
+  across docs and code comments (no code identifiers changed).
+- Fix accuracy drift found in an adversarial doc audit; reflect the
+  `everalgo` packages being published and the v1.0.0 stable status.
 
 ## [1.0.0] - 2026-06-03
 
@@ -60,6 +163,7 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.0.1...HEAD
-[1.0.1]: https://github.com/EverMind-AI/EverOS/releases/tag/v1.0.1
-[1.0.0]: https://github.com/EverMind-AI/EverOS/releases/tag/v1.0.0
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/EverMind-AI/everos/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/EverMind-AI/everos/releases/tag/v1.0.1
+[1.0.0]: https://github.com/EverMind-AI/everos/releases/tag/v1.0.0

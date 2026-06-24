@@ -42,6 +42,7 @@ def test_minimal_request_uses_hybrid_default() -> None:
     assert req.include_profile is False
     assert req.filters is None
     assert req.radius is None
+    assert req.min_score is None
 
 
 def test_top_k_zero_rejected() -> None:
@@ -75,6 +76,18 @@ def test_radius_out_of_range_rejected() -> None:
         SearchRequest(**_minimal_request_kwargs(), radius=1.5)
     with pytest.raises(ValidationError):
         SearchRequest(**_minimal_request_kwargs(), radius=-0.1)
+
+
+def test_min_score_out_of_range_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SearchRequest(**_minimal_request_kwargs(), min_score=1.5)
+    with pytest.raises(ValidationError):
+        SearchRequest(**_minimal_request_kwargs(), min_score=-0.1)
+
+
+def test_min_score_in_range_accepted() -> None:
+    req = SearchRequest(**_minimal_request_kwargs(), min_score=0.4)
+    assert req.min_score == 0.4
 
 
 def test_neither_user_id_nor_agent_id_rejected() -> None:
@@ -127,7 +140,6 @@ def test_response_default_arrays_present() -> None:
     assert resp.data.profiles == []
     assert resp.data.agent_cases == []
     assert resp.data.agent_skills == []
-    assert resp.data.unprocessed_messages == []
 
 
 def test_method_enum_serialises_to_lowercase() -> None:

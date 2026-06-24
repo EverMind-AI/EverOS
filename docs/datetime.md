@@ -66,8 +66,8 @@ All helpers live in [`everos.component.utils.datetime`](../src/everos/component/
 | Helper | Behaviour |
 |---|---|
 | `get_utc_now() -> datetime` | Current UTC instant, `tzinfo=UTC`. Independent of any setting. Use as `default_factory` on any storage field. |
-| `ensure_utc(d) -> datetime` | Naive → attach display tz → convert to UTC. Aware → `astimezone(UTC)`. Use at the storage boundary if you receive a datetime you didn't construct. |
-| `UtcDatetime` | `Annotated[datetime, AfterValidator(ensure_utc)]`. Apply to any SQLite field. Pydantic auto-runs validation on both INSERT defaults and read-back rows. |
+| `ensure_utc(d) -> datetime \| None` | Naive → **assume UTC** (attach `tzinfo=UTC`; no display-tz step). Aware → `astimezone(UTC)`. `None` → `None`. Use at the storage boundary; for caller input that may be naive-in-display-tz, funnel through `from_iso_format` first. |
+| `UtcDatetime` | `Annotated[datetime, AfterValidator(ensure_utc)]` — normalises on **construction**. The ORM hydrate path bypasses it; UTC-on-read is handled by the `UtcDateTimeColumn` SQL type (below). |
 
 ### Display rail
 
@@ -107,8 +107,9 @@ SQLModel's ORM hydrate path (rows from `select(...)`) **bypasses**
 the Pydantic validator — SQLAlchemy assigns column values straight
 to instance attributes. To close that gap,
 [core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py)
-registers a SQLAlchemy `load` event listener that re-attaches
-`tzinfo=UTC` to every `UtcDatetime` column after hydrate. Net effect:
+defines a `TypeDecorator` column type, `UtcDateTimeColumn`, whose
+`process_result_value` re-attaches `tzinfo=UTC` on read (and
+`process_bind_param` normalises to UTC on write). Net effect:
 **callers never see a naive datetime from a SQLite repo**, whatever
 the code path.
 
@@ -154,8 +155,8 @@ event payload.
 
 | Backend | Defense | Where |
 |---|---|---|
-| **SQLite** | SQLAlchemy `load` event listener on `BaseTable` re-attaches `tzinfo=UTC` after every ORM hydrate | [core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py) |
-| **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites `UTC_DATETIME_FIELDS` columns to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [core/persistence/lancedb/base.py](../src/everos/core/persistence/lancedb/base.py) |
+| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py) |
+| **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites **every** `timestamp[us]` column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [core/persistence/lancedb/base.py](../src/everos/core/persistence/lancedb/base.py) |
 | **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `component/utils/datetime` | wired into `make lint` |
 
 These defenses replace what used to be an "every consumer must call
@@ -176,9 +177,10 @@ User input (any zone)
         ▼
 ┌────────────────┬────────────────┐
 │   SQLite       │   LanceDB      │
-│  (UtcDatetime  │   (Arrow       │
-│   re-attaches  │   stripped to  │
-│   UTC on read) │   UTC bytes)   │
+│ (UtcDateTime-  │   (Arrow       │
+│  Column re-    │   stripped to  │
+│  attaches UTC  │   UTC bytes)   │
+│  on read)      │                │
 └────────────────┴────────────────┘
         │
         ▼

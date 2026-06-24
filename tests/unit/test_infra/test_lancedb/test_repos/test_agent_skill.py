@@ -52,7 +52,7 @@ def _skill_row(
 @pytest.fixture
 async def _real_lancedb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Spin up a clean LanceDB rooted under ``tmp_path`` for one test."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
     yield

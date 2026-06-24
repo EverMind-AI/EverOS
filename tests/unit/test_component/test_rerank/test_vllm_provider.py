@@ -7,7 +7,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from everos.component.rerank import RerankError, VllmRerankProvider
+from everos.component.rerank import RerankServiceError, VllmRerankProvider
 
 
 def _patch_httpx(
@@ -126,7 +126,7 @@ async def test_4xx_raises_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     p = VllmRerankProvider(
         model="m", api_key="bad", base_url="http://x/v1", max_retries=3
     )
-    with pytest.raises(RerankError, match="HTTP 401"):
+    with pytest.raises(RerankServiceError, match="HTTP 401"):
         await p.rerank("q", ["a"])
     assert state["calls"] == 1
 
@@ -153,7 +153,7 @@ async def test_5xx_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _patch_httpx(monkeypatch, handler)
     p = VllmRerankProvider(model="m", api_key="", base_url="http://x/v1", max_retries=1)
-    with pytest.raises(RerankError, match="HTTP 500"):
+    with pytest.raises(RerankServiceError, match="HTTP 500"):
         await p.rerank("q", ["a"])
 
 
@@ -163,7 +163,7 @@ async def test_transport_error_exhausts(monkeypatch: pytest.MonkeyPatch) -> None
 
     _patch_httpx(monkeypatch, handler)
     p = VllmRerankProvider(model="m", api_key="", base_url="http://x/v1", max_retries=1)
-    with pytest.raises(RerankError, match="transport failure"):
+    with pytest.raises(RerankServiceError, match="transport failure"):
         await p.rerank("q", ["a"])
 
 
@@ -173,7 +173,7 @@ async def test_malformed_results_missing_key(monkeypatch: pytest.MonkeyPatch) ->
 
     _patch_httpx(monkeypatch, handler)
     p = VllmRerankProvider(model="m", api_key="", base_url="http://x/v1")
-    with pytest.raises(RerankError, match="missing results"):
+    with pytest.raises(RerankServiceError, match="missing results"):
         await p.rerank("q", ["a"])
 
 
@@ -183,5 +183,5 @@ async def test_malformed_result_entry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _patch_httpx(monkeypatch, handler)
     p = VllmRerankProvider(model="m", api_key="", base_url="http://x/v1")
-    with pytest.raises(RerankError, match="malformed rerank result"):
+    with pytest.raises(RerankServiceError, match="malformed rerank result"):
         await p.rerank("q", ["a"])

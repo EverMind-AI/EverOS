@@ -5,7 +5,7 @@ Public API:
         Settings, MemorySettings, SqliteSettings, LanceDBSettings,
         LLMSettings, EmbeddingSettings, RerankSettings,
         BoundaryDetectionSettings,
-        load_settings,
+        load_settings, resolve_root,
     )
 
 Distinct from ``everos.component.config`` (which is a *capability* —
@@ -22,6 +22,7 @@ from .settings import RerankSettings as RerankSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
 from .settings import load_settings as load_settings
+from .settings import resolve_root as resolve_root
 
 __all__ = [
     "BoundaryDetectionSettings",
@@ -34,4 +35,5 @@ __all__ = [
     "Settings",
     "SqliteSettings",
     "load_settings",
+    "resolve_root",
 ]

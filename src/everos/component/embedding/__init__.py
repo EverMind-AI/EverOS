@@ -4,7 +4,8 @@
 Public surface:
 
 - :class:`EmbeddingProvider` — Protocol every provider satisfies.
-- :class:`EmbeddingError` — provider-side failure.
+- :class:`EmbeddingServiceError` — provider-side failure.
+- :class:`EmbeddingError` — backward-compat alias for ``EmbeddingServiceError``.
 - :class:`OpenAIEmbeddingProvider` — concrete provider for any
   OpenAI-protocol embeddings endpoint (DeepInfra, vLLM, OpenAI, …).
 - :func:`build_embedding_provider` — settings-driven factory.
@@ -15,6 +16,8 @@ External usage::
     provider = build_embedding_provider(settings.embedding)
     vec = await provider.embed("hello")
 """
+
+from everos.core.errors import EmbeddingServiceError as EmbeddingServiceError
 
 from .accessor import EmbeddingNotConfiguredError as EmbeddingNotConfiguredError
 from .accessor import get_embedder as get_embedder
@@ -27,6 +30,7 @@ __all__ = [
     "EmbeddingError",
     "EmbeddingNotConfiguredError",
     "EmbeddingProvider",
+    "EmbeddingServiceError",
     "OpenAIEmbeddingProvider",
     "build_embedding_provider",
     "get_embedder",

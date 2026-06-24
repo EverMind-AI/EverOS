@@ -56,6 +56,7 @@ class RunRecord(BaseModel):
         ),
     ]
     max_retries_snapshot: Annotated[int, Field(ge=0)]
+    event_id: str = ""
 
     @model_validator(mode="after")
     def _check_status_invariants(self) -> Self:

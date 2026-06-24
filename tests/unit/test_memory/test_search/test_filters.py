@@ -17,7 +17,8 @@ def test_no_filters_emits_base_clause() -> None:
     where = compile_filters(None, owner_id="alice", owner_type="user")
     assert where == (
         "owner_id = 'alice' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default'"
+        "AND app_id = 'default' AND project_id = 'default' "
+        "AND deprecated_by IS NULL"
     )
 
 
@@ -240,5 +241,14 @@ def test_empty_and_array_skips_combinator() -> None:
     where = compile_filters(node, owner_id="alice", owner_type="user")
     assert where == (
         "owner_id = 'alice' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default'"
+        "AND app_id = 'default' AND project_id = 'default' "
+        "AND deprecated_by IS NULL"
     )
+
+
+# ── Deprecated exclusion ──────────────────────────────────────────────
+
+
+def test_compile_filters_excludes_deprecated_by_default() -> None:
+    result = compile_filters(None, owner_id="u_a", owner_type="user")
+    assert "deprecated_by IS NULL" in result

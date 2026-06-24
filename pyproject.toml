@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.0.1"
+version = "1.1.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -39,6 +39,7 @@ dependencies = [
 
     # Web framework (entrypoints/api)
     "fastapi>=0.104.0",
+    "python-multipart>=0.0.7",    # Required by FastAPI for Form / UploadFile endpoints
     "uvicorn[standard]>=0.24.0",
 
     # Observability (core/observability)
@@ -59,15 +60,14 @@ dependencies = [
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
     # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-core==0.2.0",
-    "everalgo-boundary==0.2.0",
-    "everalgo-user-memory==0.2.0",
-    "everalgo-agent-memory==0.2.0",
-    "everalgo-rank==0.3.0",
+    "everalgo-user-memory==0.3.1",
+    "everalgo-agent-memory==0.3.1",
+    "everalgo-rank==0.4.1",
+    "everalgo-knowledge==0.1.1",
 ]
 
 [project.optional-dependencies]
-multimodal = ["everalgo-parser[svg]>=0.1.0"]  # [svg] bundles cairosvg → SVG works by default
+multimodal = ["everalgo-parser[svg]>=0.2.1"]  # [svg] bundles cairosvg → SVG works by default
 
 [build-system]
 requires = ["hatchling"]
@@ -136,6 +136,21 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short -m 'not slow and not live_llm'"
+filterwarnings = [
+    "error",
+    # jieba 0.42.1: unescaped backslashes in regex strings (upstream
+    # unmaintained; no fix available).  Python 3.12 emits
+    # SyntaxWarning for invalid escape sequences.
+    "ignore:invalid escape sequence:SyntaxWarning",
+    # aiosqlite teardown: connection-worker thread and Connection.__del__
+    # raise after pytest closes the event loop.  Upstream issue
+    # (aiosqlite + pytest-asyncio); we cannot fix their lifecycle.
+    "ignore:Exception in thread.*_connection_worker_thread:pytest.PytestUnhandledThreadExceptionWarning",
+    # aiosqlite + asyncio teardown: Connection.__del__ and
+    # BaseEventLoop.__del__ fire after pytest closes the event loop.
+    # Upstream lifecycle issue; we cannot fix their cleanup order.
+    "ignore:Exception ignored.*:pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "slow: runs that take >=10s (regardless of dependency); CI default excludes these. Run with `pytest -m slow`.",
     "live_llm: requires real LLM / embedder / reranker credentials from .env; burns tokens. CI default excludes. Run with `pytest -m live_llm`.",

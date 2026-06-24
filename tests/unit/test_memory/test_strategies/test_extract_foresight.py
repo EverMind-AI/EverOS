@@ -59,7 +59,7 @@ def _event() -> UserPipelineStarted:
 
 
 async def test_strategy_meta_is_attached() -> None:
-    meta = extract_foresight._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = extract_foresight.meta
     assert meta.name == "extract_foresight"
     assert UserPipelineStarted in meta.trigger.on
     assert meta.emits == frozenset()

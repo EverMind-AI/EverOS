@@ -309,12 +309,12 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
 # ── Metadata bridge to the everalgo _format_docs contract ──────────────────
 
 
-def test_to_everalgo_doc_metadata_injects_text_and_ms_timestamp() -> None:
-    """Bridge adds `text` (episode body) + ms-epoch `timestamp` for _format_docs.
+def test_to_everalgo_doc_metadata_bridges_episode_and_timestamp() -> None:
+    """Bridge restructures episode to dict and converts timestamp to ms-epoch.
 
-    Without this the sufficiency / multi-query LLM prompt falls back to the
-    memcell id as the doc body and renders the date as "N/A". ``episode`` is
-    left untouched so the reranker / shaper (both expecting a str) keep working.
+    ``_format_docs`` expects ``metadata["episode"] = {"subject": ..., "content": ...}``
+    and a ms-epoch ``timestamp``. The flat ``episode`` string is also kept as
+    ``text`` for the reranker.
     """
     original = _ts()
     md = {
@@ -324,15 +324,21 @@ def test_to_everalgo_doc_metadata_injects_text_and_ms_timestamp() -> None:
     }
     out = _to_everalgo_doc_metadata(md)
     assert out["text"] == "Alice prefers oat milk"
-    assert out["episode"] == "Alice prefers oat milk"  # untouched for rerank/shaper
+    assert out["episode"] == {
+        "subject": "Alice eats oat milk",
+        "content": "Alice prefers oat milk",
+    }
     assert isinstance(out["timestamp"], int)
     assert from_timestamp(out["timestamp"]) == original
 
 
-def test_restore_shaper_metadata_reverts_ms_timestamp_to_datetime() -> None:
-    """The ms-epoch timestamp is reverted to the datetime the shaper requires."""
+def test_restore_shaper_metadata_reverts_bridged_fields() -> None:
+    """Restore reverts both ms-epoch timestamp and dict episode to shaper format."""
     original = _ts()
-    bridged = _to_everalgo_doc_metadata({"episode": "x", "timestamp": original})
+    bridged = _to_everalgo_doc_metadata(
+        {"episode": "x", "timestamp": original, "subject": "s"}
+    )
     restored = _restore_shaper_metadata(bridged)
     assert isinstance(restored["timestamp"], _dt.datetime)
     assert restored["timestamp"] == original
+    assert restored["episode"] == "x"

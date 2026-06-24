@@ -3,14 +3,13 @@
 Loaded by :func:`load_settings`. Source priority (later wins):
 
     1. ``config/default.toml`` (shipped values; lowest priority)
-    2. ``~/.everos/config.toml`` (user-level overrides; optional)
-    3. ``.env`` file in the working directory (secrets / machine-specific)
-    4. ``EVEROS_<SECTION>__<KEY>`` environment variables
-    5. Init args passed programmatically (highest priority)
+    2. ``<root>/everos.toml`` (user config; optional; ``<root>`` resolved by
+       :func:`resolve_root`)
+    3. ``EVEROS_<SECTION>__<KEY>`` environment variables
+    4. Init args passed programmatically (highest priority)
 
-The user-level toml path defaults to ``~/.everos/config.toml``. Override
-with the ``EVEROS_CONFIG_FILE`` environment variable. The file is
-optional — if it does not exist, the source is silently skipped.
+The memory root is resolved by :func:`resolve_root`:
+``explicit arg > EVEROS_ROOT env > ~/.everos``.
 
 The settings tree mirrors the TOML structure: ``settings.sqlite.busy_timeout_ms``
 maps to ``[sqlite].busy_timeout_ms`` and to ``EVEROS_SQLITE__BUSY_TIMEOUT_MS``.
@@ -29,7 +28,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -38,24 +37,31 @@ from pydantic_settings import (
 )
 
 _DEFAULT_TOML_PATH = Path(__file__).parent / "default.toml"
-_USER_TOML_ENV_VAR = "EVEROS_CONFIG_FILE"
-_DEFAULT_USER_TOML_PATH = Path("~/.everos/config.toml").expanduser()
+_DEFAULT_ROOT = Path("~/.everos")
 
 
-def _resolve_user_toml_path() -> Path:
-    """Resolve the user-level ``config.toml`` path.
+def resolve_root(explicit: str | None = None) -> Path:
+    """Resolve the memory-root path.
 
-    Defaults to ``~/.everos/config.toml``; override with the
-    ``EVEROS_CONFIG_FILE`` environment variable.
+    Priority: explicit arg > EVEROS_ROOT env > ~/.everos default.
+
+    Args:
+        explicit: Caller-supplied path string (e.g. from ``--root`` CLI flag).
+
+    Returns:
+        Absolute resolved path to the memory root.
     """
-    override = os.environ.get(_USER_TOML_ENV_VAR)
-    return Path(override).expanduser() if override else _DEFAULT_USER_TOML_PATH
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    from_env = os.environ.get("EVEROS_ROOT")
+    if from_env:
+        return Path(from_env).expanduser().resolve()
+    return _DEFAULT_ROOT.expanduser().resolve()
 
 
 class MemorySettings(BaseModel):
-    """memory-root configuration."""
+    """Memory configuration."""
 
-    root: Path = Path("~/.everos")
     timezone: str = "UTC"
     """Effective timezone for date buckets and timestamps.
 
@@ -123,7 +129,7 @@ class LLMSettings(BaseModel):
         EVEROS_LLM__BASE_URL
     """
 
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-4.1-mini"
     api_key: SecretStr | None = None
     base_url: str | None = None
 
@@ -258,6 +264,18 @@ class MemorizeSettings(BaseModel):
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
 
 
+class ClusteringSettings(BaseModel):
+    """Geometry-clustering tunables.
+
+    Env binding:
+        EVEROS_CLUSTERING__THRESHOLD
+        EVEROS_CLUSTERING__TIME_WINDOW_DAYS
+    """
+
+    threshold: float = Field(default=0.65, gt=0, le=1)
+    time_window_days: float = Field(default=7.0, gt=0)
+
+
 class SearchSettings(BaseModel):
     """Search-pipeline policy knobs.
 
@@ -343,6 +361,25 @@ class LanceDBSettings(BaseModel):
     index_cache_size_bytes: int = 16 * 1024 * 1024
 
 
+class KnowledgeSearchSettings(BaseModel):
+    """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
+
+    recall_n: int = 200
+    rerank_n: int = 50
+    mass_top_m: int = 50
+    lam: float = Field(0.1, alias="lambda")
+    top_k_cap: int = 100
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class KnowledgeSettings(BaseModel):
+    """``[knowledge]`` — knowledge module configuration."""
+
+    max_upload_bytes: int = 52_428_800  # 50 MiB
+    search: KnowledgeSearchSettings = KnowledgeSearchSettings()
+
+
 class Settings(BaseSettings):
     """Top-level application settings."""
 
@@ -355,17 +392,43 @@ class Settings(BaseSettings):
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
+    clustering: ClusteringSettings = ClusteringSettings()
     search: SearchSettings = SearchSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
+    knowledge: KnowledgeSettings = KnowledgeSettings()
 
     model_config = SettingsConfigDict(
         env_prefix="EVEROS_",
         env_nested_delimiter="__",
-        env_file=".env",
-        env_file_encoding="utf-8",
         toml_file=_DEFAULT_TOML_PATH,
         extra="ignore",
     )
+
+    def __init__(self, *, _everos_root: Path | None = None, **kwargs: object) -> None:
+        """Initialise settings, optionally pinning the memory-root for testing.
+
+        Args:
+            _everos_root: Override the memory root used to locate
+                ``everos.toml``. Intended for tests only; pass ``None``
+                (the default) in production to use :func:`resolve_root`.
+            **kwargs: Forwarded verbatim to :class:`pydantic_settings.BaseSettings`.
+        """
+        if _everos_root is not None:
+            # Temporarily inject EVEROS_ROOT so that settings_customise_sources
+            # (a classmethod that cannot access instance state) picks it up via
+            # resolve_root().  We restore the original value after super().__init__
+            # returns to avoid leaking the override into the process environment.
+            _prev = os.environ.get("EVEROS_ROOT")
+            os.environ["EVEROS_ROOT"] = str(_everos_root)
+            try:
+                super().__init__(**kwargs)
+            finally:
+                if _prev is None:
+                    os.environ.pop("EVEROS_ROOT", None)
+                else:
+                    os.environ["EVEROS_ROOT"] = _prev
+        else:
+            super().__init__(**kwargs)
 
     @classmethod
     def settings_customise_sources(
@@ -376,26 +439,18 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Layer TOML sources between env / dotenv and the secret store.
-
-        Order (earlier wins in pydantic-settings):
-            init_args > env > .env > user_toml > default_toml > secrets
-
-        The user-level toml (default ``~/.everos/config.toml``) is only
-        registered when the file exists, so the source list stays tight.
-        """
+        """Source order: init_args > env_vars > everos.toml > default.toml."""
         sources: list[PydanticBaseSettingsSource] = [
             init_settings,
             env_settings,
-            dotenv_settings,
         ]
-        user_toml_path = _resolve_user_toml_path()
-        if user_toml_path.is_file():
+        # Attempt to load <root>/everos.toml if it exists.
+        everos_toml = resolve_root() / "everos.toml"
+        if everos_toml.is_file():
             sources.append(
-                TomlConfigSettingsSource(settings_cls, toml_file=user_toml_path)
+                TomlConfigSettingsSource(settings_cls, toml_file=everos_toml)
             )
-        sources.append(TomlConfigSettingsSource(settings_cls))
-        sources.append(file_secret_settings)
+        sources.append(TomlConfigSettingsSource(settings_cls))  # default.toml
         return tuple(sources)
 
 

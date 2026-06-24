@@ -10,15 +10,21 @@ every registered table.
 from .cluster import Cluster as Cluster
 from .cluster import ClusterMember as ClusterMember
 from .conversation_status import ConversationStatus as ConversationStatus
+from .knowledge import KnowledgeDocumentRow as KnowledgeDocumentRow
+from .knowledge import KnowledgeTopicRow as KnowledgeTopicRow
 from .md_change_state import MdChangeState as MdChangeState
 from .memcell import Memcell as Memcell
+from .reflection_report import ReflectionReport as ReflectionReport
 from .unprocessed_buffer import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
     "Cluster",
     "ClusterMember",
     "ConversationStatus",
+    "KnowledgeDocumentRow",
+    "KnowledgeTopicRow",
     "MdChangeState",
     "Memcell",
+    "ReflectionReport",
     "UnprocessedBuffer",
 ]

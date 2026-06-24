@@ -25,9 +25,12 @@ layer 3 is supplied at the call site.
 
 ## Loader
 
-The category loader lives at
-[`src/everos/component/config/loader.py`](../src/everos/component/config/loader.py)
-as `YamlConfigLoader`:
+The prompt-slots public entry point is
+[`PromptLoader`](../src/everos/memory/prompt_slots/loader.py) (re-exported
+from `everos.memory.prompt_slots`); it wraps the generic category loader
+[`YamlConfigLoader`](../src/everos/component/config/loader.py). The generic
+loader is shown below — `PromptLoader` is the prompt-slots-specific wrapper
+over the same mechanism:
 
 ```python
 from pathlib import Path
@@ -68,7 +71,7 @@ output_schema:
     participants: { type: array }
 
 llm:
-  model: gpt-4o-mini
+  model: gpt-4.1-mini
   temperature: 0.3
   max_tokens: 2000
 
@@ -106,6 +109,7 @@ forcing one model on the other gets clunky.
 
 ## See also
 
-- [`src/everos/component/config/loader.py`](../src/everos/component/config/loader.py)
+- [`src/everos/memory/prompt_slots/`](../src/everos/memory/prompt_slots/) — `PromptLoader` (prompt-slots public API)
+- [`src/everos/component/config/loader.py`](../src/everos/component/config/loader.py) — generic `YamlConfigLoader`
 - [`tests/unit/test_component/test_config/test_loader.py`](../tests/unit/test_component/test_config/test_loader.py)
 - [`docs/architecture.md`](architecture.md) — layer placement

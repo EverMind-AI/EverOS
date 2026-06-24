@@ -1,4 +1,4 @@
-"""Tests for :mod:`everos.memory.strategies._partition_locks`.
+"""Tests for :mod:`everos.memory._partition_locks`.
 
 The helper is the foundation under every strategy that performs a
 read → modify → write on shared state; its own behaviour (lock reuse,
@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from everos.memory.strategies._partition_locks import (
+from everos.memory._partition_locks import (
     _reset_for_tests,
     get_partition_lock,
 )
