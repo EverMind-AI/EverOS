@@ -29,6 +29,7 @@ from everos.infra.ome.triggers import Immediate
 from everos.infra.persistence.markdown import ForesightWriter
 from everos.memory.events import UserPipelineStarted
 from everos.memory.models import Foresight
+from everos.memory.strategies._sender_utils import collect_user_sender_ids
 
 logger = get_logger(__name__)
 
@@ -51,7 +52,7 @@ def _get_writer() -> ForesightWriter:
 async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
     # 1. List the user senders in this memcell.
     memcell = event.memcell
-    sender_ids = sorted({m.sender_id for m in memcell.items if m.role == "user"})
+    sender_ids = collect_user_sender_ids(memcell)
     extractor = ForesightExtractor(llm=get_llm_client()) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).

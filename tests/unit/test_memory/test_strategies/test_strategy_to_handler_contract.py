@@ -19,7 +19,14 @@ from unittest.mock import AsyncMock, patch
 
 import anyio
 import pytest
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
+from everalgo.types import (
+    AgentCase,
+    AtomicFact,
+    ChatMessage,
+    Foresight,
+    MemCell,
+    ToolCallRequest,
+)
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
@@ -71,6 +78,37 @@ def _event(owner_id: str) -> UserPipelineStarted:
                 ),
             ],
             timestamp=1_700_000_000_000,
+        ),
+    )
+
+
+def _event_with_tool_call_request(owner_id: str) -> UserPipelineStarted:
+    return UserPipelineStarted(
+        memcell_id="mc_tool_call",
+        session_id="s1",
+        memcell=MemCell(
+            items=[
+                ChatMessage(
+                    id="m1",
+                    role="user",
+                    content="hi",
+                    timestamp=1_700_000_000_000,
+                    sender_id=owner_id,
+                ),
+                ToolCallRequest(
+                    tool_calls=[
+                        {
+                            "id": "tc1",
+                            "type": "function",
+                            "function": {"name": "search", "arguments": "{}"},
+                        }
+                    ],
+                    content="calling tool",
+                    timestamp=1_700_000_001_000,
+                    sender_id="agent_42",
+                ),
+            ],
+            timestamp=1_700_000_001_000,
         ),
     )
 
@@ -197,6 +235,96 @@ async def test_foresight_strategy_md_feeds_handler_with_content(
     assert row.evidence == "said so explicitly"
     assert row.evidence_tokens == "said so explicitly"
     assert len(row.vector) == 1024
+
+
+async def test_atomic_fact_strategy_accepts_tool_call_request_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User-side extraction skips tool-call items that do not expose ``role``."""
+    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
+    monkeypatch.setattr(
+        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+    )
+    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
+
+    facts = [
+        AtomicFact(
+            owner_id="u_alice",
+            content="alice likes hiking",
+            timestamp=1_700_000_000_000,
+        ),
+    ]
+    with (
+        patch(
+            "everos.memory.strategies.extract_atomic_facts.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
+        ) as mock_ext,
+    ):
+        mock_ext.return_value.aextract = AsyncMock(return_value=facts)
+        await extract_atomic_facts(
+            _event_with_tool_call_request("u_alice"), FakeStrategyContext()
+        )
+
+    handler = AtomicFactHandler(
+        HandlerDeps(
+            memory_root=MemoryRoot(root=tmp_path),
+            embedder=_StubEmbedder(),
+            tokenizer=_StubTokenizer(),
+        )
+    )
+    row = await _build_row_from_md(
+        handler, tmp_path, "*/*/users/u_alice/.atomic_facts/atomic_fact-*.md"
+    )
+    assert row.fact == "alice likes hiking"
+
+
+async def test_foresight_strategy_accepts_tool_call_request_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User-side extraction skips tool-call items that do not expose ``role``."""
+    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    monkeypatch.setattr(
+        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+    )
+    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
+
+    foresights = [
+        Foresight(
+            owner_id="u_alice",
+            foresight="plans trip to tokyo",
+            evidence="said so explicitly",
+            timestamp=1_700_000_000_000,
+        ),
+    ]
+    with (
+        patch(
+            "everos.memory.strategies.extract_foresight.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_foresight.ForesightExtractor"
+        ) as mock_ext,
+    ):
+        mock_ext.return_value.aextract = AsyncMock(return_value=foresights)
+        await extract_foresight(
+            _event_with_tool_call_request("u_alice"), FakeStrategyContext()
+        )
+
+    handler = ForesightHandler(
+        HandlerDeps(
+            memory_root=MemoryRoot(root=tmp_path),
+            embedder=_StubEmbedder(),
+            tokenizer=_StubTokenizer(),
+        )
+    )
+    row = await _build_row_from_md(
+        handler, tmp_path, "*/*/users/u_alice/.foresights/foresight-*.md"
+    )
+    assert row.foresight == "plans trip to tokyo"
+    assert row.evidence == "said so explicitly"
 
 
 def _agent_event() -> AgentPipelineStarted:
