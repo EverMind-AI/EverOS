@@ -143,6 +143,10 @@ dmypy.json
 .trae/
 .cursor/
 
+# AI agent tooling (local agent skills/config, not part of the project)
+.agents/
+AGENTS.md
+
 # Claude Code: track team-shared rules/skills/settings; ignore personal + runtime
 .claude/*
 !.claude/rules/
