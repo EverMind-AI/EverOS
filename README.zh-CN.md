@@ -126,15 +126,16 @@ uv pip install everos
 everos demo
 ```
 
-这个命令会询问一条记忆和一个召回问题，然后打开一个全屏 terminal UI。
-这是一个 educational visualizer：它是 hardcoded 的，只在 CLI 本地运行，
-不会连接 EverOS server。它的作用是把 memory lifecycle 变成可感知的过程：
+全屏 terminal UI 里带有一个输入框：你直接在 UI 里输入一条记忆，再输入一个
+召回问题。每一轮都会对 EverMind 托管的 demo server 跑真实的 memory pipeline
+（key 在服务端，本地无需任何 API keys），各面板跟着你自己的输入更新：
 conversation -> memory sphere -> recall -> source proof -> confetti。Demo
 范围和 TUI 代码结构见 [docs/everos-demo.md](docs/everos-demo.md)。
 
 Sphere 会经历 ingest、extraction、indexing、recall、source reveal，
 并在第一条记忆落地后进入 confetti successful moment。按 `r` 可以 replay，
-按 `q` 可以退出。
+按 `q` 可以退出。几轮之后，demo 会引导你去配置自己的 key
+（`everos init`，然后 `everos demo --live`）。
 
 <p align="center">
   <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">

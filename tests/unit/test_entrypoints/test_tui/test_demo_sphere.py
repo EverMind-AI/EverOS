@@ -89,7 +89,7 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     assert len(highlighted) == 1
     assert _is_braille_cell(highlighted[0].glyph)
     assert highlighted[0].style == "#F9B91C"
-    assert frame.caption == "remembered Yosemite preference"
+    assert frame.caption == "found the matching memory"
 
 
 def test_dot_sphere_celebrating_state_bursts_into_confetti() -> None:

@@ -126,16 +126,18 @@ Run this before configuring API keys or starting the server:
 everos demo
 ```
 
-The command asks for one memory and one recall question, then opens a
-full-screen terminal UI. This is an educational visualizer: it is hardcoded,
-local to the CLI, and does not connect to the EverOS server. Its job is to make
-the memory lifecycle visible: conversation -> memory sphere -> recall -> source
-proof -> confetti. See [docs/everos-demo.md](docs/everos-demo.md) for the demo
-scope and TUI source layout.
+The full-screen terminal UI has an input box: type a memory, then a recall
+question, directly in the UI. Each round runs the real memory pipeline against
+EverMind's hosted demo server (keys live server-side, so you need no local
+keys), and the panels follow your own input: conversation -> memory sphere ->
+recall -> source proof -> confetti. See
+[docs/everos-demo.md](docs/everos-demo.md) for the demo scope and TUI source
+layout.
 
 The sphere moves through ingest, extraction, indexing, recall, source reveal,
 and a confetti burst after the first memory lands. Press `r` to replay and `q`
-to quit.
+to quit. After a few rounds the demo points you at configuring your own keys
+(`everos init`, then `everos demo --live`).
 
 <p align="center">
   <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">

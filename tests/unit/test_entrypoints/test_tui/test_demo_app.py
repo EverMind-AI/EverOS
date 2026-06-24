@@ -18,8 +18,19 @@ from everos.entrypoints.tui.demo.app import (
     _source_tree_text,
     _sphere_caption,
 )
-from everos.entrypoints.tui.demo.data import build_demo_story
+from everos.entrypoints.tui.demo.data import DemoStory
 from everos.entrypoints.tui.demo.widgets.sphere import SPHERE_STATES
+
+
+def _story(memory: str, query: str, answer: str) -> DemoStory:
+    return DemoStory(
+        owner="you",
+        memory=memory,
+        query=query,
+        answer=answer,
+        source_filename="episode-demo.md",
+        fact_filename="atomic_fact-demo.md",
+    )
 
 
 def test_demo_tui_uses_poster_derived_brand_palette() -> None:
@@ -92,9 +103,10 @@ def test_demo_tui_celebrates_after_source_reveal() -> None:
 
 
 def test_demo_tui_renders_playable_story_copy() -> None:
-    story = build_demo_story(
+    story = _story(
         "I keep my Monday design review notes in Notion.",
         "Where are my Monday review notes?",
+        "In Notion.",
     )
 
     assert "user=you" in _field_header_text(story).plain
@@ -114,6 +126,98 @@ def test_demo_tui_signal_rail_keeps_source_status_columns_separate() -> None:
     assert "mdattached" not in rail
     assert "md7 nodes" not in rail
     assert "..." in rail
+
+
+async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> None:
+    from textual.widgets import Input
+
+    from everos.entrypoints.tui.demo import cloud
+
+    def fake_recall(
+        memory: str, query: str, *, base_url: str, session_id: str, user_id: str
+    ) -> DemoStory:
+        # Stand in for the hosted server: echo the real call's identity through.
+        assert base_url == "http://server.test"
+        return _story(memory, query, f"recalled<{memory}>")
+
+    monkeypatch.setattr(cloud, "recall_round", fake_recall)
+
+    app = EverOSDemoApp(
+        interactive=True,
+        max_rounds=2,
+        base_url="http://server.test",
+        session_id="everos-demo-x",
+        user_id="everos_demo_x",
+    )
+    async with app.run_test() as pilot:
+        console_input = app.query_one("#console-input", Input)
+
+        # Round 1: a memory, then a recall query -> a real (faked) cloud round.
+        console_input.value = "我喜欢吃杨梅"
+        await pilot.press("enter")
+        console_input.value = "我喜欢吃什么"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # BUG 305: the panels follow the user's own input, never Yosemite.
+        assert app._story.memory == "我喜欢吃杨梅"
+        assert app._story.query == "我喜欢吃什么"
+        assert app._story.answer == "recalled<我喜欢吃杨梅>"
+        assert "Yosemite" not in app._story.answer
+
+        # Round 2 reaches the cap and locks the input behind the upgrade nudge.
+        console_input.value = "I bike to work"
+        await pilot.press("enter")
+        console_input.value = "How do I commute?"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app._conversation_phase == "done"
+        assert console_input.disabled is True
+
+
+async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
+    from textual.widgets import Input
+
+    from everos.entrypoints.tui.demo import cloud
+    from everos.entrypoints.tui.demo.app import _quota_guidance_text
+
+    def quota(*_: object, **__: object) -> DemoStory:
+        raise cloud.CloudQuotaError("http://server.test")
+
+    monkeypatch.setattr(cloud, "recall_round", quota)
+
+    app = EverOSDemoApp(
+        interactive=True,
+        base_url="http://server.test",
+        session_id="s",
+        user_id="u",
+    )
+    async with app.run_test() as pilot:
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = "a memory"
+        await pilot.press("enter")
+        console_input.value = "a question"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app._conversation_phase == "done"
+        assert console_input.disabled is True
+
+    assert "everos init" in _quota_guidance_text().plain
+
+
+async def test_demo_tui_non_interactive_has_no_input_box() -> None:
+    from textual.css.query import NoMatches
+    from textual.widgets import Input
+
+    app = EverOSDemoApp()
+    async with app.run_test():
+        with pytest.raises(NoMatches):
+            app.query_one("#console-input", Input)
 
 
 def _css_block(css: str, selector: str) -> str:

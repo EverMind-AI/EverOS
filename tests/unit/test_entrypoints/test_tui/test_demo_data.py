@@ -1,29 +1,23 @@
-"""EverOS playable demo story contracts."""
+"""EverOS demo story data contracts."""
 
 from __future__ import annotations
 
 from everos.entrypoints.tui.demo.data import (
     DEFAULT_MEMORY_SEED,
     DEFAULT_QUERY,
-    build_demo_story,
+    DemoStory,
+    default_demo_story,
 )
 
 
-def test_demo_story_preserves_prompted_memory_and_query() -> None:
-    story = build_demo_story(
-        "I keep my Monday design review notes in Notion.",
-        "Where are my Monday review notes?",
-    )
+def test_default_demo_story_is_the_static_showcase() -> None:
+    story = default_demo_story()
 
-    assert story.owner == "you"
-    assert story.memory == "I keep my Monday design review notes in Notion."
-    assert story.query == "Where are my Monday review notes?"
-    assert story.answer == "I keep my Monday design review notes in Notion."
-    assert story.source_filename == "episode-demo.md"
-    assert story.fact_filename == "atomic_fact-demo.md"
-
-
-def test_demo_story_keeps_default_yosemite_success_moment() -> None:
-    story = build_demo_story(DEFAULT_MEMORY_SEED, DEFAULT_QUERY)
-
+    assert isinstance(story, DemoStory)
+    assert story.memory == DEFAULT_MEMORY_SEED
     assert story.answer == "Yosemite every spring"
+    assert story.source_filename == "episode-2026-06-20.md"
+
+
+def test_default_query_constant_is_available() -> None:
+    assert DEFAULT_QUERY

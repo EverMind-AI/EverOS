@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+from functools import partial
+
+import anyio
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Input, Static
 
-from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
+from everos.entrypoints.tui.demo import cloud
+from everos.entrypoints.tui.demo.data import (
+    DEFAULT_MEMORY_SEED,
+    DEFAULT_QUERY,
+    DemoStory,
+    default_demo_story,
+)
 from everos.entrypoints.tui.demo.widgets.sphere import (
     EVEROS_AMBER,
     EVEROS_AMBER_DIM,
@@ -31,6 +40,9 @@ SPHERE_FRAME_WIDTH = 37
 SPHERE_FRAME_HEIGHT = 17
 TERMINAL_CELL_HEIGHT_RATIO = 2.0
 SIGNAL_RAIL_SOURCE_WIDTH = 18
+# Offline default demo: how many memory -> recall rounds a user plays before the
+# TUI nudges them toward the real pipeline (`--cloud` / `--live`).
+DEFAULT_DEMO_ROUNDS = 3
 
 
 class DotSphereWidget(Static):
@@ -174,6 +186,22 @@ class EverOSDemoApp(App[None]):
         content-align: left middle;
     }}
 
+    #console {{
+        height: 4;
+        margin-top: 1;
+    }}
+
+    #console-prompt {{
+        height: 1;
+        padding: 0 1;
+        content-align: left middle;
+    }}
+
+    #console-input {{
+        border: round {EVEROS_AMBER};
+        background: {EVEROS_SURFACE};
+    }}
+
     Footer {{
         background: {EVEROS_BLACK};
         color: {EVEROS_MUTED};
@@ -195,9 +223,26 @@ class EverOSDemoApp(App[None]):
     }}
     """
 
-    def __init__(self, *, story: DemoStory | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        story: DemoStory | None = None,
+        interactive: bool = False,
+        base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
+        session_id: str = cloud.LIVE_DEMO_SESSION_ID,
+        user_id: str = cloud.LIVE_DEMO_USER_ID,
+        max_rounds: int = DEFAULT_DEMO_ROUNDS,
+    ) -> None:
         super().__init__()
         self._story = story or default_demo_story()
+        self._interactive = interactive
+        self._base_url = base_url
+        self._session_id = session_id
+        self._user_id = user_id
+        self._max_rounds = max_rounds
+        self._round = 0
+        self._conversation_phase = "memory"
+        self._pending_memory = ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
@@ -220,7 +265,106 @@ class EverOSDemoApp(App[None]):
                 recall_lock.border_title = "recall lock"
                 yield recall_lock
             yield Static(_payoff_text(self._story), id="payoff")
+            if self._interactive:
+                with Vertical(id="console"):
+                    yield Static(
+                        _prompt_memory_text(self._round, self._max_rounds),
+                        id="console-prompt",
+                    )
+                    yield Input(
+                        placeholder="type a memory and press enter",
+                        id="console-input",
+                    )
             yield Footer(show_command_palette=False)
+
+    def on_mount(self) -> None:
+        if self._interactive:
+            self.query_one("#console-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if not self._interactive or self._conversation_phase in {"recalling", "done"}:
+            return
+        value = event.value.strip()
+        prompt = self.query_one("#console-prompt", Static)
+        field = self.query_one("#console-input", Input)
+        if self._conversation_phase == "memory":
+            self._pending_memory = value or DEFAULT_MEMORY_SEED
+            self._conversation_phase = "query"
+            prompt.update(_prompt_query_text())
+            field.value = ""
+            return
+
+        # Query submitted: run the real cloud round off the event loop so the UI
+        # (sphere animation, input) stays responsive while we wait on the server.
+        query = value or DEFAULT_QUERY
+        self._conversation_phase = "recalling"
+        field.value = ""
+        field.disabled = True
+        prompt.update(_recalling_text())
+        self.run_worker(
+            self._recall(self._pending_memory, query),
+            group="recall",
+            exclusive=True,
+        )
+
+    async def _recall(self, memory: str, query: str) -> None:
+        call = partial(
+            cloud.recall_round,
+            memory,
+            query,
+            base_url=self._base_url,
+            session_id=self._session_id,
+            user_id=self._user_id,
+        )
+        try:
+            story = await anyio.to_thread.run_sync(call)
+        except cloud.CloudQuotaError:
+            self._enter_done(_quota_guidance_text())
+            return
+        except cloud.CloudDemoError as exc:
+            self._show_recall_error(str(exc))
+            return
+        self._on_recall_success(story)
+
+    def _on_recall_success(self, story: DemoStory) -> None:
+        self._apply_story(story)
+        self._round += 1
+        if self._round >= self._max_rounds:
+            self._enter_done(_quota_guidance_text())
+            return
+        self._conversation_phase = "memory"
+        prompt = self.query_one("#console-prompt", Static)
+        prompt.update(_prompt_memory_text(self._round, self._max_rounds))
+        self._reenable_input()
+
+    def _enter_done(self, message: Text) -> None:
+        self._conversation_phase = "done"
+        self.query_one("#console-prompt", Static).update(message)
+        self.query_one("#console-input", Input).disabled = True
+
+    def _show_recall_error(self, message: str) -> None:
+        # Recall failed (server unreachable, unhealthy, or slow). Surface the
+        # reason honestly and let the user retry a fresh round.
+        self._conversation_phase = "memory"
+        self.query_one("#console-prompt", Static).update(_recall_error_text(message))
+        self._reenable_input()
+
+    def _reenable_input(self) -> None:
+        field = self.query_one("#console-input", Input)
+        field.disabled = False
+        field.focus()
+
+    def _apply_story(self, story: DemoStory) -> None:
+        """Refresh every story-driven panel so the demo follows the user's input."""
+
+        self._story = story
+        self.query_one("#field-header", Static).update(_field_header_text(story))
+        self.query_one("#field-answer", Static).update(_sphere_caption(story))
+        self.query_one("#signal-rail", Static).update(_signal_rail_text(story))
+        self.query_one("#source-lock", Static).update(_source_tree_text(story))
+        self.query_one("#recall-lock", Static).update(_recall_proof_text(story))
+        self.query_one("#payoff", Static).update(_payoff_text(story))
+        self.action_replay()
 
     def action_replay(self) -> None:
         widget = self.query_one(DotSphereWidget)
@@ -229,8 +373,56 @@ class EverOSDemoApp(App[None]):
         widget._advance()
 
 
-def run_demo_tui(*, story: DemoStory | None = None) -> None:
-    EverOSDemoApp(story=story).run()
+def run_demo_tui(
+    *,
+    story: DemoStory | None = None,
+    interactive: bool = False,
+    base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
+    session_id: str = cloud.LIVE_DEMO_SESSION_ID,
+    user_id: str = cloud.LIVE_DEMO_USER_ID,
+) -> None:
+    EverOSDemoApp(
+        story=story,
+        interactive=interactive,
+        base_url=base_url,
+        session_id=session_id,
+        user_id=user_id,
+    ).run()
+
+
+def _prompt_memory_text(round_index: int, total_rounds: int) -> Text:
+    if round_index == 0:
+        return Text("What should EverOS remember?", style=f"bold {EVEROS_YELLOW}")
+    return Text.assemble(
+        (f"round {round_index + 1}/{total_rounds}  ", EVEROS_MUTED),
+        ("what should EverOS remember next?", f"bold {EVEROS_YELLOW}"),
+    )
+
+
+def _prompt_query_text() -> Text:
+    return Text("Now ask EverOS to recall it.", style=f"bold {EVEROS_CYAN}")
+
+
+def _recalling_text() -> Text:
+    return Text("recalling from EverOS...", style=f"bold {EVEROS_ORANGE}")
+
+
+def _recall_error_text(message: str) -> Text:
+    return Text.assemble(
+        ("could not reach the demo server  ", f"bold {EVEROS_ORANGE}"),
+        (f"({message})  ", EVEROS_MUTED),
+        ("set EVEROS_CLOUD_DEMO_URL or use --live; type to retry", EVEROS_INK),
+    )
+
+
+def _quota_guidance_text() -> Text:
+    return Text.assemble(
+        ("free demo rounds used up  ", f"bold {EVEROS_YELLOW}"),
+        ("configure your own key -> ", EVEROS_INK),
+        ("everos init", f"bold {EVEROS_GREEN}"),
+        ("  then  ", EVEROS_MUTED),
+        ("everos demo --live", f"bold {EVEROS_GREEN}"),
+    )
 
 
 def _hero_text() -> Text:

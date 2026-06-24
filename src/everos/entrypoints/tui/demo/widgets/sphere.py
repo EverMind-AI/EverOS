@@ -99,7 +99,7 @@ SPHERE_STATES: dict[str, SphereState] = {
     ),
     "remembered": SphereState(
         key="remembered",
-        caption="remembered Yosemite preference",
+        caption="found the matching memory",
         accent=EVEROS_YELLOW,
     ),
     "source": SphereState(
