@@ -58,6 +58,8 @@ def _tracked_paths() -> list[Path]:
 
 def _tracked_text_files() -> Iterable[tuple[str, str]]:
     for path in _tracked_paths():
+        if not path.exists():
+            continue
         if path.suffix.lower() in SKIP_SUFFIXES:
             continue
         try:

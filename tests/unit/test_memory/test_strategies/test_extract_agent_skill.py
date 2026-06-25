@@ -26,12 +26,12 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.component.embedding import (
-    EmbeddingError,
     EmbeddingNotConfiguredError,
+    EmbeddingServiceError,
 )
 from everos.infra.ome.testing import FakeStrategyContext
+from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import SkillClusterUpdated
-from everos.memory.strategies._partition_locks import _reset_for_tests
 from everos.memory.strategies.extract_agent_skill import (
     MAX_SKILLS_IN_PROMPT,
     MAX_SUPPORTING_CASES,
@@ -135,7 +135,7 @@ def _algo_skill(name: str = "summarise_doc") -> AlgoAgentSkill:
 
 
 async def test_strategy_meta_is_attached() -> None:
-    meta = extract_agent_skill._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = extract_agent_skill.meta
     assert meta.name == "extract_agent_skill"
     assert SkillClusterUpdated in meta.trigger.on
     assert meta.emits == frozenset()
@@ -328,7 +328,7 @@ async def test_select_existing_skills_falls_back_to_scalar_when_embed_fails() ->
     scalar_skills = [_lance_skill(name=f"s{i}") for i in range(MAX_SKILLS_IN_PROMPT)]
 
     mock_embedder = MagicMock()
-    mock_embedder.embed = AsyncMock(side_effect=EmbeddingError("provider down"))
+    mock_embedder.embed = AsyncMock(side_effect=EmbeddingServiceError("provider down"))
 
     with (
         patch(

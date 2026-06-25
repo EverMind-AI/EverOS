@@ -1,18 +1,11 @@
-"""trigger_profile_clustering strategy — group user memcells by episode topic.
+"""trigger_profile_clustering strategy — group user episodes by topic.
 
 Listens to :class:`EpisodeExtracted` (emitted per-episode after the user
 pipeline writes its md), embeds the ``episode_text``, and merges the
 resulting size-1 :class:`everalgo.clustering.Cluster` into the user's
 existing user-memory cluster set.
 
-Profile-track parity with opensource: uses :func:`cluster_by_geometry`
-(rather than the LLM-refined variant) — opensource routes
-``has_case=False`` (user-memory) memcells through the embedding-only
-path. The members on the merged cluster are ``memcell_id`` rather than
-``episode_entry_id`` because the downstream profile-extraction step
-needs to feed full memcells (chat messages) back into
-:class:`everalgo.user_memory.ProfileExtractor`, not the per-sender
-episode summaries.
+Uses :func:`cluster_by_geometry` (embedding-only cosine + time-window).
 """
 
 from __future__ import annotations
@@ -22,13 +15,14 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.clustering import cluster_by_geometry
 
 from everos.component.embedding import get_embedder
+from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.triggers import Immediate
 from everos.infra.persistence.sqlite import cluster_repo, mint_cluster_id
+from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
-from everos.memory.strategies._partition_locks import get_partition_lock
 
 logger = get_logger(__name__)
 
@@ -37,6 +31,7 @@ logger = get_logger(__name__)
     name="trigger_profile_clustering",
     trigger=Immediate(on=[EpisodeExtracted]),
     emits=[ProfileClusterUpdated],
+    applies_to=lambda e: e.source == "pipeline",
     max_retries=2,
 )
 async def trigger_profile_clustering(
@@ -62,14 +57,14 @@ async def trigger_profile_clustering(
             project_id=event.project_id,
         )
 
-        # 3. Build a size-1 cluster for the fresh memcell (id minted upfront).
+        # 3. Build a size-1 cluster for the new episode.
         new_cluster = AlgoCluster(
             id=mint_cluster_id(),
             centroid=vector,
             count=1,
             last_ts=event.episode_timestamp_ms,
             preview=[event.episode_text],
-            members=[event.memcell_id],
+            members=[event.episode_entry_id],
         )
 
         # 4. Geometry-merge it into an existing cluster (or keep as-is).
@@ -77,7 +72,13 @@ async def trigger_profile_clustering(
         # time-window math, no I/O) returning ``Cluster | None`` directly, so
         # it must not be awaited (``await None`` raises when there is no
         # existing cluster to merge into).
-        merged = cluster_by_geometry(new_cluster, existing)
+        settings = load_settings()
+        merged = cluster_by_geometry(
+            new_cluster,
+            existing,
+            threshold=settings.clustering.threshold,
+            time_window_days=settings.clustering.time_window_days,
+        )
         to_save = merged if merged is not None else new_cluster
 
         # 5. Persist the (possibly-merged) cluster back to SQLite.
@@ -86,7 +87,7 @@ async def trigger_profile_clustering(
             owner_id=event.owner_id,
             owner_type="user",
             kind="user_memory",
-            member_type="memcell",
+            member_type="episode",
             app_id=event.app_id,
             project_id=event.project_id,
         )

@@ -1,8 +1,9 @@
 # CLI
 
 The `everos` command-line entry point covers **setup and operations** —
-generate a starter `.env` (`init`), run the HTTP API server (`server
-start`), and operate the md → LanceDB index queue (`cascade`). Hot-path
+generate starter config files (`init`), run the HTTP API server (`server
+start`), inspect effective config (`config show`), and operate the
+md → LanceDB index queue (`cascade`). Hot-path
 business (`/add` `/flush` `/search` `/get`) is the **HTTP API**, not the
 CLI.
 
@@ -26,13 +27,15 @@ a [Typer](https://typer.tiangolo.com/) app.
 
 ```
 everos
-├── init                            Generate a starter .env from the packaged template
+├── init [--root PATH] [--force] [--print]   Generate starter config files (everos.toml + ome.toml)
+├── config
+│   └── show [--root PATH]          Show effective configuration
 ├── server
-│   └── start                       Start the HTTP API server (uvicorn)
-└── cascade                         Inspect / operate the md → LanceDB sync queue
+│   └── start [--host] [--port] [--root] [--reload] [--log-level]   Start the HTTP API server (uvicorn)
+└── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
     ├── status                      Queue / LSN summary
-    ├── sync                        Drain the queue now (force md → LanceDB)
-    └── fix                         List failed rows / re-enqueue retryable ones
+    ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
+    └── fix [--apply]               List failed rows / re-enqueue retryable ones
 ```
 
 Each subcommand lives in its own module under
@@ -54,7 +57,7 @@ everos server start \
     --host 127.0.0.1 \
     --port 8000 \
     --log-level info \
-    --env-file .env
+    --root ~/.everos
 ```
 
 | Flag | Env var | Default |
@@ -62,7 +65,7 @@ everos server start \
 | `--host` | `EVEROS_API__HOST` | `127.0.0.1` (loopback only; binding `0.0.0.0` logs a warning — EverOS ships no auth) |
 | `--port` | `EVEROS_API__PORT` | `8000` |
 | `--log-level` | `EVEROS_LOG_LEVEL` | `INFO` |
-| `--env-file` | — | searched: `./.env` → `$XDG_CONFIG_HOME/everos/.env` → `~/.everos/.env` |
+| `--root` | `EVEROS_ROOT` | `~/.everos` |
 | `--reload` | — | off (use in development) |
 
 Lifespan startup wires the storage backends (SQLite engine + LanceDB
@@ -75,7 +78,7 @@ Both CLI and HTTP server read configuration from `pydantic-settings`:
 
 | Env var | Settings field |
 |---|---|
-| `EVEROS_MEMORY__ROOT` | `Settings.memory.root` (memory-root path) |
+| `EVEROS_ROOT` | memory-root path (default `~/.everos`) |
 | `EVEROS_MEMORY__TIMEZONE` | `Settings.memory.timezone` (e.g. `Asia/Shanghai`) |
 | `EVEROS_SQLITE__BUSY_TIMEOUT_MS` | `Settings.sqlite.busy_timeout_ms` |
 | `EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS` | `Settings.lancedb.read_consistency_seconds` |
@@ -98,7 +101,8 @@ everos server start --log-level debug   # see all sql / lance traffic
 | Responsibility | API | CLI |
 |---|---|---|
 | Hot-path business (`/add` `/flush` `/search` `/get`) | ✅ | — (HTTP only) |
-| Setup (generate `.env`) | — | `everos init` |
+| Setup (generate config files) | — | `everos init` |
+| Inspect effective config | — | `everos config show` |
 | Run the server | — | `everos server start` |
 | Index ops (drain / inspect / fix the cascade queue) | — | `everos cascade {status,sync,fix}` |
 | Health probe | `GET /health` | (use HTTP) |

@@ -34,7 +34,7 @@ async def runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[MemoryRoot]:
     """Boot sqlite + lancedb against a tmp memory_root."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")

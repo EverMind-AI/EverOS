@@ -37,14 +37,15 @@ from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.triggers import Immediate
+from everos.infra.persistence.lancedb import episode_repo
 from everos.infra.persistence.markdown import (
     ProfileReader,
     ProfileWriter,
     UserProfileFrontmatter,
 )
 from everos.infra.persistence.sqlite import cluster_repo, memcell_repo
+from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import ProfileClusterUpdated
-from everos.memory.strategies._partition_locks import get_partition_lock
 
 logger = get_logger(__name__)
 
@@ -127,20 +128,34 @@ async def extract_user_profile(
         if not target_clusters:
             return
 
-        # 3. Bail if the candidate set is too thin to be worth an LLM call.
-        member_ids = [m for c in target_clusters for m in c.members]
-        if len(member_ids) < PROFILE_MIN_MEMCELLS:
+        # 3. Resolve cluster members (episode entry_ids) → memcell_ids.
+        #    Cluster members store episode entry_ids. To reach the memcell
+        #    payloads we look up each episode's parent_id (= memcell_id)
+        #    in LanceDB, skipping merged episodes (parent_type=cluster)
+        #    whose source memcells were already processed before Reflection.
+        entry_ids = [m for c in target_clusters for m in c.members]
+        episodes = await episode_repo.find_by_owner_entries(
+            event.owner_id,
+            entry_ids,
+            app_id=event.app_id,
+            project_id=event.project_id,
+        )
+        memcell_ids = [
+            ep.parent_id
+            for ep in episodes
+            if ep.parent_type == "memcell" and ep.parent_id
+        ]
+        if len(memcell_ids) < PROFILE_MIN_MEMCELLS:
             logger.info(
                 "profile_extraction_below_min_memcells",
                 owner_id=event.owner_id,
-                memcell_count=len(member_ids),
+                memcell_count=len(memcell_ids),
                 threshold=PROFILE_MIN_MEMCELLS,
             )
             return
 
-        # 4. Pull memcell payloads from SQLite, rehydrate to algo types,
-        #    time-sort.
-        memcell_rows = await memcell_repo.find_by_ids(member_ids)
+        # 4. Pull memcell payloads from SQLite, rehydrate to algo types.
+        memcell_rows = await memcell_repo.find_by_ids(memcell_ids)
         algo_memcells = sorted(
             (AlgoMemCell.model_validate_json(r.payload_json) for r in memcell_rows),
             key=lambda mc: mc.timestamp,
@@ -166,6 +181,7 @@ async def extract_user_profile(
         "user_profile_extracted",
         owner_id=event.owner_id,
         cluster_count=len(target_clusters),
+        episode_count=len(episodes),
         memcell_count=len(algo_memcells),
         mode="UPDATE" if old_profile is not None else "INIT",
     )

@@ -16,10 +16,25 @@ from everos.infra.persistence.markdown import (
     AtomicFactReader,
     ForesightReader,
 )
-from everos.memory.events import AgentPipelineStarted, UserPipelineStarted
+from everos.memory.events import (
+    AgentPipelineStarted,
+    EpisodeExtracted,
+    UserPipelineStarted,
+)
 from everos.memory.strategies.extract_agent_case import extract_agent_case
 from everos.memory.strategies.extract_atomic_facts import extract_atomic_facts
 from everos.memory.strategies.extract_foresight import extract_foresight
+
+
+def _episode_event_for(owner: str) -> EpisodeExtracted:
+    return EpisodeExtracted(
+        memcell_id="mc_a",
+        episode_entry_id="ep_20260517_0001",
+        episode_text="hi",
+        episode_timestamp_ms=1_700_000_000_000,
+        owner_id=owner,
+        session_id="s1",
+    )
 
 
 def _event_for(owner: str) -> UserPipelineStarted:
@@ -102,8 +117,8 @@ async def test_atomic_facts_round_trip(
             "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
         ) as mock_ext,
     ):
-        mock_ext.return_value.aextract = AsyncMock(return_value=facts)
-        await extract_atomic_facts(_event_for("u_alice"), FakeStrategyContext())
+        mock_ext.return_value.aextract_from_text = AsyncMock(return_value=facts)
+        await extract_atomic_facts(_episode_event_for("u_alice"), FakeStrategyContext())
 
     reader = AtomicFactReader(root=MemoryRoot(root=tmp_path))
     path = reader.path_for("u_alice")

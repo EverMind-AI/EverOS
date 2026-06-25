@@ -113,7 +113,7 @@ class Episode(BaseModel):
     timestamp: int
 
     # everos engineering metadata.
-    session_id: str
+    session_id: str | None = None
     sender_ids: list[str] = Field(default_factory=list)
     parent_id: str
 
@@ -125,7 +125,7 @@ class Episode(BaseModel):
         algo_episode: AlgoEpisode,
         *,
         owner_id: str,
-        session_id: str,
+        session_id: str | None,
         sender_ids: list[str],
         parent_id: str,
     ) -> Episode:
@@ -159,15 +159,15 @@ class AtomicFact(BaseModel):
     :class:`Episode`: everos keeps the *semantic* fields algo emits
     (``owner_id`` / ``fact`` / ``timestamp``) and adds engineering context
     (``session_id`` / ``parent_id``) so md writer + cascade can audit-link
-    back to the source memcell.
+    back to the source episode.
 
     No ``sender_ids``: an atomic fact is a statement about its ``owner_id``;
     the surrounding participants are not part of the fact itself. (Episode
     keeps ``sender_ids`` because the narrative is *about* the conversation
     as a whole.)
 
-    ``parent_id`` is the source memcell id, supplied by the caller because
-    the new everalgo types no longer carry it on AtomicFact.
+    ``parent_id`` is the source episode entry_id, supplied by the caller
+    because the new everalgo types no longer carry it on AtomicFact.
     """
 
     owner_id: str
@@ -175,7 +175,7 @@ class AtomicFact(BaseModel):
     timestamp: int
 
     # everos engineering metadata.
-    session_id: str
+    session_id: str | None = None
     parent_id: str
 
     model_config = ConfigDict(extra="allow")
@@ -186,18 +186,18 @@ class AtomicFact(BaseModel):
         algo_fact: AlgoAtomicFact,
         *,
         owner_id: str,
-        session_id: str,
+        session_id: str | None,
         parent_id: str,
     ) -> AtomicFact:
         """Build a domain AtomicFact from an algo AtomicFact plus context.
 
         ``owner_id`` is supplied by the caller (not read from ``algo_fact``)
         because atomic_fact extraction uses a subject-agnostic prompt — one
-        LLM call produces a template that fans out to multiple owners. The
-        algo-side ``owner_id`` is therefore a placeholder; the caller knows
-        the real one. Same rationale for ``parent_id``: algo no longer
-        carries the source memcell id; caller injects the authoritative
-        value (any ``extra='allow'`` smuggled values are dropped).
+        LLM call produces facts per owner. The algo-side ``owner_id`` is
+        therefore a placeholder; the caller knows the real one. Same
+        rationale for ``parent_id``: algo no longer carries the source
+        episode entry_id; caller injects the authoritative value (any
+        ``extra='allow'`` smuggled values are dropped).
 
         The algo type exposes the fact sentence as ``content``; everos's
         domain field is ``fact``. This boundary is where that rename is
@@ -241,7 +241,7 @@ class Foresight(BaseModel):
     duration_days: int | None = None
 
     # everos engineering metadata.
-    session_id: str
+    session_id: str | None = None
     parent_id: str
 
     model_config = ConfigDict(extra="allow")
@@ -251,7 +251,7 @@ class Foresight(BaseModel):
         cls,
         algo_foresight: AlgoForesight,
         *,
-        session_id: str,
+        session_id: str | None,
         parent_id: str,
     ) -> Foresight:
         """Build a domain Foresight from an algo Foresight plus context.

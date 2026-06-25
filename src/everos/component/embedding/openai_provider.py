@@ -23,7 +23,7 @@ from collections.abc import Sequence
 
 import openai
 
-from .protocol import EmbeddingError
+from .protocol import EmbeddingServiceError
 
 
 class OpenAIEmbeddingProvider:
@@ -93,6 +93,6 @@ class OpenAIEmbeddingProvider:
                     input=chunk,
                 )
             except openai.OpenAIError as exc:
-                raise EmbeddingError(str(exc)) from exc
+                raise EmbeddingServiceError(str(exc)) from exc
         # OpenAI returns ``data`` indexed by request order; truncate to ``dim``.
         return [list(item.embedding[: self.dim]) for item in response.data]

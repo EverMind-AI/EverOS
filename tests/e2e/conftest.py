@@ -22,7 +22,7 @@ The ``long_conversation`` fixture (LoCoMo conv_0) lives in
 Conventions:
 
 - ``.env`` is loaded at import time (before any everos module reads
-  settings) — overrides for ``EVEROS_MEMORY__ROOT`` happen per-test.
+  settings) — overrides for ``EVEROS_ROOT`` happen per-test.
 - This file does **not** define ``cascade_runtime`` — that name belongs
   to ``tests/integration/test_cascade_integration.py``'s local fixture.
   The pipeline test uses ``core_pipeline_runtime`` to avoid name
@@ -35,6 +35,7 @@ import asyncio
 import importlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
+from importlib import resources
 from pathlib import Path
 
 import httpx
@@ -76,7 +77,7 @@ _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 def _reset_strategy_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Null every strategy ``_writer`` / ``_reader`` so the next test
     rebuilds against its own ``MemoryRoot.default()`` (driven by the
-    fresh ``EVEROS_MEMORY__ROOT`` env var set by the calling fixture).
+    fresh ``EVEROS_ROOT`` env var set by the calling fixture).
     """
     for mod_name, attrs in _STRATEGY_SINGLETONS:
         mod = importlib.import_module(mod_name)
@@ -122,7 +123,10 @@ async def core_pipeline_runtime(
     Keeps real LLM / embedding settings from ``.env`` (do NOT overwrite
     ``EVEROS_LLM__*`` or ``EVEROS_EMBEDDING__*``).
     """
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+
+    default_ome = resources.files("everos.config").joinpath("default_ome.toml")
+    (tmp_path / "ome.toml").write_text(default_ome.read_text(encoding="utf-8"))
 
     from everos.config import load_settings
 

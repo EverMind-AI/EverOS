@@ -55,12 +55,15 @@ CREATE TABLE IF NOT EXISTS run_record (
     error                           TEXT,
     event_topic                     TEXT NOT NULL,
     event_payload                   TEXT NOT NULL,
-    max_retries_snapshot            INTEGER NOT NULL
+    max_retries_snapshot            INTEGER NOT NULL,
+    event_id                        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_run_strategy_started
     ON run_record (strategy_name, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_status_started
     ON run_record (status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_event_id
+    ON run_record (event_id);
 """
 
 _INIT_PRAGMAS = ("PRAGMA journal_mode=WAL",)
@@ -78,13 +81,30 @@ class OMEStorage:
         self.db_path = db_path
 
     async def init(self) -> None:
-        """Create parent dirs + apply file-level pragmas + create schema."""
+        """Create parent dirs + apply file-level pragmas + create schema.
+
+        Runs forward-only migrations for existing databases (e.g. adding
+        the ``event_id`` column introduced in P3).
+        """
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as conn:
             for pragma in _INIT_PRAGMAS:
                 await conn.execute(pragma)
+            await self._migrate(conn)
             await conn.executescript(_SCHEMA)
             await conn.commit()
+
+    @staticmethod
+    async def _migrate(conn: aiosqlite.Connection) -> None:
+        """Forward-only column migrations for existing databases."""
+        cur = await conn.execute("PRAGMA table_info(run_record)")
+        columns = {row[1] for row in await cur.fetchall()}
+        if not columns:
+            return
+        if "event_id" not in columns:
+            await conn.execute(
+                "ALTER TABLE run_record ADD COLUMN event_id TEXT NOT NULL DEFAULT ''"
+            )
 
     @asynccontextmanager
     async def connect(self) -> AsyncIterator[aiosqlite.Connection]:

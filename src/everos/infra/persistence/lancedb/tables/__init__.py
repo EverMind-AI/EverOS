@@ -12,6 +12,7 @@ External usage::
         AgentCase,
         AgentSkill,
         UserProfile,
+        KnowledgeTopic,
         ParentType,
     )
 """
@@ -22,6 +23,7 @@ from .agent_skill import AgentSkill as AgentSkill
 from .atomic_fact import AtomicFact as AtomicFact
 from .episode import Episode as Episode
 from .foresight import Foresight as Foresight
+from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
 from .user_profile import UserProfile as UserProfile
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "AtomicFact",
     "Episode",
     "Foresight",
+    "KnowledgeTopic",
     "ParentType",
     "UserProfile",
 ]

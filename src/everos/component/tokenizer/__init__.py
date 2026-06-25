@@ -14,11 +14,9 @@ External usage::
 """
 
 from .factory import build_tokenizer as build_tokenizer
-from .jieba_provider import JiebaTokenizer as JiebaTokenizer
 from .protocol import Tokenizer as Tokenizer
 
 __all__ = [
-    "JiebaTokenizer",
     "Tokenizer",
     "build_tokenizer",
 ]

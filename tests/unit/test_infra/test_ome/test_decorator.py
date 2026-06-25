@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import StrategyMeta, offline_strategy
+from everos.infra.ome.decorator import Strategy, StrategyMeta, offline_strategy
 from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.gates import Counter
 from everos.infra.ome.triggers import Immediate
@@ -18,14 +18,15 @@ def test_decorator_attaches_metadata() -> None:
     async def s(event: _E, ctx: StrategyContext) -> None:
         return None
 
-    meta: StrategyMeta = s._ome_strategy_meta  # type: ignore[attr-defined]
+    meta: StrategyMeta = s.meta
     assert meta.name == "x"
     assert meta.emits == frozenset({_E})
     assert meta.gate is None
     assert meta.applies_to is None
     assert meta.max_retries is None
     assert meta.enabled is True
-    assert meta.func is s
+    assert isinstance(s, Strategy)
+    assert callable(meta.func)
 
 
 def test_decorator_with_full_params() -> None:
@@ -41,7 +42,7 @@ def test_decorator_with_full_params() -> None:
     async def s(event: _E, ctx: StrategyContext) -> None:
         return None
 
-    meta = s._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = s.meta
     assert meta.applies_to == "user_id"
     assert meta.gate.threshold == 5
     assert meta.max_retries == 3
@@ -61,7 +62,7 @@ def test_decorator_callable_applies_to() -> None:
     async def s(event: _E, ctx: StrategyContext) -> None:
         return None
 
-    meta = s._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = s.meta
     assert meta.applies_to is is_paid
 
 

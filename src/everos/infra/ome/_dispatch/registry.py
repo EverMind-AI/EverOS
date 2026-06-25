@@ -9,10 +9,8 @@ Kahn-style topological pass on the event-flow DAG implied by
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Callable
-from typing import Any
 
-from everos.infra.ome.decorator import StrategyMeta
+from everos.infra.ome.decorator import Strategy, StrategyMeta
 from everos.infra.ome.events import BaseEvent, CronTick, IdleTick
 from everos.infra.ome.exceptions import StartupValidationError
 from everos.infra.ome.triggers import Cron, Idle, Immediate, Trigger
@@ -24,18 +22,19 @@ class StrategyRegistry:
     def __init__(self) -> None:
         self._strategies: dict[str, StrategyMeta] = {}
 
-    def register(self, func: Callable[..., Any]) -> None:
-        """Register a strategy function (reads ``_ome_strategy_meta``).
+    def register(self, strategy: Strategy) -> None:
+        """Register a :class:`Strategy` returned by ``@offline_strategy``.
 
-        Raises ``StartupValidationError`` if ``func`` is not decorated
-        with ``@offline_strategy`` or if its name is already registered.
+        Raises:
+            StartupValidationError: If ``strategy`` is not a Strategy
+                instance or its name is already registered.
         """
-        meta = getattr(func, "_ome_strategy_meta", None)
-        if not isinstance(meta, StrategyMeta):
-            fn_name = getattr(func, "__name__", repr(func))
+        if not isinstance(strategy, Strategy):
+            label = getattr(strategy, "__name__", repr(strategy))
             raise StartupValidationError(
-                f"register: {fn_name} is not decorated with @offline_strategy"
+                f"register: {label} is not decorated with @offline_strategy"
             )
+        meta = strategy.meta
         if meta.name in self._strategies:
             raise StartupValidationError(
                 f"register: duplicate strategy name {meta.name!r}"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -40,9 +41,10 @@ async def test_runner_success_marks_record(setup) -> None:
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
+        engine=MagicMock(),
     )
     await runner.run(
-        s._ome_strategy_meta,
+        s.meta,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,
@@ -72,9 +74,10 @@ async def test_runner_retries_on_failure(setup) -> None:
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
+        engine=MagicMock(),
     )
     await runner.run(
-        s._ome_strategy_meta,
+        s.meta,
         _E(),
         run_id="r1",
         max_retries_snapshot=2,
@@ -110,9 +113,10 @@ async def test_runner_dead_letter_after_exhaust(setup) -> None:
         engine_sem=sem,
         emit_hook=_no_emit,
         on_dead_letter=lambda r: dl_calls.append(r),
+        engine=MagicMock(),
     )
     await runner.run(
-        s._ome_strategy_meta,
+        s.meta,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,
@@ -144,9 +148,10 @@ async def test_runner_emit_must_be_declared(setup) -> None:
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
+        engine=MagicMock(),
     )
     await runner.run(
-        s._ome_strategy_meta,
+        s.meta,
         _E(),
         run_id="r1",
         max_retries_snapshot=0,
@@ -172,10 +177,11 @@ async def test_runner_negative_max_retries_raises(setup) -> None:
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
+        engine=MagicMock(),
     )
     with pytest.raises(ValueError, match=r"max_retries_snapshot must be >= 0"):
         await runner.run(
-            s._ome_strategy_meta,
+            s.meta,
             _E(),
             run_id="r1",
             max_retries_snapshot=-1,
@@ -208,10 +214,11 @@ async def test_runner_aborts_silently_when_mark_running_fails(
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
+        engine=MagicMock(),
     )
     # Must NOT raise; the framework swallows + logs.
     await runner.run(
-        s._ome_strategy_meta,
+        s.meta,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,

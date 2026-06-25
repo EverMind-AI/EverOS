@@ -159,7 +159,7 @@ def _print_monotonicity(reports: list[MonotonicityReport]) -> int:
 
 async def run_lifespan_mode(corpus: Path) -> int:
     """Full strict check via app lifespan; covers every kind in KIND_REGISTRY."""
-    os.environ["EVEROS_MEMORY__ROOT"] = str(corpus)
+    os.environ["EVEROS_ROOT"] = str(corpus)
     from everos.config import load_settings
 
     load_settings.cache_clear()

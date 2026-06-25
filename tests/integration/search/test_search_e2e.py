@@ -192,7 +192,7 @@ async def test_partition_respects_owner_id(
 async def test_unknown_owner_returns_empty_200(
     search_client: httpx.AsyncClient,
 ) -> None:
-    """An owner that the corpus never saw → 200 with empty result arrays."""
+    """An owner that the corpus never saw → 200 with four empty arrays."""
     resp = await search_client.post(
         "/api/v1/memory/search",
         json={
@@ -209,7 +209,6 @@ async def test_unknown_owner_returns_empty_200(
     assert data["profiles"] == []
     assert data["agent_cases"] == []
     assert data["agent_skills"] == []
-    assert data["unprocessed_messages"] == []
 
 
 # ── 6. Filter DSL ──────────────────────────────────────────────────────

@@ -9,14 +9,29 @@ import pytest
 from everos.core.persistence import MemoryRoot
 
 
-def test_default_returns_home_everos(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Isolate from any ambient EVEROS_MEMORY__ROOT (e.g. the session-scoped
-    # search-corpus fixture sets it for the whole run); the autouse
-    # _reset_settings_cache fixture clears the load_settings cache, so the
-    # delenv takes effect for this assertion of the hard-coded default.
-    monkeypatch.delenv("EVEROS_MEMORY__ROOT", raising=False)
+def test_default_returns_home_everos(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("EVEROS_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    from everos.config import load_settings
+
+    load_settings.cache_clear()
     mr = MemoryRoot.default()
     assert mr.root == (Path.home() / ".everos").resolve()
+
+
+def test_default_from_everos_root_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "custom"))
+    mr = MemoryRoot.default()
+    assert mr.root == (tmp_path / "custom").resolve()
+
+
+def test_default_explicit_root(tmp_path: Path) -> None:
+    mr = MemoryRoot.default(explicit_root=str(tmp_path / "explicit"))
+    assert mr.root == (tmp_path / "explicit").resolve()
 
 
 def test_accepts_str_path(tmp_path: Path) -> None:
@@ -79,37 +94,11 @@ def test_ensure_is_idempotent(tmp_path: Path) -> None:
     assert mr.tmp_dir.is_dir()
 
 
-def test_ensure_materializes_ome_config_template(tmp_path: Path) -> None:
-    """First ensure() drops a real ``ome.toml`` users can edit.
-
-    Without this, ``pip install everos && everos server start`` produced
-    a warning (``config_reload_failed: No such file``) because the OME
-    config reloader had no file to point at. The template ships under
-    ``src/everos/config/default_ome.toml`` and is byte-copied on first run.
-    """
-    mr = MemoryRoot(tmp_path)
+def test_ensure_does_not_create_ome_toml(tmp_path: Path) -> None:
+    """ome.toml creation moved to ``everos init``; ensure() only makes dirs."""
+    mr = MemoryRoot(tmp_path / "fresh")
     mr.ensure()
-    assert mr.ome_config.is_file()
-    # Content is the shipped template verbatim — protects against a future
-    # diff that silently changes what users see on first run.
-    template = Path(__file__).resolve().parents[4] / (
-        "src/everos/config/default_ome.toml"
-    )
-    assert mr.ome_config.read_bytes() == template.read_bytes()
-
-
-def test_ensure_preserves_user_edited_ome_config(tmp_path: Path) -> None:
-    """Second ensure() must not overwrite user edits.
-
-    The template materialisation is an existence check, not a content
-    sync — once the user has tweaked their overrides the file is theirs.
-    """
-    mr = MemoryRoot(tmp_path)
-    mr.ensure()
-    custom = b"# user-edited\n[strategies.extract_foresight]\nenabled = false\n"
-    mr.ome_config.write_bytes(custom)
-    mr.ensure()
-    assert mr.ome_config.read_bytes() == custom
+    assert not mr.ome_config.exists()
 
 
 def test_frozen_dataclass_hashable(tmp_path: Path) -> None:

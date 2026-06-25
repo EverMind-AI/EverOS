@@ -1,16 +1,19 @@
 """``ParentType`` — provenance label for memory records linked back to a source.
 
-Currently the only value is :attr:`ParentType.MEMCELL`: every business row
-(episode / foresight / atomic_fact / agent_case) points back to a source
-MemCell. The earlier opensource design enumerated ``"episode"`` as an
-alternative parent but the production path never wrote that value, so the
-new framework collapses the enum to its single in-use member.
+Three values cover the current provenance graph:
 
-Kept as an :class:`enum.Enum` (rather than a bare string constant) so that
-adding a future parent kind stays a non-breaking enum extension. LanceDB's
-pydantic-to-arrow conversion does not accept ``Enum`` field annotations,
-so table schemas declare ``parent_type: str = ParentType.MEMCELL.value``
-and reference the enum only at the default-value level.
+* :attr:`ParentType.MEMCELL` — the original ingestion unit; every
+  business row (episode / foresight / atomic_fact / agent_case) points
+  back to a source MemCell by default.
+* :attr:`ParentType.EPISODE` — used by atomic facts that are extracted
+  from an episode rather than directly from a MemCell.
+* :attr:`ParentType.CLUSTER` — used by merged episodes produced by the
+  Reflection consolidation mechanism.
+
+LanceDB's pydantic-to-arrow conversion does not accept ``Enum`` field
+annotations, so table schemas declare
+``parent_type: str = ParentType.MEMCELL.value`` and reference the enum
+only at the default-value level.
 """
 
 from __future__ import annotations
@@ -22,3 +25,5 @@ class ParentType(StrEnum):
     """Provenance label of a memory record's parent."""
 
     MEMCELL = "memcell"
+    EPISODE = "episode"
+    CLUSTER = "cluster"

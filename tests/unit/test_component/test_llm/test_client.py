@@ -27,7 +27,7 @@ def _patch_settings(
     """Stub the ``load_settings`` reference bound inside the client module."""
     cfg = Settings(
         llm=LLMSettings(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             api_key=SecretStr(api_key) if api_key is not None else None,
             base_url=base_url,
         )

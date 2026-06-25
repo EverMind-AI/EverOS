@@ -13,7 +13,10 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from everos.component.rerank import DeepInfraRerankProvider, RerankError
+from everos.component.rerank import (
+    DeepInfraRerankProvider,
+    RerankServiceError,
+)
 
 
 def _patch_httpx(
@@ -115,7 +118,7 @@ async def test_4xx_raises_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     p = DeepInfraRerankProvider(
         model="m", api_key="k", base_url="https://api/v1", max_retries=3
     )
-    with pytest.raises(RerankError, match="HTTP 400"):
+    with pytest.raises(RerankServiceError, match="HTTP 400"):
         await p.rerank("q", ["a"])
     assert calls == 1  # no retry on 4xx
 
@@ -146,7 +149,7 @@ async def test_5xx_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     p = DeepInfraRerankProvider(
         model="m", api_key="k", base_url="https://api/v1", max_retries=1
     )
-    with pytest.raises(RerankError, match="HTTP 500"):
+    with pytest.raises(RerankServiceError, match="HTTP 500"):
         await p.rerank("q", ["a"])
 
 
@@ -178,7 +181,7 @@ async def test_transport_error_retries_then_fails(
     p = DeepInfraRerankProvider(
         model="m", api_key="k", base_url="https://api/v1", max_retries=1
     )
-    with pytest.raises(RerankError, match="transport failure"):
+    with pytest.raises(RerankServiceError, match="transport failure"):
         await p.rerank("q", ["a"])
 
 
@@ -188,7 +191,7 @@ async def test_malformed_scores_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _patch_httpx(monkeypatch, handler)
     p = DeepInfraRerankProvider(model="m", api_key="k", base_url="https://api/v1")
-    with pytest.raises(RerankError, match="missing scores"):
+    with pytest.raises(RerankServiceError, match="missing scores"):
         await p.rerank("q", ["a"])
 
 
@@ -200,7 +203,7 @@ async def test_score_length_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> 
     p = DeepInfraRerankProvider(
         model="m", api_key="k", base_url="https://api/v1", batch_size=10
     )
-    with pytest.raises(RerankError, match="returned 2 scores, expected 3"):
+    with pytest.raises(RerankServiceError, match="returned 2 scores, expected 3"):
         await p.rerank("q", ["a", "b", "c"])
 
 

@@ -39,21 +39,15 @@ class _StubEmbedder(EmbeddingProvider):
         return [[0.0] * self.dim for _ in texts]
 
 
-_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
-
-
 @pytest.fixture
 def cli_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Tmp memory root + clean singletons; CLI bootstraps the schema itself."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
     load_settings.cache_clear()
+    (tmp_path / "ome.toml").write_text("# test\n")
 
     # Strip any singleton state from a neighbouring test.
     asyncio.run(_dispose_all())
@@ -127,12 +121,12 @@ def test_sync_with_path_outside_root_errors(
     other.write_text("# unrelated\n")
     result = CliRunner().invoke(cascade_mod.app, ["sync", str(other)])
     assert result.exit_code != 0
-    # Typer.BadParameter surfaces in stderr / mixed output. The Rich
-    # error box may wrap the message, pad each line with box characters,
-    # and inject ANSI control codes on CI. Strip ANSI first, then allow
-    # non-word separators between the split message fragments.
+    # Typer.BadParameter surfaces in stderr / mixed output. Rich may wrap
+    # the error box at different terminal widths, so assert the stable
+    # semantic fragments instead of their exact adjacency.
     output = result.stdout + (result.stderr or "")
-    assert re.search(r"not under[^\w]+memory root", _strip_ansi(output)), output
+    assert re.search(r"\bnot under\b", output), output
+    assert re.search(r"\bmemory root\b", output), output
 
 
 def test_sync_with_unmatched_path(

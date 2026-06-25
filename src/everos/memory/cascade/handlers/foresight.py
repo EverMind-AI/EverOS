@@ -79,7 +79,7 @@ class ForesightHandler(BaseDailyLogHandler):
             owner_type=owner_type,
             app_id=app_id,
             project_id=project_id,
-            session_id=s.inline.get("session_id", ""),
+            session_id=s.inline.get("session_id"),
             timestamp=require_iso_timestamp(s.inline.get("timestamp")),
             start_time=optional_iso_timestamp(s.inline.get("start_time")),
             end_time=optional_iso_timestamp(s.inline.get("end_time")),

@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as _dt
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 
@@ -64,7 +63,6 @@ async def test_emit_pipeline_started_routes_through_engine() -> None:
     assert started[0].memcell is cell
 
 
-@pytest.mark.asyncio
 async def test_emit_episode_extracted_after_md_write() -> None:
     """Each per-sender Episode write emits EpisodeExtracted with the md entry id."""
     engine = _CapturingEngine()
@@ -121,3 +119,5 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert extracted[0].episode_text == "they said hello"
     assert extracted[0].episode_timestamp_ms == 1_700_000_000_000
     assert extracted[0].owner_id == "u1"
+    assert extracted[0].session_id == "s1"
+    assert extracted[0].source == "pipeline"

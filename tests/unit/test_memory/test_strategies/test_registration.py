@@ -13,6 +13,7 @@ from everos.memory.strategies import (
     extract_atomic_facts,
     extract_foresight,
     extract_user_profile,
+    reflect_episodes,
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
@@ -27,8 +28,9 @@ def test_strategies_are_re_exported_from_package() -> None:
         (extract_agent_skill, "extract_agent_skill"),
         (trigger_profile_clustering, "trigger_profile_clustering"),
         (extract_user_profile, "extract_user_profile"),
+        (reflect_episodes, "reflect_episodes"),
     ]:
-        assert fn._ome_strategy_meta.name == name  # type: ignore[attr-defined]
+        assert fn.meta.name == name
 
 
 async def test_get_engine_registers_all_strategies(
@@ -53,4 +55,5 @@ async def test_get_engine_registers_all_strategies(
         "extract_agent_skill",
         "trigger_profile_clustering",
         "extract_user_profile",
+        "reflect_episodes",
     }

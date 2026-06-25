@@ -135,8 +135,10 @@ class UserMemoryPipeline:
                         episode_text=ep.episode,
                         episode_timestamp_ms=ep.timestamp,
                         owner_id=ep.owner_id,
+                        session_id=ingested.session_id,
                         app_id=ingested.app_id,
                         project_id=ingested.project_id,
+                        source="pipeline",
                     )
                 )
 

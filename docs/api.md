@@ -30,6 +30,8 @@ business semantics the raw spec does not carry.
   - [POST /api/v1/memory/flush](#post-apiv1memoryflush)
   - [POST /api/v1/memory/search](#post-apiv1memorysearch)
   - [POST /api/v1/memory/get](#post-apiv1memoryget)
+  - [POST /api/v1/ome/trigger](#post-apiv1ometrigger)
+  - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
 
 ## Overview
@@ -42,10 +44,12 @@ business semantics the raw spec does not carry.
 | Port | `8000` | `EVEROS_API__PORT` env var or `--port` flag |
 | Version prefix | `/api/v1` | — |
 
-All business endpoints documented here live under `/api/v1/memory/`.
-The operational endpoints `GET /health` and `GET /metrics` exist but
-are intentionally outside this reference — they are runtime probes for
-deployment, not part of the application contract.
+Business endpoints live under `/api/v1/memory/`, `/api/v1/ome/`, and
+`/api/v1/knowledge/`. Knowledge endpoints have their own dedicated
+reference at [docs/knowledge.md](knowledge.md) and are cross-referenced
+below. The operational endpoints `GET /health` and `GET /metrics` exist
+but are intentionally outside this reference — they are runtime probes
+for deployment, not part of the application contract.
 
 ### Content type
 
@@ -166,26 +170,39 @@ the top level (mirroring the success envelope) alongside a nested
 {
   "request_id": "<32-char hex>",
   "error": {
-    "code": "HTTP_ERROR",
-    "message": "Value error, exactly one of user_id / agent_id must be provided",
+    "code": "NOT_FOUND",
+    "message": "Document 'abc123' not found",
     "timestamp": "2026-06-01T12:24:46+00:00",
-    "path": "/api/v1/memory/search"
+    "path": "/api/v1/knowledge/documents/abc123"
   }
 }
 ```
 
-| HTTP | `error.code` | `error.message` | When |
+### error.code values
+
+`error.code` is a machine-readable `ErrorCode` enum. Clients can switch
+on this value to decide retry / display / routing behaviour without
+parsing the human-readable `message` field.
+
+| `error.code` | HTTP | Retryable? | When |
 |---|---|---|---|
-| `415 Unsupported Media Type` | `HTTP_ERROR` | the parse-failure reason | `/add` only — a `ContentItem` could not be parsed (unsupported modality for the configured multimodal LLM, or a payload that cannot be fetched / dispatched) |
-| `422 Unprocessable Entity` | `HTTP_ERROR` | the **first** validation error (see below) | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
-| `500 Internal Server Error` | `SYSTEM_ERROR` | `"Internal server error"` (fixed; internal details are logged, never leaked) | Unhandled exception caught by the global handler |
+| `NOT_FOUND` | `404` | No | Requested resource does not exist |
+| `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document) |
+| `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
+| `EXTRACTION_EMPTY` | `422` | No | Document extraction produced no topics (empty or whitespace-only content) |
+| `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
+| `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
+| `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
+| `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
+| `INTERNAL_ERROR` | `500` | No | Unhandled exception (internal details are logged, never leaked) |
 
 ### error object
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | `string` | `"HTTP_ERROR"` for 4xx (validation / business / `HTTPException`); `"SYSTEM_ERROR"` for 5xx |
-| `message` | `string` | Human-readable reason. For `422`, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. the XOR example above) |
+| `code` | `string` | One of the `ErrorCode` values listed above |
+| `message` | `string` | Human-readable reason. For `INVALID_INPUT` from request validation, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. `"Value error, exactly one of user_id / agent_id must be provided"`) |
 | `timestamp` | `string` | ISO-8601 with timezone offset (display tz) |
 | `path` | `string` | Request path, e.g. `/api/v1/memory/add` |
 
@@ -357,7 +374,7 @@ A node is a JSON object whose keys are one of:
 |---|---|---|
 | `AND` | `array<FilterNode>` | All child nodes must match. Omit if not needed |
 | `OR` | `array<FilterNode>` | At least one child node must match. Omit if not needed |
-| *<allowed field>* | scalar or operator map | Predicate on that field — see [Allowed fields](#filter-allowed-fields) and [Operators](#filter-operators) |
+| *<allowed field>* | scalar or operator map | Predicate on that field — see [Allowed fields](#allowed-fields) and [Operators](#operators) |
 
 `AND`, `OR`, and scalar predicates **mix freely at the same level**;
 they are implicitly joined with `AND`. A node with only scalar keys is
@@ -517,7 +534,7 @@ correlation.
 #### cURL example
 
 ```bash
-TS=$(date +%s)
+TS=$(( $(date +%s) * 1000 ))
 curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
@@ -621,6 +638,7 @@ optional final LLM rerank. Returns ranked items grouped by kind.
 | `method` | [SearchMethod](#searchmethod) | no | `"hybrid"` | — |
 | `top_k` | `integer` | no | `-1` | `-1` or `1..100` |
 | `radius` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
+| `min_score` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
 | `include_profile` | `boolean` | no | `false` | — |
 | `enable_llm_rerank` | `boolean` | no | `false` | — |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
@@ -659,6 +677,10 @@ radius:
    default radius kicks in.
 3. With `top_k>0` and no caller-supplied `radius`, no threshold is
    applied (`null`).
+
+**`min_score`** — Optional **post-fusion relevance floor** in
+`[0.0, 1.0]`. Results below this score are evicted after fusion,
+independent of `radius` (which is a per-recall cosine threshold).
 
 **`include_profile`** — When `user_id` is set, also fetch the user's
 profile and include it in `data.profiles`. The profile is not
@@ -1020,6 +1042,63 @@ Response (real capture):
     }
 }
 ```
+
+### POST /api/v1/ome/trigger
+
+Manually trigger a registered OME strategy.
+
+#### Request body
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `string` | yes | — | Strategy name (e.g. `reflect_episodes`) |
+| `timeout` | `float` | no | `120.0` | Max seconds to wait for completion |
+| `force` | `bool` | no | `false` | Bypass the `enabled` gate in `ome.toml` |
+
+#### Response body
+
+`200 OK` returns:
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"ok" \| "timeout"` | Whether the strategy completed within the timeout |
+| `name` | `string` | Echoes the requested strategy name |
+
+#### Errors
+
+- `404` — strategy name not found in the OME registry.
+
+#### cURL example
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/ome/trigger \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "reflect_episodes", "force": true}'
+```
+
+---
+
+### Knowledge endpoints
+
+The knowledge base subsystem (`/api/v1/knowledge/*`) provides document
+upload, CRUD, and hybrid search. These endpoints are fully documented
+in their own reference: **[docs/knowledge.md](knowledge.md)**.
+
+Summary of available routes:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/knowledge/documents` | Upload and extract a document |
+| `GET` | `/api/v1/knowledge/documents` | List documents (paginated) |
+| `GET` | `/api/v1/knowledge/documents/{doc_id}` | Get a single document |
+| `PUT` | `/api/v1/knowledge/documents/{doc_id}` | Replace a document |
+| `PATCH` | `/api/v1/knowledge/documents/{doc_id}` | Partial update |
+| `DELETE` | `/api/v1/knowledge/documents/{doc_id}` | Delete a document |
+| `GET` | `/api/v1/knowledge/topics/{topic_id}` | Get a single topic |
+| `POST` | `/api/v1/knowledge/search` | Hybrid search over topics |
+| `GET` | `/api/v1/knowledge/categories` | List taxonomy categories |
+
+---
 
 ## OpenAPI spec source
 

@@ -18,6 +18,8 @@ External usage (frontmatter schema chassis):
     from everos.core.persistence.markdown import (
         BaseFrontmatter, UserScopedFrontmatter, AgentScopedFrontmatter,
         DailyLogPathMixin, SkillPathMixin, ProfilePathMixin,
+        KnowledgeScopedMixin, KnowledgeDocumentPathMixin,
+        KnowledgeTopicPathMixin,
     )
 """
 
@@ -31,6 +33,9 @@ from .entries import split_entries as split_entries
 from .frontmatter import AgentScopedFrontmatter as AgentScopedFrontmatter
 from .frontmatter import BaseFrontmatter as BaseFrontmatter
 from .frontmatter import DailyLogPathMixin as DailyLogPathMixin
+from .frontmatter import KnowledgeDocumentPathMixin as KnowledgeDocumentPathMixin
+from .frontmatter import KnowledgeScopedMixin as KnowledgeScopedMixin
+from .frontmatter import KnowledgeTopicPathMixin as KnowledgeTopicPathMixin
 from .frontmatter import ProfilePathMixin as ProfilePathMixin
 from .frontmatter import SkillPathMixin as SkillPathMixin
 from .frontmatter import UserScopedFrontmatter as UserScopedFrontmatter
@@ -46,6 +51,9 @@ __all__ = [
     "DailyLogPathMixin",
     "Entry",
     "EntryId",
+    "KnowledgeDocumentPathMixin",
+    "KnowledgeScopedMixin",
+    "KnowledgeTopicPathMixin",
     "MarkdownReader",
     "MarkdownWriter",
     "ParsedMarkdown",

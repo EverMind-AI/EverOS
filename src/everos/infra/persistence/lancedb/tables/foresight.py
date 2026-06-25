@@ -35,7 +35,7 @@ class Foresight(BaseLanceTable):
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``); cascade fills from md path."""
-    session_id: str
+    session_id: str | None = None
     timestamp: _dt.datetime
     """Foresight generation time."""
 

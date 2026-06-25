@@ -26,7 +26,7 @@ from .vllm_provider import VllmRerankProvider
 
 logger = get_logger(__name__)
 
-# host substring → provider. Ordered most-specific first; matched against
+# host substring -> provider. Ordered most-specific first; matched against
 # the ``base_url`` host so a Bailian / DeepInfra URL routes to the right
 # request-shape without the operator also having to set ``provider``.
 _PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (

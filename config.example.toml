@@ -21,7 +21,7 @@
 # ── LLM ───────────────────────────────────────────────
 # OpenAI-protocol chat-completions endpoint used by the algo extractors.
 [llm]
-model    = "gpt-4o-mini"
+model    = "gpt-4.1-mini"
 api_key  = "sk-..."
 base_url = "https://api.openai.com/v1"
 

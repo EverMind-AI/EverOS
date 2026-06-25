@@ -16,8 +16,8 @@ import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 
 from everos.infra.ome.testing import FakeStrategyContext
+from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
-from everos.memory.strategies._partition_locks import _reset_for_tests
 from everos.memory.strategies.trigger_profile_clustering import (
     trigger_profile_clustering,
 )
@@ -32,24 +32,27 @@ def _event(
     *,
     owner_id: str = "u_alice",
     memcell_id: str = "mc_aaaaaaaaaaa1",
+    episode_entry_id: str = "ep_20260517_0001",
     episode_text: str = "alice likes hiking",
     episode_timestamp_ms: int = 1_700_000_001_000,
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
-        episode_entry_id="ep_20260517_0001",
+        episode_entry_id=episode_entry_id,
         episode_text=episode_text,
         episode_timestamp_ms=episode_timestamp_ms,
         owner_id=owner_id,
+        session_id="s_test",
     )
 
 
 async def test_strategy_meta_is_attached() -> None:
-    meta = trigger_profile_clustering._ome_strategy_meta  # type: ignore[attr-defined]
+    meta = trigger_profile_clustering.meta
     assert meta.name == "trigger_profile_clustering"
     assert EpisodeExtracted in meta.trigger.on
     assert meta.emits == frozenset({ProfileClusterUpdated})
     assert meta.max_retries == 2
+    assert meta.applies_to is not None
 
 
 @pytest.mark.asyncio
@@ -90,7 +93,7 @@ async def test_creates_new_cluster_when_no_existing(
     assert new_cluster.id == "cl_newuser00001"
     assert new_cluster.count == 1
     assert new_cluster.last_ts == 1_700_000_001_000
-    assert new_cluster.members == ["mc_aaaaaaaaaaa1"]
+    assert new_cluster.members == ["ep_20260517_0001"]
     assert new_cluster.preview == ["alice likes hiking"]
     assert existing == []
 
@@ -101,7 +104,7 @@ async def test_creates_new_cluster_when_no_existing(
         "owner_id": "u_alice",
         "owner_type": "user",
         "kind": "user_memory",
-        "member_type": "memcell",
+        "member_type": "episode",
         "app_id": "default",
         "project_id": "default",
     }
@@ -129,7 +132,7 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
         count=1,
         last_ts=1_700_000_000_000,
         preview=["earlier episode"],
-        members=["mc_zzzzzzzzzzz0"],
+        members=["ep_20260517_0000"],
     )
     merged_cluster = AlgoCluster(
         id="cl_existing0001",
@@ -137,7 +140,7 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
         count=2,
         last_ts=1_700_000_001_000,
         preview=["earlier episode", "alice likes hiking"],
-        members=["mc_zzzzzzzzzzz0", "mc_aaaaaaaaaaa1"],
+        members=["ep_20260517_0000", "ep_20260517_0001"],
     )
 
     with (
@@ -174,7 +177,7 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
     """Drive two trigger_profile_clustering runs and record entry/exit order."""
     log: list[str] = []
 
-    def mock_cluster_by_geometry(_new_cluster, _existing):
+    def mock_cluster_by_geometry(_new_cluster, _existing, **_kw):
         # Sync, matching the real algo signature (must not be awaited).
         return None
 
@@ -208,11 +211,11 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
 
         await asyncio.gather(
             trigger_profile_clustering(
-                _event(owner_id=owner_a, memcell_id="mc_run_a"),
+                _event(owner_id=owner_a, episode_entry_id="ep_run_a"),
                 FakeStrategyContext(),
             ),
             trigger_profile_clustering(
-                _event(owner_id=owner_b, memcell_id="mc_run_b"),
+                _event(owner_id=owner_b, episode_entry_id="ep_run_b"),
                 FakeStrategyContext(),
             ),
         )
@@ -223,13 +226,31 @@ async def test_partition_lock_serialises_runs_on_same_owner() -> None:
     """Two runs sharing ``owner_id`` must not overlap critical sections."""
     log = await _run_serialisation_probe("u_alice", "u_alice")
     assert log in (
-        ["enter:mc_run_a", "leave:mc_run_a", "enter:mc_run_b", "leave:mc_run_b"],
-        ["enter:mc_run_b", "leave:mc_run_b", "enter:mc_run_a", "leave:mc_run_a"],
+        ["enter:ep_run_a", "leave:ep_run_a", "enter:ep_run_b", "leave:ep_run_b"],
+        ["enter:ep_run_b", "leave:ep_run_b", "enter:ep_run_a", "leave:ep_run_a"],
     )
 
 
 async def test_partition_lock_lets_different_owners_run_in_parallel() -> None:
     """Runs on distinct ``owner_id`` must overlap (no false serialisation)."""
     log = await _run_serialisation_probe("u_alice", "u_bob")
-    assert log.index("enter:mc_run_a") < log.index("leave:mc_run_b")
-    assert log.index("enter:mc_run_b") < log.index("leave:mc_run_a")
+    assert log.index("enter:ep_run_a") < log.index("leave:ep_run_b")
+    assert log.index("enter:ep_run_b") < log.index("leave:ep_run_a")
+
+
+async def test_applies_to_rejects_non_pipeline_source() -> None:
+    """Events with source != 'pipeline' must not pass the applies_to gate."""
+    meta = trigger_profile_clustering.meta
+    pipeline_event = _event()
+    assert meta.applies_to(pipeline_event) is True
+
+    reflection_event = EpisodeExtracted(
+        memcell_id="mc_merged",
+        episode_entry_id="ep_20260517_0002",
+        episode_text="merged narrative",
+        episode_timestamp_ms=1_700_000_001_000,
+        owner_id="u_alice",
+        session_id="reflection",
+        source="reflection",
+    )
+    assert meta.applies_to(reflection_event) is False

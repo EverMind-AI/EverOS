@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, HTTPException
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from everos import __version__
@@ -25,10 +24,10 @@ from everos.core.middleware import (
     DEFAULT_CORS_ORIGINS,
     ProfileMiddleware,
     PrometheusMiddleware,
-    global_exception_handler,
 )
 from everos.core.observability.logging import get_logger
 
+from .exception_handlers import register_handlers
 from .lifespans import (
     CascadeLifespanProvider,
     LanceDBLifespanProvider,
@@ -39,8 +38,10 @@ from .lifespans import (
 from .routes import (
     get,
     health,
+    knowledge,
     memorize,
     metrics,
+    ome,
     search,
 )
 
@@ -97,10 +98,8 @@ def create_app(
         openapi_url="/openapi.json" if enable_docs else None,
     )
 
-    # Exception handlers: HTTPException, validation errors, plus a fallback.
-    app.add_exception_handler(HTTPException, global_exception_handler)
-    app.add_exception_handler(RequestValidationError, global_exception_handler)
-    app.add_exception_handler(Exception, global_exception_handler)
+    # Exception handlers
+    register_handlers(app)
 
     # Middleware order: earlier `add_middleware` calls become inner, later ones outer.
     # CORS innermost (matches base_app.py legacy pattern).
@@ -120,6 +119,8 @@ def create_app(
     app.include_router(memorize.router)
     app.include_router(search.router)
     app.include_router(get.router)
+    app.include_router(ome.router)
+    app.include_router(knowledge.router)
 
     logger.info("app_created", docs_enabled=enable_docs)
     return app

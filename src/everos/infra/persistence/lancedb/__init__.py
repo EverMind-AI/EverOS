@@ -13,8 +13,10 @@ External usage::
     from everos.infra.persistence.lancedb import (
         get_connection, get_table, dispose_connection,
         Episode, AtomicFact, Foresight, AgentCase, AgentSkill, UserProfile,
+        KnowledgeTopic,
         episode_repo, atomic_fact_repo, foresight_repo,
         agent_case_repo, agent_skill_repo, user_profile_repo,
+        knowledge_topic_repo,
     )
 
 Three index kinds: scalar / BM25 / vector. Tables are created lazily on
@@ -33,12 +35,14 @@ from .repos import agent_skill_repo as agent_skill_repo
 from .repos import atomic_fact_repo as atomic_fact_repo
 from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
+from .repos import knowledge_topic_repo as knowledge_topic_repo
 from .repos import user_profile_repo as user_profile_repo
 from .tables import AgentCase as AgentCase
 from .tables import AgentSkill as AgentSkill
 from .tables import AtomicFact as AtomicFact
 from .tables import Episode as Episode
 from .tables import Foresight as Foresight
+from .tables import KnowledgeTopic as KnowledgeTopic
 from .tables import ParentType as ParentType
 from .tables import UserProfile as UserProfile
 
@@ -49,6 +53,7 @@ _BUSINESS_SCHEMAS = (
     AgentCase,
     AgentSkill,
     UserProfile,
+    KnowledgeTopic,
 )
 
 
@@ -115,6 +120,7 @@ __all__ = [
     "AtomicFact",
     "Episode",
     "Foresight",
+    "KnowledgeTopic",
     "LanceDBSchemaMismatchError",
     "ParentType",
     "UserProfile",
@@ -127,6 +133,7 @@ __all__ = [
     "foresight_repo",
     "get_connection",
     "get_table",
+    "knowledge_topic_repo",
     "user_profile_repo",
     "verify_business_schemas",
 ]

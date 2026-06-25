@@ -36,7 +36,7 @@ from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.decorator import StrategyMeta
+from everos.infra.ome.decorator import Strategy, StrategyMeta
 from everos.infra.ome.events import BaseEvent, CronTick, ManualTick, resolve_topic
 from everos.infra.ome.exceptions import (
     EngineCallFromStrategyError,
@@ -120,7 +120,12 @@ async def _cron_entry(engine_id: str, strategy_name: str) -> None:
 
     Looks the engine up by id and emits ``CronTick`` so the event flows
     back through the standard dispatch pipeline.
+
+    Clears ``_CURRENT_STRATEGY`` because APScheduler may inherit the
+    context from a running strategy task, which would trip the
+    ``_guard_no_strategy_call`` check on ``engine.emit()``.
     """
+    _CURRENT_STRATEGY.set(None)
     engine = _ENGINES.get(engine_id)
     if engine is None:
         logger.error(
@@ -136,8 +141,10 @@ async def _idle_entry(engine_id: str, strategy_name: str) -> None:
     """Module-level APS jobstore callback for Idle IntervalTriggers.
 
     Looks the engine up by id and hands off to
-    :meth:`OfflineEngine.run_idle_scan`.
+    :meth:`OfflineEngine.run_idle_scan`. Clears ``_CURRENT_STRATEGY``
+    for the same reason as :func:`_cron_entry`.
     """
+    _CURRENT_STRATEGY.set(None)
     engine = _ENGINES.get(engine_id)
     if engine is None:
         logger.error(
@@ -200,16 +207,22 @@ class OfflineEngine:
         self._active_runs = 0
         self._idle_event: asyncio.Event | None = None
 
-    def register(self, func: Callable[..., Any]) -> None:
-        """Register a strategy decorated with :func:`offline_strategy`.
+    def register(self, strategy: Strategy) -> None:
+        """Register a :class:`Strategy` returned by ``@offline_strategy``.
 
         Must be called before :meth:`start`; registering after start raises
         :class:`OMEError` because the scheduler has already snapshotted
         the strategy set for Cron / Idle job creation.
+
+        Args:
+            strategy: A Strategy instance produced by the decorator.
+
+        Raises:
+            OMEError: If the engine has already started.
         """
         if self._started:
             raise OMEError("register: cannot register after start()")
-        self._registry.register(func)
+        self._registry.register(strategy)
 
     @_refuse_inside_strategy
     def reschedule_cron_job(self, name: str, expr: str) -> None:
@@ -301,6 +314,7 @@ class OfflineEngine:
             engine_sem=self._engine_sem,
             emit_hook=self._dispatch_event,
             on_dead_letter=self._on_dead_letter,
+            engine=self,
         )
         self._idle_store = IdleStore(storage=self._storage)
 
@@ -519,14 +533,15 @@ class OfflineEngine:
     def _acquire_lock(self) -> None:
         lock_path = Path(str(self._config.jobstore_path) + ".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(lock_path, "a+")  # noqa: SIM115
         try:
-            handle = open(lock_path, "a+")  # noqa: SIM115
             portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-            self._lock_handle = handle
         except portalocker.LockException as e:
+            handle.close()
             raise EngineLockHeldError(
                 f"another OfflineEngine instance already holds {lock_path}"
             ) from e
+        self._lock_handle = handle
 
     def _release_lock(self) -> None:
         if self._lock_handle is not None:
@@ -795,3 +810,75 @@ class OfflineEngine:
         if not self._started:
             raise OMEError("get_run_status: engine not started")
         return await self._run_record_store.get(run_id)
+
+    async def list_runs_by_event_id(self, event_id: str) -> list[RunRecord]:
+        """Return all run records triggered by ``event_id``.
+
+        Not guarded by ``_refuse_inside_strategy`` — designed to be
+        called from inside a strategy (e.g. Reflection waiting for
+        downstream extraction runs).
+
+        Args:
+            event_id: The ``BaseEvent.event_id`` of the triggering event.
+
+        Returns:
+            All ``RunRecord`` instances whose ``event_id`` matches,
+            newest first.
+
+        Raises:
+            OMEError: Engine has not been started.
+        """
+        if not self._started:
+            raise OMEError("list_runs_by_event_id: engine not started")
+        return await self._run_record_store.list_by_event_id(event_id)
+
+    _TERMINAL_STATUSES = frozenset(
+        {
+            RunStatus.SUCCESS,
+            RunStatus.FAILED,
+            RunStatus.DEAD_LETTER,
+            RunStatus.CRASHED,
+        }
+    )
+
+    async def wait_for_event(
+        self,
+        event_id: str,
+        *,
+        timeout: float = 120.0,  # noqa: ASYNC109
+        poll_interval: float = 0.5,
+    ) -> list[RunRecord]:
+        """Poll until all runs triggered by ``event_id`` reach a terminal status.
+
+        Not guarded by ``_refuse_inside_strategy`` — designed to be
+        called from inside a strategy (e.g. Reflection waiting for
+        downstream extraction runs to complete before deprecating).
+
+        Args:
+            event_id: The ``BaseEvent.event_id`` of the triggering event.
+            timeout: Maximum seconds to wait before raising ``TimeoutError``.
+            poll_interval: Seconds between polls.
+
+        Returns:
+            All ``RunRecord`` instances for ``event_id`` once every run
+            has reached a terminal status (SUCCESS / FAILED / DEAD_LETTER
+            / CRASHED).
+
+        Raises:
+            TimeoutError: If any run is still non-terminal after ``timeout``.
+            OMEError: Engine has not been started.
+        """
+        if not self._started:
+            raise OMEError("wait_for_event: engine not started")
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            runs = await self._run_record_store.list_by_event_id(event_id)
+            if runs and all(r.status in self._TERMINAL_STATUSES for r in runs):
+                return runs
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"wait_for_event: timed out after {timeout}s "
+                    f"for event_id={event_id!r}"
+                )
+            await asyncio.sleep(min(poll_interval, remaining))

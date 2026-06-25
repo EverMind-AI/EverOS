@@ -1,10 +1,9 @@
-"""``everos init`` — generate a starter ``.env`` from the packaged template.
+"""``everos init`` — generate starter config files in the memory root.
 
-The ``env.template`` ships inside the wheel as package data at
-``everos/templates/env.template``. ``init`` reads it via
-:mod:`importlib.resources`, so the command works identically for pip-
-installed users and source-tree users (the file is the single source
-of truth).
+Copies the shipped ``default.toml`` and ``default_ome.toml`` templates
+into the resolved memory root as ``everos.toml`` and ``ome.toml``
+respectively. Users then edit these files to fill in API keys and tune
+strategy schedules.
 
 Subcommand mounted as ``everos init`` (top-level leaf command — not a
 Typer group), to match the idiomatic ``alembic init`` / ``django-admin
@@ -13,74 +12,14 @@ startproject`` shape.
 
 from __future__ import annotations
 
-import contextlib
-import logging
-import os
-import sys
-import tempfile
-from importlib import resources
 from pathlib import Path
 
 import typer
 
-_TEMPLATE_PACKAGE = "everos.templates"
-_TEMPLATE_NAME = "env.template"
+from everos.config.settings import resolve_root
 
-_log = logging.getLogger("everos.cli.init")
-
-
-def _read_template() -> str:
-    """Read the packaged ``env.template`` from wheel resources.
-
-    Returns the file contents as a UTF-8 string. Raises ``RuntimeError``
-    on missing-file — if this fires it means the wheel was built from a
-    source tree where ``src/everos/templates/env.template`` was missing
-    (canonical location; auto-included via ``packages=["src/everos"]``
-    in ``pyproject.toml``).
-    """
-    try:
-        return (
-            resources.files(_TEMPLATE_PACKAGE)
-            .joinpath(_TEMPLATE_NAME)
-            .read_text(encoding="utf-8")
-        )
-    except (FileNotFoundError, ModuleNotFoundError) as exc:
-        raise RuntimeError(
-            f"packaged template {_TEMPLATE_NAME!r} not found under "
-            f"{_TEMPLATE_PACKAGE!r}; the wheel is missing its "
-            "force-include entry (see pyproject.toml "
-            "[tool.hatch.build.targets.wheel.force-include])."
-        ) from exc
-
-
-def _xdg_default_path() -> Path:
-    """``$XDG_CONFIG_HOME/everos/.env`` (default ``~/.config/everos/.env``)."""
-    xdg = os.environ.get("XDG_CONFIG_HOME") or "~/.config"
-    return Path(xdg).expanduser() / "everos" / ".env"
-
-
-def _atomic_write(target: Path, content: str, mode: int = 0o600) -> None:
-    """Write ``content`` to ``target`` atomically with ``mode`` permission.
-
-    Writes to a tempfile in the same directory then ``os.replace``s it
-    onto the target — guarantees either the full new file is visible or
-    the original (if any) is untouched. Permission bits applied before
-    the rename so the file is never readable by other users.
-    """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=target.name + ".",
-        dir=target.parent,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(tmp_path, mode)
-        os.replace(tmp_path, target)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_path)
-        raise
+_EVEROS_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default.toml"
+_OME_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default_ome.toml"
 
 
 def register(parent: typer.Typer) -> None:
@@ -88,98 +27,65 @@ def register(parent: typer.Typer) -> None:
 
     @parent.command("init")
     def init(
-        to: str | None = typer.Option(
+        root: str | None = typer.Option(
             None,
-            "--to",
-            help=(
-                "Target path for the .env file (default: ./.env). "
-                "Parent directories are created if needed."
-            ),
+            "--root",
+            help="Memory root directory (default: ~/.everos)",
         ),
         force: bool = typer.Option(
             False,
             "--force",
-            help="Overwrite an existing file at the target path.",
+            help="Overwrite existing files",
         ),
         print_: bool = typer.Option(
             False,
             "--print",
-            help="Print the template to stdout instead of writing to disk.",
-        ),
-        xdg: bool = typer.Option(
-            False,
-            "--xdg",
-            help=(
-                "Shortcut for --to=${XDG_CONFIG_HOME:-~/.config}/everos/.env "
-                "(mutually exclusive with --to)."
-            ),
+            help="Print the everos.toml template to stdout instead of writing to disk.",
         ),
     ) -> None:
-        """Generate a starter ``.env`` from the packaged template.
+        """Generate starter configuration files.
 
         Common flows::
 
-            everos init                  # writes ./.env
-            everos init --xdg            # writes ~/.config/everos/.env
-            everos init --to /etc/foo.env --force
-            everos init --print > custom.env
+            everos init                     # writes to ~/.everos/
+            everos init --root /data/everos # writes to /data/everos/
+            everos init --force             # overwrites existing files
+            everos init --print             # prints everos.toml to stdout
 
         Exit codes:
 
-        - 0 — written successfully (or printed to stdout).
-        - 1 — target file already exists and ``--force`` was not given.
-        - 2 — packaged template missing (wheel build problem).
-        - 3 — write failed (permissions / disk full / parent unwritable).
+        - 0 — files created successfully (or printed to stdout).
+        - 1 — files already exist and ``--force`` was not given.
         """
-        if xdg and to is not None:
-            typer.secho(
-                "error: --xdg and --to are mutually exclusive",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(code=2)
-
-        try:
-            template = _read_template()
-        except RuntimeError as exc:
-            typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-
         if print_:
-            sys.stdout.write(template)
+            import sys
+
+            sys.stdout.write(_EVEROS_TEMPLATE.read_text(encoding="utf-8"))
             return
 
-        if xdg:
-            target = _xdg_default_path()
-        elif to is not None:
-            target = Path(to).expanduser().resolve()
-        else:
-            target = Path.cwd() / ".env"
+        resolved = resolve_root(root)
+        resolved.mkdir(parents=True, exist_ok=True)
 
-        if target.exists() and not force:
-            typer.secho(
-                f"error: {target} already exists; pass --force to overwrite",
-                fg=typer.colors.RED,
-                err=True,
-            )
+        everos_toml = resolved / "everos.toml"
+        ome_toml = resolved / "ome.toml"
+
+        created: list[Path] = []
+        for target, template in [
+            (everos_toml, _EVEROS_TEMPLATE),
+            (ome_toml, _OME_TEMPLATE),
+        ]:
+            if target.exists() and not force:
+                typer.echo(f"  exists: {target} (skipped)")
+                continue
+            target.write_bytes(template.read_bytes())
+            created.append(target)
+            typer.secho(f"  created: {target}", fg=typer.colors.GREEN)
+
+        if not created:
+            typer.echo("Nothing to create (use --force to overwrite).")
             raise typer.Exit(code=1)
 
-        try:
-            _atomic_write(target, template)
-        except OSError as exc:
-            typer.secho(
-                f"error: failed to write {target}: {exc}",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(code=3) from exc
-
-        # Friendly next-step block (stdout — quiet enough for piping).
-        size_kb = target.stat().st_size / 1024
-        typer.secho(f"✓ wrote {target} ({size_kb:.1f} KB)", fg=typer.colors.GREEN)
-        typer.echo("Next steps:")
-        typer.echo("  1. Edit the file and fill in the API keys (see comments inside).")
-        typer.echo("  2. Run `everos server start`.")
-        typer.echo(
-            "Docs: https://github.com/EverMind-AI/EverOS/blob/main/QUICKSTART.md"
-        )
+        typer.echo("\nNext steps:")
+        typer.echo(f"  1. Edit {everos_toml} — fill in API keys (see comments inside)")
+        root_flag = f" --root {resolved}" if root else ""
+        typer.echo(f"  2. Run: everos server start{root_flag}")

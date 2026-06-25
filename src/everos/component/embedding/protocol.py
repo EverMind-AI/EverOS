@@ -13,13 +13,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
+from everos.core.errors import EmbeddingServiceError as EmbeddingServiceError
 
-class EmbeddingError(Exception):
-    """Raised on any provider-side embedding failure.
-
-    Wraps the upstream SDK exception via ``__cause__`` (PEP 3134) so
-    diagnostic loggers preserve the original error chain.
-    """
+# Backward compat — old name still importable from this module.
+EmbeddingError = EmbeddingServiceError
 
 
 @runtime_checkable
@@ -42,7 +39,7 @@ class EmbeddingProvider(Protocol):
 
         Implementations chunk by ``batch_size`` and bound in-flight
         requests by ``max_concurrent`` (both from settings). On failure,
-        raises :class:`EmbeddingError` — the worker treats it as a
+        raises :class:`EmbeddingServiceError` — the worker treats it as a
         retryable / unrecoverable case per HTTP-status mapping.
         """
         ...

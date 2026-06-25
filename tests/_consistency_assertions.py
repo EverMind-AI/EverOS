@@ -97,7 +97,7 @@ async def assert_md_lance_strict_consistent(
 
     Args:
         memory_root: Absolute path to the memory root directory
-            (e.g. the value of ``EVEROS_MEMORY__ROOT`` /
+            (e.g. the value of ``EVEROS_ROOT`` /
             ``MemoryRoot.root``).
         expect_at_least: Optional ``{kind_name: min_md_files}`` map.
             Raises ``AssertionError`` if a listed kind has fewer md

@@ -35,11 +35,12 @@ from typing import Any
 
 import httpx
 
-from .protocol import RerankError, RerankResult
+from ._errors import retries_exhausted_error, transport_error, upstream_http_error
+from .protocol import RerankResult, RerankServiceError
 
 # Qwen3-Reranker chat template. The DeepInfra inference API treats the reranker
 # as a yes/no generator, so the prompt scaffolding must be supplied client-side
-# (verbatim mirror of the benchmark reranker client). Without it the
+# (verbatim mirror of the EverAlgo benchmark's reranker client). Without it the
 # model scores raw text off-template and returns uncalibrated relevance.
 _QWEN3_PREFIX = (
     "<|im_start|>system\n"
@@ -149,9 +150,7 @@ class DeepInfraRerankProvider:
                         )
                 except httpx.HTTPError as exc:
                     if attempt == self._max_retries:
-                        raise RerankError(
-                            f"DeepInfra rerank transport failure: {exc}"
-                        ) from exc
+                        raise transport_error("DeepInfra", exc) from exc
                     continue
 
                 if response.status_code == 200:
@@ -160,19 +159,11 @@ class DeepInfraRerankProvider:
                 # Retry on 5xx / 429 only; surface 4xx immediately.
                 if response.status_code >= 500 or response.status_code == 429:
                     if attempt == self._max_retries:
-                        raise RerankError(
-                            f"DeepInfra rerank HTTP {response.status_code}: "
-                            f"{response.text[:200]}"
-                        )
+                        raise upstream_http_error("DeepInfra", response)
                     continue
-                raise RerankError(
-                    f"DeepInfra rerank HTTP {response.status_code}: "
-                    f"{response.text[:200]}"
-                )
+                raise upstream_http_error("DeepInfra", response)
 
-            raise RerankError(
-                f"DeepInfra rerank exhausted retries ({self._max_retries})"
-            )
+            raise retries_exhausted_error("DeepInfra", self._max_retries)
 
 
 def _extract_scores(body: dict[str, Any], expected_len: int) -> list[float]:
@@ -187,10 +178,10 @@ def _extract_scores(body: dict[str, Any], expected_len: int) -> list[float]:
     """
     raw = body.get("scores")
     if not isinstance(raw, list):
-        raise RerankError(f"DeepInfra rerank response missing scores: {body!r}")
+        raise RerankServiceError(f"DeepInfra rerank response missing scores: {body!r}")
     row = raw[0] if raw and isinstance(raw[0], list) else raw
     if len(row) != expected_len:
-        raise RerankError(
+        raise RerankServiceError(
             f"DeepInfra rerank returned {len(row)} scores, expected {expected_len}"
         )
     return [float(s) for s in row]

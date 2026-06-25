@@ -21,6 +21,7 @@ scanner background task is started.
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -51,6 +52,19 @@ app = typer.Typer(
     help="Inspect and operate the md → LanceDB sync queue",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def _cascade_callback(
+    root: str | None = typer.Option(
+        None,
+        "--root",
+        help="Memory root directory (env: EVEROS_ROOT, default: ~/.everos)",
+    ),
+) -> None:
+    """Set memory root before any cascade subcommand runs."""
+    if root:
+        os.environ["EVEROS_ROOT"] = root
 
 
 # ── shared runtime context ───────────────────────────────────────────────

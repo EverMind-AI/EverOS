@@ -161,6 +161,7 @@ class SearchManager:
             owner_type=req.owner_type,
             app_id=req.app_id,
             project_id=req.project_id,
+            exclude_deprecated=req.owner_type == "user",
         )
         self._validate_components(req)
 
@@ -302,6 +303,7 @@ class SearchManager:
                 episode_recaller=self._ep,
                 where=where,
                 top_k=top_k,
+                min_score=req.min_score,
             )
 
         # rrf / lr: standard everalgo fusion path (fallback).
@@ -518,35 +520,31 @@ class SearchManager:
         ``atomic_fact`` table) for finer-grained semantic match — long
         episodes whose single mean-pooled vector dilutes a specific topic
         recover via the matching atomic fact's own embedding. Mirrors
-        the EverOS MaxSim retrieval pattern.
+        EverOS/EverAlgo's MaxSim retrieval pattern.
         """
         vector = await self._embed_query(req.query)
         if not vector:
             return []
         fact_limit = min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP)
         fact_cands = await self._fact.dense_recall(vector, where, limit=fact_limit)
-        # Max-pool fact scores by their parent memcell. ``atomic_fact``
-        # rows always carry ``parent_id = memcell_id`` (cascade contract).
-        mc_score: dict[str, float] = {}
+        # Max-pool fact scores by parent episode entry_id.
+        ep_score: dict[str, float] = {}
         for fc in fact_cands:
-            mc = fc.metadata.get("parent_id")
-            if not isinstance(mc, str) or not mc:
+            pid = fc.metadata.get("parent_id")
+            if not isinstance(pid, str) or not pid:
                 continue
-            if fc.score > mc_score.get(mc, -1.0):
-                mc_score[mc] = fc.score
-        if not mc_score:
+            if fc.score > ep_score.get(pid, -1.0):
+                ep_score[pid] = fc.score
+        if not ep_score:
             return []
-        ranked = sorted(mc_score.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
-        top_mc_ids = [mc for mc, _ in ranked]
-        score_by_mc = dict(ranked)
-        # One LanceDB scan: ``WHERE parent_id IN (...)``. The episode
-        # ``where`` re-applies the partition filter so episodes whose
-        # owner partition no longer matches the request are dropped.
-        ep_cands = await self._ep.fetch_by_parent_ids(top_mc_ids, where)
+        ranked = sorted(ep_score.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+        top_entry_ids = [eid for eid, _ in ranked]
+        score_by_entry = dict(ranked)
+        ep_cands = await self._ep.fetch_by_entry_ids(top_entry_ids, where)
         rescored: list[Candidate] = []
         for c in ep_cands:
-            mc = c.metadata.get("parent_id")
-            s = score_by_mc.get(mc, 0.0) if isinstance(mc, str) else 0.0
+            eid = c.metadata.get("entry_id")
+            s = score_by_entry.get(eid, 0.0) if isinstance(eid, str) else 0.0
             rescored.append(
                 Candidate(id=c.id, score=s, source="vector", metadata=c.metadata)
             )

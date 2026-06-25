@@ -38,7 +38,7 @@ POST /api/v1/memory/add
   parsed text merged back into the session buffer (in original order)
         │
         ▼
-  boundary detector → extraction LLM → MemCell
+  boundary detector → extraction LLM → memory cell (MemCell)
         │
         ▼
   markdown (truth)  +  SQLite (state)  +  LanceDB (vector + BM25)
@@ -56,7 +56,7 @@ text-bearing formats can be parsed without it (e.g. a plain email with no
 inline images). The parser returns text; that text takes the place of the
 asset in the message buffer. Nothing downstream of the parser
 knows or cares that the content originated as an image or PDF — the raw
-bytes are **not** persisted past extraction (the episode and memory cell
+bytes are **not** persisted past extraction (the episode and memory cell (`MemCell`)
 store only the parsed text).
 
 ## Prerequisites
@@ -85,14 +85,15 @@ brew install --cask libreoffice          # macOS
 sudo apt-get install -y libreoffice       # Debian / Ubuntu
 ```
 
-Without LibreOffice, **office uploads return `415`** with a clear error;
-image / PDF / audio / HTML / email parsing is unaffected.
+Without LibreOffice, **office uploads return `503`**
+(`CAPABILITY_UNAVAILABLE`) with a clear error message; image / PDF /
+audio / HTML / email parsing is unaffected.
 
 ### Configure the multimodal LLM
 
 The parser uses its own LLM section, independent from `[llm]`. The model
-must accept OpenAI `image_url` parts. `everos init` writes these into the
-generated `.env`:
+must accept OpenAI `image_url` parts. Configure these in `everos.toml`
+(under `[multimodal]`) or via env vars:
 
 ```bash
 EVEROS_MULTIMODAL__MODEL=google/gemini-3-flash-preview
@@ -270,33 +271,45 @@ All fields bind from the environment via the parent `Settings`
 |---|---|---|
 | `EVEROS_MULTIMODAL__MODEL` | `google/gemini-3-flash-preview` | Parsing model; must accept `image_url` parts |
 | `EVEROS_MULTIMODAL__API_KEY` | — | API key for the multimodal endpoint |
-| `EVEROS_MULTIMODAL__BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
+| `EVEROS_MULTIMODAL__BASE_URL` | `None` | OpenAI-compatible base URL |
 | `EVEROS_MULTIMODAL__MAX_CONCURRENCY` | `4` | Cap on parallel multimodal calls within one extraction |
 | `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` | `52428800` (50 MiB) | Max size of a `file://` asset |
 | `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` | `[]` (any) | JSON list of allowlisted base dirs for `file://` URIs |
 
 ## Errors and limits
 
-Two failure classes behave differently. **Deterministic** problems
-(nothing to parse, no handler, missing system dependency) **abort the
-whole `/add` batch with `415`**. A **transient** multimodal-LLM failure
-(timeout, rate-limit, the model rejecting the asset) **degrades just that
-item** — the request still returns `200`, the item is marked
-`parse_status="failed"` and contributes no text, and the rest of the
-batch extracts normally.
+Three failure classes behave differently:
 
-| Condition | Result |
-|---|---|
-| Non-text item carries only `text` (no `uri` / `base64`) | `415` (batch aborted) |
-| Extension / modality the parser has no handler for | `415` (batch aborted) |
-| `base64` without a resolvable `ext` / MIME to dispatch on | `415` (batch aborted) |
-| Office document but no LibreOffice (`soffice`) on host | `415` (batch aborted) |
-| `file://` fails a guardrail (missing / non-regular / too large / outside allowlist) | `415` (batch aborted) |
-| Multimodal **LLM call** fails (timeout / rate-limit / model rejects the asset) | **`200`** — that item is skipped (`parse_status="failed"`), the rest of the batch still extracts |
+**Format errors** — the uploaded file format is invalid or not
+recognized. These abort the batch with `415` (`UNSUPPORTED_FORMAT`):
 
-The `415` body uses the standard error envelope with the parse-failure
-reason in `error.message` — see
-[api.md → POST /add](api.md#post-apiv1memoryadd).
+| Condition | HTTP | `error.code` |
+|---|---|---|
+| Non-text item carries only `text` (no `uri` / `base64`) | `415` | `UNSUPPORTED_FORMAT` |
+| Extension / modality the parser has no handler for | `415` | `UNSUPPORTED_FORMAT` |
+| `base64` without a resolvable `ext` / MIME to dispatch on | `415` | `UNSUPPORTED_FORMAT` |
+| `file://` fails a guardrail (missing / non-regular / too large / outside allowlist) | `415` | `UNSUPPORTED_FORMAT` |
+
+**Capability errors** — the server is missing a required dependency.
+These abort the batch with `503` (`CAPABILITY_UNAVAILABLE`). Unlike
+transient errors, retrying will not help — admin action is required:
+
+| Condition | HTTP | `error.code` |
+|---|---|---|
+| `everos[multimodal]` extra not installed | `503` | `CAPABILITY_UNAVAILABLE` |
+| Office document but no LibreOffice (`soffice`) on host | `503` | `CAPABILITY_UNAVAILABLE` |
+
+**Transient LLM errors** — the multimodal LLM call failed. These
+degrade gracefully — the request still returns `200`, the affected
+item is marked `parse_status="failed"` and contributes no text, and the
+rest of the batch extracts normally:
+
+| Condition | HTTP | Result |
+|---|---|---|
+| Multimodal LLM call fails (timeout / rate-limit / model rejects) | `200` | That item is skipped; the rest of the batch still extracts |
+
+All error responses use the standard error envelope — see
+[api.md → Errors](api.md#errors).
 
 ## Searching multimodal memory
 

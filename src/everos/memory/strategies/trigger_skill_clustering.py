@@ -30,8 +30,8 @@ from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.triggers import Immediate
 from everos.infra.persistence.sqlite import cluster_repo, mint_cluster_id
+from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import AgentCaseExtracted, SkillClusterUpdated
-from everos.memory.strategies._partition_locks import get_partition_lock
 
 logger = get_logger(__name__)
 

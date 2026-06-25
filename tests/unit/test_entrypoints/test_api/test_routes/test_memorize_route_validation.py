@@ -1,4 +1,12 @@
-"""DTO-layer path-safety validation for ``POST /api/v1/memory/add``."""
+"""DTO-layer path-safety validation for ``POST /api/v1/memory/add``.
+
+``sender_id`` flows through to ``owner_id`` and is joined into the episode
+write path as a directory segment, so it must carry the same path-traversal
+guard as ``app_id`` / ``project_id`` (charset whitelist + ``.``/``..``
+rejection). These tests pin that guard at the DTO layer; the writer-level
+containment backstop is covered in
+``tests/unit/test_core/test_persistence/test_markdown/test_writer.py``.
+"""
 
 from __future__ import annotations
 
@@ -23,13 +31,13 @@ def _message(sender_id: str) -> MessageItemDTO:
 @pytest.mark.parametrize(
     "bad_sender_id",
     [
-        "../../../../etc",
-        "..",
-        ".",
-        "a/b",
-        "a/../b",
-        "with space",
-        "",
+        "../../../../etc",  # classic traversal
+        "..",  # reserved parent token
+        ".",  # reserved current-dir token
+        "a/b",  # embedded path separator
+        "a/../b",  # separator + traversal mid-string
+        "with space",  # outside the charset whitelist
+        "",  # empty (min_length)
     ],
 )
 def test_message_item_rejects_unsafe_sender_id(bad_sender_id: str) -> None:
@@ -45,9 +53,9 @@ def test_message_item_rejects_unsafe_sender_id(bad_sender_id: str) -> None:
         "user-123",
         "a.b_c-1",
         "default",
-        "user@example.com",
-        "user+tag",
-        "user+tag@example.com",
+        "user@example.com",  # email-style id (``@`` + dotted domain)
+        "user+tag",  # plus-addressing
+        "user+tag@example.com",  # both, combined
     ],
 )
 def test_message_item_accepts_path_safe_sender_id(good_sender_id: str) -> None:
@@ -55,6 +63,7 @@ def test_message_item_accepts_path_safe_sender_id(good_sender_id: str) -> None:
 
 
 def test_add_request_rejects_traversal_sender_id_in_messages() -> None:
+    # The guard fires through the nested message list, not just on a bare DTO.
     with pytest.raises(ValidationError):
         MemorizeAddRequest(
             session_id="s1",

@@ -25,12 +25,14 @@ from everos.infra.persistence.lancedb import (
     AtomicFact,
     Episode,
     Foresight,
+    KnowledgeTopic,
     UserProfile,
     agent_case_repo,
     agent_skill_repo,
     atomic_fact_repo,
     episode_repo,
     foresight_repo,
+    knowledge_topic_repo,
     user_profile_repo,
 )
 from everos.infra.persistence.markdown import (
@@ -39,6 +41,8 @@ from everos.infra.persistence.markdown import (
     AtomicFactDailyFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
+    KnowledgeDocumentFrontmatter,
+    KnowledgeTopicFrontmatter,
     UserProfileFrontmatter,
 )
 
@@ -50,6 +54,8 @@ from .handlers import (
     ForesightHandler,
     Handler,
     HandlerDeps,
+    KnowledgeDocumentHandler,
+    KnowledgeTopicHandler,
     UserProfileHandler,
 )
 
@@ -68,9 +74,9 @@ class KindSpec:
 
     name: str
     frontmatter_schema: type[BaseFrontmatter]
-    lance_schema: type
-    lance_repo: object
     handler_factory: type[Handler]
+    lance_schema: type | None = None
+    lance_repo: object | None = None
 
     def path_glob(self) -> str:
         """Glob (relative to memory root) for every md this kind covers."""
@@ -129,6 +135,20 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         lance_schema=UserProfile,
         lance_repo=user_profile_repo,
         handler_factory=UserProfileHandler,
+    ),
+    KindSpec(
+        name="knowledge_document",
+        frontmatter_schema=KnowledgeDocumentFrontmatter,
+        handler_factory=KnowledgeDocumentHandler,
+        lance_schema=None,
+        lance_repo=None,
+    ),
+    KindSpec(
+        name="knowledge_topic",
+        frontmatter_schema=KnowledgeTopicFrontmatter,
+        handler_factory=KnowledgeTopicHandler,
+        lance_schema=KnowledgeTopic,
+        lance_repo=knowledge_topic_repo,
     ),
 )
 """Every cascade kind, evaluated in declaration order by :func:`match_kind`."""

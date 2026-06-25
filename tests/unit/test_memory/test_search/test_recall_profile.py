@@ -44,7 +44,7 @@ def _profile_row(
 
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
     yield

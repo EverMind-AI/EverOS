@@ -17,6 +17,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar, Literal
 
+from pydantic import Field
+
 from everos.core.persistence.markdown import (
     DailyLogPathMixin,
     UserScopedFrontmatter,
@@ -36,3 +38,4 @@ class AtomicFactDailyFrontmatter(DailyLogPathMixin, UserScopedFrontmatter):
     entry_count: int = 0
     created_at: _dt.datetime | None = None
     last_appended_at: _dt.datetime | None = None
+    deprecated_entries: dict[str, str] = Field(default_factory=dict)

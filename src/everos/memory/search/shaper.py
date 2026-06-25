@@ -66,7 +66,7 @@ def shape_episode_from_candidate(
         return None
     session_id = md.get("session_id")
     episode = md.get("episode")
-    if not isinstance(session_id, str) or not isinstance(episode, str):
+    if not isinstance(episode, str):
         logger.warning("shape_episode_missing_required_field", id=candidate.id)
         return None
     return SearchEpisodeItem(

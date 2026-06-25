@@ -21,7 +21,6 @@
 
 <br>
 
-- [Upcoming Features](#upcoming-features)
 - [Why Ever OS](#why-ever-os)
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
@@ -34,19 +33,6 @@
 
 </details>
 
-
-## Upcoming Features
-
-> [!IMPORTANT]
->
-> **Knowledge Wiki:** editable, source-backed Markdown knowledge pages built
-> from memory.
->
-> **Reflection:** idle-time and offline memory evolution that connects
-> signals, compresses history, and improves profiles and skills between
-> sessions.
-
-<br>
 
 ## Why Ever OS
 
@@ -86,6 +72,16 @@ for fast retrieval and self-evolving reuse.
 <td><strong>Orthogonal retrieval</strong></td>
 <td>✅ Search by <code>user_id</code>, <code>agent_id</code>, <code>app_id</code>, <code>project_id</code>, and <code>session_id</code></td>
 <td>❌ Usually app, namespace, tenant, thread, or graph scoped</td>
+</tr>
+<tr>
+<td><strong>Knowledge Wiki</strong></td>
+<td>✅ Editable, source-backed Markdown knowledge pages with taxonomy, CRUD APIs, and topic search</td>
+<td>❌ Usually separate from memory, trapped in a dashboard, or not tied back to source files</td>
+</tr>
+<tr>
+<td><strong>Reflection</strong></td>
+<td>✅ Offline memory evolution that merges episode clusters and refines profiles and skills between sessions</td>
+<td>❌ Usually retrieval-only memory with little background consolidation or long-horizon improvement</td>
 </tr>
 </table>
 

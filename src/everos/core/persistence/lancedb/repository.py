@@ -78,7 +78,7 @@ class LanceRepoBase[T: BaseLanceTable]:
     reads stay unlocked so search QPS is not impacted by writers.
 
     Locks live in a class-level dict keyed by table name and are never
-    evicted (mirrors :mod:`everos.memory.strategies._partition_locks`
+    evicted (mirrors :mod:`everos.memory._partition_locks`
     on bpo-28427 — a lock with pending waiters must outlive any dict
     entry that points to it).
     """
@@ -111,7 +111,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         a module-level lock surviving across tests fails with "bound to
         a different event loop". The production cascade worker runs on
         one loop forever and does not need this hook. Mirrors
-        :func:`everos.memory.strategies._partition_locks._reset_for_tests`.
+        :func:`everos.memory._partition_locks._reset_for_tests`.
         """
         cls._table_locks.clear()
 
@@ -426,6 +426,29 @@ class LanceRepoBase[T: BaseLanceTable]:
         if where is not None:
             q = q.where(where)
         return await q.limit(limit).to_list()
+
+    # ── Update ─────────────────────────────────────────────────────────────
+
+    async def update(
+        self,
+        updates: dict[str, Any],
+        *,
+        where: str,
+    ) -> None:
+        """Partial column update for rows matching ``where``.
+
+        Wraps ``AsyncTable.update`` — sets specific column values without
+        rewriting the full row. Useful for lightweight metadata patches
+        (e.g. setting ``deprecated_by``) where a full embed+upsert cycle
+        is unnecessary.
+
+        Args:
+            updates: Column-name to new-value mapping.
+            where: SQL-like predicate scoping the update.
+        """
+        table = await self._table()
+        async with self._write_lock(self.table_name):
+            await table.update(updates, where=where)
 
     # ── Delete ─────────────────────────────────────────────────────────────
 

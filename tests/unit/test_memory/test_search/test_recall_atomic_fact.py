@@ -1,17 +1,18 @@
 """Real-LanceDB tests for ``AtomicFactRecaller.facts_for_episodes``.
 
-The MRAG bridge is the only path that links facts back to episodes, and
+The memcell bridge is the only path that links facts back to episodes, and
 the previous ``parent_type='episode' AND parent_id IN (episode_ids)``
 query never matched: cascade writes facts with
 ``parent_type='memcell'``, ``parent_id=memcell_id``. The fixed version
-takes an ``episode → memcell`` map from the caller, queries by the
-deduped memcell set, and re-buckets results under every episode that
-shares each memcell.
+takes an ``episode_id → [parent_id, ...]`` map from the caller (dual
+parent_id: entry_id for post-1.5 facts, memcell_id for pre-1.5 facts),
+queries by ``parent_id IN (all_parent_ids)`` and regroups by episode.
 
 These tests exercise the real LanceDB query path (no recaller stubs):
-- shared memcell → fact appears under both episodes,
-- distinct memcells → facts bucket exclusively to their owning episode,
-- empty / unknown memcells → empty result, no LanceDB call surprise.
+- shared parent → fact appears under both episodes,
+- distinct parents → facts bucket exclusively to their owning episode,
+- dual parent_id (entry_id + memcell_id) → facts from both eras found,
+- empty / unknown parents → empty result, no LanceDB call surprise.
 """
 
 from __future__ import annotations
@@ -71,7 +72,7 @@ def _fact_row(
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Isolate LanceDB to a tmp memory root per test."""
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
     yield
@@ -98,13 +99,13 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
         ]
     )
 
-    ep_to_memcell = {
-        "alice_ep_a": "mc_shared",
-        "alice_ep_b": "mc_shared",
-        "alice_ep_c": "mc_other",
+    ep_to_parents = {
+        "alice_ep_a": ["mc_shared"],
+        "alice_ep_b": ["mc_shared"],
+        "alice_ep_c": ["mc_other"],
     }
     where = "owner_id = 'alice' AND owner_type = 'user'"
-    out = await _recaller().facts_for_episodes(ep_to_memcell, where, per_episode=10)
+    out = await _recaller().facts_for_episodes(ep_to_parents, where, per_episode=10)
 
     assert sorted(out.keys()) == ["alice_ep_a", "alice_ep_b", "alice_ep_c"]
     assert sorted(f.id for f in out["alice_ep_a"]) == ["alice_af_1", "alice_af_2"]
@@ -119,7 +120,9 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
 
 
 async def test_facts_for_episodes_returns_empty_for_no_episodes() -> None:
-    out = await _recaller().facts_for_episodes({}, "owner_id = 'alice'", per_episode=10)
+    out: dict = await _recaller().facts_for_episodes(
+        {}, "owner_id = 'alice'", per_episode=10
+    )
     assert out == {}
 
 
@@ -130,7 +133,7 @@ async def test_facts_for_episodes_skips_unknown_memcells() -> None:
     )
 
     out = await _recaller().facts_for_episodes(
-        {"alice_ep_a": "mc_a", "alice_ep_b": "mc_missing"},
+        {"alice_ep_a": ["mc_a"], "alice_ep_b": ["mc_missing"]},
         "owner_id = 'alice' AND owner_type = 'user'",
         per_episode=10,
     )
@@ -159,15 +162,15 @@ async def test_facts_for_episodes_filters_by_where_clause() -> None:
     )
 
     out = await _recaller().facts_for_episodes(
-        {"alice_ep_a": "mc_a"},
+        {"alice_ep_a": ["mc_a"]},
         "owner_id = 'alice' AND owner_type = 'user'",
         per_episode=10,
     )
     assert [f.id for f in out["alice_ep_a"]] == ["alice_af_1"]
 
 
-async def test_facts_for_episodes_drops_empty_memcell_ids() -> None:
-    """Episodes whose parent_id is missing (empty string) are dropped silently.
+async def test_facts_for_episodes_drops_empty_parent_ids() -> None:
+    """Episodes whose parent_id list contains only empty strings are dropped.
 
     Real-world cause: a candidate row that lost its ``parent_id`` (data
     corruption, manual edit). The bridge must not crash and must not
@@ -179,14 +182,14 @@ async def test_facts_for_episodes_drops_empty_memcell_ids() -> None:
     )
 
     out = await _recaller().facts_for_episodes(
-        {"alice_ep_a": ""},
+        {"alice_ep_a": [""]},
         "owner_id = 'alice' AND owner_type = 'user'",
         per_episode=10,
     )
     assert out == {}
 
 
-# ── MRAG fact-level scoring (regression for query_vector handling) ─────
+# ── Hierarchical fact-level scoring (regression for query_vector handling) ──
 
 
 def _unit_vector(direction: int, dim: int = 1024) -> list[float]:
@@ -206,7 +209,7 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() 
     """Regression: ``query_vector`` triggers cosine ANN, not flat scan.
 
     Pre-fix, ``facts_for_episodes`` only ran ``where parent_id IN (...)``
-    and emitted every fact with ``score=0.0`` — the MRAG fact-level
+    and emitted every fact with ``score=0.0`` — the hierarchical fact-level
     ranking collapsed to insertion order. Post-fix, ``query_vector``
     flows into ``.nearest_to(...).distance_type('cosine')`` and each
     fact lands with its real query↔fact relevance score.
@@ -227,7 +230,7 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() 
     await atomic_fact_repo.upsert([row_a, row_b])
 
     out = await _recaller().facts_for_episodes(
-        {"alice_ep_a": "mc_shared"},
+        {"alice_ep_a": ["mc_shared"]},
         "owner_id = 'alice' AND owner_type = 'user'",
         per_episode=10,
         query_vector=_unit_vector(0),
@@ -255,10 +258,70 @@ async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
     await atomic_fact_repo.upsert([row])
 
     out = await _recaller().facts_for_episodes(
-        {"alice_ep_a": "mc_a"},
+        {"alice_ep_a": ["mc_a"]},
         "owner_id = 'alice' AND owner_type = 'user'",
         per_episode=10,
         # no query_vector
     )
 
     assert out["alice_ep_a"][0].score == 0.0
+
+
+# ── Dual parent_id (post-1.5 migration) ────────────────────────────────
+
+
+async def test_facts_for_episodes_dual_parent_id_finds_both_eras() -> None:
+    """Dual parent_id: facts linked by entry_id AND memcell_id are both found.
+
+    Post-1.5 facts use ``parent_id = episode_entry_id``; pre-1.5 facts
+    use ``parent_id = memcell_id``. The caller provides both candidate
+    parent_ids in the list, and facts from both eras appear in the
+    result bucket.
+    """
+    await atomic_fact_repo.upsert(
+        [
+            _fact_row(fid="alice_af_old", memcell_id="mc_1", fact="old era fact"),
+            _fact_row(fid="alice_af_new", memcell_id="ep_entry_1", fact="new era fact"),
+        ]
+    )
+
+    out = await _recaller().facts_for_episodes(
+        {"alice_ep_a": ["ep_entry_1", "mc_1"]},
+        "owner_id = 'alice' AND owner_type = 'user'",
+        per_episode=10,
+    )
+
+    assert sorted(f.id for f in out["alice_ep_a"]) == [
+        "alice_af_new",
+        "alice_af_old",
+    ]
+
+
+async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes() -> None:
+    """Two episodes sharing one parent_id each see the same fact pool.
+
+    Episode A has [ep_entry_1, mc_shared]; Episode B has [ep_entry_2, mc_shared].
+    A fact with parent_id=mc_shared should appear under both episodes.
+    """
+    await atomic_fact_repo.upsert(
+        [
+            _fact_row(fid="alice_af_1", memcell_id="mc_shared", fact="shared fact"),
+            _fact_row(fid="alice_af_2", memcell_id="ep_entry_1", fact="ep_a only fact"),
+        ]
+    )
+
+    out = await _recaller().facts_for_episodes(
+        {
+            "alice_ep_a": ["ep_entry_1", "mc_shared"],
+            "alice_ep_b": ["ep_entry_2", "mc_shared"],
+        },
+        "owner_id = 'alice' AND owner_type = 'user'",
+        per_episode=10,
+    )
+
+    # Both episodes get the shared fact
+    assert "alice_af_1" in {f.id for f in out["alice_ep_a"]}
+    assert "alice_af_1" in {f.id for f in out["alice_ep_b"]}
+    # Only ep_a gets the ep_entry_1-linked fact
+    assert "alice_af_2" in {f.id for f in out["alice_ep_a"]}
+    assert "alice_af_2" not in {f.id for f in out.get("alice_ep_b", [])}

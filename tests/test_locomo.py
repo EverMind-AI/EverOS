@@ -81,14 +81,13 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 2. ALWAYS include exact numbers, amounts, prices, percentages, dates, times
 3. PRESERVE frequencies exactly - "every Tuesday and Thursday" not "twice a week"
 4. MAINTAIN all proper nouns and entities as they appear
+5. EXPLICITLY state confidence levels for inferences (High/Medium/Low)
 
 # RESPONSE FORMAT (You MUST follow this structure):
 
 ## STEP 1: RELEVANT MEMORIES EXTRACTION
 [List each memory that relates to the question, with its timestamp]
-- Memory 1: [timestamp] - [content]
-- Memory 2: [timestamp] - [content]
-...
+- Memory [ID]: [timestamp] - [content snippet]
 
 ## STEP 2: KEY INFORMATION IDENTIFICATION
 [Extract ALL specific details from the memories]
@@ -98,35 +97,33 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 - Frequencies: [list any recurring patterns]
 - Other entities: [list brands, products, etc.]
 
-## STEP 3: CROSS-MEMORY LINKING
+## STEP 3: CROSS-MEMORY LINKING & INFERENCE
 [Identify entities that appear in multiple memories and link related information. Make reasonable inferences when entities are strongly connected.]
 - Shared entities: [list people, places, events mentioned across different memories]
-- Connections found: [e.g., "Memory 1 mentions A moved from hometown → Memory 2 mentions A's hometown is LA → Therefore A moved from LA"]
-- Inferred facts: [list any facts that require combining information from multiple memories]
+- Connections found: [e.g., "Memory 1 mentions A moved from hometown -> Memory 2 mentions A's hometown is LA -> Therefore A moved from LA"]
+- Inferences: [Connect the dots. Label confidence: (Confidence: High/Medium/Low)]
 
 ## STEP 4: TIME REFERENCE CALCULATION
-[If applicable, convert relative time references]
+[If applicable, convert relative time references using the timestamps]
 - Original reference: [e.g., "last year" from May 2022]
-- Calculated actual time: [e.g., "2021"]
+- Calculation: [Show logic]
+- Actual time: [e.g., "2021"]
 
-## STEP 5: CONTRADICTION CHECK
-[If multiple memories contain different information]
-- Conflicting information: [describe]
-- Resolution: [explain which is most recent/reliable]
+## STEP 5: CONTRADICTION & GAP ANALYSIS
+[Check for conflicts and missing details]
+- Conflicting information: [describe conflicts and resolution strategy]
+- Missing information: [explicitly state what details are requested but missing from context]
 
 ## STEP 6: DETAIL VERIFICATION CHECKLIST
-- [ ] All person names included: [list them]
-- [ ] All locations included: [list them]
-- [ ] All numbers exact: [list them]
-- [ ] All frequencies specific: [list them]
-- [ ] All dates/times precise: [list them]
-- [ ] All proper nouns preserved: [list them]
+- [ ] All person names included?
+- [ ] All locations included?
+- [ ] All numbers exact?
+- [ ] All frequencies specific?
+- [ ] All dates/times precise?
+- [ ] All proper nouns preserved?
 
-## STEP 7: ANSWER FORMULATION
-[Explain how you're combining the information to answer the question]
-
-## FINAL ANSWER:
-[Provide the concise answer with ALL specific details preserved]
+## STEP 7: FINAL ANSWER
+[Provide the concise answer with ALL specific details preserved. Do not include the internal checklist in this section, just the final synthesized answer.]
 
 ---
 
@@ -730,41 +727,56 @@ def run_search_phase(
 # =============================================================================
 
 
+_CONTEXT_TEMPLATE = """Episodes memories for conversation between {speaker_a} and {speaker_b}:
+
+    {episodes}
+"""
+
+
 def _build_context(
     episodes: list[dict], profiles: list[dict], speaker_a: str, speaker_b: str
 ) -> str:
-    """Build context string from search results."""
-    lines = [
-        f"Episodes memories for conversation between {speaker_a} and {speaker_b}:\n"
+    """Build context string from search results.
+
+    Matches the benchmark's context format: each episode renders as
+    ``{subject}: {episode_text}\\n---`` with double-newline separators.
+    Profile memories are intentionally omitted (benchmark doesn't use them).
+    """
+    episode_lines = [
+        f"{ep.get('subject', 'N/A')}: "
+        f"{ep.get('episode') or ep.get('summary') or ep.get('content') or 'N/A'}\n---"
+        for ep in episodes
     ]
-    for idx, ep in enumerate(episodes, 1):
-        subject = ep.get("subject", "")
-        body = ep.get("episode") or ep.get("summary") or ep.get("content") or ""
-        prefix = f"{subject}: " if subject else ""
-        lines.append(f"{idx}. {prefix}{body}")
-
-    if profiles:
-        lines.append("\nProfile memories:")
-        for idx, p in enumerate(profiles, 1):
-            content = p.get("content") or p.get("summary") or ""
-            lines.append(f"  {idx}. {content}")
-
-    return "\n".join(lines)
+    return _CONTEXT_TEMPLATE.format(
+        speaker_a=speaker_a,
+        speaker_b=speaker_b,
+        episodes="\n\n".join(episode_lines),
+    )
 
 
 def _extract_final_answer(text: str) -> str:
-    """Extract text after 'FINAL ANSWER:' marker."""
-    marker = "FINAL ANSWER:"
-    idx = text.upper().rfind(marker.upper())
-    if idx != -1:
-        answer = text[idx + len(marker) :].strip()
-        answer = re.sub(r"^#+\s*", "", answer).strip()
-        return answer
-    for line in reversed(text.strip().splitlines()):
-        line = line.strip()
-        if line:
-            return line
-    return text.strip()
+    """Extract the final answer using a 3-marker priority chain.
+
+    Matches the benchmark's extraction logic (``answer.py:_extract_final_answer``):
+      1. ``## STEP 7: FINAL ANSWER`` (prompt STEP 7 section header)
+      2. ``FINAL ANSWER:`` (colon-suffixed)
+      3. ``FINAL ANSWER`` (bare — leading colon stripped if present)
+
+    Each marker uses ``rsplit`` to take the LAST occurrence (handles marker
+    appearing in reasoning prose before the actual answer).
+    """
+    result = text.strip()
+    for marker in ("## STEP 7: FINAL ANSWER", "FINAL ANSWER:", "FINAL ANSWER"):
+        if marker in result:
+            answer = result.rsplit(marker, 1)[1].strip()
+            # Bare "FINAL ANSWER" may have a leading ":" — strip it
+            if marker == "FINAL ANSWER" and answer.startswith(":"):
+                answer = answer[1:].strip()
+            return answer
+    return result
+
+
+_ANSWER_MAX_RETRIES = 5
 
 
 def _answer_one(
@@ -778,11 +790,9 @@ def _answer_one(
 ) -> dict:
     """Generate an answer for a single search result; safe to run in a thread.
 
-    Retry up to 3× with rising temperature when the response parses to an
-    empty FINAL ANSWER:.  gpt-4.1-mini occasionally finishes the STEP 7
-    reasoning, emits the marker, then stops without the body — at temperature=0
-    the truncation is deterministic, so retries bump temperature to break the
-    same sampling path.
+    Retry up to 5x with temperature=0.0 on every attempt (matching benchmark's
+    ``_retry_llm_answer``). max_tokens=32768 is set explicitly to match the
+    benchmark.
 
     The openai ``timeout=300`` kwarg is a per-request socket deadline passed
     directly to the underlying HTTP client, which is safe to use from a thread
@@ -799,24 +809,29 @@ def _answer_one(
     generated_answer = ""
     last_error: str | None = None
     attempts_used = 0
-    for attempt, temp in enumerate((0.0, 0.3, 0.6)):
+    for attempt in range(_ANSWER_MAX_RETRIES):
         attempts_used = attempt + 1
         try:
             r = llm_client.chat.completions.create(
                 model=llm_model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=temp,
+                temperature=0.0,
+                max_tokens=32768,
                 timeout=300,
             )
             raw_answer = r.choices[0].message.content or ""
         except Exception as e:
             last_error = f"[ERROR: {e}]"
             raw_answer = last_error
+            if attempt < _ANSWER_MAX_RETRIES - 1:
+                time.sleep(1.0 * (2**attempt))
             continue
 
         generated_answer = _extract_final_answer(raw_answer)
         if generated_answer.strip():
             break
+        if attempt < _ANSWER_MAX_RETRIES - 1:
+            time.sleep(1.0 * (2**attempt))
 
     if not generated_answer.strip() and last_error:
         generated_answer = last_error
@@ -894,6 +909,9 @@ def _extract_json(content: str) -> str | None:
     return content.strip()
 
 
+_JUDGE_MAX_RETRIES = 5
+
+
 def _judge_single(
     llm_client: LLMClientPool,
     llm_model: str,
@@ -903,6 +921,11 @@ def _judge_single(
 ) -> bool:
     """Judge a single answer. Returns True if CORRECT.
 
+    Retries up to ``_JUDGE_MAX_RETRIES`` times on any error (API failures,
+    JSON parse errors, missing label) with exponential backoff, matching the
+    benchmark's ``llm_retry(max_attempts=config.llm_max_retries)`` pattern.
+    Defaults to WRONG only after all retries are exhausted.
+
     Uses ``timeout=300`` passed directly to the openai HTTP client so this
     function is safe to call from a thread pool without further nesting.
     """
@@ -911,25 +934,33 @@ def _judge_single(
         golden_answer=golden_answer,
         generated_answer=generated_answer,
     )
-    try:
-        r = llm_client.chat.completions.create(
-            model=llm_model,
-            messages=[
-                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0,
-            timeout=300,
-        )
-        content = r.choices[0].message.content or ""
-        json_str = _extract_json(content)
-        if not json_str:
+    for attempt in range(_JUDGE_MAX_RETRIES):
+        try:
+            r = llm_client.chat.completions.create(
+                model=llm_model,
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0,
+                timeout=300,
+            )
+            content = r.choices[0].message.content or ""
+            json_str = _extract_json(content)
+            if not json_str:
+                raise ValueError("Empty JSON from judge response")
+            result = json.loads(json_str)
+            label = result.get("label", "").strip().upper()
+            if label not in ("CORRECT", "WRONG"):
+                raise ValueError(f"Unknown judge label: {label!r}")
+            return label == "CORRECT"
+        except Exception as e:  # noqa: BLE001
+            if attempt < _JUDGE_MAX_RETRIES - 1:
+                time.sleep(0.5 * (2**attempt))
+                continue
+            print(f"    Judge error after {_JUDGE_MAX_RETRIES} retries: {e}")
             return False
-        result = json.loads(json_str)
-        return result.get("label", "").strip().upper() == "CORRECT"
-    except Exception as e:
-        print(f"    Judge error: {e}")
-        return False
+    return False  # unreachable, but satisfies type checker
 
 
 def _evaluate_one(
@@ -1338,6 +1369,29 @@ def parse_args() -> argparse.Namespace:
         help="Which speaker's memory partition to query (Plan C: single-owner eval)",
     )
     p.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Smoke mode: 2 sessions x 5 QA. Quick sanity check, not a scored run.",
+    )
+    p.add_argument(
+        "--smoke-session-limit",
+        type=int,
+        default=2,
+        help="Max sessions to load in smoke mode (default: 2)",
+    )
+    p.add_argument(
+        "--smoke-msg-limit",
+        type=int,
+        default=50,
+        help="Max messages per session in smoke mode (default: 50)",
+    )
+    p.add_argument(
+        "--smoke-qa-limit",
+        type=int,
+        default=5,
+        help="Max QA pairs in smoke mode (default: 5)",
+    )
+    p.add_argument(
         "--skip-add", action="store_true", help="Skip add phase (reuse existing data)"
     )
     p.add_argument(
@@ -1425,26 +1479,27 @@ def main():
 
     load_dotenv()
 
-    # Resolution: CLI flag > ANSWER_*/JUDGE_* env > LLM_* env > default.
+    # Resolution: CLI flag > ANSWER_*/JUDGE_* env > LLM_* env > EVEROS_LLM__* env > default.
     # Empty strings from getenv fall through via `or`.
     answer_model = (
         args.answer_model
         or os.getenv("ANSWER_MODEL")
         or os.getenv("LLM_MODEL")
-        or "gpt-4o-mini"
+        or os.getenv("EVEROS_LLM__MODEL")
+        or "gpt-4.1-mini"
     )
     answer_base_url = (
         args.answer_base_url
         or os.getenv("ANSWER_BASE_URL")
         or os.getenv("LLM_BASE_URL")
+        or os.getenv("EVEROS_LLM__BASE_URL")
         or "https://api.openai.com/v1"
     )
-    # API keys are comma-separated lists; the LLMClientPool round-robins across
-    # them and fails over to the next on RateLimitError.
     answer_api_keys = _split_keys(
         args.answer_api_key
         or os.getenv("ANSWER_API_KEY")
         or os.getenv("LLM_API_KEY")
+        or os.getenv("EVEROS_LLM__API_KEY")
         or ""
     )
 
@@ -1452,18 +1507,21 @@ def main():
         args.judge_model
         or os.getenv("JUDGE_MODEL")
         or os.getenv("LLM_MODEL")
-        or "gpt-4o-mini"
+        or os.getenv("EVEROS_LLM__MODEL")
+        or "gpt-4.1-mini"
     )
     judge_base_url = (
         args.judge_base_url
         or os.getenv("JUDGE_BASE_URL")
         or os.getenv("LLM_BASE_URL")
+        or os.getenv("EVEROS_LLM__BASE_URL")
         or "https://api.openai.com/v1"
     )
     judge_api_keys = _split_keys(
         args.judge_api_key
         or os.getenv("JUDGE_API_KEY")
         or os.getenv("LLM_API_KEY")
+        or os.getenv("EVEROS_LLM__API_KEY")
         or ""
     )
 
@@ -1505,10 +1563,18 @@ def main():
     # 1. Load data (preserve LoCoMo session boundaries)
     print_section("Loading Data")
     sessions, qa_list, spk_a, spk_b = load_conversation(args.data_path, args.conv_index)
+
+    if args.smoke:
+        sessions = sessions[: args.smoke_session_limit]
+        for s in sessions:
+            s["messages"] = s["messages"][: args.smoke_msg_limit]
+        qa_list = qa_list[: args.smoke_qa_limit]
+
     conv_label = f"conv_{args.conv_index} ({spk_a} & {spk_b})"
     total_msgs = sum(len(s["messages"]) for s in sessions)
+    mode_tag = " [SMOKE]" if args.smoke else ""
     print(
-        f"  Conversation: {conv_label}\n"
+        f"  Conversation: {conv_label}{mode_tag}\n"
         f"  LoCoMo sessions: {len(sessions)} | Messages: {total_msgs} | "
         f"QA pairs: {len(qa_list)} (excl. category 5)"
     )
@@ -1529,7 +1595,13 @@ def main():
             "benchmark_checkpoints", f"run_{ts}_conv{args.conv_index}"
         )
 
-    # 4. Add phase
+    # 4. Smoke-mode defaults: less wait, single judge run.
+    if args.smoke:
+        if args.post_flush_wait == 180:
+            args.post_flush_wait = 60
+        if args.judge_runs == 3:
+            args.judge_runs = 1
+
     add_result = None
     if not args.skip_add:
         add_result = run_add_phase(

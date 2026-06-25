@@ -10,18 +10,19 @@
 │    cli + api                                          │
 ├──────────────────────────────────────────────────────┤
 │  service/      (Application — Use Case orchestration) │
-│    memorize / retrieve / evolve / manage              │
+│    memorize / search / get / knowledge                │
 ├──────────────────────────────────────────────────────┤
 │  memory/       (Domain — Business core)               │
 │    models + extract + search + cascade + prompt_slots │
+│    + reflection + strategies + get + events            │
 ├──────────────────────────────────────────────────────┤
 │  infra/persistence  (Storage adapters; infra/ may host other adapter types)    │
 │    markdown + sqlite + lancedb                        │
 └──────────────────────────────────────────────────────┘
 
 Cross-cutting (used by all layers, depends on none):
-  component/  ← Injectable providers (LLM / Embedding / config / utils)
-  core/       ← Runtime base (observability / lifespan / context)
+  component/  ← Injectable providers (LLM / Embedding / parser / config / utils)
+  core/       ← Runtime base (observability / lifespan / context / errors / persistence / middleware)
   config/     ← Configuration data (Settings schema + default.toml)
 ```
 
@@ -131,6 +132,7 @@ User query
 ```
 extract/
 ├── ingest/      Standardized message intake + multi-modal parser dispatch
+├── parser/      Input parsing (format normalization, message preprocessing)
 ├── pipeline/    Main extraction pipeline (calls everalgo + dual-track split + writes store)
 └── evolution/   Async memory evolution (event/counter/cron triggers)
 ```
@@ -144,6 +146,8 @@ Daemon that watches markdown changes and syncs to LanceDB:
 - Entry-level diff (added / changed / removed)
 - LanceDB single-transaction update (text + vector columns atomic)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
+- Handlers for all eight business kinds: episode, atomic_fact, foresight,
+  user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
 
 ### `memory/prompt_slots/`
 
@@ -157,7 +161,23 @@ config/prompt_slots/*.yaml          (Layer 1: defaults, ships with package)
 runtime override                    (Layer 3: per-call override)
 ```
 
-everalgo receives PromptSlot as parameter — no hardcoded prompts in algorithm code.
+Extractors may accept a prompt-override parameter; EverOS supplies overrides for episode and boundary-detection prompts, and falls back to the algo-bundled default elsewhere — no hardcoded prompts in algorithm code.
+
+### `memory/reflection/`
+
+Offline memory self-improvement. The orchestrator (`orchestrator.py`)
+implements the Select → Merge → Re-extract → Deprecate pipeline, merging
+fragmented episodes within a cluster into a single coherent narrative. Driven
+by the `reflect_episodes` OME strategy (cron, disabled by default).
+
+### `memory/strategies/`
+
+OME strategy implementations — one file per strategy:
+
+- `extract_atomic_facts` / `extract_foresight` / `extract_user_profile` — user pipeline
+- `extract_agent_case` / `extract_agent_skill` — agent pipeline
+- `reflect_episodes` — offline episode consolidation (cron)
+- `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
 
 ### `core/observability/`
 
@@ -170,7 +190,7 @@ Three-piece observability:
 ## Markdown layout
 
 ```
-~/.everos/                                  # memory root (default; EVEROS_MEMORY__ROOT)
+~/.everos/                                  # memory root (default; EVEROS_ROOT)
 └── <app_id>/<project_id>/                  # scope ("default" → default_app/default_project)
     ├── users/<user_id>/
     │   ├── user.md                                     # profile (single-file rewrite)
@@ -191,23 +211,73 @@ protection (L1 read-only / L2 system / L3 business / L4 user).
 
 ## everalgo boundary
 
-`everalgo` is a set of PyPI-published packages (`everalgo-core`,
-`everalgo-boundary`, `everalgo-user-memory`, `everalgo-agent-memory`,
-`everalgo-rank`, plus the optional `everalgo-parser` extra), imported under
-the `everalgo` namespace, holding **only memory extraction algorithms**:
+`everalgo` is a set of PyPI-published packages (`everalgo-user-memory`,
+`everalgo-agent-memory`, `everalgo-rank`, `everalgo-knowledge`, plus the
+optional `everalgo-parser` extra), imported under the `everalgo` namespace,
+holding **only memory extraction algorithms**:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
 - `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
-- `everalgo.boundary` / `everalgo.rank` — boundary detection / fusion + rerank
+- `everalgo.rank` — boundary detection / fusion + rerank
+- `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
 
 everalgo is:
 
 - **Stateless** — pure functions, no class hierarchy
 - **No I/O** — does not touch md files / LanceDB / SQLite
-- **No prompts inline** — receives `PromptSlot` parameter, project supplies defaults
+- **No prompts inline** — extractors that accept a prompt-override parameter use the project-supplied value; others use their algo-bundled defaults
 
 This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
+
+## Error handling architecture
+
+### Exception hierarchy
+
+All application exceptions derive from `AppError` (`core/errors.py`),
+split into four branches by nature:
+
+```
+AppError
+├── DomainError                    (client-side / business-rule violations)
+│   ├── NotFoundError              → 404 NOT_FOUND
+│   │   ├── DocumentNotFoundError
+│   │   └── TopicNotFoundError
+│   ├── ConflictError              → 409 CONFLICT
+│   │   └── DuplicateDocumentError
+│   ├── InvalidInputError          → 422 INVALID_INPUT
+│   │   ├── ExtractionEmptyError   → 422 EXTRACTION_EMPTY
+│   │   └── FilterError
+│   ├── PathTraversalError         → 400 BAD_REQUEST
+│   └── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
+├── InfrastructureError            (transient, retryable)     → 503
+│   ├── StorageError
+│   ├── VectorStoreError
+│   └── ExternalServiceError
+│       ├── LLMServiceError
+│       ├── EmbeddingServiceError
+│       └── RerankServiceError
+├── CapabilityError                (permanent, not retryable) → 503
+│   └── MultimodalNotEnabledError
+└── ConfigurationError             (misconfiguration)         → 500
+```
+
+### Error propagation strategy
+
+Exceptions are raised at the layer where the error is detected and
+propagate naturally — **service and route layers do not catch-and-wrap**.
+The entrypoints layer registers per-type exception handlers
+(`entrypoints/api/exception_handlers.py`) via Starlette's MRO dispatch.
+Each handler converts the exception into a canonical error envelope with
+an `ErrorCode` enum value and the appropriate HTTP status code.
+
+### Boundary translation
+
+Third-party exception types are translated at the component boundary to
+prevent external types from leaking into upper layers:
+
+- `everalgo.llm.LLMError` → `LLMServiceError` at `component/parser/_core.py`
+- Embedding / rerank provider errors → `EmbeddingServiceError` / `RerankServiceError` at their respective protocol modules
 
 ## Further reading
 

@@ -36,9 +36,9 @@ OUTPUT_ROOT=""
 CONCURRENCY="${CONCURRENCY:-1}"
 # Default to polling cascade pending==0 (not fixed sleep). Falls back to
 # ~/.everos to match the server's default data root; override via env or
-# EVEROS_MEMORY__ROOT (which the server consumes). post-flush-wait becomes
+# EVEROS_ROOT (which the server consumes). post-flush-wait becomes
 # the MAX wait when corpus-path is set.
-CORPUS_PATH="${CORPUS_PATH:-${EVEROS_MEMORY__ROOT:-$HOME/.everos}}"
+CORPUS_PATH="${CORPUS_PATH:-${EVEROS_ROOT:-$HOME/.everos}}"
 POST_FLUSH_WAIT="${POST_FLUSH_WAIT:-600}"
 EXTRA_ARGS=()
 

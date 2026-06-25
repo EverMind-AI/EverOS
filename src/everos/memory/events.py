@@ -56,8 +56,10 @@ class EpisodeExtracted(BaseEvent):
     episode_text: str
     episode_timestamp_ms: int
     owner_id: str
+    session_id: str | None = None
     app_id: str = "default"
     project_id: str = "default"
+    source: str = "pipeline"
 
 
 class AgentCaseExtracted(BaseEvent):

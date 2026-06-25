@@ -37,7 +37,7 @@ def test_help_exits_zero() -> None:
 def test_resolve_relative_under_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     from everos.config import load_settings
 
     load_settings.cache_clear()
@@ -49,7 +49,7 @@ def test_resolve_relative_under_root(
 def test_resolve_relative_outside_root_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("EVEROS_MEMORY__ROOT", str(tmp_path / "memory"))
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "memory"))
     from everos.config import load_settings
 
     load_settings.cache_clear()

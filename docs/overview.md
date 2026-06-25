@@ -13,7 +13,10 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 - Hybrid retrieval (BM25 + vector + scalar filter)
 - Cascade index sync (md edit → LanceDB sub-second)
 - Dual-track memory (user-track / agent-track)
-- Offline memory evolution (Foresight / AtomicFact / Profile / Skill)
+- Offline memory evolution (Foresight / AtomicFact / Profile / Skill),
+  including Reflection — a consolidation strategy within the OME that
+  merges + re-extracts related episodes
+- Knowledge base (document upload, parse, CRUD, semantic search)
 - CLI + HTTP API
 
 **Out of scope (v1, future v2)**:
@@ -43,7 +46,7 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 
 ### 3. Algorithm-orchestration separation
 
-`everalgo` (a set of separate PyPI packages — `everalgo-core` / `-boundary` / `-user-memory` / `-agent-memory` / `-rank`, plus the optional `-parser` extra) holds the extraction algorithms (MemCell extraction, Episode generation, Profile evolution). EverOS calls everalgo via the PromptSlot interface; everalgo knows nothing about storage.
+`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-agent-memory` / `-rank` / `-knowledge`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for a couple of extractors (episode and boundary detection) it can override the bundled prompt via the PromptSlot mechanism. everalgo knows nothing about storage.
 
 This boundary lets the same algorithm power both this open-source lightweight version and other product forms.
 
@@ -78,9 +81,9 @@ Strict single-direction dependency, enforced by `import-linter` in CI.
 - **v0.2** — Full extraction pipeline (workspace / agent / knowledge), evolution framework
 - **v0.3** — Production hardening, full CLI, HTTP API, Obsidian demo
 - **v1.0** — Stable API, PyPI release, comprehensive docs
+- **v1.1** — Knowledge base + Reflection (offline memory consolidation)
 - **v2** (future) — Edge-to-cloud sync via EverMe (separate project)
 
 ## Status
 
-**Stable (v1.0.1)** — Released on PyPI; the v1 API is stable. Development
-continues on `dev` toward v1.1.
+**Latest stable release: v1.1.0** (PyPI) — the v1 API is stable.

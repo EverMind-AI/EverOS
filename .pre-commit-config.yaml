@@ -1,23 +1,16 @@
-# Local quality gate, run before each commit. Mirrors the checks CI enforces so
-# failures surface locally first. Install with `make install` (sets up both the
-# pre-commit and commit-msg hook stages).
-#
-# Run manually across the repo:  uv run pre-commit run --all-files
-default_install_hook_types: [pre-commit, commit-msg]
+default_language_version:
+  python: python3.12
 
 repos:
-  # ruff version is kept in sync with the `ruff` dev dependency in uv.lock.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12
     hooks:
       - id: ruff
-        name: ruff (lint + autofix)
         args: [--fix]
       - id: ruff-format
-        name: ruff (format)
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -25,25 +18,12 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=1024]
-      - id: detect-private-key
       - id: check-merge-conflict
+      - id: detect-private-key
 
-  - repo: local
-    hooks:
-      - id: no-repo-assets
-        name: block committed images, videos, and asset directories
-        entry: python3 scripts/check_repo_assets.py
-        language: system
-        pass_filenames: false
-      - id: no-deprecated-product-names
-        name: block deprecated product names
-        entry: python3 scripts/check_deprecated_names.py
-        language: system
-        pass_filenames: false
-
+  # Commit message format: gitlint runs in commit-msg stage (no Node required).
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1
     hooks:
       - id: gitlint
-        name: gitlint (commit message format)
         stages: [commit-msg]

@@ -34,7 +34,7 @@ class AtomicFact(BaseLanceTable):
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``); cascade fills from md path."""
-    session_id: str
+    session_id: str | None = None
     timestamp: _dt.datetime
 
     parent_type: str = ParentType.MEMCELL.value
@@ -58,5 +58,10 @@ class AtomicFact(BaseLanceTable):
     Matching digest → skip re-upsert + re-embed. Audit inline fields
     (owner_id / session_id / timestamp / parent_id / sender_ids) are
     NOT in the hash."""
+
+    deprecated_by: str | None = None
+    """Soft-delete marker set by Reflection when this fact is
+    consolidated. Value is the cluster entry_id that supersedes this
+    row. ``NULL`` means the row is still active."""
 
     vector: Vector(_DIM)  # type: ignore[valid-type]

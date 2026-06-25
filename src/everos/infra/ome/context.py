@@ -13,21 +13,34 @@ from typing import Protocol
 from structlog.types import FilteringBoundLogger
 
 from everos.infra.ome.events import BaseEvent
+from everos.infra.ome.records import RunRecord
 
 
 class StrategyContext(Protocol):
     """Per-run context handed to a strategy function.
 
-    - run_id: the current RunRecord id (string).
-    - logger: structlog logger; ``strategy_name`` / ``run_id`` /
-      ``attempt`` are auto-injected into every log record in this call
-      — strategies don't have to use this specific logger to get those
-      fields.
-    - emit(event): chain-emit a follow-up event (must be in decorator's
-      ``emits=[...]``, else EmitNotDeclaredError).
+    Attributes:
+        run_id: The current RunRecord id.
+        logger: Structlog logger with ``strategy_name`` / ``run_id`` /
+            ``attempt`` auto-bound.
+        emit: Chain-emit a follow-up event (must be in decorator's
+            ``emits=[...]``, else EmitNotDeclaredError).
+        wait_for_event: Poll until all runs triggered by an event_id
+            reach a terminal status.
+        list_runs_by_event_id: Return all run records triggered by an
+            event_id.
     """
 
     run_id: str
     logger: FilteringBoundLogger
 
     async def emit(self, event: BaseEvent) -> None: ...
+
+    async def wait_for_event(
+        self,
+        event_id: str,
+        *,
+        timeout: float = 120.0,  # noqa: ASYNC109
+    ) -> list[RunRecord]: ...
+
+    async def list_runs_by_event_id(self, event_id: str) -> list[RunRecord]: ...

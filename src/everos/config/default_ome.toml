@@ -1,11 +1,12 @@
-# everos OME (Offline Memory Engine) — per-strategy overrides.
+# everos OME (Offline Memory Engine) — strategy configuration.
 #
-# This file is materialised at ``<memory-root>/ome.toml`` by
-# ``MemoryRoot.ensure()`` on first server start. Edit it to toggle
-# individual strategies or tweak their gate / retry / cron without
-# restarting the server; the engine watches this file and hot-reloads
-# changes within ~2 seconds. Re-running ``ensure()`` will NOT overwrite
-# your edits — the file is only materialised when absent.
+# THIS IS THE SINGLE ENTRY POINT for all strategy settings (enabled,
+# cron, max_retries, gate). Edit this file to toggle strategies on/off
+# or tune their scheduling — changes are hot-reloaded within ~2 seconds,
+# no server restart needed.
+#
+# Created at ``~/.everos/ome.toml`` on first server start. Editing the
+# file after creation is safe — it will not be overwritten.
 #
 # Overrides are partial: only the keys you set replace the in-code
 # defaults; omitted keys keep each strategy's coded value. Unknown
@@ -45,6 +46,17 @@
 # to disable in evaluation runs where ground-truth profiles aren't measured.
 # [strategies.extract_user_profile]
 # enabled = false
+
+# ── Reflection ──────────────────────────────────────────────────────────
+
+# Offline memory consolidation. Disabled by default — uncomment to enable.
+# Once enabled, runs on the default schedule: weekly, Monday 02:00.
+# Run Reflection sparingly — at most once a week. Triggering it too
+# often degrades quality, since each run is a lossy LLM re-merge.
+# The cron expression can be overridden without restarting the server.
+# [strategies.reflect_episodes]
+# enabled = true
+# cron = "0 2 * * 1"
 
 # ── Agent-memory pipeline ───────────────────────────────────────────────
 

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from everos.component.llm import get_multimodal_llm_client
 from everos.component.utils.datetime import from_timestamp
 from everos.config import load_settings
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
@@ -59,7 +58,6 @@ async def process(payload: dict[str, Any]) -> IngestResult:
             require_multimodal()
             await enrich_content_items(
                 content_items,
-                llm=get_multimodal_llm_client(),
                 max_concurrency=load_settings().multimodal.max_concurrency,
             )
         text, non_text = derive_text(content_items)
@@ -96,6 +94,7 @@ async def process(payload: dict[str, Any]) -> IngestResult:
 def _coerce_tool_calls(
     raw: list[dict[str, Any]] | list[Any] | None,
 ) -> list[ToolCall] | None:
+    """Convert raw tool-call dicts to ToolCall models."""
     if not raw:
         return None
     out: list[ToolCall] = []

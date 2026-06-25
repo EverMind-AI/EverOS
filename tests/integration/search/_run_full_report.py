@@ -609,7 +609,7 @@ async def main() -> None:
     if CORPUS_ROOT.exists():
         shutil.rmtree(CORPUS_ROOT)
     CORPUS_ROOT.mkdir(parents=True)
-    os.environ["EVEROS_MEMORY__ROOT"] = str(CORPUS_ROOT)
+    os.environ["EVEROS_ROOT"] = str(CORPUS_ROOT)
 
     # Reset cached singletons so they pick up the new env.
     from everos.config import load_settings

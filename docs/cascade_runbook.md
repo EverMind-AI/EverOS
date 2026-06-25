@@ -7,13 +7,15 @@ the recurring operational questions.
 
 ## What runs where
 
-When `everos server start` boots, the FastAPI lifespan wires four
+When `everos server start` boots, the FastAPI lifespan wires six
 providers in order:
 
 1. **Metrics** — Prometheus collector.
-2. **SQLite** — system DB + schema (`SQLModel.metadata.create_all`).
-3. **LanceDB** — async connection + schema verification + FTS indexes.
-4. **Cascade** — watcher + scanner + worker, all in-process tasks.
+2. **LLM** — LLM client initialisation.
+3. **SQLite** — system DB + schema (`SQLModel.metadata.create_all`).
+4. **LanceDB** — async connection + schema verification + FTS indexes.
+5. **Cascade** — watcher + scanner + worker, all in-process tasks.
+6. **OME** — offline memory engine.
 
 The cascade subsystem itself is three independent loops:
 

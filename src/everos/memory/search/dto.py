@@ -4,7 +4,7 @@ Contract per the final design:
 
 * ``owner_type`` is a hard partition. ``user`` returns ``episodes``
   (and optionally ``profiles``); ``agent`` returns ``agent_cases`` +
-  ``agent_skills``. The five ``data.*`` arrays always exist; routes not
+  ``agent_skills``. The four ``data.*`` arrays always exist; routes not
   applicable to the current ``owner_type`` stay as ``[]``.
 * ``atomic_facts`` are **nested** inside :class:`SearchEpisodeItem`,
   never returned as a top-level array.
@@ -80,6 +80,14 @@ class SearchRequest(BaseModel):
     method: SearchMethod = SearchMethod.HYBRID
     top_k: int = -1
     radius: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    """Post-fusion relevance floor for the episode HYBRID (hierarchy) path.
+
+    Applied after Layer 4 against the LR-calibrated score in ``[0, 1]``:
+    items scoring below this value are dropped. Independent of ``radius``
+    (which gates raw cosine at recall time); ``None`` disables the floor.
+    Only the episode hierarchy path consumes it — other methods ignore it.
+    """
     include_profile: bool = False
     enable_llm_rerank: bool = Field(
         default=False,
@@ -148,7 +156,8 @@ class SearchEpisodeItem(BaseModel):
     """Owning user (``None`` only on malformed cascade rows)."""
     app_id: str = "default"
     project_id: str = "default"
-    session_id: str
+    session_id: str | None = None
+    """``None`` for merged episodes (Reflection aggregation products)."""
     timestamp: _dt.datetime
     sender_ids: list[str] = Field(default_factory=list)
     summary: str
