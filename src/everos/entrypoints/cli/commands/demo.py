@@ -9,6 +9,8 @@ static, no-network renderings for non-interactive shells and README media.
 
 from __future__ import annotations
 
+import getpass
+import subprocess
 import sys
 
 import typer
@@ -61,14 +63,19 @@ def register(parent: typer.Typer) -> None:
             _print_plain_demo()
             return
 
+        user_label = _resolve_local_user()
         if cinematic:
-            _load_run_demo_tui()()
+            _load_run_demo_tui()(user_label=user_label)
             return
 
-        _launch_interactive_demo(live=live, server_url=server_url)
+        _launch_interactive_demo(
+            live=live, server_url=server_url, user_label=user_label
+        )
 
 
-def _launch_interactive_demo(*, live: bool, server_url: str) -> None:
+def _launch_interactive_demo(
+    *, live: bool, server_url: str, user_label: str = "you"
+) -> None:
     """Launch the cloud-backed interactive TUI, or --live against your own server."""
 
     run_demo_tui = _load_run_demo_tui()
@@ -84,7 +91,30 @@ def _launch_interactive_demo(*, live: bool, server_url: str) -> None:
         base_url=base_url,
         session_id=session_id,
         user_id=user_id,
+        user_label=user_label,
     )
+
+
+def _resolve_local_user() -> str:
+    """Local-first display name: the clone's git identity, else the OS user."""
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "user.name"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        name = result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    if name:
+        return name
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "you"
 
 
 def _load_run_demo_tui():

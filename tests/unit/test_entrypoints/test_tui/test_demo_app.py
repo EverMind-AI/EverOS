@@ -8,18 +8,22 @@ from everos.entrypoints.tui.demo.app import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
     TERMINAL_CELL_HEIGHT_RATIO,
+    TRACE_STAGES,
     DotSphereWidget,
     EverOSDemoApp,
+    QueryAnswerBar,
     _field_header_text,
     _hero_text,
     _payoff_text,
     _recall_proof_text,
     _signal_rail_text,
     _source_tree_text,
-    _sphere_caption,
+    _state_to_stage,
 )
 from everos.entrypoints.tui.demo.data import DemoStory
 from everos.entrypoints.tui.demo.widgets.sphere import SPHERE_STATES
+
+_YELLOW = "#F9B91C"
 
 
 def _story(memory: str, query: str, answer: str) -> DemoStory:
@@ -109,15 +113,78 @@ def test_demo_tui_renders_playable_story_copy() -> None:
         "In Notion.",
     )
 
-    assert "user=you" in _field_header_text(story).plain
-    assert "Where are my Monday review notes?" in _sphere_caption(story).plain
-    assert story.answer in _sphere_caption(story).plain
     assert "server wake" not in _signal_rail_text(story).plain
     assert "memory core" in _signal_rail_text(story).plain
     assert story.source_filename in _source_tree_text(story).plain
     assert story.fact_filename in _source_tree_text(story).plain
     assert story.answer in _recall_proof_text(story).plain
     assert story.answer in _payoff_text(story).plain
+
+
+def test_field_header_shows_local_user_and_trace_stages() -> None:
+    header = _field_header_text(user_label="YangtzeSeventh", active_stage=1)
+
+    assert "user=YangtzeSeventh" in header.plain
+    assert "scope=local-first" in header.plain
+    for stage in TRACE_STAGES:
+        assert stage in header.plain
+
+
+def test_field_header_highlights_only_the_active_stage() -> None:
+    header = _field_header_text(user_label="you", active_stage=2)
+
+    highlighted = {
+        header.plain[span.start : span.end]
+        for span in header.spans
+        if span.style == f"bold {_YELLOW}"
+    }
+    assert highlighted & set(TRACE_STAGES) == {"index"}
+
+
+def test_state_to_stage_maps_sphere_states_to_trace_words() -> None:
+    assert _state_to_stage("ingesting") == 0
+    assert _state_to_stage("extracting") == 1
+    assert _state_to_stage("indexing") == 2
+    assert _state_to_stage("recalling") == 3
+    assert _state_to_stage("booting") == -1
+
+
+def test_query_answer_bar_keeps_both_labels() -> None:
+    rendered = QueryAnswerBar().render().plain
+
+    assert "Query" in rendered
+    assert "Answer" in rendered
+
+
+def test_ctrl_c_is_a_priority_quit_binding() -> None:
+    quit_keys = {
+        binding.key
+        for binding in EverOSDemoApp.BINDINGS
+        if getattr(binding, "action", None) == "quit"
+        and getattr(binding, "priority", False)
+    }
+    assert "ctrl+c" in quit_keys
+    assert "ctrl+q" in quit_keys
+
+
+async def test_typing_quit_exits_the_app(monkeypatch) -> None:
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True,
+        base_url="http://server.test",
+        session_id="s",
+        user_id="u",
+    )
+    async with app.run_test() as pilot:
+        exited: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: exited.append(True))
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = "quit"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert exited == [True]
 
 
 def test_demo_tui_signal_rail_keeps_source_status_columns_separate() -> None:

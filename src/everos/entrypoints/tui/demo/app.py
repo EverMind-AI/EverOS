@@ -6,8 +6,11 @@ from functools import partial
 
 import anyio
 from rich.text import Text
+from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Static
 
@@ -44,6 +47,33 @@ SIGNAL_RAIL_SOURCE_WIDTH = 18
 # TUI nudges them toward the real pipeline (`--cloud` / `--live`).
 DEFAULT_DEMO_ROUNDS = 3
 
+# Sphere animation cadence. Each named state (and its highlighted trace word)
+# dwells for SPHERE_STAGE_SECONDS so a viewer can read the stage it represents.
+SPHERE_FPS = 12
+SPHERE_STAGE_SECONDS = 3.0
+SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
+
+# The four pipeline stages shown in the trace header. They line up with the four
+# core sphere states, so the active word can highlight in sync with the sphere.
+TRACE_STAGES = ("ingest", "extract", "index", "recall")
+
+# Words a user can type in the input box to quit back to the terminal.
+QUIT_COMMANDS = frozenset({"quit", "exit", ":q", "/quit"})
+_STATE_TO_STAGE = {
+    "ingesting": 0,
+    "extracting": 1,
+    "indexing": 2,
+    "recalling": 3,
+    "remembered": 3,
+    "source": 3,
+}
+
+
+def _state_to_stage(state_key: str) -> int:
+    """Map a sphere state to its trace-stage index (-1 = no stage highlighted)."""
+
+    return _STATE_TO_STAGE.get(state_key, -1)
+
 
 class DotSphereWidget(Static):
     """Animated dot sphere that represents EverOS memory activity."""
@@ -66,14 +96,22 @@ class DotSphereWidget(Static):
         "celebrating",
     )
 
+    class StageChanged(Message):
+        """Posted when the sphere enters a different trace stage."""
+
+        def __init__(self, stage: int) -> None:
+            self.stage = stage
+            super().__init__()
+
     def __init__(self) -> None:
         super().__init__()
         self._phase = 0.0
         self._tick = 0
+        self._last_stage = -2
         self._animation_timer: Timer | None = None
 
     def on_mount(self) -> None:
-        self._animation_timer = self.set_interval(1 / 12, self._advance)
+        self._animation_timer = self.set_interval(1 / SPHERE_FPS, self._advance)
         self._advance()
 
     def pause_animation(self) -> None:
@@ -83,7 +121,7 @@ class DotSphereWidget(Static):
     def _advance(self) -> None:
         self._phase = (self._phase + 0.025) % 1.0
         self._tick += 1
-        state = self.STATES[(self._tick // 36) % len(self.STATES)]
+        state = self.STATES[(self._tick // SPHERE_STAGE_TICKS) % len(self.STATES)]
         frame = build_dot_sphere(
             width=SPHERE_FRAME_WIDTH,
             height=SPHERE_FRAME_HEIGHT,
@@ -92,13 +130,59 @@ class DotSphereWidget(Static):
         )
         self.update(render_dot_sphere_text(frame))
 
+        stage = _state_to_stage(state)
+        if stage != self._last_stage:
+            self._last_stage = stage
+            self.post_message(self.StageChanged(stage))
+
+
+class QueryAnswerBar(Static):
+    """Query <-> Answer bar with a marker that propagates back and forth."""
+
+    TRACK_WIDTH = 11
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._pos = 0
+        self._dir = 1
+        self._timer: Timer | None = None
+
+    def on_mount(self) -> None:
+        self._timer = self.set_interval(0.1, self._advance)
+
+    def _advance(self) -> None:
+        self._pos += self._dir
+        if self._pos >= self.TRACK_WIDTH - 1:
+            self._pos = self.TRACK_WIDTH - 1
+            self._dir = -1
+        elif self._pos <= 0:
+            self._pos = 0
+            self._dir = 1
+        self.refresh()
+
+    def render(self) -> Text:
+        glyph = "▶" if self._dir > 0 else "◀"
+        left = "·" * self._pos
+        right = "·" * (self.TRACK_WIDTH - 1 - self._pos)
+        return Text.assemble(
+            ("Query ", f"bold {EVEROS_CYAN}"),
+            (f" {left}", EVEROS_AMBER),
+            (glyph, f"bold {EVEROS_YELLOW}"),
+            (f"{right} ", EVEROS_AMBER),
+            ("Answer", f"bold {EVEROS_GREEN}"),
+        )
+
 
 class EverOSDemoApp(App[None]):
     """Fullscreen first-run demo cockpit."""
 
     TITLE = "EverOS Memory Core"
     SUB_TITLE = "dot sphere demo"
+    # ctrl+c / ctrl+q are priority bindings so they quit even while the input
+    # box has focus (where a bare "q" would just be typed into the field).
     BINDINGS = [
+        Binding("ctrl+c", "quit", "Quit", priority=True, show=False),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
         ("q", "quit", "Quit"),
         ("r", "replay", "Replay"),
     ]
@@ -145,6 +229,7 @@ class EverOSDemoApp(App[None]):
         border-top: hkey {EVEROS_AMBER_DIM};
         background: {EVEROS_SURFACE_RAISED};
         padding: 0 1;
+        content-align: center middle;
     }}
 
     #signal-rail {{
@@ -231,6 +316,7 @@ class EverOSDemoApp(App[None]):
         base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
         session_id: str = cloud.LIVE_DEMO_SESSION_ID,
         user_id: str = cloud.LIVE_DEMO_USER_ID,
+        user_label: str = "you",
         max_rounds: int = DEFAULT_DEMO_ROUNDS,
     ) -> None:
         super().__init__()
@@ -239,8 +325,10 @@ class EverOSDemoApp(App[None]):
         self._base_url = base_url
         self._session_id = session_id
         self._user_id = user_id
+        self._user_label = user_label
         self._max_rounds = max_rounds
         self._round = 0
+        self._active_stage = -1
         self._conversation_phase = "memory"
         self._pending_memory = ""
 
@@ -251,9 +339,15 @@ class EverOSDemoApp(App[None]):
                 memory_field = Vertical(id="memory-field")
                 memory_field.border_title = "memory field"
                 with memory_field:
-                    yield Static(_field_header_text(self._story), id="field-header")
+                    yield Static(
+                        _field_header_text(
+                            user_label=self._user_label,
+                            active_stage=self._active_stage,
+                        ),
+                        id="field-header",
+                    )
                     yield DotSphereWidget()
-                    yield Static(_sphere_caption(self._story), id="field-answer")
+                    yield QueryAnswerBar(id="field-answer")
                 signal_rail = Static(_signal_rail_text(self._story), id="signal-rail")
                 signal_rail.border_title = "signal rail"
                 yield signal_rail
@@ -272,7 +366,9 @@ class EverOSDemoApp(App[None]):
                         id="console-prompt",
                     )
                     yield Input(
-                        placeholder="type a memory and press enter",
+                        placeholder=(
+                            "type a memory and press enter  ·  'quit' or ctrl+c to exit"
+                        ),
                         id="console-input",
                     )
             yield Footer(show_command_palette=False)
@@ -281,10 +377,23 @@ class EverOSDemoApp(App[None]):
         if self._interactive:
             self.query_one("#console-input", Input).focus()
 
+    @on(DotSphereWidget.StageChanged)
+    def _on_stage_changed(self, event: DotSphereWidget.StageChanged) -> None:
+        self._active_stage = event.stage
+        self.query_one("#field-header", Static).update(
+            _field_header_text(
+                user_label=self._user_label,
+                active_stage=self._active_stage,
+            )
+        )
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if not self._interactive or self._conversation_phase in {"recalling", "done"}:
             return
         value = event.value.strip()
+        if value.lower() in QUIT_COMMANDS:
+            self.exit()
+            return
         prompt = self.query_one("#console-prompt", Static)
         field = self.query_one("#console-input", Input)
         if self._conversation_phase == "memory":
@@ -355,11 +464,13 @@ class EverOSDemoApp(App[None]):
         field.focus()
 
     def _apply_story(self, story: DemoStory) -> None:
-        """Refresh every story-driven panel so the demo follows the user's input."""
+        """Refresh every story-driven panel so the demo follows the user's input.
+
+        The header (user/scope/trace) and the Query<->Answer bar are not
+        story-driven, so they are left to their own animations.
+        """
 
         self._story = story
-        self.query_one("#field-header", Static).update(_field_header_text(story))
-        self.query_one("#field-answer", Static).update(_sphere_caption(story))
         self.query_one("#signal-rail", Static).update(_signal_rail_text(story))
         self.query_one("#source-lock", Static).update(_source_tree_text(story))
         self.query_one("#recall-lock", Static).update(_recall_proof_text(story))
@@ -380,6 +491,7 @@ def run_demo_tui(
     base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
     session_id: str = cloud.LIVE_DEMO_SESSION_ID,
     user_id: str = cloud.LIVE_DEMO_USER_ID,
+    user_label: str = "you",
 ) -> None:
     EverOSDemoApp(
         story=story,
@@ -387,6 +499,7 @@ def run_demo_tui(
         base_url=base_url,
         session_id=session_id,
         user_id=user_id,
+        user_label=user_label,
     ).run()
 
 
@@ -433,26 +546,20 @@ def _hero_text() -> Text:
     )
 
 
-def _field_header_text(story: DemoStory | None = None) -> Text:
-    story = story or default_demo_story()
-    return Text.assemble(
-        (f"user={story.owner}", f"bold {EVEROS_INK}"),
+def _field_header_text(*, user_label: str = "you", active_stage: int = -1) -> Text:
+    parts: list[tuple[str, str]] = [
+        (f"user={user_label}", f"bold {EVEROS_INK}"),
         ("  scope=local-first", f"bold {EVEROS_YELLOW_SOFT}"),
         ("  trace ", EVEROS_MUTED),
-        ("conversation -> facts -> index", f"bold {EVEROS_YELLOW}"),
-        ("  live", f"bold {EVEROS_ORANGE}"),
-    )
-
-
-def _sphere_caption(story: DemoStory | None = None) -> Text:
-    story = story or default_demo_story()
-    return Text.assemble(
-        ("query  ", f"bold {EVEROS_CYAN}"),
-        (f"{story.query}  ", EVEROS_INK),
-        ("->  ", EVEROS_MUTED),
-        ("answer ", f"bold {EVEROS_GREEN}"),
-        (story.answer, f"bold {EVEROS_GREEN}"),
-    )
+    ]
+    for index, stage in enumerate(TRACE_STAGES):
+        if index:
+            parts.append((" · ", EVEROS_MUTED))
+        if index == active_stage:
+            parts.append((stage, f"bold {EVEROS_YELLOW}"))
+        else:
+            parts.append((stage, EVEROS_AMBER))
+    return Text.assemble(*parts)
 
 
 def _signal_rail_text(story: DemoStory | None = None) -> Text:
