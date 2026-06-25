@@ -131,9 +131,10 @@ recall -> source proof -> confetti. See
 layout.
 
 The sphere moves through ingest, extraction, indexing, recall, source reveal,
-and a confetti burst after the first memory lands. Press `r` to replay and `q`
-to quit. After a few rounds the demo points you at configuring your own keys
-(`everos init`, then `everos demo --live`).
+and a confetti burst after the first memory lands. Type `/` to see the
+commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime. After a few
+rounds the demo points you at configuring your own keys (`everos init`, then
+`everos demo --live`).
 
 <p align="center">
   <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
