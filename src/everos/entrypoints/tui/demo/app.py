@@ -14,6 +14,7 @@ from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Static
 
+from everos.component.utils.datetime import today_with_timezone
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import (
     DEFAULT_MEMORY_SEED,
@@ -232,10 +233,23 @@ class EverOSDemoApp(App[None]):
         content-align: center middle;
     }}
 
-    #signal-rail {{
+    #right-rail {{
         width: 48;
         height: 100%;
         margin-left: 1;
+    }}
+
+    #capabilities {{
+        height: 9;
+        border: thick {EVEROS_YELLOW};
+        background: {EVEROS_SURFACE};
+        padding: 0 2;
+        margin-bottom: 1;
+    }}
+
+    #signal-rail {{
+        width: 100%;
+        height: 1fr;
         border: round {EVEROS_AMBER};
         background: {EVEROS_SURFACE};
         padding: 1 2;
@@ -261,14 +275,13 @@ class EverOSDemoApp(App[None]):
         padding: 0 2;
     }}
 
-    #payoff {{
-        height: 2;
+    #conversation {{
+        height: 7;
         border-top: hkey {EVEROS_YELLOW};
         background: {EVEROS_SURFACE};
         color: {EVEROS_INK};
         padding: 0 1;
         margin-top: 1;
-        content-align: left middle;
     }}
 
     #console {{
@@ -331,6 +344,8 @@ class EverOSDemoApp(App[None]):
         self._active_stage = -1
         self._conversation_phase = "memory"
         self._pending_memory = ""
+        self._lights = _initial_lights()
+        self._log: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
@@ -348,17 +363,25 @@ class EverOSDemoApp(App[None]):
                     )
                     yield DotSphereWidget()
                     yield QueryAnswerBar(id="field-answer")
-                signal_rail = Static(_signal_rail_text(self._story), id="signal-rail")
-                signal_rail.border_title = "signal rail"
-                yield signal_rail
+                with Vertical(id="right-rail"):
+                    capabilities = Static(_capabilities_text(), id="capabilities")
+                    capabilities.border_title = "EverOS strengths"
+                    yield capabilities
+                    signal_rail = Static(
+                        _signal_rail_text(self._lights), id="signal-rail"
+                    )
+                    signal_rail.border_title = "signal rail"
+                    yield signal_rail
             with Horizontal(id="provenance-strip"):
-                source_lock = Static(_source_tree_text(self._story), id="source-lock")
+                source_lock = Static(_source_tree_text(), id="source-lock")
                 source_lock.border_title = "source lock"
                 yield source_lock
                 recall_lock = Static(_recall_proof_text(self._story), id="recall-lock")
                 recall_lock.border_title = "recall lock"
                 yield recall_lock
-            yield Static(_payoff_text(self._story), id="payoff")
+            conversation = Static(_conversation_text(self._log), id="conversation")
+            conversation.border_title = "conversation"
+            yield conversation
             if self._interactive:
                 with Vertical(id="console"):
                     yield Static(
@@ -417,34 +440,95 @@ class EverOSDemoApp(App[None]):
         )
 
     async def _recall(self, memory: str, query: str) -> None:
-        call = partial(
-            cloud.recall_round,
-            memory,
-            query,
-            base_url=self._base_url,
-            session_id=self._session_id,
-            user_id=self._user_id,
+        # Reset the per-round lights; each step below lights up as it completes,
+        # so the signal rail mirrors the real add -> flush -> search pipeline.
+        self._reset_round_lights()
+        base_url, session_id, user_id = (
+            self._base_url,
+            self._session_id,
+            self._user_id,
         )
         try:
-            story = await anyio.to_thread.run_sync(call)
+            await anyio.to_thread.run_sync(
+                partial(cloud.check_health, base_url=base_url)
+            )
+            self._set_light("core", "ready")
+            await anyio.to_thread.run_sync(
+                partial(
+                    cloud.add_memory,
+                    memory,
+                    base_url=base_url,
+                    session_id=session_id,
+                    user_id=user_id,
+                )
+            )
+            self._set_light("conversation", "captured")
+            await anyio.to_thread.run_sync(
+                partial(cloud.flush_memory, base_url=base_url, session_id=session_id)
+            )
+            self._set_light("facts", "live")
+            self._set_light("index", "synced")
+            story = await anyio.to_thread.run_sync(
+                partial(
+                    cloud.search_recall,
+                    memory,
+                    query,
+                    base_url=base_url,
+                    user_id=user_id,
+                )
+            )
         except cloud.CloudQuotaError:
             self._enter_done(_quota_guidance_text())
             return
         except cloud.CloudDemoError as exc:
+            self._set_light("core", "error")
             self._show_recall_error(str(exc))
             return
-        self._on_recall_success(story)
 
-    def _on_recall_success(self, story: DemoStory) -> None:
-        self._apply_story(story)
+        if story is None:
+            self._set_light("recall", "miss")
+            answer = "(no matching memory found)"
+            self._record_turn(query, answer)
+            story = DemoStory(
+                owner=user_id,
+                memory=memory,
+                query=query,
+                answer=answer,
+                source_filename="",
+                fact_filename="",
+            )
+        else:
+            self._set_light("recall", "hit")
+            self._record_turn(story.query, story.answer)
+        self._finish_round(story)
+
+    def _finish_round(self, story: DemoStory) -> None:
+        self._story = story
+        self.query_one("#recall-lock", Static).update(_recall_proof_text(story))
+        self.action_replay()
         self._round += 1
         if self._round >= self._max_rounds:
             self._enter_done(_quota_guidance_text())
             return
         self._conversation_phase = "memory"
-        prompt = self.query_one("#console-prompt", Static)
-        prompt.update(_prompt_memory_text(self._round, self._max_rounds))
+        self.query_one("#console-prompt", Static).update(
+            _prompt_memory_text(self._round, self._max_rounds)
+        )
         self._reenable_input()
+
+    def _reset_round_lights(self) -> None:
+        self._lights.update(
+            conversation="idle", facts="idle", index="idle", recall="idle"
+        )
+        self.query_one("#signal-rail", Static).update(_signal_rail_text(self._lights))
+
+    def _set_light(self, key: str, state: str) -> None:
+        self._lights[key] = state
+        self.query_one("#signal-rail", Static).update(_signal_rail_text(self._lights))
+
+    def _record_turn(self, query: str, answer: str) -> None:
+        self._log.append((query, answer))
+        self.query_one("#conversation", Static).update(_conversation_text(self._log))
 
     def _enter_done(self, message: Text) -> None:
         self._conversation_phase = "done"
@@ -462,20 +546,6 @@ class EverOSDemoApp(App[None]):
         field = self.query_one("#console-input", Input)
         field.disabled = False
         field.focus()
-
-    def _apply_story(self, story: DemoStory) -> None:
-        """Refresh every story-driven panel so the demo follows the user's input.
-
-        The header (user/scope/trace) and the Query<->Answer bar are not
-        story-driven, so they are left to their own animations.
-        """
-
-        self._story = story
-        self.query_one("#signal-rail", Static).update(_signal_rail_text(story))
-        self.query_one("#source-lock", Static).update(_source_tree_text(story))
-        self.query_one("#recall-lock", Static).update(_recall_proof_text(story))
-        self.query_one("#payoff", Static).update(_payoff_text(story))
-        self.action_replay()
 
     def action_replay(self) -> None:
         widget = self.query_one(DotSphereWidget)
@@ -562,43 +632,58 @@ def _field_header_text(*, user_label: str = "you", active_stage: int = -1) -> Te
     return Text.assemble(*parts)
 
 
-def _signal_rail_text(story: DemoStory | None = None) -> Text:
-    story = story or default_demo_story()
-    return Text.assemble(
-        ("● ", f"bold {EVEROS_GREEN}"),
-        ("memory core        ", EVEROS_INK),
-        ("ready\n", f"bold {EVEROS_GREEN}"),
-        ("● ", f"bold {EVEROS_YELLOW_SOFT}"),
-        ("conversation       ", EVEROS_INK),
-        ("captured\n", f"bold {EVEROS_YELLOW_SOFT}"),
-        ("● ", f"bold {EVEROS_ORANGE}"),
-        ("episode -> facts   ", EVEROS_INK),
-        ("live\n", f"bold {EVEROS_ORANGE}"),
-        ("● ", f"bold {EVEROS_CYAN}"),
-        ("SQLite + LanceDB   ", EVEROS_INK),
-        ("synced\n", f"bold {EVEROS_CYAN}"),
-        ("● ", f"bold {EVEROS_GREEN}"),
-        ("memory recall      ", EVEROS_INK),
-        ("hit\n", f"bold {EVEROS_GREEN}"),
-        ("\nsource route\n", EVEROS_MUTED),
-        (_rail_cell(story.source_filename), EVEROS_INK),
-        (" attached\n", f"bold {EVEROS_YELLOW_SOFT}"),
-        (_rail_cell(story.fact_filename), EVEROS_INK),
-        (" 7 nodes\n", f"bold {EVEROS_ORANGE}"),
-        ("lancedb orbit      ", EVEROS_INK),
-        ("synced\n", f"bold {EVEROS_CYAN}"),
-        ("\nrecall proof\n", EVEROS_MUTED),
-        ("score              ", EVEROS_INK),
-        ("0.628\n", f"bold {EVEROS_GREEN}"),
-        ("source             ", EVEROS_INK),
-        (f"{story.source_filename}\n", f"bold {EVEROS_CYAN}"),
-        ("field integrity\n", EVEROS_MUTED),
-        ("█████████░  92%\n", f"bold {EVEROS_YELLOW}"),
-        ("latency            ", EVEROS_MUTED),
-        ("42 ms\n", f"bold {EVEROS_GREEN}"),
-        ("mode               ", EVEROS_MUTED),
-        ("local-first", f"bold {EVEROS_INK}"),
-    )
+def _initial_lights() -> dict[str, str]:
+    """Default signal-rail state before any round runs."""
+
+    return {
+        "core": "not_ready",
+        "conversation": "idle",
+        "facts": "idle",
+        "index": "idle",
+        "recall": "idle",
+    }
+
+
+# White = not ready / idle / miss; yellow = ready / active / hit; black = error.
+_LIGHT_YELLOW = frozenset({"ready", "captured", "live", "synced", "hit"})
+
+
+def _light_color(state: str) -> str:
+    if state in _LIGHT_YELLOW:
+        return EVEROS_YELLOW
+    if state == "error":
+        return EVEROS_BLACK
+    return EVEROS_INK
+
+
+def _light_label(state: str) -> str:
+    return "not ready" if state == "not_ready" else state
+
+
+_SIGNAL_ROWS = (
+    ("core", "memory core      "),
+    ("conversation", "conversation     "),
+    ("facts", "episode -> facts "),
+    ("index", "SQLite + LanceDB "),
+    ("recall", "memory recall    "),
+)
+
+
+def _signal_rail_text(lights: dict[str, str] | None = None) -> Text:
+    lights = lights or _initial_lights()
+    parts: list[tuple[str, str]] = []
+    for key, label in _SIGNAL_ROWS:
+        state = lights.get(key, "idle")
+        color = _light_color(state)
+        parts.append(("● ", f"bold {color}"))
+        parts.append((label, EVEROS_INK))
+        parts.append((f"{_light_label(state)}\n", f"bold {color}"))
+    parts.append(("\nsource route\n", EVEROS_MUTED))
+    parts.append((_rail_cell(_demo_episode_name()), EVEROS_INK))
+    parts.append((" attached\n", f"bold {EVEROS_YELLOW_SOFT}"))
+    parts.append((_rail_cell(_demo_fact_name()), EVEROS_INK))
+    parts.append((" stored", f"bold {EVEROS_ORANGE}"))
+    return Text.assemble(*parts)
 
 
 def _rail_cell(value: str, *, width: int = SIGNAL_RAIL_SOURCE_WIDTH) -> str:
@@ -607,38 +692,64 @@ def _rail_cell(value: str, *, width: int = SIGNAL_RAIL_SOURCE_WIDTH) -> str:
     return f"{value:<{width}}"
 
 
-def _source_tree_text(story: DemoStory | None = None) -> Text:
-    story = story or default_demo_story()
+def _demo_episode_name() -> str:
+    """Date-stamped episode filename reflecting when the demo is used."""
+
+    return f"episode-{today_with_timezone().isoformat()}.md"
+
+
+def _demo_fact_name() -> str:
+    return f"atomic_fact-{today_with_timezone().isoformat()}.md"
+
+
+def _capabilities_text() -> Text:
+    rows = (
+        ("hybrid retrieval ", "BM25 + vector", EVEROS_YELLOW),
+        ("agentic rerank   ", "on", EVEROS_GREEN),
+        ("multilingual     ", "CJK + EN", EVEROS_CYAN),
+        ("multimodal       ", "image / pdf / audio", EVEROS_ORANGE),
+        ("md-first         ", "auditable source", EVEROS_YELLOW_SOFT),
+        ("local-first      ", "runs on your machine", EVEROS_INK),
+    )
+    parts: list[tuple[str, str]] = []
+    for label, value, color in rows:
+        parts.append((label, EVEROS_MUTED))
+        parts.append((f"{value}\n", f"bold {color}"))
+    return Text.assemble(*parts)
+
+
+def _source_tree_text() -> Text:
     return Text.assemble(
         ("episode ", EVEROS_MUTED),
-        (f"{story.source_filename}\n", f"bold {EVEROS_YELLOW_SOFT}"),
+        (f"{_demo_episode_name()}\n", f"bold {EVEROS_YELLOW_SOFT}"),
         ("facts   ", EVEROS_MUTED),
-        (f"{story.fact_filename}\n", f"bold {EVEROS_ORANGE}"),
+        (f"{_demo_fact_name()}\n", f"bold {EVEROS_ORANGE}"),
         ("index   ", EVEROS_MUTED),
         ("sqlite/system.db + lancedb/*.lance\n", EVEROS_CYAN),
         ("root    ", EVEROS_MUTED),
-        ("~/.everos/default_app/default_project", EVEROS_INK),
+        ("~/.everos/default_app/demo", EVEROS_INK),
     )
 
 
 def _recall_proof_text(story: DemoStory | None = None) -> Text:
     story = story or default_demo_story()
+    score = f"{story.score:.3f}" if story.score else "—"
     return Text.assemble(
         ("score   ", EVEROS_MUTED),
-        ("0.628\n", f"bold {EVEROS_GREEN}"),
+        (f"{score}\n", f"bold {EVEROS_GREEN}"),
         ("scope   ", EVEROS_MUTED),
-        (f"user={story.owner} project=default\n", EVEROS_INK),
-        ("answer  ", EVEROS_MUTED),
-        (story.answer, f"bold {EVEROS_YELLOW}"),
+        (f"user={story.owner} project=demo\n", EVEROS_INK),
+        ("= similarity to your stored memory", EVEROS_MUTED),
     )
 
 
-def _payoff_text(story: DemoStory | None = None) -> Text:
-    story = story or default_demo_story()
-    return Text.assemble(
-        ("memory formed: ", f"bold {EVEROS_YELLOW}"),
-        (
-            f"EverOS recalled {story.answer} and kept the source attached.",
-            f"bold {EVEROS_INK}",
-        ),
-    )
+def _conversation_text(log: list[tuple[str, str]]) -> Text:
+    if not log:
+        return Text("your input and EverOS output will appear here", style=EVEROS_MUTED)
+    parts: list[tuple[str, str]] = []
+    for query, answer in log:
+        parts.append(("you    ", f"bold {EVEROS_CYAN}"))
+        parts.append((f"{query}\n", EVEROS_INK))
+        parts.append(("everos ", f"bold {EVEROS_GREEN}"))
+        parts.append((f"{answer}\n", EVEROS_INK))
+    return Text.assemble(*parts)

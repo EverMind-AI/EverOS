@@ -12,9 +12,10 @@ from everos.entrypoints.tui.demo.app import (
     DotSphereWidget,
     EverOSDemoApp,
     QueryAnswerBar,
+    _capabilities_text,
+    _conversation_text,
     _field_header_text,
     _hero_text,
-    _payoff_text,
     _recall_proof_text,
     _signal_rail_text,
     _source_tree_text,
@@ -56,8 +57,9 @@ def test_demo_tui_uses_elevated_instrument_layout() -> None:
     assert "#command-strip" in css
     assert "#memory-field" in css
     assert "#signal-rail" in css
+    assert "#capabilities" in css
     assert "#provenance-strip" in css
-    assert "#payoff" in css
+    assert "#conversation" in css
     assert "FooterKey" in css
     assert "background: #F9B91C" in css
     assert any("on #F9B91C" in span.style for span in _hero_text().spans)
@@ -70,7 +72,7 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
 
     command_strip = _css_block(css, "#command-strip")
     signal_rail = _css_block(css, "#signal-rail")
-    payoff = _css_block(css, "#payoff")
+    conversation = _css_block(css, "#conversation")
 
     assert "height: 2;" in command_strip
     assert "border-left: thick" not in command_strip
@@ -80,15 +82,11 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
 
     assert "height: 1fr;" in DotSphereWidget.DEFAULT_CSS
 
-    assert "height: 100%;" in signal_rail
+    assert "height: 1fr;" in signal_rail
     assert "source route" in _signal_rail_text().plain
-    assert "recall proof" in _signal_rail_text().plain
 
-    assert "height: 2;" in payoff
-    assert "background: #24231E;" in payoff
-    assert "padding: 0 1;" in payoff
-    assert _payoff_text().plain.startswith("memory formed:")
-    assert "bold #F9B91C" in {span.style for span in _payoff_text().spans}
+    # The conversation log sits below the yellow line.
+    assert "border-top: hkey #F9B91C;" in conversation
 
 
 def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
@@ -106,19 +104,79 @@ def test_demo_tui_celebrates_after_source_reveal() -> None:
     assert set(DotSphereWidget.STATES).issubset(SPHERE_STATES)
 
 
-def test_demo_tui_renders_playable_story_copy() -> None:
-    story = _story(
-        "I keep my Monday design review notes in Notion.",
-        "Where are my Monday review notes?",
-        "In Notion.",
-    )
+def test_signal_rail_lights_reflect_state() -> None:
+    idle = _signal_rail_text().plain
+    assert "memory core" in idle
+    assert "not ready" in idle  # core idle => not ready
+    assert "source route" in idle
 
-    assert "server wake" not in _signal_rail_text(story).plain
-    assert "memory core" in _signal_rail_text(story).plain
-    assert story.source_filename in _source_tree_text(story).plain
-    assert story.fact_filename in _source_tree_text(story).plain
-    assert story.answer in _recall_proof_text(story).plain
-    assert story.answer in _payoff_text(story).plain
+    active = _signal_rail_text(
+        {
+            "core": "ready",
+            "conversation": "captured",
+            "facts": "live",
+            "index": "synced",
+            "recall": "hit",
+        }
+    ).plain
+    for label in ("ready", "captured", "live", "synced", "hit"):
+        assert label in active
+
+
+def test_signal_rail_light_colors_follow_white_yellow_black() -> None:
+    rail = _signal_rail_text(
+        {
+            "core": "error",
+            "conversation": "idle",
+            "facts": "live",
+            "index": "idle",
+            "recall": "idle",
+        }
+    )
+    dot_styles = [
+        span.style for span in rail.spans if "●" in rail.plain[span.start : span.end]
+    ]
+    assert f"bold {_YELLOW}" in dot_styles  # an active light is yellow
+    assert "bold #1D1C18" in dot_styles  # the errored light is black
+
+
+def test_capabilities_box_lists_real_strengths() -> None:
+    text = _capabilities_text().plain
+    for feature in ("hybrid retrieval", "rerank", "multilingual", "multimodal"):
+        assert feature in text
+
+
+def test_source_lock_uses_date_stamped_filenames() -> None:
+    text = _source_tree_text().plain
+    assert "episode-" in text and ".md" in text
+    assert "atomic_fact-" in text
+
+
+def test_recall_lock_shows_real_score_and_demo_scope() -> None:
+    story = DemoStory(
+        owner="everos_demo_abc",
+        memory="m",
+        query="q",
+        answer="a",
+        source_filename="",
+        fact_filename="",
+        score=0.873,
+    )
+    text = _recall_proof_text(story).plain
+    assert "0.873" in text
+    assert "user=everos_demo_abc" in text
+    assert "project=demo" in text
+
+
+def test_conversation_log_accumulates_turns() -> None:
+    empty = _conversation_text([]).plain
+    assert "will appear here" in empty
+
+    filled = _conversation_text([("where do I climb?", "Yosemite")]).plain
+    assert "you" in filled
+    assert "where do I climb?" in filled
+    assert "everos" in filled
+    assert "Yosemite" in filled
 
 
 def test_field_header_shows_local_user_and_trace_stages() -> None:
@@ -200,14 +258,17 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
 
     from everos.entrypoints.tui.demo import cloud
 
-    def fake_recall(
-        memory: str, query: str, *, base_url: str, session_id: str, user_id: str
+    monkeypatch.setattr(cloud, "check_health", lambda **_: None)
+    monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: None)
+    monkeypatch.setattr(cloud, "flush_memory", lambda **_: None)
+
+    def fake_search(
+        memory: str, query: str, *, base_url: str, user_id: str, **_: object
     ) -> DemoStory:
-        # Stand in for the hosted server: echo the real call's identity through.
         assert base_url == "http://server.test"
         return _story(memory, query, f"recalled<{memory}>")
 
-    monkeypatch.setattr(cloud, "recall_round", fake_recall)
+    monkeypatch.setattr(cloud, "search_recall", fake_search)
 
     app = EverOSDemoApp(
         interactive=True,
@@ -232,6 +293,9 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
         assert app._story.query == "我喜欢吃什么"
         assert app._story.answer == "recalled<我喜欢吃杨梅>"
         assert "Yosemite" not in app._story.answer
+        # Lights walked the full pipeline to a hit.
+        assert app._lights["core"] == "ready"
+        assert app._lights["recall"] == "hit"
 
         # Round 2 reaches the cap and locks the input behind the upgrade nudge.
         console_input.value = "I bike to work"
@@ -251,10 +315,10 @@ async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
     from everos.entrypoints.tui.demo import cloud
     from everos.entrypoints.tui.demo.app import _quota_guidance_text
 
-    def quota(*_: object, **__: object) -> DemoStory:
+    def quota(*_: object, **__: object) -> None:
         raise cloud.CloudQuotaError("http://server.test")
 
-    monkeypatch.setattr(cloud, "recall_round", quota)
+    monkeypatch.setattr(cloud, "check_health", quota)
 
     app = EverOSDemoApp(
         interactive=True,

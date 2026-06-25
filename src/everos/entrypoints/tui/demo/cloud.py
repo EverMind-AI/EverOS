@@ -67,34 +67,34 @@ def new_demo_identity() -> tuple[str, str]:
     return f"everos-demo-{token}", f"everos_demo_{token}"
 
 
-def recall_round(
-    memory: str,
-    query: str,
+def check_health(
     *,
     base_url: str,
-    session_id: str,
-    user_id: str,
-    request_json: Callable[..., dict[str, Any]] | None = None,
     timeout_seconds: float = LIVE_DEMO_TIMEOUT_SECONDS,
-    search_attempts: int = LIVE_DEMO_SEARCH_ATTEMPTS,
-    search_interval_seconds: float = LIVE_DEMO_SEARCH_INTERVAL_SECONDS,
-) -> DemoStory:
-    """Run one ``add -> flush -> search`` round against a live EverOS server.
-
-    Blocking (uses ``urllib`` + ``time.sleep`` while indexing catches up); call
-    it from a worker thread, never directly on an event loop.
-    """
+    request_json: Callable[..., dict[str, Any]] | None = None,
+) -> None:
+    """Raise CloudDemoError unless the server reports healthy. Blocking."""
 
     request = request_json or _request_json
     health = request(
-        "GET",
-        "/health",
-        base_url=base_url,
-        timeout_seconds=timeout_seconds,
+        "GET", "/health", base_url=base_url, timeout_seconds=timeout_seconds
     )
     if health.get("status") != "ok":
         raise CloudDemoError(f"EverOS server at {base_url} is not healthy")
 
+
+def add_memory(
+    memory: str,
+    *,
+    base_url: str,
+    session_id: str,
+    user_id: str,
+    timeout_seconds: float = LIVE_DEMO_TIMEOUT_SECONDS,
+    request_json: Callable[..., dict[str, Any]] | None = None,
+) -> None:
+    """Send one user memory to the server. Blocking."""
+
+    request = request_json or _request_json
     timestamp_ms = int(get_utc_now().timestamp() * 1000)
     request(
         "POST",
@@ -115,6 +115,18 @@ def recall_round(
         },
         timeout_seconds=timeout_seconds,
     )
+
+
+def flush_memory(
+    *,
+    base_url: str,
+    session_id: str,
+    timeout_seconds: float = LIVE_DEMO_TIMEOUT_SECONDS,
+    request_json: Callable[..., dict[str, Any]] | None = None,
+) -> None:
+    """Force extraction of the accumulated session into episodes/facts. Blocking."""
+
+    request = request_json or _request_json
     request(
         "POST",
         "/api/v1/memory/flush",
@@ -127,6 +139,25 @@ def recall_round(
         timeout_seconds=timeout_seconds,
     )
 
+
+def search_recall(
+    memory: str,
+    query: str,
+    *,
+    base_url: str,
+    user_id: str,
+    timeout_seconds: float = LIVE_DEMO_TIMEOUT_SECONDS,
+    search_attempts: int = LIVE_DEMO_SEARCH_ATTEMPTS,
+    search_interval_seconds: float = LIVE_DEMO_SEARCH_INTERVAL_SECONDS,
+    request_json: Callable[..., dict[str, Any]] | None = None,
+) -> DemoStory | None:
+    """Search the query, polling while indexing catches up.
+
+    Returns a :class:`DemoStory` (with the real recall score) on a hit, or
+    ``None`` on a miss (the server answered but returned nothing). Blocking.
+    """
+
+    request = request_json or _request_json
     search_payload = {
         "user_id": user_id,
         "app_id": LIVE_DEMO_APP_ID,
@@ -147,11 +178,7 @@ def recall_round(
             return _story_from_live_episode(memory, query, episode, user_id=user_id)
         if attempt < search_attempts - 1:
             time.sleep(search_interval_seconds)
-
-    raise CloudDemoError(
-        "EverOS accepted the memory, but search did not return it yet. "
-        "Try again once indexing catches up."
-    )
+    return None
 
 
 def _request_json(
@@ -220,6 +247,9 @@ def _story_from_live_episode(
             or memory
         )
     episode_id = _string_field(episode, "id") or "live"
+    score = _float_field(first_fact, "score") if isinstance(first_fact, dict) else 0.0
+    if not score:
+        score = _float_field(episode, "score")
     return DemoStory(
         owner=user_id,
         memory=memory,
@@ -227,6 +257,7 @@ def _story_from_live_episode(
         answer=answer,
         source_filename=f"episode:{episode_id}",
         fact_filename=f"fact:{fact_id or 'live'}",
+        score=score,
     )
 
 
@@ -235,3 +266,10 @@ def _string_field(payload: dict[str, Any] | None, key: str) -> str:
         return ""
     value = payload.get(key)
     return value if isinstance(value, str) else ""
+
+
+def _float_field(payload: dict[str, Any] | None, key: str) -> float:
+    if payload is None:
+        return 0.0
+    value = payload.get(key)
+    return float(value) if isinstance(value, int | float) else 0.0

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import urllib.error
+
 import pytest
 
 from everos.entrypoints.tui.demo import cloud
@@ -35,8 +37,16 @@ def test_new_demo_identity_is_unique_and_paired() -> None:
     assert user_a.startswith("everos_demo_")
 
 
-def test_recall_round_runs_real_flow_with_isolated_identity() -> None:
-    calls: list[tuple[str, str, dict[str, object] | None]] = []
+def test_check_health_raises_when_not_ok() -> None:
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        return {"status": "degraded"}
+
+    with pytest.raises(cloud.CloudDemoError):
+        cloud.check_health(base_url="http://server.test", request_json=fake_request)
+
+
+def test_add_memory_sends_isolated_identity() -> None:
+    bodies: list[tuple[str, dict[str, object] | None]] = []
 
     def fake_request(
         method: str,
@@ -46,10 +56,34 @@ def test_recall_round_runs_real_flow_with_isolated_identity() -> None:
         json_body: dict[str, object] | None = None,
         timeout_seconds: float,
     ) -> dict[str, object]:
-        calls.append((method, path, json_body))
-        assert base_url == "http://server.test"
-        if path == "/health":
-            return {"status": "ok"}
+        bodies.append((path, json_body))
+        return {}
+
+    cloud.add_memory(
+        "我喜欢吃杨梅",
+        base_url="http://server.test",
+        session_id="everos-demo-abc",
+        user_id="everos_demo_abc",
+        request_json=fake_request,
+    )
+
+    path, body = bodies[0]
+    assert path == "/api/v1/memory/add"
+    assert body is not None
+    assert body["session_id"] == "everos-demo-abc"
+    assert body["messages"][0]["sender_id"] == "everos_demo_abc"
+    assert body["messages"][0]["content"] == "我喜欢吃杨梅"
+
+
+def test_search_recall_returns_story_with_real_score() -> None:
+    def fake_request(
+        method: str,
+        path: str,
+        *,
+        base_url: str,
+        json_body: dict[str, object] | None = None,
+        timeout_seconds: float,
+    ) -> dict[str, object]:
         if path == "/api/v1/memory/search":
             return {
                 "data": {
@@ -57,61 +91,36 @@ def test_recall_round_runs_real_flow_with_isolated_identity() -> None:
                         {
                             "id": "ep1",
                             "summary": "You like Yangmei.",
+                            "score": 0.41,
                             "atomic_facts": [
-                                {"id": "af1", "content": "You like Yangmei."}
+                                {
+                                    "id": "af1",
+                                    "content": "You like Yangmei.",
+                                    "score": 0.87,
+                                }
                             ],
                         }
                     ]
                 }
             }
-        return {"status": "ok"}
+        return {}
 
-    story = cloud.recall_round(
+    story = cloud.search_recall(
         "我喜欢吃杨梅",
         "我喜欢吃什么",
         base_url="http://server.test",
-        session_id="everos-demo-abc",
         user_id="everos_demo_abc",
         request_json=fake_request,
-        timeout_seconds=1.0,
     )
 
-    assert [path for _, path, _ in calls] == [
-        "/health",
-        "/api/v1/memory/add",
-        "/api/v1/memory/flush",
-        "/api/v1/memory/search",
-    ]
-    add_body = calls[1][2]
-    search_body = calls[3][2]
-    assert add_body is not None and search_body is not None
-    assert add_body["session_id"] == "everos-demo-abc"
-    assert add_body["messages"][0]["sender_id"] == "everos_demo_abc"
-    assert add_body["messages"][0]["content"] == "我喜欢吃杨梅"
-    assert search_body["user_id"] == "everos_demo_abc"
+    assert story is not None
     assert story.owner == "everos_demo_abc"
-    assert story.memory == "我喜欢吃杨梅"
     assert story.query == "我喜欢吃什么"
     assert story.answer == "You like Yangmei."
-    assert story.source_filename == "episode:ep1"
+    assert story.score == 0.87  # prefers the top fact's score
 
 
-def test_recall_round_raises_quota_error_on_429() -> None:
-    def fake_request(*_: object, **__: object) -> dict[str, object]:
-        raise cloud.CloudQuotaError("http://server.test")
-
-    with pytest.raises(cloud.CloudQuotaError):
-        cloud.recall_round(
-            "m",
-            "q",
-            base_url="http://server.test",
-            session_id="s",
-            user_id="u",
-            request_json=fake_request,
-        )
-
-
-def test_recall_round_raises_demo_error_when_search_never_returns() -> None:
+def test_search_recall_returns_none_on_miss() -> None:
     def fake_request(
         method: str,
         path: str,
@@ -120,20 +129,30 @@ def test_recall_round_raises_demo_error_when_search_never_returns() -> None:
         json_body: dict[str, object] | None = None,
         timeout_seconds: float,
     ) -> dict[str, object]:
-        if path == "/health":
-            return {"status": "ok"}
-        if path == "/api/v1/memory/search":
-            return {"data": {"episodes": []}}
-        return {"status": "ok"}
+        return {"data": {"episodes": []}}
 
-    with pytest.raises(cloud.CloudDemoError):
-        cloud.recall_round(
-            "m",
-            "q",
-            base_url="http://server.test",
-            session_id="s",
-            user_id="u",
-            request_json=fake_request,
-            search_attempts=2,
-            search_interval_seconds=0.0,
+    story = cloud.search_recall(
+        "m",
+        "q",
+        base_url="http://server.test",
+        user_id="u",
+        request_json=fake_request,
+        search_attempts=2,
+        search_interval_seconds=0.0,
+    )
+
+    assert story is None
+
+
+def test_request_json_maps_429_to_quota_error(monkeypatch) -> None:
+    def boom(*_: object, **__: object) -> object:
+        raise urllib.error.HTTPError(
+            "http://server.test", 429, "Too Many Requests", {}, None
+        )
+
+    monkeypatch.setattr(cloud.urllib.request, "urlopen", boom)
+
+    with pytest.raises(cloud.CloudQuotaError):
+        cloud._request_json(
+            "GET", "/health", base_url="http://server.test", timeout_seconds=1.0
         )

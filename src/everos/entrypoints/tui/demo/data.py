@@ -18,6 +18,7 @@ class DemoStory:
     answer: str
     source_filename: str
     fact_filename: str
+    score: float = 0.0
 
 
 def default_demo_story() -> DemoStory:
