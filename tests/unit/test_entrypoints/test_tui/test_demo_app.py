@@ -227,6 +227,50 @@ def test_ctrl_c_is_a_priority_quit_binding() -> None:
     assert "ctrl+q" in quit_keys
 
 
+def test_help_and_unknown_command_text() -> None:
+    from everos.entrypoints.tui.demo.app import _help_text, _unknown_command_text
+
+    help_plain = _help_text().plain
+    for command in ("/help", "/replay", "/clear", "/quit"):
+        assert command in help_plain
+    assert "unknown command /bogus" in _unknown_command_text("/bogus").plain
+
+
+async def test_slash_help_does_not_consume_a_turn() -> None:
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = "/help"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # /help is a command, not a memory: the conversation does not advance.
+        assert app._conversation_phase == "memory"
+        assert app._pending_memory == ""
+
+
+async def test_slash_clear_wipes_the_conversation_log() -> None:
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        app._record_turn("where do I climb?", "Yosemite")
+        assert app._log
+
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = "/clear"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app._log == []
+
+
 async def test_typing_quit_exits_the_app(monkeypatch) -> None:
     from textual.widgets import Input
 

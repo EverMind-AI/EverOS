@@ -59,7 +59,7 @@ SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
 TRACE_STAGES = ("ingest", "extract", "index", "recall")
 
 # Words a user can type in the input box to quit back to the terminal.
-QUIT_COMMANDS = frozenset({"quit", "exit", ":q", "/quit"})
+QUIT_COMMANDS = frozenset({"quit", "exit", ":q", "/quit", "/exit"})
 _STATE_TO_STAGE = {
     "ingesting": 0,
     "extracting": 1,
@@ -397,7 +397,8 @@ class EverOSDemoApp(App[None]):
                     )
                     yield Input(
                         placeholder=(
-                            "type a memory and press enter  ·  'quit' or ctrl+c to exit"
+                            "type a memory & enter  ·  /help for commands  ·  "
+                            "/quit to exit"
                         ),
                         id="console-input",
                     )
@@ -424,6 +425,9 @@ class EverOSDemoApp(App[None]):
         if value.lower() in QUIT_COMMANDS:
             self.exit()
             return
+        if value.startswith("/"):
+            self._run_slash_command(value.lower())
+            return
         prompt = self.query_one("#console-prompt", Static)
         field = self.query_one("#console-input", Input)
         if self._conversation_phase == "memory":
@@ -445,6 +449,21 @@ class EverOSDemoApp(App[None]):
             group="recall",
             exclusive=True,
         )
+
+    def _run_slash_command(self, command: str) -> None:
+        prompt = self.query_one("#console-prompt", Static)
+        self.query_one("#console-input", Input).value = ""
+        if command in {"/help", "/?"}:
+            prompt.update(_help_text())
+        elif command == "/replay":
+            self.action_replay()
+        elif command == "/clear":
+            self._log.clear()
+            self.query_one("#conversation", Static).update(
+                _conversation_text(self._log)
+            )
+        else:
+            prompt.update(_unknown_command_text(command))
 
     async def _recall(self, memory: str, query: str) -> None:
         # Reset the per-round lights; each step below lights up as it completes,
@@ -604,6 +623,27 @@ def _recall_error_text(message: str) -> Text:
         ("could not reach the demo server  ", f"bold {EVEROS_ORANGE}"),
         (f"({message})  ", EVEROS_MUTED),
         ("set EVEROS_CLOUD_DEMO_URL or use --live; type to retry", EVEROS_INK),
+    )
+
+
+def _help_text() -> Text:
+    return Text.assemble(
+        ("commands  ", f"bold {EVEROS_YELLOW}"),
+        ("/help", f"bold {EVEROS_GREEN}"),
+        (" list  ", EVEROS_MUTED),
+        ("/replay", f"bold {EVEROS_GREEN}"),
+        (" re-run sphere  ", EVEROS_MUTED),
+        ("/clear", f"bold {EVEROS_GREEN}"),
+        (" wipe log  ", EVEROS_MUTED),
+        ("/quit", f"bold {EVEROS_GREEN}"),
+        (" exit", EVEROS_MUTED),
+    )
+
+
+def _unknown_command_text(command: str) -> Text:
+    return Text.assemble(
+        (f"unknown command {command}  ", f"bold {EVEROS_ORANGE}"),
+        ("try /help", EVEROS_INK),
     )
 
 
