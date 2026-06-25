@@ -166,11 +166,14 @@ def test_recall_lock_shows_real_score_and_demo_scope() -> None:
         fact_filename="",
         score=0.873,
     )
-    text = _recall_proof_text(story, user_label="YangtzeSeventh").plain
+    text = _recall_proof_text(story, user_label="YangtzeSeventh", saved_pct=62).plain
     assert "0.873" in text
     assert "user=YangtzeSeventh" in text  # local user, not the session id or alice
     assert "project=demo" in text
+    assert "~62% tokens (est)" in text
     assert "similarity" not in text
+    # No saved figure until a round has run.
+    assert "saved   —" in _recall_proof_text(story, user_label="x").plain
 
 
 def test_conversation_log_accumulates_turns() -> None:
@@ -369,6 +372,8 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
         # Lights walked the full pipeline to a hit.
         assert app._lights["core"] == "ready"
         assert app._lights["recall"] == "hit"
+        # A per-round token-saving estimate was computed.
+        assert app._saved_pct is not None
 
         # Round 2 reaches the cap and locks the input behind the upgrade nudge.
         console_input.value = "I bike to work"

@@ -350,6 +350,8 @@ class EverOSDemoApp(App[None]):
         self._pending_memory = ""
         self._lights = _initial_lights()
         self._log: list[tuple[str, str]] = []
+        self._history_chars = 0
+        self._saved_pct: int | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
@@ -546,12 +548,24 @@ class EverOSDemoApp(App[None]):
         else:
             self._set_light("recall", "hit")
             self._record_turn(story.query, story.answer)
+        self._update_savings(memory, query, story.answer)
         self._finish_round(story)
+
+    def _update_savings(self, memory: str, query: str, answer: str) -> None:
+        # Estimate (not measured): carrying the whole conversation as LLM context
+        # vs. EverOS handing back only the compact recalled answer. Char counts
+        # are a token proxy; the ratio is what matters, so the /4 cancels out.
+        self._history_chars += len(memory) + len(query) + len(answer)
+        if self._history_chars:
+            ratio = 1 - len(answer) / self._history_chars
+            self._saved_pct = max(0, min(99, round(100 * ratio)))
 
     def _finish_round(self, story: DemoStory) -> None:
         self._story = story
         self.query_one("#recall-lock", Static).update(
-            _recall_proof_text(story, user_label=self._user_label)
+            _recall_proof_text(
+                story, user_label=self._user_label, saved_pct=self._saved_pct
+            )
         )
         self.action_replay()
         self._round += 1
@@ -814,13 +828,19 @@ def _source_tree_text() -> Text:
 
 
 def _recall_proof_text(
-    story: DemoStory | None = None, *, user_label: str = "you"
+    story: DemoStory | None = None,
+    *,
+    user_label: str = "you",
+    saved_pct: int | None = None,
 ) -> Text:
     story = story or default_demo_story()
     score = f"{story.score:.3f}" if story.score else "—"
+    saved = f"~{saved_pct}% tokens (est)" if saved_pct is not None else "—"
     return Text.assemble(
         ("score   ", EVEROS_MUTED),
         (f"{score}\n", f"bold {EVEROS_GREEN}"),
+        ("saved   ", EVEROS_MUTED),
+        (f"{saved}\n", f"bold {EVEROS_YELLOW}"),
         ("scope   ", EVEROS_MUTED),
         (f"user={user_label} project=demo", EVEROS_INK),
     )
