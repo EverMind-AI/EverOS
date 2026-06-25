@@ -797,15 +797,17 @@ def _demo_fact_name() -> str:
 
 
 def _capabilities_text() -> Text:
-    # Real published numbers from evermind.ai ("SOTA Performance") plus the
-    # core retrieval strengths. No fabricated figures.
+    # Real highlights from evermind.ai: the token-efficiency claim, one headline
+    # SOTA benchmark, and core capabilities. No fabricated figures. (local-first
+    # is dropped here because the field header already shows scope=local-first.)
     rows = (
-        ("LoCoMo        ", "93.05%", EVEROS_YELLOW),
-        ("LongMemEval   ", "83.00%", EVEROS_GREEN),
-        ("HaluMem       ", "93.04%", EVEROS_CYAN),
-        ("hybrid        ", "BM25 + vector", EVEROS_ORANGE),
-        ("rerank        ", "agentic", EVEROS_YELLOW_SOFT),
-        ("local-first   ", "on your machine", EVEROS_INK),
+        ("token efficiency ", "1/10 of full context", EVEROS_YELLOW),
+        ("LoCoMo           ", "93.05% (SOTA)", EVEROS_GREEN),
+        ("context window   ", "unlimited", EVEROS_CYAN),
+        ("hybrid retrieval ", "BM25 + vector", EVEROS_ORANGE),
+        ("agentic rerank   ", "on", EVEROS_YELLOW_SOFT),
+        ("multimodal       ", "pdf / image / docs", EVEROS_INK),
+        ("self-evolving    ", "cases -> skills", EVEROS_GREEN),
     )
     parts: list[tuple[str, str]] = []
     for label, value, color in rows:

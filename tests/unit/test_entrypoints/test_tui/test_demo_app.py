@@ -142,12 +142,13 @@ def test_signal_rail_light_colors_follow_white_yellow_black() -> None:
 
 def test_capabilities_box_uses_real_website_numbers() -> None:
     text = _capabilities_text().plain
-    # Real SOTA numbers published on evermind.ai (not fabricated token savings).
-    assert "93.05%" in text  # LoCoMo
-    assert "83.00%" in text  # LongMemEval
-    assert "93.04%" in text  # HaluMem
+    # Real highlights from evermind.ai: token efficiency + one SOTA benchmark.
+    assert "1/10 of full context" in text  # real token-efficiency claim
+    assert "93.05%" in text  # one headline benchmark (LoCoMo)
+    assert "83.00%" not in text  # only one score now
     assert "rerank" in text
-    assert "local-first" in text
+    # local-first is dropped here (already shown in the field header scope).
+    assert "local-first" not in text
 
 
 def test_source_lock_uses_date_stamped_filenames() -> None:
