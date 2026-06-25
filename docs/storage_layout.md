@@ -41,7 +41,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │               ├── SKILL.md
 │       │               ├── references/               (optional)
 │       │               └── scripts/                  (optional)
-│       └── knowledge/                                user-visible (shared / global, reserved)
+│       └── knowledge/                                user-visible (shared / global)
 │
 ├── .index/                              system-managed, rebuildable (gitignore)
 │   ├── sqlite/
@@ -186,7 +186,7 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 - **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
   holds only system / coordination tables — `md_change_state` (cascade
   queue), `memcell` (boundary ledger), `unprocessed_buffer`,
-  `conversation_status`, `cluster`, `reflection_report` — **not**
+  `conversation_status`, `cluster`, `knowledge`, `reflection_report` — **not**
   per-kind business rows. `reflection_report` is the audit trail for
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).

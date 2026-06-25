@@ -5,9 +5,12 @@ the prompts it sends to LLMs. Algorithm code receives a `PromptSlot`
 parameter; the *project* (EverOS) supplies defaults and lets operators
 override.
 
-> **Status (2026-05-07)**: the YAML loader is implemented; the higher-
-> level `PromptSlot` model + sandbox dry-run + three-layer overlay
-> resolution arrive when the memory layer ships (see Stage 2).
+> **Status (2026-05-07)**: Layer 1 (bundled defaults under
+> `config/prompt_slots/`) is live — `PromptLoader` is integrated into the
+> memorize pipeline (`service/memorize.py`). Two slots ship today —
+> `boundary_detection` and `episode_extract`; other extractors use their
+> algo-bundled defaults. Layers 2-3 (app-level overlay from
+> `~/.everos/prompt_slots/` and per-call runtime override) are still pending.
 
 ## Three-layer overlay
 
@@ -27,63 +30,44 @@ layer 3 is supplied at the call site.
 
 The prompt-slots public entry point is
 [`PromptLoader`](../src/everos/memory/prompt_slots/loader.py) (re-exported
-from `everos.memory.prompt_slots`); it wraps the generic category loader
-[`YamlConfigLoader`](../src/everos/component/config/loader.py). The generic
-loader is shown below — `PromptLoader` is the prompt-slots-specific wrapper
-over the same mechanism:
+from `everos.memory.prompt_slots`). Its public method is
+`load(name: str) -> str | None` — returns the override template when the
+slot is enabled and non-empty, or `None` to fall back to the algo default.
+
+Internally, `PromptLoader` wraps the generic category loader
+[`YamlConfigLoader`](../src/everos/component/config/loader.py):
 
 ```python
+from everos.memory.prompt_slots import PromptLoader
 from pathlib import Path
-from everos.component.config import YamlConfigLoader
 
-loader = YamlConfigLoader(
-    root=Path("src/everos/config"),
-    categories={"prompt_slots": None},   # subdir == category name
-)
+loader = PromptLoader(config_root=Path("src/everos/config"))
 
-# Reads <root>/prompt_slots/episode_extract.yaml → dict
-slot = loader.find("prompt_slots", "episode_extract")
-
-# Refresh after on-disk edits.
-loader.refresh()                         # drop the entire cache
-loader.refresh("prompt_slots")           # drop one category
-loader.refresh("prompt_slots", "episode_extract")  # drop one entry
+# Returns the template string, or None when disabled / empty.
+template = loader.load("episode_extract")
 ```
+
+The underlying `YamlConfigLoader` supports `find()`, `refresh()`, etc. —
+but callers should use `PromptLoader.load()` rather than reaching into the
+generic layer directly.
 
 Top-level YAML is required to be a mapping; a list / scalar root
 raises `TypeError` to fail-fast (loud, not silent).
 
-## YAML format (proposed; subject to change)
+## YAML format
+
+Each slot file uses two keys: `enabled` (boolean) and `template` (string).
 
 ```yaml
 # config/prompt_slots/episode_extract.yaml
-template: |
-  Extract a single episode from this conversation:
-  {{ memcell.text }}
-
-variables:
-  memcell: input memcell
-
-output_schema:
-  type: object
-  properties:
-    summary: { type: string }
-    participants: { type: array }
-
-llm:
-  model: gpt-4.1-mini
-  temperature: 0.3
-  max_tokens: 2000
-
-validation:
-  test_cases:
-    - input: { memcell: { text: "Hi" } }
-      expected: { summary: "...", participants: [] }
+enabled: false
+template: ""
 ```
 
-When layer 2 supplies an override the loader will be re-pointed at
-`~/.everos/prompt_slots/`; the runtime resolution logic (currently TBD)
-sandbox-runs the merged slot before returning it.
+When `enabled` is `true` and `template` is a non-empty string,
+`PromptLoader.load()` returns the template as-is. Otherwise it returns
+`None`, and the pipeline falls back to the algo-bundled default prompt
+(zero override cost).
 
 ## Why YAML (not TOML)
 

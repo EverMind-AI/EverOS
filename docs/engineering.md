@@ -410,21 +410,11 @@ File locations:
 - GitLab: `.gitlab/merge_request_templates/default.md`
 - GitHub: `.github/PULL_REQUEST_TEMPLATE.md`
 
-### 7.3 CODEOWNERS (by DDD layer)
+### 7.3 Code ownership
 
-```
-/src/everos/memory/         @chandler.zhang @libin.zhang001
-/src/everos/infra/          @chandler.zhang @yeanhua
-/src/everos/component/      @chandler.zhang
-/src/everos/core/           @chandler.zhang
-/src/everos/service/        @chandler.zhang @libin.zhang001
-/src/everos/entrypoints/    @chandler.zhang
-/.claude/                   @chandler.zhang
-/.gitlab-ci.yml             @chandler.zhang @jianhua.yao
-```
-
-At least one owner per directory; two owners for critical modules. Edits
-auto-mention the corresponding owners.
+The `.gitlab/CODEOWNERS` file was removed (commit `e870927`) to avoid
+leaking internal accounts. Code ownership is now managed via GitLab
+project-level settings (Merge Request approval rules).
 
 ### 7.4 Commit convention (Gitmoji)
 
@@ -488,8 +478,8 @@ CONTRIBUTING.md              contributor onboarding: setup / code style /
 │                      │                                      │  merge      │
 │  GitHub Actions      │  /.github/workflows/ci.yml           │  PR cannot  │
 │                      │                                      │  merge      │
-│  CODEOWNERS          │  /.gitlab/CODEOWNERS                 │  no auto    │
-│                      │                                      │  reviewer   │
+│  Code ownership      │  GitLab project settings             │  no auto    │
+│                      │  (approval rules)                    │  reviewer   │
 │  GitLab MR template  │  /.gitlab/merge_request_templates/   │  no MR temp │
 │  GitHub PR template  │  /.github/PULL_REQUEST_TEMPLATE.md   │  no PR temp │
 │  Issue templates     │  /.github/ISSUE_TEMPLATE/ (3)        │  scattered  │
@@ -509,13 +499,13 @@ Near-term
   □ /run-eval      skill: run behavior-consistency eval
   □ ruff rule sets: add D (docstring), ANN (annotations)
 
-Mid-term (before v0.5)
+Mid-term (v1.2 – v1.3)
   □ Type checking re-introduction (pyright or mypy) once hot paths stabilize
   □ release-please / Conventional Commits → automated changelog
   □ pre-commit autoupdate cadence
   □ Performance benchmark CI with historical comparison
 
-Long-term (after v1.0)
+Long-term (v2+)
   □ /security-review  skill: automated security review
   □ Mutation testing (mutmut)
   □ Multi-Python version matrix (3.12 / 3.13)

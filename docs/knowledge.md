@@ -280,7 +280,8 @@ PUT /documents/{doc_id}
 Content-Type: multipart/form-data
 ```
 
-Same fields as POST. Atomic operation: if extraction fails, the old
+Same fields as POST. Returns 404 if `doc_id` does not exist; on success
+returns 200 (not 201). Atomic operation: if extraction fails, the old
 document is restored from backup.
 
 ### Update metadata
@@ -297,8 +298,8 @@ Content-Type: application/json
 }
 ```
 
-Returns `updated_fields: ["title", "category_id"]`. Changing `category_id`
-moves the document directory to the new category folder.
+Returns `doc_id`, `updated_at`, and `updated_fields: ["title", "category_id"]`.
+Changing `category_id` moves the document directory to the new category folder.
 
 ### Delete a document
 
@@ -306,8 +307,8 @@ moves the document directory to the new category folder.
 DELETE /documents/{doc_id}
 ```
 
-Returns 204 if the document did not exist (idempotent), or 200 with
-`deleted_topics` count.
+Returns 204 when no topics were removed (document absent or present with zero
+topics); 200 with `doc_id` + `deleted_topics` otherwise.
 
 ### List documents
 
@@ -459,6 +460,7 @@ degradation). The two failure modes map to distinct status codes:
         "content": "The P99 API latency dropped...",
         "score": 0.92,
         "retrieval_method": "hybrid",
+        "source": null,
         "document": {
           "doc_id": "d_a1b2c3d4e5f6",
           "title": "Q1 Engineering Report",
@@ -574,18 +576,11 @@ pip install everos[multimodal]
 | 422 | `INVALID_INPUT` | Empty/oversized query, empty title, invalid ID format |
 | 500 | `CONFIGURATION_ERROR` | Embedding or rerank provider not configured |
 | 503 | `EXTERNAL_SERVICE_UNAVAILABLE` | Configured embedding/rerank provider failing at call time |
+| 422 | `EXTRACTION_EMPTY` | Document parsed but extractor produced no topics |
 | 503 | `CAPABILITY_UNAVAILABLE` | `everos[multimodal]` not installed |
 
-All error responses include a human-readable `message` field:
-
-```json
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Document 'd_abc123' not found"
-  }
-}
-```
+All error responses use the standard error envelope — see
+[api.md → Errors](api.md#errors).
 
 ## Multi-tenancy
 

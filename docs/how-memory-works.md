@@ -69,7 +69,7 @@ visually distinct from a user-named one).
 │       │       │   └── agent_case-<YYYY-MM-DD>.md
 │       │       └── skills/                          skill-named dir
 │       │           └── skill_<name>/SKILL.md        (+ references/ scripts/)
-│       └── knowledge/                      ← shared / global (reserved)
+│       └── knowledge/                      ← shared / global
 │
 ├── .index/                                 ← system-managed, rebuildable (gitignore)
 │   ├── sqlite/
@@ -147,8 +147,8 @@ index catches up asynchronously.
 
 ## Memory types & storage strategies
 
-Six business memory kinds today, each user- or agent-owned, each picking
-one of three on-disk patterns:
+Eight business memory kinds today, each user-, agent-, or globally owned,
+each picking one of three on-disk patterns:
 
 | Kind | Owner | Dir / file | Strategy | Produced by |
 |---|---|---|---|---|
@@ -158,6 +158,8 @@ one of three on-disk patterns:
 | **profile** | user | `user.md` | single-file rewrite | OME |
 | **agent_case** | agent | `.cases/agent_case-<date>.md` (hidden) | daily-log | OME |
 | **agent_skill** | agent | `skills/skill_<name>/SKILL.md` | skill-named dir | OME (clustering) |
+| **knowledge_document** | global | `knowledge/<category_id>/<title_dirname>/index.md` | knowledge tree | knowledge service |
+| **knowledge_topic** | global | `knowledge/<category_id>/<title_dirname>/<N>_<topic_slug>.md` | knowledge tree | knowledge service |
 
 The three strategies:
 
@@ -206,6 +208,8 @@ and write their markdown when ready:
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
   substantive enough; thin trajectories are skipped by design)
 - `extract_agent_skill` — clusters related cases into a named skill
+- `trigger_profile_clustering` — triggers user profile clustering
+- `trigger_skill_clustering` — triggers agent skill clustering
 - `reflect_episodes` (cron, default off) — offline memory consolidation.
   Merges fragmented episodes within a cluster into a single coherent
   narrative, re-extracts atomic facts, and deprecates the originals.

@@ -38,7 +38,7 @@ POST /api/v1/memory/add
   parsed text merged back into the session buffer (in original order)
         │
         ▼
-  boundary detector → extraction LLM → MemCell
+  boundary detector → extraction LLM → memory cell (MemCell)
         │
         ▼
   markdown (truth)  +  SQLite (state)  +  LanceDB (vector + BM25)
@@ -56,7 +56,7 @@ text-bearing formats can be parsed without it (e.g. a plain email with no
 inline images). The parser returns text; that text takes the place of the
 asset in the message buffer. Nothing downstream of the parser
 knows or cares that the content originated as an image or PDF — the raw
-bytes are **not** persisted past extraction (the episode and memory cell
+bytes are **not** persisted past extraction (the episode and memory cell (`MemCell`)
 store only the parsed text).
 
 ## Prerequisites
@@ -271,7 +271,7 @@ All fields bind from the environment via the parent `Settings`
 |---|---|---|
 | `EVEROS_MULTIMODAL__MODEL` | `google/gemini-3-flash-preview` | Parsing model; must accept `image_url` parts |
 | `EVEROS_MULTIMODAL__API_KEY` | — | API key for the multimodal endpoint |
-| `EVEROS_MULTIMODAL__BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
+| `EVEROS_MULTIMODAL__BASE_URL` | `None` | OpenAI-compatible base URL |
 | `EVEROS_MULTIMODAL__MAX_CONCURRENCY` | `4` | Cap on parallel multimodal calls within one extraction |
 | `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` | `52428800` (50 MiB) | Max size of a `file://` asset |
 | `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` | `[]` (any) | JSON list of allowlisted base dirs for `file://` URIs |

@@ -29,33 +29,36 @@ pip install everos
 
 ## 2. Configure
 
-Generate a starter `.env` and drop in your two keys:
+Generate the starter config and drop in your two keys:
 
 ```bash
-everos init                    # writes ./.env (use --xdg for ~/.config/everos/.env)
-# or, from a source checkout:
-cp .env.example .env
-
-# Edit .env and fill four API key slots (only two distinct keys needed):
-#   EVEROS_LLM__API_KEY         (OpenRouter — chat LLM)
-#   EVEROS_MULTIMODAL__API_KEY  (OpenRouter — same key works)
-#   EVEROS_EMBEDDING__API_KEY   (DeepInfra)
-#   EVEROS_RERANK__API_KEY      (DeepInfra — same key works)
+everos init                    # writes ~/.everos/everos.toml + ome.toml (use --root to relocate)
+# Edit ~/.everos/everos.toml and fill four api_key slots (only two distinct keys needed):
+#   [llm]        api_key   (OpenRouter — chat LLM)
+#   [multimodal] api_key   (OpenRouter — same key works)
+#   [embedding]  api_key   (DeepInfra)
+#   [rerank]     api_key   (DeepInfra — same key works)
 ```
 
-`everos init` reads the template bundled inside the wheel and writes it
-with `0600` permissions (only your user can read the API keys).
+`everos init` generates two files: `everos.toml` (provider settings)
+and `ome.toml` (offline memory engine strategy config, hot-reloaded).
+Because `everos.toml` holds API keys, consider restricting access
+after editing: `chmod 600 ~/.everos/everos.toml`.
 
-The shipped template already points LLM + multimodal → OpenRouter
-(`openai/gpt-4.1-mini` and `google/gemini-3-flash-preview`) and
-embedding + rerank → DeepInfra (`Qwen/Qwen3-Embedding-4B` and
-`Qwen/Qwen3-Reranker-4B`). To use a different OpenAI-compatible
-endpoint, override the matching `*__BASE_URL` env var.
+The shipped template sets model defaults for `[llm]` (`gpt-4.1-mini`) and
+`[multimodal]` (`google/gemini-3-flash-preview`); `[embedding]` and
+`[rerank]` ship no model default — set `model` + `base_url` for those two
+sections yourself (e.g. DeepInfra's `Qwen/Qwen3-Embedding-4B` /
+`Qwen/Qwen3-Reranker-4B`). To use a different OpenAI-compatible endpoint
+for any provider, set the matching `base_url` field.
 
-> **Where to store `.env`** — `everos server start` searches in order:
-> `--env-file <path>` → `./.env` (cwd) → `${XDG_CONFIG_HOME:-~/.config}/everos/.env` →
-> `~/.everos/.env`. The first existing file wins. Use `everos init --xdg` to write
-> the XDG location so the same config works from any cwd.
+> **Where config lives** — `everos init` writes into the memory root
+> (`~/.everos` by default; relocate with `everos init --root <path>` and
+> start the server with the matching `everos server start --root <path>`).
+> `everos server start` reads `<root>/everos.toml` and exits with an error
+> if it is missing. Any setting can also be overridden by an `EVEROS_*`
+> environment variable (e.g. `EVEROS_LLM__API_KEY`) — handy for containers
+> and CI.
 
 ## 3. Start the server
 
@@ -108,7 +111,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   }"
 ```
 
-Typical response:
+Response:
 
 ```json
 {
@@ -122,9 +125,7 @@ Typical response:
 
 `status: "accumulated"` means the three messages are in the session
 buffer, but the boundary detector hasn't decided to extract a memory
-cell yet. If you see `status: "extracted"` instead, EverOS already
-carved out a memory cell; you can still continue. For a deterministic
-quick demo we'll force the boundary in the next step.
+cell yet. For a quick demo we'll force it.
 
 ## 5. Force boundary extraction
 
@@ -146,7 +147,7 @@ Response (this takes a few seconds — one LLM call for extraction):
 ```
 
 `status: "extracted"` means at least one memory cell was carved out and
-written to disk; the local cascade process then indexes the Markdown.
+written to disk + indexed.
 
 > `/flush` is **OSS-only**. The cloud edition decides boundary timing
 > server-side and does not expose this endpoint.
@@ -189,8 +190,7 @@ Response (trimmed):
         ],
         "profiles": [],
         "agent_cases": [],
-        "agent_skills": [],
-        "unprocessed_messages": []
+        "agent_skills": []
     }
 }
 ```
@@ -198,13 +198,8 @@ Response (trimmed):
 The hybrid retrieval (BM25 + vector + scalar) returns the episode
 that contains the climbing fact, with the matching atomic fact nested
 under it. Other response arrays (`profiles` / `agent_cases` /
-`agent_skills` / `unprocessed_messages`) are always present for
-client-side symmetry, populated only when the requested kind matches
-or when `filters.session_id` asks for in-flight buffer rows.
-
-If the result is empty on the first try, wait a moment and retry; the
-Markdown write is synchronous, while the local index catches up in the
-background.
+`agent_skills`) are always present for client-side symmetry, populated
+only when the requested kind matches.
 
 ## 7. Your memory is just Markdown
 
@@ -216,15 +211,19 @@ $ tree ~/.everos -L 5 -a
 ~/.everos
 ├── default_app/                       ← app_id  ("default" → "default_app")
 │   └── default_project/               ← project_id ("default" → "default_project")
-│       └── users/
-│           └── alice/                  ← user_id (mirror dir: agents/<agent_id>/)
-│               ├── episodes/
-│               │   └── episode-2026-05-28.md
-│               ├── .atomic_facts/      ← hidden (dot-prefix)
-│               │   └── atomic_fact-2026-05-28.md
-│               ├── .foresights/
-│               │   └── foresight-2026-05-28.md
-│               └── user.md             ← profile
+│       ├── users/
+│       │   └── alice/                  ← user_id (mirror dir: agents/<agent_id>/)
+│       │       ├── episodes/
+│       │       │   └── episode-2026-05-28.md
+│       │       ├── .atomic_facts/      ← hidden (dot-prefix)
+│       │       │   └── atomic_fact-2026-05-28.md
+│       │       ├── .foresights/
+│       │       │   └── foresight-2026-05-28.md
+│       │       └── user.md             ← profile
+│       └── knowledge/                  ← shared knowledge base (v1.1+)
+│           └── .taxonomy.md
+├── everos.toml                         ← provider config (API keys)
+├── ome.toml                            ← strategy config (hot-reloaded)
 ├── .index/                             ← derived indexes (rebuildable from md)
 │   ├── sqlite/system.db
 │   └── lancedb/*.lance/
@@ -296,6 +295,14 @@ LLM → metrics) before exiting.
   call them from your agent loop.
 - **App + project scope** — set `app_id` / `project_id` to anything
   other than `"default"` to partition memory spaces inside one server.
+- **Knowledge base** — upload documents (PDF / HTML / DOCX) via
+  `/api/v1/knowledge/documents` and search them with hybrid retrieval
+  at `/api/v1/knowledge/search`. Ships with a 20-category default
+  taxonomy. See [docs/knowledge.md](docs/knowledge.md).
+- **Reflection** — offline memory self-improvement that consolidates
+  related episodes. Disabled by default; enable in `ome.toml`
+  (`[strategies.reflect_episodes] enabled = true`). Changes are
+  hot-reloaded, no server restart needed.
 - **Multi-modal messages** — `messages[].content` accepts a list of
   typed `ContentItem`s (`text` / `image` / `audio` / `doc` / `pdf` /
   `html` / `email`) for non-text input. Install the optional extra
@@ -304,7 +311,8 @@ LLM → metrics) before exiting.
   (`doc` / `docx` / `xls` / `ppt` / `…`) additionally need
   **LibreOffice** on the host (`brew install --cask libreoffice` /
   `apt-get install libreoffice`) — without it those uploads return
-  HTTP 415; PDF / image / audio / HTML still work.
+  HTTP 503 (`CAPABILITY_UNAVAILABLE`); PDF / image / audio / HTML
+  still work.
 - **Filter DSL and search modes** — `/search` supports a filter DSL
   (`AND` / `OR` / scalar predicates) and four methods (`HYBRID` /
   `KEYWORD` / `VECTOR` / `AGENTIC`). The OpenAPI docs UI is served at

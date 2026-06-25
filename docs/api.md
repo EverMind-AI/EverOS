@@ -31,6 +31,7 @@ business semantics the raw spec does not carry.
   - [POST /api/v1/memory/search](#post-apiv1memorysearch)
   - [POST /api/v1/memory/get](#post-apiv1memoryget)
   - [POST /api/v1/ome/trigger](#post-apiv1ometrigger)
+  - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
 
 ## Overview
@@ -43,10 +44,12 @@ business semantics the raw spec does not carry.
 | Port | `8000` | `EVEROS_API__PORT` env var or `--port` flag |
 | Version prefix | `/api/v1` | — |
 
-All business endpoints documented here live under `/api/v1/memory/`.
-The operational endpoints `GET /health` and `GET /metrics` exist but
-are intentionally outside this reference — they are runtime probes for
-deployment, not part of the application contract.
+Business endpoints live under `/api/v1/memory/`, `/api/v1/ome/`, and
+`/api/v1/knowledge/`. Knowledge endpoints have their own dedicated
+reference at [docs/knowledge.md](knowledge.md) and are cross-referenced
+below. The operational endpoints `GET /health` and `GET /metrics` exist
+but are intentionally outside this reference — they are runtime probes
+for deployment, not part of the application contract.
 
 ### Content type
 
@@ -206,15 +209,6 @@ parsing the human-readable `message` field.
 > Unlike FastAPI's default, the full per-field validation array is **not**
 > returned — only the first error's message. A client that needs the
 > offending field can read the `<loc>` suffix in `message`.
-
-### Search degradation
-
-When a `/search` call uses `method: "vector"` or `"hybrid"` and the
-embedding or rerank service is temporarily unavailable, the server does
-**not** return `503`. Instead, it degrades gracefully — the response
-suggests an alternative method in the error detail so the client can
-retry with `"keyword"` (which requires no embedding). This keeps search
-available during transient provider outages.
 
 ## Common types
 
@@ -380,7 +374,7 @@ A node is a JSON object whose keys are one of:
 |---|---|---|
 | `AND` | `array<FilterNode>` | All child nodes must match. Omit if not needed |
 | `OR` | `array<FilterNode>` | At least one child node must match. Omit if not needed |
-| *<allowed field>* | scalar or operator map | Predicate on that field — see [Allowed fields](#filter-allowed-fields) and [Operators](#filter-operators) |
+| *<allowed field>* | scalar or operator map | Predicate on that field — see [Allowed fields](#allowed-fields) and [Operators](#operators) |
 
 `AND`, `OR`, and scalar predicates **mix freely at the same level**;
 they are implicitly joined with `AND`. A node with only scalar keys is
@@ -540,7 +534,7 @@ correlation.
 #### cURL example
 
 ```bash
-TS=$(date +%s)
+TS=$(( $(date +%s) * 1000 ))
 curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
@@ -644,6 +638,7 @@ optional final LLM rerank. Returns ranked items grouped by kind.
 | `method` | [SearchMethod](#searchmethod) | no | `"hybrid"` | — |
 | `top_k` | `integer` | no | `-1` | `-1` or `1..100` |
 | `radius` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
+| `min_score` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
 | `include_profile` | `boolean` | no | `false` | — |
 | `enable_llm_rerank` | `boolean` | no | `false` | — |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
@@ -682,6 +677,10 @@ radius:
    default radius kicks in.
 3. With `top_k>0` and no caller-supplied `radius`, no threshold is
    applied (`null`).
+
+**`min_score`** — Optional **post-fusion relevance floor** in
+`[0.0, 1.0]`. Results below this score are evicted after fusion,
+independent of `radius` (which is a per-recall cosine threshold).
 
 **`include_profile`** — When `user_id` is set, also fetch the user's
 profile and include it in `data.profiles`. The profile is not
@@ -816,7 +815,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 | `sender_id` | `string` | Original sender id from `/add` |
 | `sender_name` | `string \| null` | Original sender name; `null` if not provided |
 | `role` | `"user" \| "assistant" \| "tool"` | Original role |
-| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#addmessage)) |
+| `content` | `string \| array<object>` | `string` for the single-text shorthand, `array` of opaque content items for the original multimodal payload (mirrors [MessageItem.content](#messageitem)) |
 | `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
 | `tool_calls` | `array<object> \| null` | Original tool_calls payload if any |
 | `tool_call_id` | `string \| null` | Original tool_call_id if any |
@@ -1076,6 +1075,28 @@ curl -X POST http://127.0.0.1:8000/api/v1/ome/trigger \
   -H 'Content-Type: application/json' \
   -d '{"name": "reflect_episodes", "force": true}'
 ```
+
+---
+
+### Knowledge endpoints
+
+The knowledge base subsystem (`/api/v1/knowledge/*`) provides document
+upload, CRUD, and hybrid search. These endpoints are fully documented
+in their own reference: **[docs/knowledge.md](knowledge.md)**.
+
+Summary of available routes:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/knowledge/documents` | Upload and extract a document |
+| `GET` | `/api/v1/knowledge/documents` | List documents (paginated) |
+| `GET` | `/api/v1/knowledge/documents/{doc_id}` | Get a single document |
+| `PUT` | `/api/v1/knowledge/documents/{doc_id}` | Replace a document |
+| `PATCH` | `/api/v1/knowledge/documents/{doc_id}` | Partial update |
+| `DELETE` | `/api/v1/knowledge/documents/{doc_id}` | Delete a document |
+| `GET` | `/api/v1/knowledge/topics/{topic_id}` | Get a single topic |
+| `POST` | `/api/v1/knowledge/search` | Hybrid search over topics |
+| `GET` | `/api/v1/knowledge/categories` | List taxonomy categories |
 
 ---
 

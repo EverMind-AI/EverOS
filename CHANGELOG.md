@@ -37,9 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Search: hierarchical fact eviction** (Layer-4) with `min_score` floor —
   low-confidence atomic facts are evicted before fusion, improving
   precision.
-- **Search degradation guidance** — when embedding or rerank providers fail,
-  the response now includes a `degradation` field explaining which
-  capability is unavailable and how results are affected.
+- **Knowledge search degradation guidance** — when the embedding or rerank
+  provider fails at call time, the knowledge search route enriches the
+  error message with actionable guidance (e.g. retry with `method=keyword`,
+  which needs no embedding) before returning `503`.
 - **Knowledge topic recaller** — dual-column BM25 recall for knowledge
   topics, integrated into the search manager alongside existing recall
   types.
@@ -131,8 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add a multimodal usage guide and correct the multimodal error semantics
   after end-to-end verification.
-- Rename the algorithm library from the previous package name to `everalgo`
-  across docs and code comments (no code identifiers changed).
+- Rename the algorithm library to `everalgo` across docs and
+  code comments (no code identifiers changed).
 - Fix accuracy drift found in an adversarial doc audit; reflect the
   `everalgo` packages being published and the v1.0.0 stable status.
 

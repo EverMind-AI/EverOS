@@ -42,7 +42,7 @@ later with `--data-path` if you keep it elsewhere.
 
 ```bash
 EVEROS_ROOT=~/.everos \
-uv run python -m everos.entrypoints.cli.main server start --port 8000
+uv run everos server start --port 8000
 ```
 
 `EVEROS_ROOT` isolates one benchmark's corpus from another —

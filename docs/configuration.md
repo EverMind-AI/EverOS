@@ -115,6 +115,8 @@ everos init --root /data/everos
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | No | Custom endpoint URL. |
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
+| `file_uri_allow_dirs` | list[string] | `[]` | No | Allowlisted base dirs for `file://` URIs. Empty = allow any readable file. |
+| `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
 
 ### `[embedding]`
 
@@ -167,6 +169,12 @@ everos init --root /data/everos
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `vector_strategy` | string | `"maxsim_atomic"` | Vector retrieval path: `maxsim_atomic` (finer-grained) or `episode` (legacy). |
+
+### `[knowledge]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_upload_bytes` | int | `52428800` | Max bytes for an uploaded knowledge document (50 MiB). Oversized uploads are rejected with HTTP 422 before parsing. |
 
 ### `[knowledge.search]`
 
