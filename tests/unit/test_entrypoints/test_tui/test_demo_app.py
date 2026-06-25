@@ -142,8 +142,9 @@ def test_signal_rail_light_colors_follow_white_yellow_black() -> None:
 
 def test_capabilities_box_lists_real_strengths() -> None:
     text = _capabilities_text().plain
-    for feature in ("hybrid retrieval", "rerank", "multilingual", "multimodal"):
+    for feature in ("hybrid retrieval", "rerank", "multimodal", "local-first"):
         assert feature in text
+    assert "multilingual" not in text
 
 
 def test_source_lock_uses_date_stamped_filenames() -> None:
@@ -162,10 +163,11 @@ def test_recall_lock_shows_real_score_and_demo_scope() -> None:
         fact_filename="",
         score=0.873,
     )
-    text = _recall_proof_text(story).plain
+    text = _recall_proof_text(story, user_label="YangtzeSeventh").plain
     assert "0.873" in text
-    assert "user=everos_demo_abc" in text
+    assert "user=YangtzeSeventh" in text  # local user, not the session id or alice
     assert "project=demo" in text
+    assert "similarity" not in text
 
 
 def test_conversation_log_accumulates_turns() -> None:

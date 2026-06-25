@@ -240,9 +240,12 @@ class EverOSDemoApp(App[None]):
     }}
 
     #capabilities {{
-        height: 9;
-        border: thick {EVEROS_YELLOW};
-        background: {EVEROS_SURFACE};
+        height: 8;
+        border: panel {EVEROS_YELLOW};
+        border-title-color: {EVEROS_BLACK};
+        border-title-background: {EVEROS_YELLOW};
+        border-title-style: bold;
+        background: {EVEROS_SURFACE_RAISED};
         padding: 0 2;
         margin-bottom: 1;
     }}
@@ -276,7 +279,7 @@ class EverOSDemoApp(App[None]):
     }}
 
     #conversation {{
-        height: 7;
+        height: 4;
         border-top: hkey {EVEROS_YELLOW};
         background: {EVEROS_SURFACE};
         color: {EVEROS_INK};
@@ -285,7 +288,7 @@ class EverOSDemoApp(App[None]):
     }}
 
     #console {{
-        height: 4;
+        height: 2;
         margin-top: 1;
     }}
 
@@ -296,8 +299,9 @@ class EverOSDemoApp(App[None]):
     }}
 
     #console-input {{
-        border: round {EVEROS_AMBER};
-        background: {EVEROS_SURFACE};
+        height: 1;
+        border: none;
+        background: {EVEROS_SURFACE_RAISED};
     }}
 
     Footer {{
@@ -376,7 +380,10 @@ class EverOSDemoApp(App[None]):
                 source_lock = Static(_source_tree_text(), id="source-lock")
                 source_lock.border_title = "source lock"
                 yield source_lock
-                recall_lock = Static(_recall_proof_text(self._story), id="recall-lock")
+                recall_lock = Static(
+                    _recall_proof_text(self._story, user_label=self._user_label),
+                    id="recall-lock",
+                )
                 recall_lock.border_title = "recall lock"
                 yield recall_lock
             conversation = Static(_conversation_text(self._log), id="conversation")
@@ -504,7 +511,9 @@ class EverOSDemoApp(App[None]):
 
     def _finish_round(self, story: DemoStory) -> None:
         self._story = story
-        self.query_one("#recall-lock", Static).update(_recall_proof_text(story))
+        self.query_one("#recall-lock", Static).update(
+            _recall_proof_text(story, user_label=self._user_label)
+        )
         self.action_replay()
         self._round += 1
         if self._round >= self._max_rounds:
@@ -706,7 +715,6 @@ def _capabilities_text() -> Text:
     rows = (
         ("hybrid retrieval ", "BM25 + vector", EVEROS_YELLOW),
         ("agentic rerank   ", "on", EVEROS_GREEN),
-        ("multilingual     ", "CJK + EN", EVEROS_CYAN),
         ("multimodal       ", "image / pdf / audio", EVEROS_ORANGE),
         ("md-first         ", "auditable source", EVEROS_YELLOW_SOFT),
         ("local-first      ", "runs on your machine", EVEROS_INK),
@@ -731,15 +739,16 @@ def _source_tree_text() -> Text:
     )
 
 
-def _recall_proof_text(story: DemoStory | None = None) -> Text:
+def _recall_proof_text(
+    story: DemoStory | None = None, *, user_label: str = "you"
+) -> Text:
     story = story or default_demo_story()
     score = f"{story.score:.3f}" if story.score else "—"
     return Text.assemble(
         ("score   ", EVEROS_MUTED),
         (f"{score}\n", f"bold {EVEROS_GREEN}"),
         ("scope   ", EVEROS_MUTED),
-        (f"user={story.owner} project=demo\n", EVEROS_INK),
-        ("= similarity to your stored memory", EVEROS_MUTED),
+        (f"user={user_label} project=demo", EVEROS_INK),
     )
 
 
