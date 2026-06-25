@@ -140,11 +140,14 @@ def test_signal_rail_light_colors_follow_white_yellow_black() -> None:
     assert "bold #1D1C18" in dot_styles  # the errored light is black
 
 
-def test_capabilities_box_lists_real_strengths() -> None:
+def test_capabilities_box_uses_real_website_numbers() -> None:
     text = _capabilities_text().plain
-    for feature in ("hybrid retrieval", "rerank", "multimodal", "local-first"):
-        assert feature in text
-    assert "multilingual" not in text
+    # Real SOTA numbers published on evermind.ai (not fabricated token savings).
+    assert "93.05%" in text  # LoCoMo
+    assert "83.00%" in text  # LongMemEval
+    assert "93.04%" in text  # HaluMem
+    assert "rerank" in text
+    assert "local-first" in text
 
 
 def test_source_lock_uses_date_stamped_filenames() -> None:

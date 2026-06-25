@@ -240,7 +240,7 @@ class EverOSDemoApp(App[None]):
     }}
 
     #capabilities {{
-        height: 8;
+        height: 9;
         border: panel {EVEROS_YELLOW};
         border-title-color: {EVEROS_BLACK};
         border-title-background: {EVEROS_YELLOW};
@@ -783,12 +783,15 @@ def _demo_fact_name() -> str:
 
 
 def _capabilities_text() -> Text:
+    # Real published numbers from evermind.ai ("SOTA Performance") plus the
+    # core retrieval strengths. No fabricated figures.
     rows = (
-        ("hybrid retrieval ", "BM25 + vector", EVEROS_YELLOW),
-        ("agentic rerank   ", "on", EVEROS_GREEN),
-        ("multimodal       ", "image / pdf / audio", EVEROS_ORANGE),
-        ("md-first         ", "auditable source", EVEROS_YELLOW_SOFT),
-        ("local-first      ", "runs on your machine", EVEROS_INK),
+        ("LoCoMo        ", "93.05%", EVEROS_YELLOW),
+        ("LongMemEval   ", "83.00%", EVEROS_GREEN),
+        ("HaluMem       ", "93.04%", EVEROS_CYAN),
+        ("hybrid        ", "BM25 + vector", EVEROS_ORANGE),
+        ("rerank        ", "agentic", EVEROS_YELLOW_SOFT),
+        ("local-first   ", "on your machine", EVEROS_INK),
     )
     parts: list[tuple[str, str]] = []
     for label, value, color in rows:
