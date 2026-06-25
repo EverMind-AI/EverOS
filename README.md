@@ -644,7 +644,7 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 - [docs/everos-demo.md](docs/everos-demo.md) — Demo scope and TUI source layout
 - [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
-- [docs/engineering.md](docs/engineering.md) — Engineering and CI tooling
+- [docs/engineering.md](docs/engineering.md) — Contributor engineering reference: build, test, CI, conventions
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute

@@ -653,7 +653,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 - [docs/everos-demo.md](docs/everos-demo.md) - Demo 范围与 TUI 源码布局
 - [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、LanceDB 与 recall flow
 - [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
-- [docs/engineering.md](docs/engineering.md) - 工程与 CI tooling
+- [docs/engineering.md](docs/engineering.md) - 贡献者工程参考:构建、测试、CI 与规范
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 迁移说明
 - [CHANGELOG.md](CHANGELOG.md) - 发布记录
 - [CONTRIBUTING.md](CONTRIBUTING.md) - 如何贡献
