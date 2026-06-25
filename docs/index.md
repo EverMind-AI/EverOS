@@ -4,6 +4,16 @@ Documentation for [EverOS](../README.md) — md-first memory extraction
 framework. Organised by [Diátaxis](https://diataxis.fr/) — what kind of
 question you have determines which section to read.
 
+## Tutorials
+
+Learning-oriented entry points — start here to get a feel for the system
+before wiring it into a real workflow.
+
+| Doc | Purpose |
+|---|---|
+| [everos-demo.md](everos-demo.md) | `everos demo` — local educational TUI to feel the memory lifecycle before configuring keys |
+| [use-cases.md](use-cases.md) | Worked examples and integrations showing what persistent memory enables, to study and adapt |
+
 ## Reference
 
 Technical reference: contracts, commands, schemas — read these when you
@@ -42,14 +52,14 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
 | [locomo_benchmark.md](locomo_benchmark.md) | LoCoMo benchmark — run and evaluate |
 
-## Engineering / Internal
+## Engineering
 
-For maintainers and contributors working on the framework itself,
-not for using it.
+For contributors working on the framework itself — how to build, test,
+and ship a change.
 
 | Doc | Purpose |
 |---|---|
-| [engineering.md](engineering.md) | Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code) |
+| [engineering.md](engineering.md) | Contributor engineering reference — build, test, CI gates, branch & commit conventions |
 
 ## See also
 
@@ -59,6 +69,8 @@ Top-level project files live next to the repo root:
 - [QUICKSTART.md](../QUICKSTART.md) — 5-minute walkthrough (install → service → search)
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — how to contribute (issue-only model)
 - [CHANGELOG.md](../CHANGELOG.md) — release notes
+- [release-notes-1.1.0.md](release-notes-1.1.0.md) — EverOS 1.1.0 highlights (Knowledge, Reflection, OME)
+- [migration-to-1.0.0.md](migration-to-1.0.0.md) — migrate off pre-1.0.0 APIs / infrastructure
 - [SECURITY.md](../SECURITY.md) — security policy & private vulnerability reporting
 - [CITATION.md](../CITATION.md) — academic citation info
 - [ACKNOWLEDGMENTS.md](../ACKNOWLEDGMENTS.md) — third-party acknowledgments
