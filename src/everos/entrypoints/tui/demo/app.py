@@ -450,20 +450,40 @@ class EverOSDemoApp(App[None]):
             exclusive=True,
         )
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        # Live slash-command panel: as soon as the user types "/", surface the
+        # available commands; restore the phase prompt once they type real text.
+        if not self._interactive or self._conversation_phase in {"recalling", "done"}:
+            return
+        prompt = self.query_one("#console-prompt", Static)
+        if event.value.startswith("/"):
+            prompt.update(_help_text())
+        elif event.value:
+            prompt.update(self._phase_prompt())
+
     def _run_slash_command(self, command: str) -> None:
         prompt = self.query_one("#console-prompt", Static)
         self.query_one("#console-input", Input).value = ""
         if command in {"/help", "/?"}:
             prompt.update(_help_text())
+        elif command == "/live":
+            prompt.update(_live_guidance_text())
         elif command == "/replay":
             self.action_replay()
+            prompt.update(self._phase_prompt())
         elif command == "/clear":
             self._log.clear()
             self.query_one("#conversation", Static).update(
                 _conversation_text(self._log)
             )
+            prompt.update(self._phase_prompt())
         else:
             prompt.update(_unknown_command_text(command))
+
+    def _phase_prompt(self) -> Text:
+        if self._conversation_phase == "query":
+            return _prompt_query_text()
+        return _prompt_memory_text(self._round, self._max_rounds)
 
     async def _recall(self, memory: str, query: str) -> None:
         # Reset the per-round lights; each step below lights up as it completes,
@@ -631,12 +651,23 @@ def _help_text() -> Text:
         ("commands  ", f"bold {EVEROS_YELLOW}"),
         ("/help", f"bold {EVEROS_GREEN}"),
         (" list  ", EVEROS_MUTED),
+        ("/live", f"bold {EVEROS_GREEN}"),
+        (" use your key  ", EVEROS_MUTED),
         ("/replay", f"bold {EVEROS_GREEN}"),
-        (" re-run sphere  ", EVEROS_MUTED),
+        (" re-run  ", EVEROS_MUTED),
         ("/clear", f"bold {EVEROS_GREEN}"),
         (" wipe log  ", EVEROS_MUTED),
         ("/quit", f"bold {EVEROS_GREEN}"),
         (" exit", EVEROS_MUTED),
+    )
+
+
+def _live_guidance_text() -> Text:
+    return Text.assemble(
+        ("use your own key  ", f"bold {EVEROS_YELLOW}"),
+        ("everos init", f"bold {EVEROS_GREEN}"),
+        ("  then  ", EVEROS_MUTED),
+        ("everos demo --live", f"bold {EVEROS_GREEN}"),
     )
 
 

@@ -231,9 +231,33 @@ def test_help_and_unknown_command_text() -> None:
     from everos.entrypoints.tui.demo.app import _help_text, _unknown_command_text
 
     help_plain = _help_text().plain
-    for command in ("/help", "/replay", "/clear", "/quit"):
+    for command in ("/help", "/live", "/replay", "/clear", "/quit"):
         assert command in help_plain
     assert "unknown command /bogus" in _unknown_command_text("/bogus").plain
+
+
+def test_live_guidance_points_to_own_key_flow() -> None:
+    from everos.entrypoints.tui.demo.app import _live_guidance_text
+
+    text = _live_guidance_text().plain
+    assert "everos init" in text
+    assert "everos demo --live" in text
+
+
+async def test_slash_live_does_not_consume_a_turn() -> None:
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = "/live"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app._conversation_phase == "memory"
+        assert app._pending_memory == ""
 
 
 async def test_slash_help_does_not_consume_a_turn() -> None:
