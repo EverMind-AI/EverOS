@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-deprecated-names check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  check-pr-title Validate PR title uses Conventional Commit format"
 	@echo "  check-assets  Block committed images, videos, and asset/media directories"
 	@echo "  check-deprecated-names Block deprecated product names"
+	@echo "  check-github-docs Block legacy/internal branch-model residue in contributor docs"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
 	@echo "  check-datetime Scan for code that bypasses component/utils/datetime (HARD gate, run via lint)"
 	@echo "  openapi       Regenerate docs/openapi.json from the FastAPI app"
@@ -39,11 +40,13 @@ lint:
 	uv run lint-imports
 	uv run python scripts/check_repo_assets.py
 	uv run python scripts/check_deprecated_names.py
+	uv run python scripts/check_github_contributor_docs.py
 	uv run python scripts/check_datetime_discipline.py
 	uv run python scripts/dump_openapi.py --check
 
 docs-check:
 	python3 scripts/check_docs.py
+	python3 scripts/check_github_contributor_docs.py
 	ruby -e 'require "yaml"; Dir[".github/ISSUE_TEMPLATE/*.yml"].sort.each { |p| YAML.load_file(p); puts "YAML ok: #{p}" }'
 
 check-commits:
@@ -60,6 +63,11 @@ check-assets:
 # Product naming gate. Public repo text should use EverOS or EverMind Cloud.
 check-deprecated-names:
 	uv run python scripts/check_deprecated_names.py
+
+# GitHub contributor-doc gate. Public contribution guidance must target the
+# GitHub `main` workflow, not an internal branch model.
+check-github-docs:
+	uv run python scripts/check_github_contributor_docs.py
 
 # Advisory CJK scan (see .claude/rules/language-policy.md). Deliberately NOT
 # wired into `lint` / `ci`: the policy is enforced by review and the rules

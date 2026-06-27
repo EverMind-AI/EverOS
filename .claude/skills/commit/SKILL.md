@@ -26,8 +26,8 @@ standard. The format is enforced by `gitlint` in the `commit-msg` hook.
    ```
 
 5. Never use `--no-verify`. If pre-commit hooks fail, fix the cause and re-commit.
-6. Do not commit secrets, generated artifacts, or work-in-progress to a
-   protected branch (`main` / `dev` / `master`).
+6. Do not commit secrets, generated artifacts, or work-in-progress directly to
+   the protected `main` branch.
 
 ## Types
 

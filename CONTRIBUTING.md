@@ -91,7 +91,7 @@ internally.
 git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 make install             # deps + pre-commit hooks (one-stop dev setup)
-everos init              # write ./.env, then fill in the API key slots
+everos init              # write ~/.everos/everos.toml + ome.toml
 make ci                  # verify: lint + unit + integration + package
 ```
 
@@ -153,7 +153,7 @@ Full conventions: [.claude/rules/testing.md](.claude/rules/testing.md).
 
 - `/new-branch` — create branch with proper naming
 - `/commit` — generate a Conventional Commits message
-- `/pr` — internal merge request with correct target branch
+- `/pr` — open a GitHub pull request with the correct target branch
 
 ---
 

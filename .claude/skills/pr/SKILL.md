@@ -10,8 +10,9 @@ Open a pull request on GitHub using the `gh` CLI and the repo's PR template.
 ## Steps
 
 1. Confirm the branch and target:
-   - `feat/*`, `fix/*` → base **`dev`**.
-   - `hotfix/*` → base **`master`** (then a follow-up PR/sync into `dev`).
+   - Base branch is **`main`**.
+   - Head branch should be a scoped branch such as `feat/*`, `fix/*`,
+     `docs/*`, `ci/*`, `chore/*`, or `refactor/*`.
 2. Ensure local checks pass first:
    ```bash
    make ci
@@ -24,7 +25,7 @@ Open a pull request on GitHub using the `gh` CLI and the repo's PR template.
 4. Create the PR, filling the template
    ([.github/PULL_REQUEST_TEMPLATE.md](../../../.github/PULL_REQUEST_TEMPLATE.md)):
    ```bash
-   gh pr create --base dev --fill-first
+   gh pr create --base main --fill-first
    ```
    Then edit the body to complete each section:
    - **Summary** — what changed and why.
@@ -38,4 +39,5 @@ Open a pull request on GitHub using the `gh` CLI and the repo's PR template.
 
 - Keep the PR scoped to one area. Split unrelated changes.
 - If `make ci` was not fully run, say so in Verification rather than implying it passed.
-- A `hotfix` is not done until it has landed on **both** `master` and `dev`.
+- Never retarget a community PR away from `main` unless a maintainer explicitly
+  asks for it.
