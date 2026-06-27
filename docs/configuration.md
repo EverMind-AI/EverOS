@@ -105,7 +105,7 @@ everos init --root /data/everos
 |---|---|---|---|---|
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
-| `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
+| `base_url` | string | — | **Yes** | Endpoint URL (OpenAI-compatible). |
 
 ### `[multimodal]`
 
@@ -113,7 +113,7 @@ everos init --root /data/everos
 |---|---|---|---|---|
 | `model` | string | `"google/gemini-3-flash-preview"` | No | Multimodal parsing model. |
 | `api_key` | string | — | **Yes** | API key. |
-| `base_url` | string | — | No | Custom endpoint URL. |
+| `base_url` | string | — | **Yes** | Endpoint URL. |
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
 | `file_uri_allow_dirs` | list[string] | `[]` | No | Allowlisted base dirs for `file://` URIs. Empty = allow any readable file. |
 | `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
@@ -134,7 +134,7 @@ everos init --root /data/everos
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra` or `vllm`. |
+| `provider` | string | inferred | No | Rerank provider: `deepinfra`, `vllm`, or `dashscope`. |
 | `model` | string | — | **Yes** | Reranker model identifier. |
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | **Yes** | Rerank endpoint URL. |
@@ -210,9 +210,13 @@ variables directly:
 ENV EVEROS_ROOT=/data/everos
 ENV EVEROS_LLM__API_KEY=sk-...
 ENV EVEROS_LLM__MODEL=gpt-4o
+ENV EVEROS_LLM__BASE_URL=https://api.openai.com/v1
 ENV EVEROS_EMBEDDING__MODEL=text-embedding-3-large
 ENV EVEROS_EMBEDDING__API_KEY=sk-...
 ENV EVEROS_EMBEDDING__BASE_URL=https://api.openai.com/v1
+ENV EVEROS_RERANK__MODEL=Qwen/Qwen3-Reranker-4B
+ENV EVEROS_RERANK__API_KEY=...
+ENV EVEROS_RERANK__BASE_URL=https://api.deepinfra.com/v1/inference
 ENV EVEROS_API__HOST=0.0.0.0
 ENV EVEROS_API__PORT=8000
 ```

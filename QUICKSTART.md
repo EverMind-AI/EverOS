@@ -10,15 +10,19 @@ front of your agent.
 ## Prerequisites
 
 - **Python 3.12+**
-- **An OpenRouter API key** — covers the chat LLM (memory extraction)
-  *and* the multimodal LLM (parsing image / pdf / audio content items)
-  with a single key.
-- **A DeepInfra API key** — for the embedding + rerank models that
-  OpenRouter doesn't ship.
+- **An LLM provider key and endpoint** — for memory extraction. OpenRouter,
+  OpenAI, and other OpenAI-compatible providers work when you set
+  `base_url`.
+- **A multimodal provider key and endpoint** — needed only when parsing
+  image / pdf / audio content items.
+- **Embedding and rerank provider keys and endpoints** — for search. DeepInfra
+  works for the embedding + rerank path; vLLM and DashScope are also supported
+  for rerank.
 
-Two keys total. Any OpenAI-compatible endpoint plugs in via the
-matching `*__BASE_URL` env var if you'd rather use OpenAI directly,
-self-host vLLM, route to Ollama, etc.
+Many deployments use two distinct keys by reusing one LLM key for `[llm]` and
+`[multimodal]`, and one DeepInfra key for `[embedding]` and `[rerank]`. Any
+setting can live in TOML or be overridden by the matching `EVEROS_*`
+environment variable.
 
 ## 1. Install
 
@@ -29,15 +33,15 @@ pip install everos
 
 ## 2. Configure
 
-Generate the starter config and drop in your two keys:
+Generate the starter config and fill in provider credentials:
 
 ```bash
 everos init                    # writes ~/.everos/everos.toml + ome.toml (use --root to relocate)
-# Edit ~/.everos/everos.toml and fill four api_key slots (only two distinct keys needed):
-#   [llm]        api_key   (OpenRouter — chat LLM)
-#   [multimodal] api_key   (OpenRouter — same key works)
-#   [embedding]  api_key   (DeepInfra)
-#   [rerank]     api_key   (DeepInfra — same key works)
+# Edit ~/.everos/everos.toml and fill the provider fields:
+#   [llm]        api_key + base_url             (chat LLM)
+#   [multimodal] api_key + base_url             (optional parser LLM)
+#   [embedding]  model + api_key + base_url
+#   [rerank]     model + api_key + base_url     (provider can be inferred or set)
 ```
 
 `everos init` generates two files: `everos.toml` (provider settings)
@@ -48,9 +52,9 @@ after editing: `chmod 600 ~/.everos/everos.toml`.
 The shipped template sets model defaults for `[llm]` (`gpt-4.1-mini`) and
 `[multimodal]` (`google/gemini-3-flash-preview`); `[embedding]` and
 `[rerank]` ship no model default — set `model` + `base_url` for those two
-sections yourself (e.g. DeepInfra's `Qwen/Qwen3-Embedding-4B` /
-`Qwen/Qwen3-Reranker-4B`). To use a different OpenAI-compatible endpoint
-for any provider, set the matching `base_url` field.
+sections yourself (for example DeepInfra's `Qwen/Qwen3-Embedding-4B` /
+`Qwen/Qwen3-Reranker-4B`). `[llm]` and `[multimodal]` ship model defaults,
+but still need `api_key` and `base_url` before those capabilities are used.
 
 > **Where config lives** — `everos init` writes into the memory root
 > (`~/.everos` by default; relocate with `everos init --root <path>` and

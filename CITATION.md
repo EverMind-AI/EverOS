@@ -32,9 +32,9 @@ BibTeX citation information will be added here once the paper is published.
 To cite the software itself:
 
 ```
-EverOS: md-first memory extraction framework for AI agents
-Version: 0.1.0
-URL: https://github.com/EverMind-AI/everos
+EverOS: local-first memory runtime for AI agents
+Version: 1.1.0
+URL: https://github.com/EverMind-AI/EverOS
 License: Apache 2.0
 ```
 

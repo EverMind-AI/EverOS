@@ -1,6 +1,10 @@
 <div align="center" id="readme-top">
 
-![EverOS banner](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)
+<h1 align="center">EverOS</h1>
+
+<p align="center"><strong>Local-first memory for AI agents, stored as Markdown.</strong></p>
+
+<p align="center">Markdown source of truth · SQLite + LanceDB · User + agent memory · Knowledge + Reflection</p>
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
@@ -21,7 +25,7 @@
 
 <br>
 
-- [Why Ever OS](#why-ever-os)
+- [Why EverOS](#why-everos)
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Documentation](#documentation)
@@ -34,13 +38,13 @@
 </details>
 
 
-## Why Ever OS
+## Why EverOS
 
-EverOS is a Python library and local-first memory runtime for agents and
-makers. It gives one portable memory layer across coding assistants, apps,
-devices, and workflows from day one. It stores conversations, files, and agent
-trajectories as readable Markdown, then syncs local SQLite and LanceDB indexes
-for fast retrieval and self-evolving reuse.
+EverOS is a local-first memory runtime for agents and makers. It gives one
+portable memory layer across coding assistants, apps, devices, and workflows
+from day one. It stores conversations, files, and agent trajectories as
+readable Markdown, then syncs local SQLite and LanceDB indexes for retrieval,
+search, and background memory evolution.
 
 <table>
 <tr>
@@ -99,13 +103,13 @@ for fast retrieval and self-evolving reuse.
 - To run the real server-backed memory flow, create two provider keys before
   `everos init`:
 
-| Capability | Provider | Used for | Fill these `.env` slots |
+| Capability | Provider path | Used for | Configure in `everos.toml` |
 | --- | --- | --- | --- |
-| Chat + multimodal | [OpenRouter](https://openrouter.ai/) | `LLM` / `MULTIMODAL` | `EVEROS_LLM__API_KEY`, `EVEROS_MULTIMODAL__API_KEY` |
-| Embedding + rerank | [DeepInfra](https://deepinfra.com/) | `EMBEDDING` / `RERANK` | `EVEROS_EMBEDDING__API_KEY`, `EVEROS_RERANK__API_KEY` |
+| Chat + multimodal | Any OpenAI-compatible LLM endpoint, such as [OpenRouter](https://openrouter.ai/) or OpenAI | `LLM` / `MULTIMODAL` | `[llm]` and `[multimodal]` `api_key`, `base_url`, and model fields |
+| Embedding + rerank | OpenAI-compatible embeddings plus DeepInfra / vLLM / DashScope rerank | `EMBEDDING` / `RERANK` | `[embedding]` and `[rerank]` `api_key`, `base_url`, and model fields |
 
-You can use other OpenAI-compatible providers by changing the matching
-`*__BASE_URL` fields in `.env`.
+You can also override any TOML field with the matching environment variable,
+for example `EVEROS_LLM__BASE_URL` or `EVEROS_EMBEDDING__API_KEY`.
 
 ### 1. Install
 
@@ -151,19 +155,17 @@ everos demo --plain
 
 ### 3. Configure
 
-Generate a starter `.env` file, then fill the four API key slots shown in the
-generated comments. With the default setup, paste your OpenRouter key into the
-`LLM` / `MULTIMODAL` slots and your DeepInfra key into the `EMBEDDING` /
-`RERANK` slots.
+Generate starter TOML files, then fill in provider credentials and endpoints in
+`~/.everos/everos.toml`. The second file, `ome.toml`, controls the offline
+memory engine schedule.
 
 ```bash
 everos init
-# or, from a source checkout:
-cp .env.example .env
 ```
 
-`everos init` writes `./.env` by default. Use `everos init --xdg` to
-write `${XDG_CONFIG_HOME:-~/.config}/everos/.env` instead.
+`everos init` writes `~/.everos/everos.toml` and `~/.everos/ome.toml` by
+default. Use `everos init --root /path/to/everos` to choose another memory
+root.
 
 ### 4. Start EverOS
 
@@ -183,11 +185,10 @@ Expected response:
 {"status":"ok"}
 ```
 
-`everos server start` searches for `.env` in this order: `--env-file <path>` →
-`./.env` (cwd) → `${XDG_CONFIG_HOME:-~/.config}/everos/.env` → `~/.everos/.env`.
-The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
-Ollama / DeepInfra) - override `*__BASE_URL` in the generated `.env` to point
-at any of them.
+`everos server start` reads `<root>/everos.toml` and exits if the file is
+missing. The endpoint stack is OpenAI-protocol compatible; set each provider's
+`base_url` in TOML, or override it with `EVEROS_*__BASE_URL` environment
+variables for containers and CI.
 
 Now make the demo real. In the second terminal, run:
 
@@ -268,8 +269,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 
 This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG
 support via cairosvg) and wires up the multimodal LLM client
-(`EVEROS_MULTIMODAL__*` fields in `.env`, defaults to
-`google/gemini-3-flash-preview` via OpenRouter).
+(`[multimodal]` in `everos.toml`, or `EVEROS_MULTIMODAL__*` environment
+overrides).
 
 **Office document support requires LibreOffice as a system dependency.**
 The parser shells out to `soffice` (LibreOffice's headless renderer) to
@@ -293,7 +294,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # try the local educational demo; no API keys needed
-everos init                          # paste OpenRouter + DeepInfra keys into .env
+everos init                          # create ~/.everos/everos.toml + ome.toml
 
 everos --help
 make test
@@ -465,7 +466,7 @@ Ruminer brings persistent memory to a browser agent so it can carry personal con
 
 #### EverMem Sync With EverOS
 
-One command to connect any AI coding CLI to EverMemOS long-term memory.
+One command to connect any AI coding CLI to EverOS long-term memory.
 
 [Code](https://github.com/nanxingw/EverMem)
 
@@ -641,6 +642,14 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 
 ## Documentation
 
+- [docs/index.md](docs/index.md) — Documentation map
+- [QUICKSTART.md](QUICKSTART.md) — Five-minute service + memory walkthrough
+- [docs/overview.md](docs/overview.md) — Project vision, scope, and design philosophy
+- [docs/positioning.md](docs/positioning.md) — Public GTM language, banner direction, and competitor framing
+- [docs/configuration.md](docs/configuration.md) — TOML and environment-variable configuration reference
+- [docs/api.md](docs/api.md) — HTTP API v1 reference
+- [docs/knowledge.md](docs/knowledge.md) — Knowledge base module
+- [docs/reflection.md](docs/reflection.md) — Offline memory consolidation
 - [docs/everos-demo.md](docs/everos-demo.md) — Demo scope and TUI source layout
 - [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples

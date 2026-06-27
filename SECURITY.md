@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-EverOS is released and at v1.0.0 (stable). Security fixes are applied to the
+EverOS is released and in the v1.x stable line. Security fixes are applied to the
 latest release line only.
 
 | Version | Supported |
@@ -39,8 +39,9 @@ following in mind:
   is loopback-only. Only set the bind to `0.0.0.0` (or any routable interface)
   after you have placed your own gateway / auth layer in front;
   `everos server start` will log a warning when you bind to `0.0.0.0`.
-- Secrets (LLM / embedding API keys) live in your local `.env`; protect that
-  file as you would any credential. EverOS never transmits them anywhere except
-  the providers you configure.
+- Secrets (LLM / embedding / rerank API keys) normally live in your local
+  `<root>/everos.toml`, or in `EVEROS_*` environment variables for container
+  deployments. Protect those values as you would any credential. EverOS never
+  transmits them anywhere except the providers you configure.
 - Memory content is stored as plaintext `.md` files; apply OS-level file
   permissions or disk encryption if your data is sensitive.

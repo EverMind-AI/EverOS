@@ -131,6 +131,14 @@ vector_strategy = "maxsim_atomic"
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
 
+# Maximum wall-clock for one memorize() invocation while holding the
+# per-session lock. On timeout the outer asyncio.timeout cancels the call
+# and the lock auto-releases so subsequent concurrent /add on the same
+# session aren't deadlocked. Covers boundary LLM + memcell writes +
+# synchronous portion of pipeline dispatch.
+# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
+session_lock_timeout_seconds = 360.0
+
 [knowledge]
 # Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
 # uploads are rejected with HTTP 422 before parsing/extraction. Note: the
@@ -146,14 +154,6 @@ rerank_n = 50
 lambda = 0.1
 mass_top_m = 50
 top_k_cap = 100
-
-# Maximum wall-clock for one memorize() invocation while holding the
-# per-session lock. On timeout the outer asyncio.timeout cancels the call
-# and the lock auto-releases so subsequent concurrent /add on the same
-# session aren't deadlocked. Covers boundary LLM + memcell writes +
-# synchronous portion of pipeline dispatch.
-# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
-session_lock_timeout_seconds = 360.0
 
 [clustering]
 # Geometry-clustering: cosine similarity threshold and time window.

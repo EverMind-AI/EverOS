@@ -1,6 +1,10 @@
 <div align="center" id="readme-top">
 
-![EverOS banner](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)
+<h1 align="center">EverOS</h1>
+
+<p align="center"><strong>面向 AI agents 的 local-first Markdown 记忆运行时。</strong></p>
+
+<p align="center">Markdown source of truth · SQLite + LanceDB · 用户 + Agent 双轨记忆 · Knowledge + Reflection</p>
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
@@ -36,11 +40,11 @@
 
 ## 为什么选择 EverOS
 
-EverOS 是面向 agents 和 makers 的 Python library 与 local-first memory
-runtime。它从 day one 开始就提供一层可携带的记忆层，让记忆穿过 coding
-assistants、apps、devices 和 workflows。它会把 conversations、files 和
-agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
-索引，用于快速检索和自进化复用。
+EverOS 是面向 agents 和 makers 的 local-first memory runtime。它从 day
+one 开始就提供一层可携带的记忆层，让记忆穿过 coding assistants、apps、
+devices 和 workflows。它会把 conversations、files 和 agent trajectories
+保存为可读 Markdown，并同步本地 SQLite 与 LanceDB 索引，用于检索、搜索
+和后台记忆进化。
 
 <table>
 <tr>
@@ -100,14 +104,14 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
   [阿里云百炼控制台](https://bailian.console.aliyun.com/) 创建一个
   DashScope API Key：
 
-| 能力 | 默认 Provider | 用途 | 填入这些 `.env` 字段 |
+| 能力 | 默认 Provider | 用途 | 配置到 `everos.toml` |
 | --- | --- | --- | --- |
-| Chat / extraction | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `LLM` | `EVEROS_LLM__API_KEY` |
-| Embedding | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `EMBEDDING` | `EVEROS_EMBEDDING__API_KEY` |
-| Re-rank | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `RERANK` | `EVEROS_RERANK__API_KEY` |
+| Chat / extraction | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `LLM` | `[llm]` 的 `model`、`api_key`、`base_url` |
+| Embedding | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `EMBEDDING` | `[embedding]` 的 `model`、`api_key`、`base_url` |
+| Re-rank | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `RERANK` | `[rerank]` 的 `provider`、`model`、`api_key`、`base_url` |
 
-同一个 DashScope API Key 可以填到这三个 slot。多模态文件摄取仍通过
-`EVEROS_MULTIMODAL__*` 单独配置；如果只跑下面的文本记忆闭环，不需要先配置它。
+同一个 DashScope API Key 可以填到这三个 section。多模态文件摄取仍通过
+`[multimodal]` 单独配置；如果只跑下面的文本记忆闭环，不需要先配置它。
 
 ### 1. 安装
 
@@ -152,34 +156,36 @@ everos demo --plain
 
 ### 3. 配置
 
-生成一个 starter `.env` 文件，然后根据生成的注释填入对应的 API key 字段。
-中文 quick start 默认推荐使用
+生成 starter TOML 文件，然后在 `~/.everos/everos.toml` 中填入模型、
+endpoint 和 API key。中文 quick start 默认推荐使用
 [阿里云百炼控制台](https://bailian.console.aliyun.com/) 的 DashScope API Key
 配置 `LLM` / `EMBEDDING` / `RERANK` 三个核心能力。
 
 ```bash
 everos init
-# or, from a source checkout:
-cp .env.example .env
 ```
 
-`everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`
-写入 `${XDG_CONFIG_HOME:-~/.config}/everos/.env`。
+`everos init` 默认写入 `~/.everos/everos.toml` 和 `~/.everos/ome.toml`。
+也可以使用 `everos init --root /path/to/everos` 指定 memory root。
 
 百炼三件套示例：
 
-```env
-EVEROS_LLM__MODEL=qwen-plus
-EVEROS_LLM__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_LLM__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```toml
+[llm]
+model = "qwen-plus"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-EVEROS_EMBEDDING__MODEL=text-embedding-v4
-EVEROS_EMBEDDING__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_EMBEDDING__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+[embedding]
+model = "text-embedding-v4"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-EVEROS_RERANK__MODEL=gte-rerank-v2
-EVEROS_RERANK__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_RERANK__BASE_URL=https://dashscope.aliyuncs.com
+[rerank]
+provider = "dashscope"
+model = "gte-rerank-v2"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com"
 ```
 
 ### 4. 启动 EverOS
@@ -200,11 +206,10 @@ curl http://127.0.0.1:8000/health
 {"status":"ok"}
 ```
 
-`everos server start` 会按以下顺序查找 `.env`：`--env-file <path>` →
-`./.env`（当前目录）→ `${XDG_CONFIG_HOME:-~/.config}/everos/.env` →
-`~/.everos/.env`。端点栈兼容 OpenAI protocol（OpenAI / OpenRouter /
-vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
-来指向任意这些模型服务。
+`everos server start` 会读取 `<root>/everos.toml`；如果文件不存在，会提示先
+运行 `everos init`。端点栈兼容 OpenAI protocol。你可以在 TOML 中设置各
+provider 的 `base_url`，也可以用 `EVEROS_*__BASE_URL` 环境变量覆盖，方便
+container 和 CI 使用。
 
 现在可以把 demo 跑成真实 server flow。在第二个 terminal 里运行：
 
@@ -280,8 +285,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
 这会引入 `everalgo-parser`（包含用于 SVG 支持的 `[svg]` bundle，通过
-cairosvg）并接入多模态 LLM client（`.env` 中的 `EVEROS_MULTIMODAL__*`
-字段，默认通过 OpenRouter 使用 `google/gemini-3-flash-preview`）。
+cairosvg）并接入多模态 LLM client（`everos.toml` 中的 `[multimodal]`
+section，或 `EVEROS_MULTIMODAL__*` 环境变量覆盖）。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
 `soffice`（LibreOffice 的 headless renderer），先把 `.doc` / `.docx` /
@@ -304,7 +309,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 把百炼 DashScope API Key 填进 .env
+everos init                          # 创建 ~/.everos/everos.toml + ome.toml
 
 everos --help
 make test
@@ -474,7 +479,7 @@ Ruminer 为 browser agent 带来持久记忆，让它能在不同网页任务之
 
 #### EverMem 与 EverOS 同步
 
-一条命令，把任意 AI coding CLI 连接到 EverMemOS 长期记忆。
+一条命令，把任意 AI coding CLI 连接到 EverOS 长期记忆。
 
 [代码](https://github.com/nanxingw/EverMem)
 
@@ -650,6 +655,14 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 
 ## 文档
 
+- [docs/index.md](docs/index.md) - 文档地图
+- [QUICKSTART.md](QUICKSTART.md) - 5 分钟 service + memory walkthrough
+- [docs/overview.md](docs/overview.md) - 项目愿景、范围与设计哲学
+- [docs/positioning.md](docs/positioning.md) - GTM 文案、banner 方向与竞品 framing
+- [docs/configuration.md](docs/configuration.md) - TOML 与环境变量配置参考
+- [docs/api.md](docs/api.md) - HTTP API v1 参考
+- [docs/knowledge.md](docs/knowledge.md) - Knowledge base 模块
+- [docs/reflection.md](docs/reflection.md) - 离线记忆 consolidation
 - [docs/everos-demo.md](docs/everos-demo.md) - Demo 范围与 TUI 源码布局
 - [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、LanceDB 与 recall flow
 - [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
