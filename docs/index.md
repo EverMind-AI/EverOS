@@ -38,7 +38,6 @@ why the system is shaped the way it is.
 | Doc | Purpose |
 |---|---|
 | [overview.md](overview.md) | Project vision, scope, design philosophy |
-| [positioning.md](positioning.md) | Public GTM language, proof points, banner direction, and competitor framing |
 | [how-memory-works.md](how-memory-works.md) | Storage stack + on-disk paths + write→index→read pipeline + consistency |
 | [architecture.md](architecture.md) | DDD layered architecture + dependency rules |
 | [datetime.md](datetime.md) | Two-zone discipline — UTC at storage, display tz at boundaries |
