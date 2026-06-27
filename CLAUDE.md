@@ -54,6 +54,13 @@ pull requests back to `main` after the required checks pass.
 See [.claude/skills/new-branch/SKILL.md](.claude/skills/new-branch/SKILL.md)
 for the full branch workflow.
 
+## GitHub sync guard
+
+When refreshing this repository from an internal source archive, preserve
+GitHub-only contributor and automation files. Do not overwrite `CLAUDE.md`,
+`.claude/skills/*`, `CONTRIBUTING.md`, or `.github/*` workflow/template files
+without checking [docs/github-sync.md](docs/github-sync.md).
+
 ## Storage three-piece set
 
 ```
