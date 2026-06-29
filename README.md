@@ -124,8 +124,9 @@ everos demo
 
 The full-screen terminal UI has an input box: type a memory, then a recall
 question, directly in the UI. Each round runs the real memory pipeline against
-EverMind's hosted demo server (keys live server-side, so you need no local
-keys), and the panels follow your own input: conversation -> memory sphere ->
+[EverOS Cloud](https://everos.evermind.ai) (keys and storage live on the
+platform, so you need no local keys), and the panels follow your own input:
+conversation -> memory sphere ->
 recall -> source proof -> confetti. See
 [docs/everos-demo.md](docs/everos-demo.md) for the demo scope and TUI source
 layout.

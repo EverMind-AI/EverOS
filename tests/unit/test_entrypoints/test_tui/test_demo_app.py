@@ -335,9 +335,9 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
 
     from everos.entrypoints.tui.demo import cloud
 
-    monkeypatch.setattr(cloud, "check_health", lambda **_: None)
-    monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: None)
-    monkeypatch.setattr(cloud, "flush_memory", lambda **_: None)
+    monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: "task-1")
+    monkeypatch.setattr(cloud, "wait_task", lambda *_, **__: None)
+    monkeypatch.setattr(cloud, "flush_memory", lambda *_, **__: None)
 
     def fake_search(
         memory: str, query: str, *, base_url: str, user_id: str, **_: object
@@ -397,7 +397,7 @@ async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
     def quota(*_: object, **__: object) -> None:
         raise cloud.CloudQuotaError("http://server.test")
 
-    monkeypatch.setattr(cloud, "check_health", quota)
+    monkeypatch.setattr(cloud, "add_memory", quota)
 
     app = EverOSDemoApp(
         interactive=True,

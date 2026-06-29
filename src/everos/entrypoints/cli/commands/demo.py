@@ -45,17 +45,17 @@ def register(parent: typer.Typer) -> None:
         live: bool = typer.Option(
             False,
             "--live",
-            help="Run the interactive flow against your own EverOS server.",
+            help="Use your own EverOS Cloud API key (env EVEROS_CLOUD_API_KEY).",
         ),
         cloud_mode: bool = typer.Option(
             False,
             "--cloud",
-            help="Run against EverMind's hosted demo server (this is the default).",
+            help="Run against EverOS Cloud with the demo key (this is the default).",
         ),
         server_url: str = typer.Option(
             cloud.LIVE_DEMO_SERVER_URL,
             "--server-url",
-            help="EverOS server URL used by --live (and to override --cloud).",
+            help="Override the EverOS Cloud API base URL.",
         ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
@@ -76,21 +76,23 @@ def register(parent: typer.Typer) -> None:
 def _launch_interactive_demo(
     *, live: bool, server_url: str, user_label: str = "you"
 ) -> None:
-    """Launch the cloud-backed interactive TUI, or --live against your own server."""
+    """Launch the cloud-platform interactive TUI.
+
+    Both modes talk to EverOS Cloud; ``--live`` just uses the user's own
+    platform key instead of the restricted demo key.
+    """
 
     run_demo_tui = _load_run_demo_tui()
-    if live:
-        base_url = server_url
-        session_id, user_id = cloud.LIVE_DEMO_SESSION_ID, cloud.LIVE_DEMO_USER_ID
-    else:
-        base_url = cloud.resolve_cloud_base_url(server_url)
-        session_id, user_id = cloud.new_demo_identity()
+    base_url = cloud.resolve_cloud_base_url(server_url)
+    session_id, user_id = cloud.new_demo_identity()
+    api_key = cloud.resolve_user_key() if live else cloud.resolve_demo_key()
 
     run_demo_tui(
         interactive=True,
         base_url=base_url,
         session_id=session_id,
         user_id=user_id,
+        api_key=api_key,
         user_label=user_label,
     )
 

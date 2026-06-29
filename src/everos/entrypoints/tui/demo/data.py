@@ -26,7 +26,7 @@ def default_demo_story() -> DemoStory:
 
     This is only the static showcase content for ``--plain`` / ``--cinematic``.
     The interactive demo builds its story from real server recall (see
-    :func:`everos.entrypoints.tui.demo.cloud.recall_round`).
+    :func:`everos.entrypoints.tui.demo.cloud.search_recall`).
     """
 
     return DemoStory(

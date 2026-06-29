@@ -12,37 +12,34 @@ everos demo
 
 This opens a full-screen terminal UI with an input box. You type a memory and a
 recall question directly in the UI, and each round runs the **real** memory
-pipeline (`add -> flush -> search`) against EverMind's hosted demo server. The
-panels follow your own input: conversation -> memory sphere -> recall -> source
-proof -> confetti.
+pipeline against [EverOS Cloud](https://everos.evermind.ai) (`https://api.evermind.ai`):
+`POST /api/v1/memories` -> `POST /api/v1/memories/flush` ->
+`POST /api/v1/memories/search`. The panels follow your own input: conversation
+-> memory sphere -> recall -> source proof -> confetti.
 
-The hosted server holds the LLM and embedding keys server-side, so you need no
-local keys. Each run uses a fresh, isolated `(session_id, user_id)` pair, so
-concurrent visitors never see each other's memories.
+EverOS Cloud holds all model keys and manages storage, so the demo needs only a
+single platform API key — no server to deploy, no model keys locally. Each run
+uses a fresh, isolated `(session_id, user_id)` pair, so demo visitors never see
+each other's memories.
 
-After a few rounds the demo points you at configuring your own keys (`everos
-init`, then `everos demo --live`).
+The demo key is read from the `EVEROS_CLOUD_DEMO_KEY` environment variable (a
+restricted, shippable key can be baked in later). If no key is set, the key is
+rejected, or the quota is exhausted, the UI says so and points you at
+configuring your own key — it never fakes a result.
 
-The hosted endpoint can be overridden with the `EVEROS_CLOUD_DEMO_URL`
-environment variable (or `--server-url <url>`). If the server is unreachable or
-the free quota is exhausted, the UI says so rather than faking a result.
+The endpoint can be overridden with `EVEROS_CLOUD_DEMO_URL` (or `--server-url`).
 
-## Run It Against Your Own Server
+## Run It With Your Own Cloud Key
 
-After `everos init` and `everos server start`, run the same interactive TUI
-against your own server (your own keys):
+Get a key from <https://everos.evermind.ai/api-keys>, then:
 
 ```bash
+export EVEROS_CLOUD_API_KEY=<your-key>
 everos demo --live
 ```
 
-Each round performs `GET /health` -> `POST /api/v1/memory/add` ->
-`POST /api/v1/memory/flush` -> `POST /api/v1/memory/search`. If your server is
-not on `http://127.0.0.1:8000`, pass `--server-url <url>`.
-
-> Before the hosted demo server (and its DNS) is deployed, you can point the
-> default demo at a local server with
-> `EVEROS_CLOUD_DEMO_URL=http://127.0.0.1:8000 everos demo`.
+`--live` runs the same flow against the same platform, just authenticated with
+your own key instead of the restricted demo key.
 
 ## Static Previews
 
@@ -66,7 +63,7 @@ because the public command is still `everos demo`.
 The TUI implementation lives under `src/everos/entrypoints/tui/demo/`:
 
 - `app.py` renders the Textual app and drives the interactive rounds.
-- `cloud.py` is the hosted-demo HTTP client (`add -> flush -> search`).
+- `cloud.py` is the EverOS Cloud HTTP client (`add -> flush -> search`).
 - `data.py` holds the static showcase story for `--plain` / `--cinematic`.
 - `widgets/sphere.py` builds the memory sphere frames.
 - `readme_media.py` renders README media.

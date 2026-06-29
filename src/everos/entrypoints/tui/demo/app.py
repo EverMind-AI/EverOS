@@ -330,9 +330,10 @@ class EverOSDemoApp(App[None]):
         *,
         story: DemoStory | None = None,
         interactive: bool = False,
-        base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
+        base_url: str = cloud.CLOUD_API_BASE_URL,
         session_id: str = cloud.LIVE_DEMO_SESSION_ID,
         user_id: str = cloud.LIVE_DEMO_USER_ID,
+        api_key: str = "",
         user_label: str = "you",
         max_rounds: int = DEFAULT_DEMO_ROUNDS,
     ) -> None:
@@ -342,6 +343,7 @@ class EverOSDemoApp(App[None]):
         self._base_url = base_url
         self._session_id = session_id
         self._user_id = user_id
+        self._api_key = api_key
         self._user_label = user_label
         self._max_rounds = max_rounds
         self._round = 0
@@ -491,28 +493,37 @@ class EverOSDemoApp(App[None]):
         # Reset the per-round lights; each step below lights up as it completes,
         # so the signal rail mirrors the real add -> flush -> search pipeline.
         self._reset_round_lights()
-        base_url, session_id, user_id = (
+        base_url, session_id, user_id, api_key = (
             self._base_url,
             self._session_id,
             self._user_id,
+            self._api_key,
         )
         try:
-            await anyio.to_thread.run_sync(
-                partial(cloud.check_health, base_url=base_url)
-            )
-            self._set_light("core", "ready")
-            await anyio.to_thread.run_sync(
+            task_id = await anyio.to_thread.run_sync(
                 partial(
                     cloud.add_memory,
                     memory,
                     base_url=base_url,
                     session_id=session_id,
                     user_id=user_id,
+                    api_key=api_key,
                 )
             )
+            # A successful add means the key authenticated and the memory landed.
+            self._set_light("core", "ready")
             self._set_light("conversation", "captured")
             await anyio.to_thread.run_sync(
-                partial(cloud.flush_memory, base_url=base_url, session_id=session_id)
+                partial(cloud.wait_task, task_id, base_url=base_url, api_key=api_key)
+            )
+            await anyio.to_thread.run_sync(
+                partial(
+                    cloud.flush_memory,
+                    base_url=base_url,
+                    session_id=session_id,
+                    user_id=user_id,
+                    api_key=api_key,
+                )
             )
             self._set_light("facts", "live")
             self._set_light("index", "synced")
@@ -523,6 +534,7 @@ class EverOSDemoApp(App[None]):
                     query,
                     base_url=base_url,
                     user_id=user_id,
+                    api_key=api_key,
                 )
             )
         except cloud.CloudQuotaError:
@@ -620,9 +632,10 @@ def run_demo_tui(
     *,
     story: DemoStory | None = None,
     interactive: bool = False,
-    base_url: str = cloud.DEFAULT_CLOUD_DEMO_SERVER_URL,
+    base_url: str = cloud.CLOUD_API_BASE_URL,
     session_id: str = cloud.LIVE_DEMO_SESSION_ID,
     user_id: str = cloud.LIVE_DEMO_USER_ID,
+    api_key: str = "",
     user_label: str = "you",
 ) -> None:
     EverOSDemoApp(
@@ -631,6 +644,7 @@ def run_demo_tui(
         base_url=base_url,
         session_id=session_id,
         user_id=user_id,
+        api_key=api_key,
         user_label=user_label,
     ).run()
 
