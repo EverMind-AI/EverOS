@@ -51,7 +51,13 @@ def _get_writer() -> ForesightWriter:
 async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
     # 1. List the user senders in this memcell.
     memcell = event.memcell
-    sender_ids = sorted({m.sender_id for m in memcell.items if m.role == "user"})
+    sender_ids = sorted(
+        {
+            m.sender_id
+            for m in memcell.items
+            if getattr(m, "role", None) == "user" and m.sender_id
+        }
+    )
     extractor = ForesightExtractor(llm=get_llm_client()) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).

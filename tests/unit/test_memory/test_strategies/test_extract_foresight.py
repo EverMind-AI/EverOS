@@ -5,7 +5,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import structlog.testing
-from everalgo.types import ChatMessage, Foresight, MemCell
+from everalgo.types import (
+    ChatMessage,
+    Foresight,
+    MemCell,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallRequest,
+)
 
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory.events import UserPipelineStarted
@@ -195,6 +202,75 @@ async def test_writes_md_for_each_foresight(
     assert inline1["start_time"] == "2023-11-15"
     assert inline1["duration_days"] == 7
     assert sections1 == {"Foresight": "buy tickets", "Evidence": "confirmed"}
+
+
+async def test_tolerates_tool_call_request_items_in_memcell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ToolCallRequest items lack ``role``; foresight must not crash on them."""
+    memcell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                content="fix the failing test",
+                timestamp=1_700_000_000_000,
+                sender_id="u_alice",
+            ),
+            ToolCallRequest(
+                kind="tool_call",
+                tool_calls=[
+                    ToolCall(
+                        id="tc1",
+                        type="function",
+                        function=ToolCallFunction(
+                            name="run_test",
+                            arguments='{"path": "tests/unit"}',
+                        ),
+                    )
+                ],
+                timestamp=1_700_000_001_000,
+                content="running the test",
+                sender_id="agent",
+            ),
+            ChatMessage(
+                id="m2",
+                role="assistant",
+                content="the test passes now",
+                timestamp=1_700_000_002_000,
+                sender_id="agent",
+            ),
+        ],
+        timestamp=1_700_000_002_000,
+    )
+    event = UserPipelineStarted(
+        memcell_id="mc_tool",
+        session_id="s1",
+        memcell=memcell,
+    )
+
+    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    with (
+        patch(
+            "everos.memory.strategies.extract_foresight.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_foresight.ForesightExtractor"
+        ) as mock_cls,
+        patch(
+            "everos.memory.strategies.extract_foresight.ForesightWriter"
+        ) as mock_wcls,
+    ):
+        mock_cls.return_value.aextract = AsyncMock(
+            return_value=[_foresight("u_alice", "run tests before merging")]
+        )
+        mock_wcls.return_value.append_entries = AsyncMock(return_value=[])
+
+        await extract_foresight(event, FakeStrategyContext())
+
+    mock_cls.return_value.aextract.assert_awaited_once()
+    assert mock_cls.return_value.aextract.call_args.kwargs["sender_id"] == "u_alice"
 
 
 async def test_skips_when_memcell_has_no_messages(
