@@ -675,7 +675,8 @@ to keep improving.
 
 ## EverMind Ecosystems
 
-EverMind is an open-source ecosystem for long-term memory, self-evolving agents, and memory evaluation.
+EverMind is an open-source ecosystem for long-term memory, self-evolving
+agents, AI-native interfaces, and memory evaluation.
 
 <table>
 <tr>
@@ -684,6 +685,10 @@ EverMind is an open-source ecosystem for long-term memory, self-evolving agents,
 <tr>
 <td><strong>Memory Runtime</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - the local memory operating system and research-backed runtime for agent and user memory.</td>
+</tr>
+<tr>
+<td><strong>Self-Improving Agent Harness</strong></td>
+<td><a href="https://github.com/EverMind-AI/Raven">Raven</a> - the self-improving agent harness that brings memory, proactivity, context control, and skill evolution into terminal-native agents.</td>
 </tr>
 <tr>
 <td><strong>Algorithm Engine</strong></td>
