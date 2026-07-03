@@ -7,6 +7,8 @@ MemCell — recorded via ``parent_type`` / ``parent_id``.
 
 from __future__ import annotations
 
+from everos.config.settings import load_settings
+
 import datetime as _dt
 from typing import ClassVar
 
@@ -14,7 +16,7 @@ from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
 from ._parent_type import ParentType
 
-_DIM = 1024
+_DIM = load_settings().embedding.dim
 
 
 class AtomicFact(BaseLanceTable):

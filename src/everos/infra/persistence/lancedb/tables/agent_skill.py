@@ -10,11 +10,13 @@ entity* rather than a daily-log entry — PK is ``<owner_id>_<skill_name>``
 
 from __future__ import annotations
 
+from everos.config.settings import load_settings
+
 from typing import ClassVar
 
 from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
-_DIM = 1024
+_DIM = load_settings().embedding.dim
 
 
 class AgentSkill(BaseLanceTable):
