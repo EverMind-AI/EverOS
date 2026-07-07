@@ -32,19 +32,43 @@ everos
 │   └── show [--root PATH]          Show effective configuration
 ├── server
 │   └── start [--host] [--port] [--root] [--reload] [--log-level]   Start the HTTP API server (uvicorn)
-└── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
-    ├── status                      Queue / LSN summary
-    ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
-    └── fix [--apply]               List failed rows / re-enqueue retryable ones
+├── cascade [--root PATH]           Inspect / operate the md → LanceDB sync queue
+│   ├── status                      Queue / LSN summary
+│   ├── sync [PATH]                 Drain the queue now (optional PATH force-enqueues)
+│   └── fix [--apply]               List failed rows / re-enqueue retryable ones
+└── integrations                   Install EverOS into third-party tools
+    ├── install [hermes] [--source PATH] [--force]
+    └── uninstall [hermes] [--source PATH] [--force] [--yes]
 ```
 
 Each subcommand lives in its own module under
 [`entrypoints/cli/commands/`](../src/everos/entrypoints/cli/commands/) and is
 registered in `cli/main.py`. The CLI is intentionally small — hot-path
 business (`/add` `/flush` `/search` `/get`) is the **HTTP API**, not the
-CLI; the CLI covers setup (`init`), running the server, and index ops
-(`cascade`). There is no `reindex` command — rebuild by deleting
-`<root>/.index/lancedb` and restarting, or run `everos cascade sync`.
+CLI; the CLI covers setup (`init`), running the server, index ops
+(`cascade`), and external-tool install (`integrations`). There is no
+`reindex` command — rebuild by deleting `<root>/.index/lancedb` and
+restarting, or run `everos cascade sync`.
+
+## `everos integrations`
+
+Install EverOS integrations into third-party tools. Currently ships the
+Hermes Agent memory-provider plugin — see
+[hermes-integration.md](hermes-integration.md) for the full walkthrough.
+
+```bash
+everos integrations install hermes [--source PATH] [--force]
+everos integrations uninstall hermes [--source PATH] [--force] [--yes]
+```
+
+`install` symlinks the bundle at `integrations/hermes/` into
+`$HERMES_HOME/plugins/everos/` so Hermes discovers it. The bundle source
+resolves in this order: `EVEROS_HERMES_PLUGIN_SOURCE` env → `--source`
+flag → repo-root walk-up from `everos.__file__` (covers editable/dev
+installs). An existing symlink is replaced; a real directory requires
+`--force`. `uninstall` removes the symlink only if it points at this
+bundle (`--force` skips the ownership check; `--source` overrides the
+expected path). `~/.everos` memory data is never touched.
 
 ## `everos server start`
 
