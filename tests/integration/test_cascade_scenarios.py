@@ -127,12 +127,12 @@ async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
     last-second re-enqueue (e.g. atomic-replace echo).
     """
     async with asyncio.timeout(deadline):
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None:
                 break
             await asyncio.sleep(0.05)
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
                 break
@@ -400,14 +400,25 @@ async def test_modify_existing_entry_content_reindexes(
         assert new_text != text
         mw = MarkdownWriter(memory_root)
         await mw.write(absolute, new_text)
-        # The edit reuses md_path; row status flips back to pending then
-        # to done again. Poll until content_sha256 actually changes.
-        await asyncio.sleep(0.3)
-        await _wait_drain()
+        # The edit reuses md_path; watcher enqueue can lag behind the write,
+        # so queue-empty is not a sufficient barrier. Poll for the externally
+        # visible condition this scenario cares about: LanceDB rows reflect the
+        # rewritten entry bodies.
+        async with asyncio.timeout(15.0):
+            while True:
+                await _wait_drain()
+                rows_after = await atomic_fact_repo.find_where(
+                    f"md_path = '{md_path}'", limit=10
+                )
+                if len(rows_after) == 3 and all(
+                    r.content_sha256 != sha_before.get(r.entry_id)
+                    and "EDITED" in r.fact
+                    and "ORIGINAL" not in r.fact
+                    for r in rows_after
+                ):
+                    break
+                await asyncio.sleep(0.05)
 
-        rows_after = await atomic_fact_repo.find_where(
-            f"md_path = '{md_path}'", limit=10
-        )
         assert len(rows_after) == 3
         sha_after = {r.entry_id: r.content_sha256 for r in rows_after}
         fact_after = {r.entry_id: r.fact for r in rows_after}
@@ -616,7 +627,7 @@ async def test_scanner_recovers_missed_delete(
                 await asyncio.sleep(0.1)
 
         async with asyncio.timeout(5.0):
-            while True:  # noqa: ASYNC110 - polling cascade state
+            while True:
                 row = await md_change_state_repo.get_by_id(md_path)
                 if row is not None and row.status == "done":
                     break

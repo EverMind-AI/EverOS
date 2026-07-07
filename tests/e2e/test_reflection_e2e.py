@@ -17,11 +17,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Path setup for sibling-module import (test_locomo lives in the same dir).
-# load_dotenv() is deferred to main() to avoid module-level side effects.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# benchmarks/run.py is the benchmark runner; add repo root to sys.path so
+# the benchmarks package is importable from any working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from test_locomo import (  # noqa: E402
+from benchmarks.run import (
     ANSWER_PROMPT,
     JUDGE_SYSTEM_PROMPT,
     JUDGE_USER_PROMPT,

@@ -70,7 +70,7 @@ async def scan_and_resume(
                 old_run_id=rec.run_id,
                 new_run_id=new_run_id,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception(
                 "crash_recovery_resume_failed",
                 strategy_name=rec.strategy_name,

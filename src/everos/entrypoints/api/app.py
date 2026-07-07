@@ -11,7 +11,6 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from everos import __version__
 from everos.core.lifespan import (
     LifespanProvider,
     MetricsLifespanProvider,
@@ -87,6 +86,8 @@ def create_app(
             CascadeLifespanProvider(),
             OmeLifespanProvider(),
         ]
+
+    from everos import __version__
 
     app = FastAPI(
         title="everos",

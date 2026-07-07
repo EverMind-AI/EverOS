@@ -9,12 +9,12 @@ import pytest
 
 pytest.importorskip("everalgo.parser")
 
-from everalgo.llm import LLMError  # noqa: E402
-from everalgo.types import ParsedContent  # noqa: E402
+from everalgo.llm import LLMError
+from everalgo.types import ParsedContent
 
-from everos.component import parser as _parser_mod  # noqa: E402
-from everos.core.errors import UnsupportedModalityError  # noqa: E402
-from everos.memory.extract.parser import enrich_content_items  # noqa: E402
+from everos.component import parser as _parser_mod
+from everos.core.errors import UnsupportedModalityError
+from everos.memory.extract.parser import enrich_content_items
 
 _APARSE_FILE_TARGET = "everos.component.parser.aparse_file"
 

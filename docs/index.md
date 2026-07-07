@@ -12,7 +12,6 @@ before wiring it into a real workflow.
 | Doc | Purpose |
 |---|---|
 | [everos-demo.md](everos-demo.md) | `everos demo` — local educational TUI to feel the memory lifecycle before configuring keys |
-| [use-cases.md](use-cases.md) | Worked examples and integrations showing what persistent memory enables, to study and adapt |
 
 ## Reference
 
@@ -51,16 +50,16 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
 | [github-sync.md](github-sync.md) | Guardrails for refreshing GitHub from internal exports without overwriting GitHub-only workflow files |
-| [locomo_benchmark.md](locomo_benchmark.md) | LoCoMo benchmark — run and evaluate |
+| [benchmarks/README.md](../benchmarks/README.md) | LoCoMo benchmark — run and evaluate |
 
-## Engineering
+## Engineering / Internal
 
-For contributors working on the framework itself — how to build, test,
-and ship a change.
+For maintainers and contributors working on the framework itself,
+not for using it.
 
 | Doc | Purpose |
 |---|---|
-| [engineering.md](engineering.md) | Contributor engineering reference — build, test, CI gates, branch & commit conventions |
+| [engineering.md](engineering.md) | Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code) |
 
 ## See also
 

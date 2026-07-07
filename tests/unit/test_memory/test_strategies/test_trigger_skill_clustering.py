@@ -116,7 +116,7 @@ async def test_creates_new_cluster_when_no_existing(
         await trigger_skill_clustering(_event(), ctx)
 
     # cluster_by_llm called with the size-1 new cluster + empty existing.
-    args, kwargs = mock_cluster.call_args
+    args, _kwargs = mock_cluster.call_args
     new_cluster, existing = args
     assert isinstance(new_cluster, AlgoCluster)
     assert new_cluster.id == "cl_newxxxx0001"

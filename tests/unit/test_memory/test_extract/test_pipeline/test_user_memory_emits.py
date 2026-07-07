@@ -46,7 +46,7 @@ async def test_emit_pipeline_started_routes_through_engine() -> None:
     )
 
     cell = _sample_memcell()
-    await pipeline._emit_pipeline_started(  # noqa: SLF001 — test introspection
+    await pipeline._emit_pipeline_started(
         memcell_id="mc_a",
         session_id="s1",
         app_id="claude_code",
@@ -101,7 +101,7 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     algo_ep = AlgoEpisode(
         owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
     )
-    with patch.object(  # noqa: SLF001
+    with patch.object(
         pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
     ):
         outcome = await pipeline.run(

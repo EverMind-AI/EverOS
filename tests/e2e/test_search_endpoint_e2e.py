@@ -352,10 +352,9 @@ async def test_vector_search_returns_episode_hits(
 ) -> None:
     """``method=vector`` embeds the query and ranks by cosine.
 
-    Seeds atomic_facts alongside episodes because the default
-    ``vector_strategy = "maxsim_atomic"`` (config/default.toml) walks
+    Seeds atomic_facts alongside episodes because the MaxSim path walks
     atomic_fact ANN → max-pool by parent_id → fetch episodes; an
-    episode-only corpus would return 0 hits under that strategy.
+    episode-only corpus would return 0 hits.
     """
     await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
     await _seed_atomic_facts(_facts_for_owner(search_seed, "caroline"))
@@ -419,17 +418,15 @@ async def test_agentic_search_returns_episode_hits(
 # ── Agent owner_type dispatch (separate path: agent_case + agent_skill) ─
 
 
-async def _seed_one_agent_corpus(
-    owner: str = "a1", *, use_real_embeddings: bool = False
-) -> None:
+async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     """Single seed used by the parametrized agent dispatch test.
 
     One case + one skill sharing surface tokens with the test query
     ("refactor authentication") so BM25 deterministically hits both
-    tables. Dense / agentic methods exercise the same rows and opt into
-    real embeddings so LanceDB's ``nearest_to`` can rank them (zero
-    vectors are undefined under cosine distance — the dense path returns
-    0 hits for them).
+    tables; dense / agentic methods exercise the same rows. Both rows
+    are embedded with the real embedder so LanceDB's ``nearest_to``
+    can rank them (zero vectors are undefined under cosine distance —
+    the dense path returns 0 hits for them).
     """
     from everos.service.search import _get_embedding
 
@@ -438,16 +435,16 @@ async def _seed_one_agent_corpus(
     skill_desc = "refactor authentication middleware reliably"
     skill_body = "step-by-step approach for auth refactors"
 
-    embedder = _get_embedding() if use_real_embeddings else None
+    embedder = _get_embedding()
     if embedder is not None:
         case_vec, skill_vec = await embedder.embed_batch(
             [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
         )
     else:
-        # Keyword-only default runs offline in CI; live dense variants
-        # pass real embeddings via ``use_real_embeddings=True``.
-        case_vec = [1.0, *([0.0] * 1023)]
-        skill_vec = [1.0, *([0.0] * 1023)]
+        # No embedder credentials → leave zeros; only keyword assertions
+        # will pass, vector/hybrid/agentic methods are skipped anyway.
+        case_vec = [0.0] * 1024
+        skill_vec = [0.0] * 1024
 
     await _seed_agent_cases(
         [
@@ -511,7 +508,7 @@ async def test_search_agent_dispatch_per_method(
     All methods must enforce the owner_type hard partition:
     ``episodes`` / ``profiles`` stay empty.
     """
-    await _seed_one_agent_corpus(use_real_embeddings=method != "keyword")
+    await _seed_one_agent_corpus()
 
     resp = await _post(
         client,
@@ -1290,7 +1287,7 @@ async def test_search_filter_error_returns_422(
     # FastAPI's default ``{"detail": ...}``). The FilterError text
     # lands in ``error.message``.
     body = resp.json()
-    assert body["error"]["code"] == "INVALID_INPUT"
+    assert body["error"]["code"] == "HTTP_ERROR"
     assert "this_field_does_not_exist" in body["error"]["message"]
 
 
@@ -1310,10 +1307,10 @@ async def test_vector_search_with_session_filter(
     recall query (not bypassed by the dense path). Half the seed gets
     a target session, half gets another; only target hits may come back.
 
-    The default ``vector_strategy = "maxsim_atomic"`` filters atomic_facts
-    first (then max-pools to episodes), so the per-episode session_id
-    mutation has to propagate to each fact via its parent memcell id —
-    otherwise the where clause drops every fact and recall returns 0.
+    The MaxSim path filters atomic_facts first (then max-pools to
+    episodes), so the per-episode session_id mutation has to propagate
+    to each fact via its parent memcell id — otherwise the where clause
+    drops every fact and recall returns 0.
     """
     base = _eps_for_owner(search_seed, "caroline")
     facts = _facts_for_owner(search_seed, "caroline")

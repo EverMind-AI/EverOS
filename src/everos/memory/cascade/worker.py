@@ -22,10 +22,14 @@ prefix but the handlers themselves are independent.
 After a batch completes, each kind that mutated its LanceDB table is
 passed to :meth:`_schedule_optimize` — a per-kind throttle + trailing
 edge scheduler that fires LanceDB ``optimize()`` as a separate task,
-so the drain loop is never blocked by index maintenance. A 60-second
-heartbeat sweeps every kind through the same gate so unindexed
-fragments don't linger after a worker restart even without new
-writes. See :meth:`_schedule_optimize` for the exact semantics.
+so the drain loop is never blocked by index maintenance. ``optimize()``
+is a performance/storage-hygiene step, **not** a visibility one: new
+rows are searchable immediately via LanceDB's flat-scan over the
+unindexed tail (see :meth:`LanceRepoBase.optimize`), so optimizing only
+keeps that tail small and prunes dead files. A 60-second heartbeat
+sweeps every kind through the same gate so an unindexed tail doesn't
+accumulate after a worker restart even without new writes. See
+:meth:`_schedule_optimize` for the exact semantics.
 
 A separate 12-hour loop (:meth:`_rebuild_loop`) does a full
 ``drop_index + create_index`` per kind to bound the **active** index
@@ -57,7 +61,7 @@ DEFAULT_BATCH_SIZE = 50
 DEFAULT_MAX_RETRY = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
-DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 1.0
+DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 10.0
 DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS = 60.0
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
@@ -97,7 +101,7 @@ exhausts file descriptors at index-scan time (observed: macOS / Linux
 default ``ulimit -n`` of 1024 — the ``os error 24`` reported in CI).
 
 The prune itself is cheap when scoped to recent versions; we just don't
-want to pay it on every 1-second throttle tick. 5 minutes is the
+want to pay it on every optimize throttle tick. 5 minutes is the
 shortest interval that comfortably outlives any in-flight query / index
 build, while keeping the on-disk footprint bounded. It is also passed
 as ``cleanup_older_than`` itself (semantically: "the retention window
@@ -231,10 +235,12 @@ class CascadeWorker:
         For each kind that mutated its LanceDB table this batch,
         :meth:`_schedule_optimize` records a throttled optimize
         intent. The actual ``optimize()`` runs as a separate task so
-        drain throughput is decoupled from index maintenance; callers
-        that need a "fully indexed" barrier (CLI ``cascade sync``)
-        must call :meth:`_flush_optimizers` — :meth:`drain_until_empty`
-        does this on their behalf.
+        drain throughput is decoupled from index maintenance. Drained
+        rows are already searchable at this point (flat-scan over the
+        unindexed tail); callers that additionally want the index fully
+        merged before returning (CLI ``cascade sync``) call
+        :meth:`_flush_optimizers` — :meth:`drain_until_empty` does this
+        on their behalf.
         """
         batch = await md_change_state_repo.claim_pending_batch(self._batch_size)
         if not batch:
@@ -254,8 +260,9 @@ class CascadeWorker:
         cheap safety net).
 
         Awaits :meth:`_flush_optimizers` before returning so callers
-        (CLI ``cascade sync``) can rely on FTS being up-to-date when
-        the call completes.
+        (CLI ``cascade sync``) get a fully merged index — not for
+        visibility (the data is already searchable) but so ``sync``
+        returns a deterministically optimized state.
         """
         total = 0
         for _ in range(max_passes):
@@ -272,7 +279,7 @@ class CascadeWorker:
         while not self._stop.is_set():
             try:
                 processed = await self.drain_once()
-            except Exception as exc:  # noqa: BLE001 — never crash the daemon
+            except Exception as exc:
                 logger.exception("cascade_worker_drain_failed", error=str(exc))
                 processed = 0
             if processed == 0:
@@ -330,7 +337,7 @@ class CascadeWorker:
                     new_retry_count=retry_count,
                 )
                 return None
-            except Exception as exc:  # noqa: BLE001 — surface as unrecoverable
+            except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.exception(
                     "cascade_worker_unrecoverable",
@@ -483,7 +490,7 @@ class CascadeWorker:
                 kind=kind,
                 pruned=should_prune,
             )
-        except Exception as exc:  # noqa: BLE001 — never crash the daemon
+        except Exception as exc:
             logger.warning(
                 "cascade_lancedb_optimize_failed",
                 kind=kind,
@@ -496,11 +503,13 @@ class CascadeWorker:
 
         Sweeps every kind through :meth:`_schedule_optimize` once per
         ``optimize_heartbeat_seconds``. Without this, a worker that
-        restarts with stale unindexed fragments (e.g. after a crash
-        between write and optimize) would only catch up once new
-        writes arrive. The sweep goes through the same throttle gate
-        so it can never storm — kinds with an in-flight optimize or
-        a fresh ``last_run_at`` are coalesced.
+        restarts with an unindexed tail (e.g. after a crash between
+        write and optimize) would only merge it in once new writes
+        arrive — those rows stay searchable meanwhile (flat-scan), but
+        the tail keeps the scan slow and the dead files on disk; the
+        sweep bounds both. It goes through the same throttle gate so it
+        can never storm — kinds with an in-flight optimize or a fresh
+        ``last_run_at`` are coalesced.
         """
         while not self._stop.is_set():
             if await self._wait_or_stop(self._optimize_heartbeat):
@@ -571,7 +580,7 @@ class CascadeWorker:
         try:
             await rebuild_task
             logger.info("cascade_lancedb_rebuilt", kind=kind)
-        except Exception as exc:  # noqa: BLE001 — never crash the daemon
+        except Exception as exc:
             logger.warning(
                 "cascade_lancedb_rebuild_failed",
                 kind=kind,
@@ -586,8 +595,10 @@ class CascadeWorker:
 
         Drain-loop path is fire-and-forget for throughput; this is the
         explicit barrier used by CLI ``cascade sync`` and worker
-        shutdown to ensure FTS is consistent with the data on disk
-        before the call returns.
+        shutdown to let in-flight optimizes finish merging the unindexed
+        tail before the call returns. Not a visibility barrier — drained
+        rows are searchable via flat-scan regardless; this just yields a
+        fully merged index (and, on shutdown, no orphaned mid-write).
 
         Exceptions from optimize tasks are already logged in
         :meth:`_run_optimize_once`; ``return_exceptions=True`` here

@@ -54,18 +54,18 @@ cache_size_kb = 2048
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
 # Or set the field directly in this file (<root>/everos.toml).
-model = "gpt-4.1-mini"
-# api_key = ""
-# base_url = ""
+model = "openai/gpt-4.1-mini"
+api_key = ""
+base_url = "https://openrouter.ai/api/v1"
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
 # image / pdf / audio image_url parts. Override via env:
 #   EVEROS_MULTIMODAL__MODEL, EVEROS_MULTIMODAL__API_KEY, EVEROS_MULTIMODAL__BASE_URL
 model = "google/gemini-3-flash-preview"
+api_key = ""
+base_url = "https://openrouter.ai/api/v1"
 max_concurrency = 4
-# api_key = ""
-# base_url = ""
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.
@@ -75,11 +75,10 @@ max_concurrency = 4
 [embedding]
 # OpenAI-compatible embedding endpoint. Override via env:
 #   EVEROS_EMBEDDING__MODEL, EVEROS_EMBEDDING__API_KEY, EVEROS_EMBEDDING__BASE_URL
-# model / api_key / base_url have no shipped defaults — must be set
-# (env or user toml) before the embedding capability is used.
-# model     = "Qwen/Qwen3-Embedding-4B"
-# api_key   = ""
-# base_url  = "https://api.example.com/v1"
+# model and base_url ship with recommended defaults; api_key must be set.
+model     = "Qwen/Qwen3-Embedding-4B"
+api_key   = ""
+base_url  = "https://api.deepinfra.com/v1/openai"
 timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
@@ -92,17 +91,10 @@ max_concurrent  = 5
 # `provider` picks the request-shape:
 #   - "deepinfra" -> POST {base_url}/{model} (DeepInfra inference API)
 #   - "vllm"      -> POST {base_url}/rerank (OpenAI-compat rerank endpoint)
-#   - "dashscope" -> POST {base_url}/api/v1/services/rerank/text-rerank/text-rerank
-#                    (Aliyun Bailian native text-rerank; currently
-#                     "gte-rerank-v2", base_url "https://dashscope.aliyuncs.com")
-# Left unset, the factory infers the provider from the base_url host
-# (dashscope.aliyuncs.com -> dashscope, *.deepinfra.com -> deepinfra) and
-# falls back to "deepinfra" for unknown hosts. Set it explicitly to
-# override — required for self-hosted "vllm" on an arbitrary host.
-# provider = "deepinfra"
-# model     = "Qwen/Qwen3-Reranker-4B"
-# api_key   = ""
-# base_url  = "https://api.deepinfra.com/v1/inference"
+provider = "deepinfra"
+model     = "Qwen/Qwen3-Reranker-4B"
+api_key   = ""
+base_url  = "https://api.deepinfra.com/v1/inference"
 timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
@@ -113,16 +105,6 @@ max_concurrent  = 5
 hard_token_limit = 65536
 hard_msg_limit = 500
 
-[search]
-# Vector retrieval strategy when SearchMethod.VECTOR is selected.
-#   "maxsim_atomic" (default): ANN over atomic_fact.vector (pool=top_k*20),
-#       max-pool the per-fact cosine by parent memcell, then reverse-resolve
-#       to episode rows. MaxSim over atomic facts; +0.6pp over the legacy
-#       episode-vector path on LoCoMo, at the cost of one extra LanceDB scan.
-#   "episode": single-vector ANN over episode.vector (legacy path).
-# Override via EVEROS_SEARCH__VECTOR_STRATEGY.
-vector_strategy = "maxsim_atomic"
-
 [memorize]
 # Conversation mode. Selects the boundary detector and which pipelines run:
 #   "chat"  -> BoundaryDetector       + user_memory only
@@ -130,14 +112,6 @@ vector_strategy = "maxsim_atomic"
 # A single service process serves one mode at a time; switching mode
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
-
-# Maximum wall-clock for one memorize() invocation while holding the
-# per-session lock. On timeout the outer asyncio.timeout cancels the call
-# and the lock auto-releases so subsequent concurrent /add on the same
-# session aren't deadlocked. Covers boundary LLM + memcell writes +
-# synchronous portion of pipeline dispatch.
-# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
-session_lock_timeout_seconds = 360.0
 
 [knowledge]
 # Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
@@ -155,6 +129,14 @@ lambda = 0.1
 mass_top_m = 50
 top_k_cap = 100
 
+# Maximum wall-clock for one memorize() invocation while holding the
+# per-session lock. On timeout the outer asyncio.timeout cancels the call
+# and the lock auto-releases so subsequent concurrent /add on the same
+# session aren't deadlocked. Covers boundary LLM + memcell writes +
+# synchronous portion of pipeline dispatch.
+# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
+session_lock_timeout_seconds = 360.0
+
 [clustering]
 # Geometry-clustering: cosine similarity threshold and time window.
 # Episodes older than ``time_window_days`` from the newest cluster
@@ -162,3 +144,4 @@ top_k_cap = 100
 # Override via EVEROS_CLUSTERING__THRESHOLD, EVEROS_CLUSTERING__TIME_WINDOW_DAYS.
 threshold = 0.65
 time_window_days = 7.0
+

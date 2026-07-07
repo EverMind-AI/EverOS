@@ -29,7 +29,7 @@ async def test_lifespan_starts_and_stops_engine(
 
     engine = await provider.startup(app)
     assert engine is not None
-    assert engine._started is True  # noqa: SLF001 — test introspection
+    assert engine._started is True
 
     await provider.shutdown(app)
-    assert engine._started is False  # noqa: SLF001
+    assert engine._started is False

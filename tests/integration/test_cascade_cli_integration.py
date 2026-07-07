@@ -60,6 +60,10 @@ async def _dispose_all() -> None:
     await dispose_engine()
 
 
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+
+
 def test_status_on_empty_queue(cli_runtime: Path) -> None:
     """``cascade status`` boots the runtime + prints zeros for a fresh DB."""
     result = CliRunner().invoke(cascade_mod.app, ["status"])
@@ -121,12 +125,17 @@ def test_sync_with_path_outside_root_errors(
     other.write_text("# unrelated\n")
     result = CliRunner().invoke(cascade_mod.app, ["sync", str(other)])
     assert result.exit_code != 0
-    # Typer.BadParameter surfaces in stderr / mixed output. Rich may wrap
-    # the error box at different terminal widths, so assert the stable
-    # semantic fragments instead of their exact adjacency.
+    # Typer.BadParameter surfaces in stderr / mixed output. The rich
+    # error box wraps the message at terminal width and pads each line
+    # with ``│`` (U+2502 box-drawing); so ``not under`` and
+    # ``memory root`` end up separated by spaces *plus* box characters
+    # *plus* a newline. ``\s`` doesn't match ``│``, so widen to
+    # ``[^\w]+`` (anything that isn't an alnum / underscore) — that
+    # tolerates the rich frame without falsely matching real text
+    # between the two tokens.
     output = result.stdout + (result.stderr or "")
-    assert re.search(r"\bnot under\b", output), output
-    assert re.search(r"\bmemory root\b", output), output
+    plain_output = _strip_ansi(output)
+    assert re.search(r"not under[^\w]+memory root", plain_output), output
 
 
 def test_sync_with_unmatched_path(

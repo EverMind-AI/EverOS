@@ -159,7 +159,7 @@ def _safe_applies(meta: StrategyMeta, event: BaseEvent) -> bool:
     """
     try:
         return _applies(meta.applies_to, event)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception(
             "applies_to_callable_raised",
             strategy_name=meta.name,

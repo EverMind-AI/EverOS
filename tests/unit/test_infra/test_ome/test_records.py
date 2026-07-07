@@ -104,7 +104,7 @@ def test_run_record_rejects_negative_int(field: str) -> None:
 
 
 def test_run_record_rejects_naive_started_at() -> None:
-    naive = datetime(2026, 5, 12, 12, 0, 0)  # noqa: DTZ001 — deliberately naive
+    naive = datetime(2026, 5, 12, 12, 0, 0)
     with pytest.raises(ValidationError, match="started_at"):
         RunRecord(**_ok_kwargs(started_at=naive))
 

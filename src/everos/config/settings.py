@@ -188,7 +188,7 @@ class EmbeddingSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=5, ge=1)
+    max_concurrent: int = Field(default=50, ge=1)
 
 
 class RerankSettings(BaseModel):
@@ -197,16 +197,8 @@ class RerankSettings(BaseModel):
     Unlike LLM / embedding (single OpenAI-compatible shape), rerank API
     schemas differ between providers — DeepInfra uses ``POST {base_url}/
     {model}`` with a custom body, vLLM uses ``POST {base_url}/rerank``
-    with ``{model, query, documents}``, DashScope (Aliyun Bailian)
-    ``gte-rerank-v2`` uses ``POST {base_url}/api/v1/services/rerank/
-    text-rerank/text-rerank`` with a nested ``{model, input, parameters}``
-    body. ``provider`` picks which client implementation the factory builds.
-
-    ``provider`` defaults to ``None`` — the factory then infers it from
-    the ``base_url`` host (e.g. ``dashscope.aliyuncs.com`` → DashScope,
-    ``*.deepinfra.com`` → DeepInfra), falling back to ``"deepinfra"`` when
-    the host is unrecognized. Set ``provider`` explicitly to override the
-    inference (required for self-hosted ``vllm`` on an arbitrary host).
+    with ``{model, query, documents}``. ``provider`` picks which client
+    implementation the factory builds.
 
     Env binding:
         EVEROS_RERANK__PROVIDER
@@ -219,14 +211,14 @@ class RerankSettings(BaseModel):
         EVEROS_RERANK__MAX_CONCURRENT
     """
 
-    provider: Literal["deepinfra", "vllm", "dashscope"] | None = None
+    provider: Literal["deepinfra", "vllm", "dashscope"] = "deepinfra"
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=5, ge=1)
+    max_concurrent: int = Field(default=50, ge=1)
 
 
 class BoundaryDetectionSettings(BaseModel):
@@ -274,28 +266,6 @@ class ClusteringSettings(BaseModel):
 
     threshold: float = Field(default=0.65, gt=0, le=1)
     time_window_days: float = Field(default=7.0, gt=0)
-
-
-class SearchSettings(BaseModel):
-    """Search-pipeline policy knobs.
-
-    ``vector_strategy`` selects the read path taken by
-    ``SearchMethod.VECTOR``:
-
-    - ``"maxsim_atomic"`` (default) — ANN over ``atomic_fact.vector``
-      (recall pool ``top_k * 20``, capped at 2000), max-pool the per-fact
-      cosine by parent memcell, then reverse-resolve the top memcells back
-      to episode rows. MaxSim over atomic facts; trades one extra LanceDB
-      scan for finer-grained semantic match on long episodes.
-    - ``"episode"`` — single-vector ANN over ``episode.vector`` (one vector
-      per episode = the embedded Content section). The legacy path; kept
-      so deployments can opt out via env.
-
-    Env binding:
-        EVEROS_SEARCH__VECTOR_STRATEGY={episode,maxsim_atomic}
-    """
-
-    vector_strategy: Literal["episode", "maxsim_atomic"] = "maxsim_atomic"
 
 
 class LanceDBSettings(BaseModel):
@@ -393,7 +363,6 @@ class Settings(BaseSettings):
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
     clustering: ClusteringSettings = ClusteringSettings()
-    search: SearchSettings = SearchSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
 

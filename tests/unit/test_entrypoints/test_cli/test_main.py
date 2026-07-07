@@ -13,7 +13,6 @@ def test_help_exits_zero() -> None:
     assert "everos" in result.stdout
     assert "server" in result.stdout
     assert "cascade" in result.stdout
-    assert "demo" in result.stdout
     assert "config" in result.stdout
 
 

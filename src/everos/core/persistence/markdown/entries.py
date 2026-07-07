@@ -85,7 +85,7 @@ class EntryId:
             f"{self.prefix}_{self.date.strftime(_DATE_FMT)}_{self.seq:0{_SEQ_DIGITS}d}"
         )
 
-    def __str__(self) -> str:  # noqa: D401
+    def __str__(self) -> str:
         return self.format()
 
     @classmethod

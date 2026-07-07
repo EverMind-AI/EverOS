@@ -6,7 +6,8 @@ candidate list; the manager's job is to:
 
 * honour the ``owner_type`` hard partition,
 * run KEYWORD as sparse-only and leave ``atomic_facts`` empty,
-* run VECTOR as dense-only (and refuse when no embedding is wired),
+* run VECTOR via MaxSim (ANN atomic_facts -> max-pool -> resolve episodes)
+  and refuse when no embedding is wired,
 * let HYBRID run without an LLM by default; require LLM only when the
   caller sets ``enable_llm_rerank=True``,
 * refuse AGENTIC when reranker / LLM prerequisites are missing,
@@ -330,86 +331,6 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     assert "owner_type = 'user'" in recaller.last_where
 
 
-# ── VECTOR: requires embedding ────────────────────────────────────────
-
-
-async def test_vector_method_requires_embedding() -> None:
-    mgr = _build_manager()  # embedding=None by default
-    with pytest.raises(RuntimeError, match="embedding"):
-        await mgr.search(_user_req(method=SearchMethod.VECTOR))
-
-
-async def test_vector_method_runs_dense_only_with_embedding() -> None:
-    mgr = _build_manager(
-        episode_sparse=[_episode_row("should_not_appear")],
-        episode_dense=[_episode_row("ep_dense")],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
-    assert [e.id for e in resp.data.episodes] == ["ep_dense"]
-
-
-async def test_vector_radius_filter_drops_below_threshold() -> None:
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.3),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, radius=0.5))
-    assert [e.id for e in resp.data.episodes] == ["ep_high"]
-
-
-async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
-    """``top_k=-1`` without an explicit radius gets the project default 0.5.
-
-    Mirrors enterprise's auto-floor behaviour — unlimited mode must not
-    return arbitrarily low-similarity tail.
-    """
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.3),  # below default 0.5 → dropped
-            _episode_row("ep_mid", score=0.55),  # above default → kept
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
-    assert [e.id for e in resp.data.episodes] == ["ep_mid", "ep_high"]
-
-
-async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
-    """Caller-supplied radius (even ``0.0``) wins over the unlimited default."""
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1, radius=0.1))
-    # 0.1 threshold keeps both rows (the default 0.5 would have dropped ep_low).
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
-
-
-async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
-    """``top_k > 0`` without a radius applies no threshold — truncation handles tail."""
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=10))
-    # No radius default in normal mode → both kept.
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
-
-
-# ── VECTOR + maxsim_atomic strategy ─────────────────────────────────────
-
-
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
     """Atomic-fact candidate emitted by ``AtomicFactRecaller.dense_recall``."""
     return Candidate(
@@ -428,18 +349,107 @@ def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
     )
 
 
-async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``vector_strategy=maxsim_atomic`` should ANN atomic_facts → max-pool by
-    episode entry_id → resolve to episode, ordering episodes by the
-    per-episode maximum fact score."""
-    from everos.config.settings import load_settings
+# ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
 
-    monkeypatch.setenv("EVEROS_SEARCH__VECTOR_STRATEGY", "maxsim_atomic")
-    load_settings.cache_clear()
-    # Two episodes; each has two atomic facts under it. The max fact score
-    # per memcell is what should end up as the episode's score.
+
+async def test_vector_method_requires_embedding() -> None:
+    mgr = _build_manager()  # embedding=None by default
+    with pytest.raises(RuntimeError, match="embedding"):
+        await mgr.search(_user_req(method=SearchMethod.VECTOR))
+
+
+async def test_vector_method_returns_episodes_via_maxsim() -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("should_not_appear")],
+        episode_dense=[_episode_row("ep_dense")],
+        atomic_fact_dense=[
+            _atomic_fact_row("f1", parent_id="ep_dense", score=0.85),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert [e.id for e in resp.data.episodes] == ["ep_dense"]
+
+
+async def test_vector_radius_filter_drops_below_threshold() -> None:
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, radius=0.5))
+    assert [e.id for e in resp.data.episodes] == ["ep_high"]
+
+
+async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
+    """``top_k=-1`` without an explicit radius gets the project default 0.5.
+
+    Mirrors enterprise's auto-floor behaviour — unlimited mode must not
+    return arbitrarily low-similarity tail.
+    """
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_mid"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),  # below 0.5
+            _atomic_fact_row("f_mid", parent_id="ep_mid", score=0.55),  # above 0.5
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
+    # Ordered by max-pooled fact score descending.
+    assert [e.id for e in resp.data.episodes] == ["ep_high", "ep_mid"]
+
+
+async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
+    """Caller-supplied radius (even ``0.0``) wins over the unlimited default."""
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1, radius=0.1))
+    # 0.1 threshold keeps both rows (the default 0.5 would have dropped ep_low).
+    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+
+
+async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
+    """``top_k > 0`` without a radius applies no threshold — truncation handles tail."""
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=10))
+    # No radius default in normal mode -> both kept.
+    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+
+
+async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
+    """ANN atomic_facts -> max-pool by episode entry_id -> resolve to
+    episode, ordering episodes by the per-episode maximum fact score."""
     mgr = _build_manager(
         episode_dense=[
             _episode_row("ep_A", memcell_id="mc_A"),
@@ -460,14 +470,8 @@ async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
     assert eps[1].score == pytest.approx(0.75)
 
 
-async def test_vector_maxsim_atomic_returns_empty_when_no_facts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No fact recall → no memcells to score → empty episode list."""
-    from everos.config.settings import load_settings
-
-    monkeypatch.setenv("EVEROS_SEARCH__VECTOR_STRATEGY", "maxsim_atomic")
-    load_settings.cache_clear()
+async def test_vector_returns_empty_when_no_facts() -> None:
+    """No fact recall -> no episodes to score -> empty episode list."""
     mgr = _build_manager(
         episode_dense=[_episode_row("ep_A", memcell_id="mc_A")],
         atomic_fact_dense=[],
@@ -503,9 +507,9 @@ async def test_hybrid_requires_llm_when_enable_llm_rerank_true() -> None:
 
 
 async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
-    """HYBRID episode path: hierarchy pipeline (RRF -> MaxSim -> merge -> eviction).
+    """HYBRID episode path: heap-expand pipeline (RRF -> LR -> expansion).
 
-    ep_1 has a fact scoring higher than the RRF score -> fact evicts episode.
+    ep_1 has a fact scoring higher than its LR score -> fact evicts episode.
     ep_2 has no facts -> episode emitted as-is.
     """
     ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")

@@ -30,7 +30,7 @@ not need to manage either.
 # Importing ``tables`` registers every business SQLModel in
 # ``SQLModel.metadata`` so ``SqliteLifespanProvider.startup`` can
 # ``create_all`` without callers having to import each model module.
-from . import tables as tables  # noqa: F401
+from . import tables as tables
 from .repos import DocumentListPage as DocumentListPage
 from .repos import DocumentUpsertPayload as DocumentUpsertPayload
 from .repos import QueueSummary as QueueSummary

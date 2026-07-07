@@ -76,7 +76,6 @@ class GetManager:
             owner_type=req.owner_type,
             app_id=req.app_id,
             project_id=req.project_id,
-            exclude_deprecated=req.memory_type == GetMemoryType.EPISODE,
         )
 
         match req.memory_type:

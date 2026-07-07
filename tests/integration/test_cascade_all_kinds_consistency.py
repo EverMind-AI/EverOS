@@ -215,12 +215,12 @@ _KIND_CASES: list[_DailyLogKindCase] = [
 
 async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
     async with asyncio.timeout(deadline):
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None:
                 break
             await asyncio.sleep(0.05)
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
                 break

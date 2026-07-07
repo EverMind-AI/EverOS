@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-07-06
+
+### Added
+
+- **DashScope rerank provider** — Aliyun Bailian `gte-rerank-v2` adapter;
+  configure with `rerank.provider = "dashscope"` in `everos.toml`.
+- **`everos demo` TUI command** — Textual-based interactive CLI demo for
+  showcasing EverOS core features.
+- **Benchmark runner** — full LoCoMo benchmark suite: `benchmarks/run.py`
+  with TOML configuration, automated ingestion, search evaluation, and
+  scoring.
+- **Hybrid search: heap-expand algorithm** — rewrote `hierarchy.py` to
+  heap-driven lazy expansion with global top-N competition, replacing the
+  serial four-layer pipeline.
+
+### Fixed
+
+- **Knowledge: atomic upsert prevents StaleDataError** — cascade handler
+  switched from get→update to `INSERT ... ON CONFLICT DO UPDATE`, fixing
+  concurrent cascade race conditions.
+- **API: OpenAPI version read from `__version__`** — no longer hardcoded to
+  `0.1.0`; version now stays in sync with `pyproject.toml`.
+- **Profile middleware no longer swallows exceptions** — inner handler
+  errors now re-raise correctly instead of silently returning HTTP 200.
+
+### Performance
+
+- **Cascade optimize throttle 1s → 10s** — reduced unnecessary LanceDB
+  `optimize()` I/O by raising the minimum interval between calls.
+
+### CI / Build
+
+- **CI Python version matrix** — test and integration jobs now run on both
+  Python 3.12 and 3.13.
+- **pyproject.toml improvements** — added `project.urls`, `Typing :: Typed`
+  classifier, relaxed `jieba` version constraint, removed unused
+  `python-dotenv` dependency, cleaned up sdist include list, added `RUF`
+  lint rules and coverage configuration.
+- **`make ci` includes coverage** — `ci` target now runs
+  `lint + test + integration + cov`.
+
+### Documentation
+
+- Fixed stale references across 13 files (v1.1.0 freshness sweep).
+- Added GitHub sync guide (`docs/github-sync.md`).
+- Added v1.1.0 release notes and v1.0.0 migration guide as standalone docs.
+- Added `README.zh-CN.md` (Chinese README).
+- Expanded `QUICKSTART.md` with source install instructions and `uv run`
+  usage notes.
+- Clarified cascade `optimize()` semantics in docstrings and runbook.
+
 ## [1.1.0] - 2026-06-24
 
 ### Added
@@ -164,7 +215,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/EverMind-AI/everos/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/EverMind-AI/everos/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/EverMind-AI/everos/releases/tag/v1.0.1
 [1.0.0]: https://github.com/EverMind-AI/everos/releases/tag/v1.0.0

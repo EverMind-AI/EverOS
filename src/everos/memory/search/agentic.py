@@ -20,6 +20,7 @@ before calling ``shape_episode_from_candidate``.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -31,11 +32,14 @@ from everalgo.rank.maxsim import amaxsim_retrieve
 from everalgo.types import Candidate
 
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import cluster_repo
 from everos.memory.search.callbacks import build_rerank_fn
 from everos.memory.search.shaper import shape_episode_from_candidate
 
 from .dto import SearchEpisodeItem
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from everalgo.clustering import Cluster
@@ -76,6 +80,8 @@ async def search_episodes_agentic(
     *,
     owner_id: str,
     where: str,
+    app_id: str = "default",
+    project_id: str = "default",
     episode_recaller: EpisodeRecaller,
     atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
@@ -101,15 +107,23 @@ async def search_episodes_agentic(
         Empty when no clusters exist or retrieval returns nothing.
     """
 
-    # 1. Fact-level child retrieve closures (dense + sparse via atomic_fact table).
+    # 1. Fact-level child retrieve closures (dense + sparse via both tables).
     async def _fact_dense(q: str, k: int) -> list[Candidate]:
         vec = await embed_query_fn(q)
         if not vec:
             return []
-        return await atomic_fact_recaller.dense_recall(vec, where, limit=k)
+        fact_results, ep_results = await asyncio.gather(
+            atomic_fact_recaller.dense_recall(vec, where, limit=k),
+            episode_recaller.dense_recall_subject_as_child(vec, where, limit=k),
+        )
+        return fact_results + ep_results
 
     async def _fact_sparse(q: str, k: int) -> list[Candidate]:
-        return await atomic_fact_recaller.sparse_recall(q, where, limit=k)
+        fact_results, ep_results = await asyncio.gather(
+            atomic_fact_recaller.sparse_recall(q, where, limit=k),
+            episode_recaller.sparse_recall_as_child(q, where, limit=k),
+        )
+        return fact_results + ep_results
 
     # 2. parent_fetch: maps entry_ids (from atomic_fact.parent_id) to episodes.
     #    Atomic facts always point to episodes via entry_id regardless of
@@ -168,7 +182,12 @@ async def search_episodes_agentic(
     #    Reshape metadata to the everalgo doc contract so the sufficiency /
     #    multi-query LLM prompt (rendered by ``_format_docs``) sees the episode
     #    body and a ms-epoch date instead of the memcell id.
-    clusters: list[Cluster] = await cluster_repo.list_for_owner(owner_id, "user_memory")
+    clusters: list[Cluster] = await cluster_repo.list_for_owner(
+        owner_id,
+        "user_memory",
+        app_id=app_id,
+        project_id=project_id,
+    )
     raw_all_docs = await episode_recaller.fetch_all_for_owner(where)
     all_docs: list[Candidate] = [
         c.model_copy(update={"metadata": _to_everalgo_doc_metadata(c.metadata)})
@@ -192,7 +211,7 @@ async def search_episodes_agentic(
     )
 
     # 8. aagentic_retrieve — benchmark cluster main path.
-    candidates, _decision = await aagentic_retrieve(
+    candidates, decision = await aagentic_retrieve(
         query,
         base_retrieve=cluster_scoped,
         round2_retrieve=hybrid_full,
@@ -206,6 +225,9 @@ async def search_episodes_agentic(
         multi_query_count=_MULTI_QUERY_COUNT,
         rrf_k=_HYBRID_RRF_K,
     )
+
+    round_tag = "round1" if decision.is_sufficient else "round2"
+    logger.info("agentic_search_decision", round=round_tag, query=query[:80])
 
     # 9. Shape: remap id from memcell_id -> episode_id, then build DTO.
     return _shape_results(candidates)

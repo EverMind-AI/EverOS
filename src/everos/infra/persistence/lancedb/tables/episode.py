@@ -81,3 +81,4 @@ class Episode(BaseLanceTable):
     supersedes this row. ``NULL`` means the row is still active."""
 
     vector: Vector(_DIM)  # type: ignore[valid-type]
+    subject_vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

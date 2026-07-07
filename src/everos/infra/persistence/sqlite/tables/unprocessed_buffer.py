@@ -15,7 +15,7 @@ from everos.core.persistence.sqlite.base import UtcDateTimeColumn
 
 
 class UnprocessedBuffer(BaseTable, table=True):
-    """One row per unprocessed message. PK ``message_id``."""
+    """One row per unprocessed message. PK ``(message_id, app_id, project_id)``."""
 
     __tablename__ = "unprocessed_buffer"  # type: ignore[assignment]
     __table_args__ = (
@@ -32,8 +32,8 @@ class UnprocessedBuffer(BaseTable, table=True):
     )
 
     message_id: str = Field(primary_key=True)
-    app_id: str = Field(default="default")
-    project_id: str = Field(default="default")
+    app_id: str = Field(default="default", primary_key=True)
+    project_id: str = Field(default="default", primary_key=True)
     """App / project scope segments (default ``"default"``)."""
     session_id: str = Field(index=True)
     track: str = Field(index=True)

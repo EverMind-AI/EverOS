@@ -688,7 +688,7 @@ ranked; `score` is `null`. Ignored when `agent_id` is set.
 
 **`enable_llm_rerank`** — Opt-in LLM rerank pass for
 `method: "hybrid"`. Applies to `agent_case` and `agent_skill` fusion
-only; the episode hierarchy path has built-in fact eviction and
+only; the episode hybrid path has built-in fact eviction and
 ignores this flag. Adds one LLM call per request. Ignored by
 `keyword` / `vector` (no fusion to rerank) and `agentic` (uses its
 own cross-encoder loop).

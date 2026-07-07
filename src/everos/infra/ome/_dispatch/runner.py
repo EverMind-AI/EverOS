@@ -191,7 +191,7 @@ class Runner:
             except StrategyContractError as e:
                 await self._terminate_dead_letter(current_run_id, _format_error(e))
                 return True
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 err = _format_error(e)
                 if attempt < max_retries_snapshot:
                     await self._rec.mark_failed(
@@ -237,7 +237,7 @@ class Runner:
                 max_retries_snapshot=max_retries_snapshot,
                 event_id=event_id,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception(
                 "mark_running_failed",
                 run_id=run_id,
@@ -264,7 +264,7 @@ class Runner:
             return
         try:
             self._on_dead_letter(rec)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("on_dead_letter_failed")
 
 

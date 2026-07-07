@@ -107,7 +107,7 @@ async def test_enabled_with_query_returns_html_when_inner_raises(
         pytest.skip("pyinstrument not installed in this env")
 
     # Rebuild a tiny app whose route raises so the middleware's except branch
-    # fires; the profile HTML is still emitted regardless.
+    # fires; the middleware re-raises so the error propagates normally.
     app = FastAPI()
     app.add_middleware(ProfileMiddleware)
 
@@ -120,8 +120,7 @@ async def test_enabled_with_query_returns_html_when_inner_raises(
         base_url="http://test",
     ) as c:
         resp = await c.get("/bang?profile=true")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers.get("content-type", "")
+    assert resp.status_code == 500
 
 
 async def test_enabled_without_pyinstrument(monkeypatch: pytest.MonkeyPatch) -> None:

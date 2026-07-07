@@ -107,6 +107,7 @@ celerybeat.pid
 # Environments
 .env
 .env.*
+!.env.example
 .venv
 env/
 venv/
@@ -258,13 +259,17 @@ evaluation/locomo_evaluation/data/locomo10.json
 # Legacy src kept locally for migration reference; not under version control.
 src_old/
 
-# Benchmark checkpoints — Phase-level intermediate JSON dumps produced by
-# tests/test_locomo.py / tests/run_locomo_batch.sh. Per-conv final results
-# (benchmark_results/run_*/convN.json) and reports (REPORT.md / REPORT.html)
-# stay tracked; checkpoints are large, regeneratable, and not useful in
-# code review.
+# Benchmark results — JSONL outputs, reports, and run specs produced by
+# benchmarks/run.py. These are large, regeneratable, and not useful in
+# code review. Legacy benchmark_results/ and benchmark_checkpoints/ kept
+# for any lingering local data from pre-refactor runs.
+benchmarks/results/
 benchmark_results/
 benchmark_checkpoints/
 
+# Benchmark credentials — API keys + base URLs; covered by the top-level
+# .env pattern but listed explicitly for discoverability.
+benchmarks/.env
+
 # Local everos runtime data (memory root, indexes, OME state)
-.everos/
+.everos*/

@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.1.0"
+version = "1.1.1"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -15,13 +15,15 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
+
 dependencies = [
     # Core data validation & config
     "pydantic>=2.7.1",
     "pydantic-settings>=2.0.0",
-    "python-dotenv>=1.0.1",
 
     # Storage stack (md-first three-piece set)
     "lancedb>=0.13.0",            # Vector + BM25 + scalar filter (Arrow-based)
@@ -46,12 +48,12 @@ dependencies = [
     "structlog>=24.0.0",
     "prometheus-client>=0.20.0",
 
-    # CLI
+    # CLI + TUI
     "typer>=0.12.0",
     "textual>=8.2.7",
 
     # Tokenization (BM25 Chinese support)
-    "jieba==0.42.1",
+    "jieba>=0.42.1,<1.0",
 
     # OME (Offline Memory Evolution) async scheduler & file I/O
     "apscheduler>=3.10.4,<4.0",   # async strategy scheduler chassis
@@ -68,6 +70,12 @@ dependencies = [
 
 [project.optional-dependencies]
 multimodal = ["everalgo-parser[svg]>=0.2.1"]  # [svg] bundles cairosvg → SVG works by default
+
+[project.urls]
+Homepage = "https://evermind.ai"
+Repository = "https://github.com/EverMind-AI/EverOS"
+Changelog = "https://github.com/EverMind-AI/EverOS/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/EverMind-AI/EverOS/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -90,10 +98,8 @@ packages = ["src/everos"]
 include = [
     "/src",
     "/tests",
-    "/data",
     "/docs",
     "/pyproject.toml",
-    "/uv.lock",
     "/README.md",
     "/QUICKSTART.md",
     "/CHANGELOG.md",
@@ -121,14 +127,20 @@ target-version = "py312"
 extend-exclude = ["src_old"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM", "ASYNC"]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "ASYNC", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous Unicode in strings (intentional × – symbols)
+    "RUF002",  # ambiguous Unicode in docstrings
+    "RUF003",  # ambiguous Unicode in comments
+    "RUF012",  # mutable class attribute default (SQLModel requires this)
+]
 
 [tool.ruff.lint.per-file-ignores]
 # LoCoMo benchmark embeds LLM prompts (ANSWER_PROMPT / JUDGE_*_PROMPT) and
 # verbose argparse help strings as multi-line string literals. Line breaks
 # would change what the LLM actually sees or noise the --help output, so
 # E501 is silenced for this file only.
-"tests/test_locomo.py" = ["E501"]
+"benchmarks/run.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -160,6 +172,15 @@ markers = [
 source = ["src/everos"]
 branch = true
 omit = ["**/__init__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "pragma: no cover",
+]
 
 [tool.importlinter]
 root_packages = ["everos"]

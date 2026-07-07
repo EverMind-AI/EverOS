@@ -140,7 +140,7 @@ async def _enqueue_async(
             change_type=change_type,
             mtime=mtime,
         )
-    except Exception as exc:  # noqa: BLE001 — defensive: never crash watcher
+    except Exception as exc:
         logger.warning(
             "cascade_watcher_upsert_failed",
             md_path=rel,

@@ -28,8 +28,7 @@ def build_llm_provider(settings: LLMSettings) -> LLMClient:
     Raises:
         ValueError: If ``api_key`` or ``base_url`` is unset.
     """
-    api_key = settings.api_key.get_secret_value() if settings.api_key else ""
-    if not api_key:
+    if not settings.api_key or not settings.api_key.get_secret_value():
         raise ValueError(
             "LLM api_key is not configured "
             "(set EVEROS_LLM__API_KEY or [llm] api_key in user toml)"
@@ -41,6 +40,6 @@ def build_llm_provider(settings: LLMSettings) -> LLMClient:
         )
     return OpenAIProvider(
         model=settings.model,
-        api_key=api_key,
+        api_key=settings.api_key.get_secret_value(),
         base_url=settings.base_url,
     )

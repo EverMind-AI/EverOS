@@ -26,36 +26,30 @@
 
 # ── User-memory pipeline ────────────────────────────────────────────────
 
-# Atomic fact extraction (runs per memcell). Disable to skip fact mining.
-# [strategies.extract_atomic_facts]
+# Atomic fact extraction runs per memcell. Always enabled — search
+# depends on atomic facts for MaxSim retrieval.
+
+# Foresight extraction (runs per memcell). Heavy LLM call — set
+# enabled = false to skip in evaluation / benchmark runs.
+# [strategies.extract_foresight]
 # enabled = true
 
-# Foresight extraction (runs per memcell). Heavy LLM call — common to
-# disable in evaluation / benchmark runs.
-# [strategies.extract_foresight]
-# enabled = false
-
-# Profile clustering trigger (counter-gated; fires once N user memcells
-# accumulate). Lower the threshold to cluster more aggressively.
+# Profile clustering trigger (fires on each EpisodeExtracted event).
 # [strategies.trigger_profile_clustering]
 # enabled = true
-# [strategies.trigger_profile_clustering.gate]
-# threshold = 5
 
-# User-profile extraction (runs after clustering trigger fires). Common
-# to disable in evaluation runs where ground-truth profiles aren't measured.
+# User-profile extraction (runs after clustering trigger fires). Set
+# enabled = false to skip in evaluation runs.
 # [strategies.extract_user_profile]
-# enabled = false
+# enabled = true
 
 # ── Reflection ──────────────────────────────────────────────────────────
 
-# Offline memory consolidation. Disabled by default — uncomment to enable.
-# Once enabled, runs on the default schedule: weekly, Monday 02:00.
-# Run Reflection sparingly — at most once a week. Triggering it too
-# often degrades quality, since each run is a lossy LLM re-merge.
-# The cron expression can be overridden without restarting the server.
+# Offline memory consolidation. Disabled by default. To enable,
+# uncomment and set enabled = true. Runs weekly Monday 02:00.
+# Run sparingly — at most once a week. Each run is a lossy LLM re-merge.
 # [strategies.reflect_episodes]
-# enabled = true
+# enabled = false
 # cron = "0 2 * * 1"
 
 # ── Agent-memory pipeline ───────────────────────────────────────────────
@@ -64,12 +58,9 @@
 # [strategies.extract_agent_case]
 # enabled = true
 
-# Skill clustering trigger (counter-gated; fires once N agent cases
-# accumulate per agent).
+# Skill clustering trigger (fires on each AgentCaseExtracted event).
 # [strategies.trigger_skill_clustering]
 # enabled = true
-# [strategies.trigger_skill_clustering.gate]
-# threshold = 5
 
 # Agent skill extraction (runs after skill clustering trigger fires).
 # [strategies.extract_agent_skill]

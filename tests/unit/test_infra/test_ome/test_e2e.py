@@ -178,7 +178,7 @@ async def test_cron_strategy_executes_when_cron_entry_fires() -> None:
         h.register(cron_job)
         await h.start()
         # Directly invoke what APS would call; bypass scheduler timing.
-        await _cron_entry(h._engine._engine_id, "cron_e2e")  # noqa: SLF001
+        await _cron_entry(h._engine._engine_id, "cron_e2e")
         await h.drain(timeout=5)
         runs = await h.list_runs("cron_e2e")
 
