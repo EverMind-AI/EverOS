@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.1.1"
+version = "1.1.2"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
