@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-07-07
+
+### Fixed
+
+- **Agent-track search broken by `deprecated_by IS NULL` filter** —
+  `compile_filters()` unconditionally appended a `deprecated_by IS NULL`
+  clause to every LanceDB query, but only `episode` and `atomic_fact`
+  tables have this column. Agent-track search (`agent_case`,
+  `agent_skill`) failed on any method. The clause is now conditional on
+  `owner_type == "user"`.
+
 ## [1.1.1] - 2026-07-06
 
 ### Added
@@ -215,7 +226,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/EverMind-AI/everos/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/EverMind-AI/everos/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/EverMind-AI/everos/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/EverMind-AI/everos/releases/tag/v1.0.1

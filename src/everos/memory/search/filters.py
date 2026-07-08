@@ -107,8 +107,11 @@ def compile_filters(
         f"owner_type = '{owner_type}'",
         f"app_id = '{_escape_str(app_id)}'",
         f"project_id = '{_escape_str(project_id)}'",
-        "deprecated_by IS NULL",
     ]
+    # Only episode / atomic_fact tables carry the ``deprecated_by`` column
+    # (Reflection V1 marks superseded entries). Agent tables don't have it.
+    if owner_type == "user":
+        base.append("deprecated_by IS NULL")
     if node is None:
         return " AND ".join(base)
     compiled = _compile_node(node.model_dump(exclude_none=True))
