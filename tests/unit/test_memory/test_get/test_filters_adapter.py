@@ -33,6 +33,12 @@ def test_no_filters_emits_base_clause() -> None:
     )
 
 
+def test_no_filters_agent_omits_deprecated_by() -> None:
+    """Agent tables lack ``deprecated_by`` — clause must be absent."""
+    where = compile_filters_for_get(None, owner_id="bot", owner_type="agent")
+    assert "deprecated_by" not in where
+
+
 def test_owner_id_quote_is_escaped() -> None:
     """SQL-standard double-quote escape on ``owner_id``."""
     where = compile_filters_for_get(None, owner_id="o'reilly", owner_type="user")
