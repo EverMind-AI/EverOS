@@ -22,7 +22,7 @@ async def test_search_without_embedding_raises() -> None:
 
     with (
         patch(f"{_MOD}._get_embedding", return_value=None),
-        pytest.raises(ConfigurationError, match="[Ee]mbedding"),
+        pytest.raises(ConfigurationError, match=r"[Ee]mbedding"),
     ):
         await search_knowledge(query="test", method="vector")
 
@@ -36,6 +36,6 @@ async def test_search_without_reranker_raises() -> None:
     with (
         patch(f"{_MOD}._get_embedding", return_value=mock_embedder),
         patch(f"{_MOD}._get_reranker", return_value=None),
-        pytest.raises(ConfigurationError, match="[Rr]erank"),
+        pytest.raises(ConfigurationError, match=r"[Rr]erank"),
     ):
         await search_knowledge(query="test", method="keyword")

@@ -153,7 +153,8 @@ async def test_added_entry_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     assert outcome.skipped == 0
-    assert embedder.calls == 1
+    # Subject "Test" is present → two embed calls (content + subject).
+    assert embedder.calls == 2
     assert len(fake_repo.upserts) == 1
     row = fake_repo.upserts[0][0]
     assert row.owner_id == "u1"
@@ -165,12 +166,15 @@ async def test_added_entry_upserts_typed_row(
     assert row.parent_id == "mc_test_parent"
     assert row.parent_type == "memcell"
     assert row.episode == "hello world"
-    assert row.episode_tokens == "hello world"
+    # episode_tokens includes subject keywords appended after content tokens.
+    assert row.episode_tokens == "hello world Test"
     assert row.subject == "Test"
     assert row.md_path == rel
     assert row.entry_id.startswith("ep_")
     assert row.id == f"u1_{row.entry_id}"
     assert len(row.vector) == 1024
+    assert row.subject_vector is not None
+    assert len(row.subject_vector) == 1024
 
 
 async def test_unchanged_entry_is_skipped_no_embed_call(
@@ -211,7 +215,40 @@ async def test_modified_entry_reembeds(
     outcome = await handler.handle_added_or_modified(rel)
     assert outcome.upserted == 1
     assert outcome.skipped == 0
+    # Subject "Test" is present → two embed calls (content + subject).
+    assert embedder.calls == 2
+
+
+async def test_no_subject_skips_subject_embed(
+    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+) -> None:
+    """When Subject is absent, subject_vector is None; only one embed call is made."""
+    today = _dt.date(2026, 5, 14)
+    writer = EpisodeWriter(memory_root)
+    await writer.append_entry(
+        "u2",
+        inline={
+            "owner_id": "u2",
+            "session_id": "s2",
+            "timestamp": "2026-05-14T10:00:00+00:00",
+            "parent_type": "memcell",
+            "parent_id": "mc_no_subject",
+            "sender_ids": ["u2"],
+        },
+        sections={"Content": "content only"},
+        date=today,
+    )
+    rel = "default_app/default_project/users/u2/episodes/episode-2026-05-14.md"
+
+    handler, embedder = _build_handler(memory_root)
+    outcome = await handler.handle_added_or_modified(rel)
+
+    assert outcome.upserted == 1
+    # No Subject → single embed call for content only.
     assert embedder.calls == 1
+    row = fake_repo.upserts[0][0]
+    assert row.subject_vector is None
+    assert row.episode_tokens == "content only"
 
 
 # ── deletion paths ───────────────────────────────────────────────────────

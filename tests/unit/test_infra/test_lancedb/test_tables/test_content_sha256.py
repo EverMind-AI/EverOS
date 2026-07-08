@@ -146,5 +146,5 @@ def test_content_sha256_required(factory) -> None:  # type: ignore[no-untyped-de
     row = factory()
     kwargs = row.model_dump()
     del kwargs["content_sha256"]
-    with pytest.raises(Exception):  # noqa: B017,PT011
+    with pytest.raises(Exception):  # noqa: B017
         type(row).model_validate(kwargs)

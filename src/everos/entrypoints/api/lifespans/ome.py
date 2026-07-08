@@ -27,13 +27,13 @@ class OmeLifespanProvider(LifespanProvider):
 
     async def startup(self, app: FastAPI) -> Any:
         svc = importlib.import_module("everos.service.memorize")
-        engine = svc._get_engine()  # noqa: SLF001 — service-internal accessor
+        engine = svc._get_engine()
         await engine.start()
         logger.info("ome_engine_started")
         return engine
 
     async def shutdown(self, app: FastAPI) -> None:
         svc = importlib.import_module("everos.service.memorize")
-        engine = svc._get_engine()  # noqa: SLF001
+        engine = svc._get_engine()
         await engine.stop()
         logger.info("ome_engine_stopped")

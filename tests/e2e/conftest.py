@@ -35,7 +35,6 @@ import asyncio
 import importlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
-from importlib import resources
 from pathlib import Path
 
 import httpx
@@ -124,9 +123,6 @@ async def core_pipeline_runtime(
     ``EVEROS_LLM__*`` or ``EVEROS_EMBEDDING__*``).
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-
-    default_ome = resources.files("everos.config").joinpath("default_ome.toml")
-    (tmp_path / "ome.toml").write_text(default_ome.read_text(encoding="utf-8"))
 
     from everos.config import load_settings
 

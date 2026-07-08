@@ -10,107 +10,147 @@ front of your agent.
 ## Prerequisites
 
 - **Python 3.12+**
-- **An LLM provider key and endpoint** — for memory extraction. OpenRouter,
-  OpenAI, and other OpenAI-compatible providers work when you set
-  `base_url`.
-- **A multimodal provider key and endpoint** — needed only when parsing
-  image / pdf / audio content items.
-- **Embedding and rerank provider keys and endpoints** — for search. DeepInfra
-  works for the embedding + rerank path; vLLM and DashScope are also supported
-  for rerank.
-
-Many deployments use two distinct keys by reusing one LLM key for `[llm]` and
-`[multimodal]`, and one DeepInfra key for `[embedding]` and `[rerank]`. Any
-setting can live in TOML or be overridden by the matching `EVEROS_*`
-environment variable.
+- **API keys** for three capabilities: a chat LLM (memory extraction),
+  an embedding model (vector retrieval), and a reranker. Any
+  OpenAI-compatible endpoint works.
 
 ## 1. Install
+
+**From PyPI** (users):
 
 ```bash
 pip install everos
 # or:  uv pip install everos
 ```
 
-## 2. Configure
-
-Generate the starter config and fill in provider credentials:
+**From source** (contributors / developers):
 
 ```bash
-everos init                    # writes ~/.everos/everos.toml + ome.toml (use --root to relocate)
-# Edit ~/.everos/everos.toml and fill the provider fields:
-#   [llm]        api_key + base_url             (chat LLM)
-#   [multimodal] api_key + base_url             (optional parser LLM)
-#   [embedding]  model + api_key + base_url
-#   [rerank]     model + api_key + base_url     (provider can be inferred or set)
+git clone https://github.com/EverMind-AI/EverOS.git
+cd EverOS
+uv sync          # install all deps into .venv
 ```
 
-`everos init` generates two files: `everos.toml` (provider settings)
-and `ome.toml` (offline memory engine strategy config, hot-reloaded).
-Because `everos.toml` holds API keys, consider restricting access
-after editing: `chmod 600 ~/.everos/everos.toml`.
+> **Note:** source install creates a `.venv` virtualenv. Subsequent
+> `everos` commands need either `uv run everos ...` or activate the venv
+> first (`source .venv/bin/activate`).
 
-The shipped template sets model defaults for `[llm]` (`gpt-4.1-mini`) and
-`[multimodal]` (`google/gemini-3-flash-preview`); `[embedding]` and
-`[rerank]` ship no model default — set `model` + `base_url` for those two
-sections yourself (for example DeepInfra's `Qwen/Qwen3-Embedding-4B` /
-`Qwen/Qwen3-Reranker-4B`). `[llm]` and `[multimodal]` ship model defaults,
-but still need `api_key` and `base_url` before those capabilities are used.
+## 2. Configure
 
-> **Where config lives** — `everos init` writes into the memory root
-> (`~/.everos` by default; relocate with `everos init --root <path>` and
-> start the server with the matching `everos server start --root <path>`).
-> `everos server start` reads `<root>/everos.toml` and exits with an error
-> if it is missing. Any setting can also be overridden by an `EVEROS_*`
-> environment variable (e.g. `EVEROS_LLM__API_KEY`) — handy for containers
+```bash
+everos init                        # default root: ~/.everos
+everos init --root /data/everos    # or specify a custom root
+```
+
+> **Root directory** — defaults to `~/.everos`. Use `--root <path>` to
+> relocate; all subsequent commands (`server start`, `cascade status`,
+> etc.) must use the matching `--root`. Any setting in `everos.toml` can
+> also be overridden via `EVEROS_*` environment variables for containers
 > and CI.
+
+This creates `everos.toml` and `ome.toml` under the root directory.
+Open `everos.toml` and fill in three sections — here's the minimum
+viable config:
+
+```toml
+[llm]
+model    = "gpt-4.1-mini"                        # or your preferred model
+base_url = "https://openrouter.ai/api/v1"        # any OpenAI-compatible endpoint
+api_key  = "sk-..."                               # your API key
+
+[embedding]
+model    = "Qwen/Qwen3-Embedding-4B"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key  = "..."
+
+[rerank]
+provider = "deepinfra"
+model    = "Qwen/Qwen3-Reranker-4B"
+base_url = "https://api.deepinfra.com/v1/inference"
+api_key  = "..."
+```
+
+The generated file pre-fills recommended `model` and `base_url`
+defaults — just drop in your API keys. Any OpenAI-compatible endpoint
+works.
+
+> **Multimodal** (`[multimodal]`) is optional — only needed when
+> ingesting image / pdf / audio content items. See
+> [docs/multimodal.md](docs/multimodal.md) for setup.
+
 
 ## 3. Start the server
 
+Check your file descriptor limit — EverOS opens many LanceDB segment
+files under concurrent search + indexing. Platform defaults:
+**macOS 256** · **Linux 1024** · **Windows 8192**. If yours is below
+4096, raise it before starting:
+
+Run these in the **same terminal** where you will start the server —
+`ulimit` is per-shell-session, not global:
+
 ```bash
-everos server start
+ulimit -n            # check current limit
+ulimit -n 4096       # raise if needed
+everos server start [--root <path>]   # must be in the same session
 ```
 
-You should see (port and host are configurable):
+> **No side effects** — `ulimit -n` only raises the per-process ceiling.
+> It does not pre-allocate memory or file handles, and has zero
+> performance cost. For Linux production, set `LimitNOFILE=65536` in
+> your systemd unit file.
+
+You should see:
 
 ```
 starting everos on 127.0.0.1:8000
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ```
 
-- Default bind is `127.0.0.1` (loopback only). To expose the API
-  elsewhere, put your own auth/gateway in front first
-  ([see SECURITY.md](SECURITY.md)).
-- The cascade index daemon runs **in the same process** as a FastAPI
-  lifespan coroutine — you don't need a separate worker.
-- The server runs in the foreground; **open a second terminal** for the
-  steps below, and use `Ctrl+C` to stop the server when you're done.
+The server runs in the foreground. **Open a second terminal** for the
+steps below.
 
-In the second terminal, verify the server is up:
+Verify it's up:
 
 ```bash
-$ curl http://127.0.0.1:8000/health
-{"status":"ok"}
+curl http://127.0.0.1:8000/health
+# {"status":"ok"}
 ```
 
 ## 4. Add a conversation
 
-EverOS ingests memory at the **conversation level**, not as standalone
-sentences: you POST a batch of `messages` tied to a `session_id`, and
-the server accumulates them until the boundary detector trips (you can
-also force a flush — see step 5).
+Send messages to the server — one at a time or in batches. Each batch
+belongs to a `session_id`, which represents one conversation thread.
+Timestamps are Unix epoch in **milliseconds** (UTC).
+
+First, a chat about climbing:
 
 ```bash
-TS=$(($(date +%s)*1000))    # Unix epoch in **milliseconds** (v1 contract)
+TS=$(($(date +%s)*1000))
 curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
-    \"app_id\": \"default\",
-    \"project_id\": \"default\",
     \"messages\": [
-      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $TS, \"content\": \"I love climbing in Yosemite every spring.\"},
-      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $((TS+10000)), \"content\": \"My favorite coffee shop is Blue Bottle in SOMA.\"},
-      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $((TS+20000)), \"content\": \"I bike to work most days.\"}
+      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $TS,              \"content\": \"I just got back from a week in Yosemite. The climbing was incredible.\"},
+      {\"sender_id\": \"agent1\", \"role\": \"assistant\", \"timestamp\": $((TS+10000)),  \"content\": \"That sounds amazing! Which routes did you do?\"},
+      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+20000)),  \"content\": \"Mostly cracks on El Cap. I go every spring — it's my favorite season there.\"}
+    ]
+  }"
+# → status: "accumulated"
+```
+
+Now the topic shifts to work:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"session_id\": \"demo-001\",
+    \"messages\": [
+      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+60000)),  \"content\": \"By the way, I switched to biking to work last month. Loving it so far.\"},
+      {\"sender_id\": \"agent1\", \"role\": \"assistant\", \"timestamp\": $((TS+70000)),  \"content\": \"How long is your commute?\"},
+      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+80000)),  \"content\": \"About 25 minutes. I stop at Blue Bottle in SOMA for coffee most mornings.\"}
     ]
   }"
 ```
@@ -119,52 +159,53 @@ Response:
 
 ```json
 {
-    "request_id": "bf86e4e857834eba804841f8bff29106",
     "data": {
         "message_count": 3,
-        "status": "accumulated"
+        "status": "extracted"
     }
 }
 ```
 
-`status: "accumulated"` means the three messages are in the session
-buffer, but the boundary detector hasn't decided to extract a memory
-cell yet. For a quick demo we'll force it.
+EverOS detected a topic shift (climbing → commute) and automatically
+extracted the earlier conversation into memory.
 
-## 5. Force boundary extraction
+The `status` field tells you what happened:
+
+| Status | Meaning |
+|---|---|
+| `accumulated` | Messages buffered, still part of the same topic. |
+| `extracted` | Topic shift detected — memory extracted from the buffer. |
+
+> For the full API contract, see [docs/openapi.json](docs/openapi.json).
+
+## 5. Flush (manual extraction)
+
+If you want to extract memory without waiting for a topic shift — for
+example at the end of a session — call `/flush`:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
   -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
+  -d '{"session_id":"demo-001"}'
 ```
-
-Response (this takes a few seconds — one LLM call for extraction):
 
 ```json
 {
-    "request_id": "ec0e7a00c3bd4b00bb21212a411b7763",
     "data": {
         "status": "extracted"
     }
 }
 ```
 
-`status: "extracted"` means at least one memory cell was carved out and
-written to disk + indexed.
+This forces extraction of whatever is still in the buffer.
 
-> `/flush` is **OSS-only**. The cloud edition decides boundary timing
-> server-side and does not expose this endpoint.
-
-## 6. Search the memory you just added
+## 6. Search
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
-    "app_id": "default",
-    "project_id": "default",
     "query": "Where do I like to climb?",
     "top_k": 5
   }'
@@ -174,158 +215,78 @@ Response (trimmed):
 
 ```json
 {
-    "request_id": "b53a3a94a080472d97692c503c88afdf",
     "data": {
         "episodes": [
             {
                 "id": "alice_ep_20260528_00000002",
-                "user_id": "alice",
-                "session_id": "demo-001",
-                "summary": "On May 28, 2026 ... Alice shared that she loves climbing in Yosemite every spring ...",
-                "score": 0.6284722685813904,
+                "summary": "... Alice shared that she loves climbing in Yosemite every spring ...",
+                "score": 0.628,
                 "atomic_facts": [
                     {
-                        "id": "alice_af_20260528_00000016",
                         "content": "Alice said she loves climbing in Yosemite every spring.",
-                        "score": 0.6284722685813904
+                        "score": 0.628
                     }
                 ]
             }
-        ],
-        "profiles": [],
-        "agent_cases": [],
-        "agent_skills": []
+        ]
     }
 }
 ```
 
-The hybrid retrieval (BM25 + vector + scalar) returns the episode
-that contains the climbing fact, with the matching atomic fact nested
-under it. Other response arrays (`profiles` / `agent_cases` /
-`agent_skills`) are always present for client-side symmetry, populated
-only when the requested kind matches.
+Hybrid retrieval (BM25 + vector + scalar) returns the matching episode
+with its atomic facts nested under it.
 
 ## 7. Your memory is just Markdown
 
-This is what makes EverOS different — your memory persists as plain
-Markdown files on disk:
+This is what makes EverOS different — memory persists as plain Markdown:
 
 ```
-$ tree ~/.everos -L 5 -a
-~/.everos
-├── default_app/                       ← app_id  ("default" → "default_app")
-│   └── default_project/               ← project_id ("default" → "default_project")
-│       ├── users/
-│       │   └── alice/                  ← user_id (mirror dir: agents/<agent_id>/)
-│       │       ├── episodes/
-│       │       │   └── episode-2026-05-28.md
-│       │       ├── .atomic_facts/      ← hidden (dot-prefix)
-│       │       │   └── atomic_fact-2026-05-28.md
-│       │       ├── .foresights/
-│       │       │   └── foresight-2026-05-28.md
-│       │       └── user.md             ← profile
-│       └── knowledge/                  ← shared knowledge base (v1.1+)
-│           └── .taxonomy.md
-├── everos.toml                         ← provider config (API keys)
+<root>/                                  ← ~/.everos or your --root path
+├── default_app/                        ← app_id ("default" → "default_app")
+│   └── default_project/                ← project_id ("default" → "default_project")
+│       ├── users/<user_id>/
+│       │   ├── user.md                 ← profile
+│       │   ├── episodes/               ← daily-log episodes
+│       │   ├── .atomic_facts/          ← nested facts (dot-hidden)
+│       │   └── .foresights/            ← predictive memory (dot-hidden)
+│       ├── agents/<agent_id>/
+│       │   ├── agent.md
+│       │   ├── .cases/                 ← task cases
+│       │   └── skills/                 ← procedural memories
+│       └── knowledge/                  ← shared knowledge base
+├── everos.toml                         ← provider config
 ├── ome.toml                            ← strategy config (hot-reloaded)
 ├── .index/                             ← derived indexes (rebuildable from md)
 │   ├── sqlite/system.db
-│   └── lancedb/*.lance/
+│   └── lancedb/
 └── .tmp/
 ```
 
-The `default` scope id materialises as `default_app` / `default_project`
-on disk (with the `_app` / `_project` suffix) so the default space is
-visually distinct from any user-named space. Any other id maps to itself
-(e.g. `app_id: "my-app"` → `my-app/`).
-
-Top-level `.index/` holds SQLite + LanceDB **derived** indexes — wipe it
-and the cascade daemon rebuilds everything from the Markdown alone.
-
-Read the episode we just created:
-
-```
-$ cat ~/.everos/default_app/default_project/users/alice/episodes/episode-2026-05-28.md
----
-id: episode_log_alice_2026-05-28
-type: episode_daily
-file_type: episode_daily
-schema_version: 1
-user_id: alice
-track: user
-date: '2026-05-28'
-entry_count: 1
-last_appended_at: '2026-05-28T08:32:24.966944+00:00'
----
-<!-- entry:ep_20260528_00000002 -->
-## ep_20260528_00000002
-
-**owner_id**: alice
-**session_id**: demo-001
-**timestamp**: 2026-05-28T08:32:13+00:00
-**parent_type**: memcell
-**parent_id**: mc_3779c20f1c53
-**sender_ids**: [alice]
-
-### Subject
-Alice's Outdoor Activities and Daily Routine on May 28, 2026 Morning
-
-### Content
-On May 28, 2026 at 8:32 AM UTC, Alice shared that she loves climbing in
-Yosemite every spring, highlighting a recurring seasonal outdoor activity.
-She also mentioned that her favorite coffee shop is Blue Bottle located in
-SOMA, indicating a preferred local spot. Additionally, Alice stated that
-she bikes to work most days, revealing a habitual commuting practice.
-<!-- /entry:ep_20260528_00000002 -->
-```
-
-Every memory entry is a plain Markdown file you can:
-
-- `cat` / `grep` / `vim` directly — no driver, no service to query
-- Version with Git (or rsync to backup)
-- Open the `~/.everos/default_app/default_project/users/alice/` folder
-  in Obsidian (the dotfile directories stay hidden by default)
+Every memory entry is a plain Markdown file you can directly read and
+edit — no database driver needed.
 
 ## Stopping the server
 
-`Ctrl+C` in the server terminal. Uvicorn catches `SIGINT` and shuts each
-lifespan provider down in reverse order (cascade → LanceDB → SQLite →
-LLM → metrics) before exiting.
+`Ctrl+C` in the server terminal.
 
 ## Next steps
 
-- **Integrate into your agent** — wrap the three endpoints (`/add`,
-  `/flush`, `/search`) in a thin Python client (`httpx.AsyncClient`) and
-  call them from your agent loop.
-- **App + project scope** — set `app_id` / `project_id` to anything
-  other than `"default"` to partition memory spaces inside one server.
-- **Knowledge base** — upload documents (PDF / HTML / DOCX) via
-  `/api/v1/knowledge/documents` and search them with hybrid retrieval
-  at `/api/v1/knowledge/search`. Ships with a 20-category default
-  taxonomy. See [docs/knowledge.md](docs/knowledge.md).
-- **Reflection** — offline memory self-improvement that consolidates
-  related episodes. Disabled by default; enable in `ome.toml`
-  (`[strategies.reflect_episodes] enabled = true`). Changes are
-  hot-reloaded, no server restart needed.
-- **Multi-modal messages** — `messages[].content` accepts a list of
-  typed `ContentItem`s (`text` / `image` / `audio` / `doc` / `pdf` /
-  `html` / `email`) for non-text input. Install the optional extra
-  to enable parsing:
-  `uv pip install 'everos[multimodal]'`. Office documents
-  (`doc` / `docx` / `xls` / `ppt` / `…`) additionally need
-  **LibreOffice** on the host (`brew install --cask libreoffice` /
-  `apt-get install libreoffice`) — without it those uploads return
-  HTTP 503 (`CAPABILITY_UNAVAILABLE`); PDF / image / audio / HTML
-  still work.
-- **Filter DSL and search modes** — `/search` supports a filter DSL
-  (`AND` / `OR` / scalar predicates) and four methods (`HYBRID` /
-  `KEYWORD` / `VECTOR` / `AGENTIC`). The OpenAPI docs UI is served at
-  `/docs` only when the server runs with `ENV=DEV`; the default (`prod`)
-  serves the API without the docs UI. The schema also lives at
-  [docs/openapi.json](docs/openapi.json).
-- **Architecture** — see [docs/architecture.md](docs/architecture.md)
-  for the DDD layering and cascade design, and
-  [docs/storage_layout.md](docs/storage_layout.md) for the on-disk
-  layout.
-- **Found a bug?** — open an issue (see [CONTRIBUTING.md](CONTRIBUTING.md);
-  external pull requests are not merged).
+- **Integrate into your agent** — wrap `/add`, `/flush`, `/search` in a
+  thin HTTP client and call them from your agent loop.
+- **App + project scope** — pass `app_id` / `project_id` in your API
+  requests to partition memory spaces inside one server (defaults to
+  `"default"` when omitted).
+- **Knowledge base** — upload documents via
+  `/api/v1/knowledge/documents` and search with hybrid retrieval. See
+  [docs/knowledge.md](docs/knowledge.md).
+- **Reflection** — offline memory consolidation; enable in `ome.toml`.
+  See [docs/reflection.md](docs/reflection.md).
+- **Multimodal** — ingest image / pdf / audio / office documents. See
+  [docs/multimodal.md](docs/multimodal.md).
+- **Search modes** — four methods (`HYBRID` / `KEYWORD` / `VECTOR` /
+  `AGENTIC`) with a filter DSL. See [docs/openapi.json](docs/openapi.json)
+  for the full API schema.
+- **Architecture** — [docs/architecture.md](docs/architecture.md) for
+  DDD layering; [docs/storage_layout.md](docs/storage_layout.md) for
+  on-disk layout.
+- **Found a bug?** — [open an issue](CONTRIBUTING.md).

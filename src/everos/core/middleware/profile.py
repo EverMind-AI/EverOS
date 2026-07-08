@@ -62,8 +62,12 @@ class ProfileMiddleware(BaseHTTPMiddleware):
         profiler.start()
         logger.info("profile_started", method=request.method, path=request.url.path)
         try:
-            await call_next(request)
+            response = await call_next(request)
         except Exception:
-            logger.exception("profile_request_failed")
+            profiler.stop()
+            raise
         profiler.stop()
-        return HTMLResponse(content=profiler.output_html(), status_code=200)
+        return HTMLResponse(
+            content=profiler.output_html(),
+            status_code=response.status_code,
+        )

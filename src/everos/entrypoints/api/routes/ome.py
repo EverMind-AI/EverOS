@@ -32,7 +32,7 @@ class TriggerResponse(BaseModel):
 async def trigger(req: TriggerRequest) -> TriggerResponse:
     """Manually trigger a registered OME strategy and wait for completion."""
     # Deferred: avoid importing heavy OME engine at module level.
-    from everos.service.memorize import _get_engine  # noqa: SLF001
+    from everos.service.memorize import _get_engine
 
     engine = _get_engine()
     try:

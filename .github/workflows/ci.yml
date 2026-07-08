@@ -1,3 +1,6 @@
+# CI is a thin wrapper over the Makefile — single source of truth for commands.
+# See docs/engineering.md and the Makefile for what each target does.
+
 name: CI
 
 on:
@@ -32,7 +35,7 @@ jobs:
       - name: Install dependencies (frozen)
         run: make install-deps
 
-      - name: Lint (ruff + import-linter + datetime + openapi drift)
+      - name: Lint (ruff + import-linter + repo gates + datetime + openapi drift)
         run: make lint
 
   unit:
@@ -56,6 +59,27 @@ jobs:
       - name: Unit tests
         run: make test
 
+  unit-py313:
+    name: unit tests (3.13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies (frozen)
+        run: make install-deps
+
+      - name: Unit tests
+        run: make test
+
   integration:
     name: integration tests
     runs-on: ubuntu-latest
@@ -70,6 +94,27 @@ jobs:
 
       - name: Set up Python
         run: uv python install 3.12
+
+      - name: Install dependencies (frozen)
+        run: make install-deps
+
+      - name: Integration tests
+        run: make integration
+
+  integration-py313:
+    name: integration tests (3.13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
 
       - name: Install dependencies (frozen)
         run: make install-deps

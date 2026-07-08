@@ -111,9 +111,9 @@ async def _build_row_from_md(
     pe = ParsedEntry(
         entry_id=entry.id,
         structured=structured,
-        content_sha256=handler._content_sha256(structured),  # noqa: SLF001
+        content_sha256=handler._content_sha256(structured),
     )
-    return await handler._build_row(  # noqa: SLF001
+    return await handler._build_row(
         owner_id=owner_id,
         owner_type=owner_type,
         md_path=rel,

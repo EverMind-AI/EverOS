@@ -6,9 +6,10 @@ Public surface:
 - :class:`RerankResult` / :class:`RerankServiceError` — value type + error.
 - :class:`RerankError` — backward-compat alias for :class:`RerankServiceError`.
 - :class:`DeepInfraRerankProvider` — DeepInfra inference-API rerank.
-- :class:`DashScopeRerankProvider` — Aliyun Bailian / DashScope rerank.
 - :class:`VllmRerankProvider` — OpenAI-compat ``/v1/rerank`` (vLLM,
   self-hosted, other compatible servers).
+- :class:`DashScopeRerankProvider` — DashScope (Aliyun Bailian)
+  ``gte-rerank-v2`` native text-rerank endpoint.
 - :func:`build_rerank_provider` — settings-driven factory that picks
   the concrete provider via ``settings.rerank.provider``.
 

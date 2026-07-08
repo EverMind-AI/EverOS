@@ -217,7 +217,7 @@ async def _setup_system_db_schema(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from everos.infra.persistence.sqlite import sqlite_manager
 
-    if sqlite_manager._engine is not None:  # noqa: SLF001
+    if sqlite_manager._engine is not None:
         await sqlite_manager.dispose_engine()
     monkeypatch.setattr(sqlite_manager, "_engine", None, raising=False)
     monkeypatch.setattr(sqlite_manager, "_session_factory", None, raising=False)
@@ -231,7 +231,7 @@ async def _teardown_system_db_schema() -> None:
     the event loop (counterpart of :func:`_setup_system_db_schema`)."""
     from everos.infra.persistence.sqlite import sqlite_manager
 
-    if sqlite_manager._engine is not None:  # noqa: SLF001
+    if sqlite_manager._engine is not None:
         await sqlite_manager.dispose_engine()
 
 

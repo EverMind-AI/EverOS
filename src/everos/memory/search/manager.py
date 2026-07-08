@@ -12,8 +12,8 @@ guards (embedding / cross-encoder / LLM) raise early when a method is
 selected without its prerequisites.
 
 ``HYBRID`` defaults to **no LLM rerank** — the response comes back
-straight after the four-layer hierarchy pipeline (RRF → MaxSim →
-RRF merge → single-pass fact eviction). ``enable_llm_rerank`` is
+straight after the heap-expand pipeline (RRF-ordered expansion → LR-calibrated
+global top-N competition with fact eviction). ``enable_llm_rerank`` is
 **ignored** for the hierarchy path. ``AGENTIC`` keeps its own
 internal cross-encoder rerank loop; the flag is ignored there.
 
@@ -33,10 +33,10 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
+from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate, RankInput
 
 from everos.component.utils.datetime import to_display_tz
-from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import gen_request_id
 from everos.infra.persistence.sqlite import (
@@ -60,8 +60,9 @@ from .dto import (
     UnprocessedMessageDTO,
 )
 from .filters import compile_filters
-from .hierarchy import hierarchy_retrieve_episodes
+from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .shaper import (
+    reshape_hybrid_output,
     shape_agent_case_from_candidate,
     shape_agent_skill_from_candidate,
     shape_episode_from_candidate,
@@ -161,7 +162,6 @@ class SearchManager:
             owner_type=req.owner_type,
             app_id=req.app_id,
             project_id=req.project_id,
-            exclude_deprecated=req.owner_type == "user",
         )
         self._validate_components(req)
 
@@ -251,6 +251,8 @@ class SearchManager:
                 req.query,
                 owner_id=req.owner_id,
                 where=where,
+                app_id=req.app_id,
+                project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
                 embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
@@ -269,14 +271,8 @@ class SearchManager:
                 cands = await self._ep.sparse_recall(
                     req.query, where, limit=self._recall_limit(req.top_k)
                 )
-            elif load_settings().search.vector_strategy == "maxsim_atomic":
-                cands = await self._maxsim_atomic_recall(req, where, top_k)
             else:
-                vector = await self._embed_query(req.query)
-                cands = await self._ep.dense_recall(
-                    vector, where, limit=self._recall_limit(req.top_k)
-                )
-                cands = self._apply_radius(cands, _effective_radius(req))
+                cands = await self._maxsim_atomic_recall(req, where, top_k)
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
@@ -294,17 +290,25 @@ class SearchManager:
         )
 
         if fusion_mode == "hierarchy":
-            return await hierarchy_retrieve_episodes(
-                req.query,
+            rrf_candidates = rrf(sparse, dense)
+            ep_to_parents = build_ep_to_fact_parents(rrf_candidates)
+            episode_to_facts = await self._fact.facts_for_episodes(
+                ep_to_parents,
+                where,
+                per_episode=max(top_k * 2, 20),
+                query_vector=query_vector,
+            )
+            scored = heap_expand(
                 sparse=sparse,
                 dense=dense,
-                query_vector=query_vector,
-                fact_recaller=self._fact,
-                episode_recaller=self._ep,
-                where=where,
+                episode_to_facts=episode_to_facts,
                 top_k=top_k,
-                min_score=req.min_score,
             )
+            episode_pool = {c.id: c for c in (*sparse, *dense)}
+            shaped = reshape_hybrid_output(scored, episode_pool=episode_pool)
+            if req.min_score is not None:
+                shaped = [s for s in shaped if s.score >= req.min_score]
+            return shaped
 
         # rrf / lr: standard everalgo fusion path (fallback).
         output = await arank(

@@ -17,6 +17,19 @@ from .base import (
 )
 
 
+def _inject_parent_id(candidates: list[Candidate]) -> list[Candidate]:
+    """Wrap candidates with ``parent_id`` for MaxSim group-by-parent."""
+    return [
+        Candidate(
+            id=c.id,
+            score=c.score,
+            source=c.source,
+            metadata={**c.metadata, "parent_id": c.metadata.get("entry_id", c.id)},
+        )
+        for c in candidates
+    ]
+
+
 def _q(value: str) -> str:
     return value.replace("'", "''")
 
@@ -63,6 +76,7 @@ class EpisodeRecaller:
         rows = (
             await table.query()
             .nearest_to(list(vector))
+            .column("vector")
             .distance_type("cosine")
             .where(where)
             .limit(limit)
@@ -76,6 +90,54 @@ class EpisodeRecaller:
             )
             for r in rows
         ]
+
+    async def sparse_recall_as_child(
+        self, query: str, where: str, *, limit: int
+    ) -> list[Candidate]:
+        """Sparse recall returning episodes as MaxSim child candidates."""
+        return _inject_parent_id(await self.sparse_recall(query, where, limit=limit))
+
+    async def dense_recall_as_child(
+        self, vector: Sequence[float], where: str, *, limit: int
+    ) -> list[Candidate]:
+        """Dense recall (body vector ANN) returning as MaxSim children."""
+        return _inject_parent_id(await self.dense_recall(vector, where, limit=limit))
+
+    async def dense_recall_subject(
+        self, vector: Sequence[float], where: str, *, limit: int
+    ) -> list[Candidate]:
+        """ANN over the ``subject_vector`` column.
+
+        Rows with ``subject_vector=None`` are naturally excluded by
+        LanceDB ANN.
+        """
+        if not vector:
+            return []
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        rows = (
+            await table.query()
+            .nearest_to(list(vector))
+            .column("subject_vector")
+            .distance_type("cosine")
+            .where(where)
+            .limit(limit)
+            .to_list()
+        )
+        return [
+            row_to_candidate(
+                r,
+                source="vector",
+                score=cosine_score_from_distance(r.get("_distance")),
+            )
+            for r in rows
+        ]
+
+    async def dense_recall_subject_as_child(
+        self, vector: Sequence[float], where: str, *, limit: int
+    ) -> list[Candidate]:
+        """Subject-vector ANN returning as MaxSim children."""
+        candidates = await self.dense_recall_subject(vector, where, limit=limit)
+        return _inject_parent_id(candidates)
 
     async def fetch_all_for_owner(self, where: str) -> list[Candidate]:
         """Flat scan — all episodes for this owner, keyed by entry_id.

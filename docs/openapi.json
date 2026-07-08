@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.1.0"
+    "version": "1.1.1"
   },
   "paths": {
     "/health": {
@@ -2622,7 +2622,7 @@
           "enable_llm_rerank": {
             "type": "boolean",
             "title": "Enable Llm Rerank",
-            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hierarchy path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
+            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
           "filters": {

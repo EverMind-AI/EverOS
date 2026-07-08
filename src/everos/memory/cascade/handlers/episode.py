@@ -21,13 +21,16 @@ writers must match):
 
 ``sections``:
 
-- ``Subject`` (optional): one-line topic.
+- ``Subject`` (optional): one-line topic — embedded into
+  ``subject_vector`` and appended to the BM25 tokenization source.
 - ``Summary`` (optional): condensed narrative.
 - ``Content``: full episode narrative — fed to the embedder AND the
   tokenizer for the ``episode_tokens`` BM25 field.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from everos.infra.persistence.lancedb import Episode, ParentType, episode_repo
 
@@ -66,8 +69,22 @@ class EpisodeHandler(BaseDailyLogHandler):
     ) -> Episode:
         s = entry.structured
         text = s.sections.get("Content", "").strip()
-        tokens = self._deps.tokenizer.tokenize(text)
-        vector = await self._deps.embedder.embed(text)
+        subject_text = s.sections.get("Subject", "").strip()
+
+        # Embed content and subject concurrently; skip subject embed when absent.
+        if subject_text:
+            vector, subject_vector = await asyncio.gather(
+                self._deps.embedder.embed(text),
+                self._deps.embedder.embed(subject_text),
+            )
+        else:
+            vector = await self._deps.embedder.embed(text)
+            subject_vector = None
+
+        # BM25 tokenization covers both body and subject keywords.
+        tokenize_source = f"{text} {subject_text}" if subject_text else text
+        tokens = self._deps.tokenizer.tokenize(tokenize_source)
+
         return Episode(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,
@@ -87,4 +104,5 @@ class EpisodeHandler(BaseDailyLogHandler):
             md_path=md_path,
             content_sha256=entry.content_sha256,
             vector=vector,
+            subject_vector=subject_vector,
         )

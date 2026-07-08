@@ -72,7 +72,7 @@ class _FakeRepo:
 
 
 class _OkHandler(Handler):
-    def __init__(self) -> None:  # noqa: D401 — no deps needed
+    def __init__(self) -> None:
         pass
 
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:

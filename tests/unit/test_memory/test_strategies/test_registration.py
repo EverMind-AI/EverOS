@@ -46,7 +46,7 @@ async def test_get_engine_registers_all_strategies(
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
 
     engine = svc._get_engine()
-    names = {m.name for m in engine._registry.all()}  # noqa: SLF001 — test introspection
+    names = {m.name for m in engine._registry.all()}
     assert names == {
         "extract_atomic_facts",
         "extract_foresight",

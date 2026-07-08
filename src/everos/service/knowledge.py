@@ -960,7 +960,7 @@ _embedding_resolved = False
 
 def _get_embedding() -> EmbeddingProvider | None:
     """Build the embedding client on first call. ``None`` when not configured."""
-    global _embedding, _embedding_resolved  # noqa: PLW0603
+    global _embedding, _embedding_resolved
     if _embedding_resolved:
         return _embedding
 
@@ -990,7 +990,7 @@ _recaller_resolved = False
 
 def _build_recaller() -> KnowledgeTopicRecaller:
     """Return the shared :class:`KnowledgeTopicRecaller`, building it on first call."""
-    global _recaller, _recaller_resolved  # noqa: PLW0603
+    global _recaller, _recaller_resolved
     if _recaller_resolved:
         return _recaller  # type: ignore[return-value]  -- guarded by _recaller_resolved
 
@@ -1014,7 +1014,7 @@ _reranker_resolved = False
 
 def _get_reranker() -> RerankProvider | None:
     """Build the rerank client on first call. ``None`` when not configured."""
-    global _reranker, _reranker_resolved  # noqa: PLW0603
+    global _reranker, _reranker_resolved
     if _reranker_resolved:
         return _reranker
 

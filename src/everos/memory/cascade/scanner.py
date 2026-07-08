@@ -105,7 +105,7 @@ class CascadeScanner:
         while not self._stop.is_set():
             try:
                 await self.scan_once()
-            except Exception as exc:  # noqa: BLE001 — never crash the daemon
+            except Exception as exc:
                 logger.exception("cascade_scanner_failed", error=str(exc))
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval)

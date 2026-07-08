@@ -26,7 +26,7 @@ first access; row population is the cascade daemon's job (see
 
 # Importing ``tables`` registers every business :class:`BaseLanceTable`
 # schema so callers can rely on the package alone to surface every schema.
-from . import tables as tables  # noqa: F401
+from . import tables as tables
 from .lancedb_manager import dispose_connection as dispose_connection
 from .lancedb_manager import get_connection as get_connection
 from .lancedb_manager import get_table as get_table

@@ -282,5 +282,5 @@ prevent external types from leaking into upper layers:
 ## Further reading
 
 - [docs/overview.md](overview.md) — vision and scope
-- [docs/engineering.md](engineering.md) — contributor engineering reference: build, test, CI, conventions
+- [docs/engineering.md](engineering.md) — engineering tooling and CI / CD
 - [.claude/rules/architecture.md](../.claude/rules/architecture.md) — short-form rules for Claude Code

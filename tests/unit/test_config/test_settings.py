@@ -13,10 +13,12 @@ from everos.config.settings import resolve_root
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Strip EVEROS_* env vars and move CWD away from any config file."""
+    """Strip EVEROS_* env vars and pin root to tmp_path so no external
+    everos.toml is ever discovered."""
     for key in list(os.environ):
         if key.startswith("EVEROS_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     load_settings.cache_clear()
 
@@ -107,47 +109,20 @@ def test_load_settings_is_cached() -> None:
 
 def test_embedding_rerank_defaults() -> None:
     s = Settings()
-    assert s.embedding.model is None
-    assert s.embedding.api_key is None
+    assert s.embedding.model == "Qwen/Qwen3-Embedding-4B"
+    assert s.embedding.base_url == "https://api.deepinfra.com/v1/openai"
+    assert s.embedding.api_key.get_secret_value() == ""
     assert s.embedding.timeout_seconds == 30.0
-    assert s.rerank.model is None
-    assert s.rerank.provider is None
+    assert s.rerank.model == "Qwen/Qwen3-Reranker-4B"
+    assert s.rerank.base_url == "https://api.deepinfra.com/v1/inference"
+    assert s.rerank.api_key.get_secret_value() == ""
     assert s.rerank.timeout_seconds == 30.0
+    assert s.llm.api_key.get_secret_value() == ""
 
 
-def test_dashscope_one_key_can_configure_llm_embedding_and_rerank(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """One DashScope key value can be reused across all three clients."""
-    key = "sk-dashscope"
-    compatible_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    monkeypatch.setenv("EVEROS_LLM__MODEL", "qwen-plus")
-    monkeypatch.setenv("EVEROS_LLM__API_KEY", key)
-    monkeypatch.setenv("EVEROS_LLM__BASE_URL", compatible_base_url)
-    monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "text-embedding-v4")
-    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", key)
-    monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", compatible_base_url)
-    monkeypatch.setenv("EVEROS_RERANK__MODEL", "gte-rerank-v2")
-    monkeypatch.setenv("EVEROS_RERANK__API_KEY", key)
-    monkeypatch.setenv("EVEROS_RERANK__BASE_URL", "https://dashscope.aliyuncs.com")
-
-    s = Settings()
-
-    assert s.llm.api_key is not None
-    assert s.embedding.api_key is not None
-    assert s.rerank.api_key is not None
-    assert s.llm.api_key.get_secret_value() == key
-    assert s.embedding.api_key.get_secret_value() == key
-    assert s.rerank.api_key.get_secret_value() == key
-    assert s.llm.base_url == compatible_base_url
-    assert s.embedding.base_url == compatible_base_url
-    assert s.rerank.provider is None
-    assert s.rerank.base_url == "https://dashscope.aliyuncs.com"
-
-
-def test_resolve_root_default() -> None:
+def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """No --root, no EVEROS_ROOT → ~/.everos."""
+    monkeypatch.delenv("EVEROS_ROOT", raising=False)
     assert resolve_root() == Path("~/.everos").expanduser().resolve()
 
 
