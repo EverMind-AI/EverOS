@@ -56,7 +56,7 @@ class _StubRepo:
 
     async def find_where_paginated(
         self,
-        where: str,
+        where: Any,
         *,
         sort_by: str,
         descending: bool = True,
@@ -65,7 +65,7 @@ class _StubRepo:
         max_fetch: int = 20000,
     ) -> tuple[list[Any], int]:
         self.last = _CallRecord(
-            where=where,
+            where=str(where),
             sort_by=sort_by,
             descending=descending,
             page=page,

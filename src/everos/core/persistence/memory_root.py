@@ -11,6 +11,7 @@ Single root directory holding all persisted memory:
         .index/             derived indexes (rebuildable from markdown)
             sqlite/         system.db (+ WAL/SHM), ome.db, ome.aps.db
             lancedb/        LanceDB tables
+            milvus/         Milvus Lite database when Milvus is selected
         .tmp/               atomic-write staging directory
         .lock               single-process lock anchor (created on demand by
                             ``memory_root_lock``)
@@ -166,6 +167,16 @@ class MemoryRoot:
         return self.index_dir / "lancedb"
 
     @property
+    def milvus_dir(self) -> Path:
+        """``<root>/.index/milvus/`` — Milvus Lite derived index root."""
+        return self.index_dir / "milvus"
+
+    @property
+    def milvus_db(self) -> Path:
+        """``<root>/.index/milvus/milvus.db`` — default Milvus Lite URI."""
+        return self.milvus_dir / "milvus.db"
+
+    @property
     def sqlite_dir(self) -> Path:
         """``<root>/.index/sqlite/`` — SQLite system DB root.
 
@@ -244,10 +255,12 @@ class MemoryRoot:
             <root>/.index/
             <root>/.index/sqlite/
             <root>/.index/lancedb/
+            <root>/.index/milvus/
             <root>/.tmp/
         """
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.sqlite_dir.mkdir(parents=True, exist_ok=True)
         self.lancedb_dir.mkdir(parents=True, exist_ok=True)
+        self.milvus_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)

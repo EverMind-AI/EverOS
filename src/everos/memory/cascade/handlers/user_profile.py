@@ -27,7 +27,7 @@ import json
 from typing import Any, ClassVar
 
 from everos.core.persistence import MarkdownReader
-from everos.infra.persistence.lancedb import UserProfile, user_profile_repo
+from everos.infra.persistence.index import UserProfile, user_profile_repo
 
 from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256

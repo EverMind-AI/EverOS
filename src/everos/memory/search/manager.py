@@ -22,7 +22,8 @@ pipeline runs over episodes. The other methods leave it empty: there is
 no query-relevance score we can assign to a fact pulled by parent_id
 alone, and emitting ``score=0.0`` facts would muddy the contract.
 
-The manager never writes to storage; it only reads LanceDB + markdown.
+The manager never writes to storage; it only reads the derived index +
+markdown.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ from .dto import (
     SearchResponse,
     UnprocessedMessageDTO,
 )
-from .filters import compile_filters
+from .filters import compile_filters_for_backends
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .shaper import (
     reshape_hybrid_output,
@@ -204,7 +205,7 @@ class SearchManager:
             # Compile filters first: a malformed `filters` payload is a user
             # input error (422) and should surface before the server-side
             # component guard (500). The two steps are independent.
-            where = compile_filters(
+            where = compile_filters_for_backends(
                 req.filters,
                 owner_id=req.owner_id,
                 owner_type=req.owner_type,

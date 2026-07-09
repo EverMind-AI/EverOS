@@ -1,8 +1,8 @@
 """Get use case — lazy singleton wiring for ``POST /api/v2/memory/get``.
 
 Mirrors :mod:`everos.service.search`: the :class:`GetManager` and its
-LanceDB repo singletons are built on first call so the FastAPI module
-import order stays decoupled from the lifespan that brings up LanceDB.
+derived index repo singletons are built on first call so the FastAPI module
+import order stays decoupled from the lifespan that brings up the index backend.
 
 ``/get`` is read-only and uses no embedding / LLM / rerank clients —
 it never blocks on optional components the way ``/search`` does.
@@ -11,7 +11,7 @@ it never blocks on optional components the way ``/search`` does.
 from __future__ import annotations
 
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     agent_case_repo,
     agent_skill_repo,
     episode_repo,

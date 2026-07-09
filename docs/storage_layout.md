@@ -3,8 +3,9 @@
 How `everos` lays out a memory-root on disk: directory tree, file
 naming, frontmatter chassis, and entry-id encoding.
 
-The contents are the **source of truth**; SQLite and LanceDB are
-derived indexes that can be rebuilt from markdown alone.
+The contents are the **source of truth**; SQLite and the configured
+vector/BM25 index backend are derived indexes that can be rebuilt from
+markdown alone.
 
 ## 1. Memory-root tree
 
@@ -49,8 +50,10 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │   │   ├── ome.db                        Offline Memory Engine state
 │   │   ├── ome.aps.db                    APScheduler jobstore (split to avoid lock contention)
 │   │   └── ome.db.lock                   OME single-engine guard (portalocker)
-│   └── lancedb/
-│       └── <kind>.lance/                one directory per LanceDB table
+│   ├── lancedb/
+│   │   └── <kind>.lance/                default derived index backend
+│   └── milvus/
+│       └── milvus.db                    Milvus Lite database when configured
 │
 ├── ome.toml                             user-editable OME strategy overrides (hot-reloaded)
 └── .tmp/                                staging dir for batch / multi-step writes
@@ -64,7 +67,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
-runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`); the
+runtime-required dirs (`.index/{sqlite,lancedb,milvus}/`, `.tmp/`); the
 user-visible dirs are *not* pre-created — they appear on first write.
 Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
 
@@ -168,9 +171,9 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
 > appear across two different `user_id`s (each user has its own daily file).
 > Cross-table joins must therefore key on **`(scope_id, entry_id)`**
-> rather than `entry_id` alone — see SQLite/LanceDB tables that follow.
+> rather than `entry_id` alone — see the derived index tables that follow.
 
-## 5. SQLite + LanceDB derived indexes
+## 5. SQLite + derived indexes
 
 ```
 .index/
@@ -178,9 +181,10 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 │   └── system.db          state / audit / cascade queue + buffer / LSN
 │                           (system tables: md_change_state, memcell,
 │                            unprocessed_buffer, conversation_status, cluster)
-└── lancedb/
-    └── <kind>.lance/      one Arrow table per business kind — the per-kind
-                            rows (text / vector / tokens / metadata) live here
+├── lancedb/
+│   └── <kind>.lance/      default derived index backend
+└── milvus/
+    └── milvus.db          Milvus Lite database when configured
 ```
 
 - **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
@@ -190,13 +194,14 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
   per-kind business rows. `reflection_report` is the audit trail for
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).
-- **LanceDB** ([`infra/persistence/lancedb/tables/`](../src/everos/infra/persistence/lancedb/tables/))
-  holds the per-kind business rows, keyed `<owner_id>_<entry_id>` (so
-  cross-table joins use `(owner_id, entry_id)`); each table's `Vector(N)`
-  dimension matches the embedding model output.
+- The **derived index backend** holds the per-kind business rows, keyed
+  `<owner_id>_<entry_id>` (so cross-table joins use `(owner_id, entry_id)`).
+  LanceDB is the default backend under `.index/lancedb/`; Milvus can be enabled
+  as the same rebuildable index backend and uses `.index/milvus/milvus.db` by
+  default for Milvus Lite.
 
-Episode and AtomicFact LanceDB tables carry a `deprecated_by: str | None`
-column. When an episode is superseded by a Reflection merge,
+Episode and AtomicFact index rows carry a `deprecated_by: str | None` column.
+When an episode is superseded by a Reflection merge,
 `deprecated_by` is set to the merged episode's entry_id. Search filters
 automatically exclude rows where `deprecated_by IS NOT NULL`.
 
@@ -226,5 +231,5 @@ this primitive is **schema-agnostic** — field-level semantics
 - Code:
   - [`core/persistence/memory_root.py`](../src/everos/core/persistence/memory_root.py)
   - [`core/persistence/markdown/`](../src/everos/core/persistence/markdown/)
-  - [`infra/persistence/{markdown,sqlite,lancedb}/`](../src/everos/infra/persistence/)
-  - [`memory/cascade/`](../src/everos/memory/cascade/) (md → LanceDB sync)
+  - [`infra/persistence/{markdown,sqlite,lancedb,milvus,index}/`](../src/everos/infra/persistence/)
+  - [`memory/cascade/`](../src/everos/memory/cascade/) (md → derived index sync)

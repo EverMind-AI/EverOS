@@ -22,7 +22,7 @@ from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.events import CronTick
 from everos.infra.ome.triggers import Cron
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     atomic_fact_repo,
     episode_repo,
 )

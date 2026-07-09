@@ -147,14 +147,15 @@ narrative.
 
 ## Storage layout
 
-Memory uses Markdown as the single source of truth; SQLite and LanceDB are
-derived indexes built automatically by the cascade daemon.
+Memory uses Markdown as the single source of truth; SQLite and the configured
+vector/BM25 index backend are derived indexes built automatically by the
+cascade daemon.
 
 | Store | What it holds | Role |
 |---|---|---|
 | Markdown | Episode bodies, merged narratives, archive markers | Single source of truth; human-readable and editable |
 | SQLite | Clusters and members, consolidation audit records | Structured state and queries |
-| LanceDB | Vectors + BM25 index for Episodes / atomic facts | Search (rebuildable from Markdown) |
+| Derived index | Vectors + BM25 index for Episodes / atomic facts | Search (rebuildable from Markdown) |
 
 The **merged narrative** is written to the Episode daily-log Markdown; its
 frontmatter marks that it came from a cluster:
@@ -186,7 +187,7 @@ deprecated_entries:
 ---
 ```
 
-> Soft-archive, not delete: even if SQLite / LanceDB are corrupted, as long
+> Soft-archive, not delete: even if SQLite / the derived index are corrupted, as long
 > as the Markdown is intact the indexes can be fully rebuilt — and every
 > consolidation remains traceable back to its original content.
 
@@ -355,5 +356,5 @@ curl -s -X POST "$BASE/memory/search" \
 ## See also
 
 - [how-memory-works.md](how-memory-works.md) — Episodes and the memory extraction pipeline
-- [storage_layout.md](storage_layout.md) — Markdown + SQLite + LanceDB stack
+- [storage_layout.md](storage_layout.md) — Markdown + SQLite + derived index stack
 - [api.md](api.md) — full HTTP API reference

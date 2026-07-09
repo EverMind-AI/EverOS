@@ -18,7 +18,7 @@ import dataclasses
 from pathlib import PurePosixPath
 
 from everos.core.persistence.markdown import BaseFrontmatter
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     AgentCase,
     AgentSkill,
     AtomicFact,

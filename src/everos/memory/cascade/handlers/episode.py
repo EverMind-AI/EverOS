@@ -38,7 +38,7 @@ import asyncio
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import Episode, ParentType, episode_repo
+from everos.infra.persistence.index import Episode, ParentType, episode_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import AgentCase, ParentType, agent_case_repo
+from everos.infra.persistence.index import AgentCase, ParentType, agent_case_repo
 
 from ._common import require_float, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry

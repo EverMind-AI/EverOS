@@ -21,11 +21,10 @@ from typing import Any, ClassVar
 
 from everalgo.types import Candidate, FactCandidate
 
-from everos.infra.persistence.lancedb import AtomicFact, get_table
+from everos.infra.persistence.index import AtomicFact, atomic_fact_repo
 
 from .base import (
     RecallerDeps,
-    build_or_query,
     cosine_score_from_distance,
     row_to_candidate,
 )
@@ -49,14 +48,14 @@ class AtomicFactRecaller:
         self, query: str, where: str, *, limit: int
     ) -> list[Candidate]:
         """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring)."""
-        bq = build_or_query(
-            self._deps.tokenizer, query, column=AtomicFact.BM25_FIELDS[0]
-        )
-        if bq is None:
+        terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
+        if not terms:
             return []
-        table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
-        rows = (
-            await table.query().nearest_to_text(bq).where(where).limit(limit).to_list()
+        rows = await atomic_fact_repo.sparse_search(
+            terms,
+            where,
+            columns=AtomicFact.BM25_FIELDS,
+            limit=limit,
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
@@ -78,15 +77,7 @@ class AtomicFactRecaller:
         """
         if not vector:
             return []
-        table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
-        rows = (
-            await table.query()
-            .nearest_to(list(vector))
-            .distance_type("cosine")
-            .where(where)
-            .limit(limit)
-            .to_list()
-        )
+        rows = await atomic_fact_repo.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
                 r,
@@ -170,17 +161,11 @@ class AtomicFactRecaller:
         clause = f"parent_id IN ({quoted})"
         full_where = f"({where}) AND ({clause})"
         limit = per_episode * max(len(parent_to_eps), 1)
-        table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
         if query_vector:
-            return await (
-                table.query()
-                .nearest_to(list(query_vector))
-                .distance_type("cosine")
-                .where(full_where)
-                .limit(limit)
-                .to_list()
+            return await atomic_fact_repo.dense_search(
+                query_vector, full_where, limit=limit
             )
-        return await table.query().where(full_where).limit(limit).to_list()
+        return await atomic_fact_repo.search(where=full_where, limit=limit)
 
 
 def _build_parent_to_episode_map(

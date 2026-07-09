@@ -59,7 +59,7 @@ from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.lancedb import episode_repo
+from everos.infra.persistence.index import episode_repo
 from everos.infra.persistence.markdown import (
     ProfileReader,
     ProfileWriter,

@@ -99,6 +99,26 @@ everos init --root /data/everos
 | `read_consistency_seconds` | float \| null | `null` | Read consistency interval. `null` = no check, `0` = strict, `>0` = eventual. |
 | `index_cache_size_bytes` | int | `16777216` | Upper bound on LanceDB index cache (16 MB default). |
 
+### `[index]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `backend` | `"lancedb"` \| `"milvus"` | `"lancedb"` | Rebuildable vector/BM25 index backend used by cascade, search, and get. Markdown remains the source of truth; SQLite remains the system state store. |
+
+### `[milvus]`
+
+Milvus is optional. Install with `everos[milvus]`, then set
+`[index].backend = "milvus"`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `uri` | string \| null | `""` | Empty uses Milvus Lite at `<root>/.index/milvus/milvus.db`. Set to a Milvus server or Zilliz Cloud endpoint to use an external service. |
+| `token` | string \| null | `""` | Token for Zilliz Cloud or auth-enabled Milvus. |
+| `db_name` | string \| null | `""` | Optional Milvus database name. |
+| `consistency_level` | `"Strong"` \| `"Session"` \| `"Bounded"` \| `"Eventually"` | `"Session"` | Milvus consistency level for created collections. |
+| `dimension` | int | `1024` | Dense vector dimension. Must match the configured embedding model output. |
+| `collection_prefix` | string | `"everos"` | Prefix for EverOS Milvus collections. |
+
 ### `[llm]`
 
 | Field | Type | Default | Required | Description |
@@ -228,3 +248,5 @@ Examples:
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
+| `[index] backend = "milvus"` | `EVEROS_INDEX__BACKEND=milvus` |
+| `[milvus] uri = "http://localhost:19530"` | `EVEROS_MILVUS__URI=http://localhost:19530` |

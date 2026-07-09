@@ -83,10 +83,10 @@ from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     AgentCase as LanceAgentCase,
 )
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     agent_case_repo,
     agent_skill_repo,
 )

@@ -42,7 +42,7 @@ import anyio
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader
-from everos.infra.persistence.lancedb import AgentSkill, agent_skill_repo
+from everos.infra.persistence.index import AgentSkill, agent_skill_repo
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 
 from ..types import HandlerOutcome

@@ -9,6 +9,7 @@ from everos.memory.search import (
     FilterNode,
     compile_filters,
 )
+from everos.memory.search.filters import compile_filters_for_backends
 
 # ── Base injection ───────────────────────────────────────────────────────
 
@@ -266,3 +267,35 @@ def test_compile_filters_excludes_deprecated_by_for_user() -> None:
 def test_compile_filters_omits_deprecated_by_for_agent() -> None:
     result = compile_filters(None, owner_id="agent_1", owner_type="agent")
     assert "deprecated_by" not in result
+
+
+# ── Backend-specific rendering ─────────────────────────────────────────
+
+
+def test_compile_filters_for_backends_preserves_lancedb_default() -> None:
+    filters = compile_filters_for_backends(None, owner_id="u_a", owner_type="user")
+    assert str(filters) == filters.lancedb
+    assert "owner_id = 'u_a'" in filters.lancedb
+    assert "owner_id == \"u_a\"" in filters.milvus
+    assert "deprecated_by IS NULL" in filters.lancedb
+    assert "deprecated_by is null" in filters.milvus
+
+
+def test_compile_filters_for_milvus_timestamp_and_array() -> None:
+    node = FilterNode.model_validate(
+        {"timestamp": {"gte": 1704067200000}, "sender_id": "u_jason"}
+    )
+    filters = compile_filters_for_backends(node, owner_id="u_a", owner_type="user")
+    assert "timestamp_ms >= 1704067200000" in filters.milvus
+    assert 'array_contains(sender_ids, "u_jason")' in filters.milvus
+    assert "TIMESTAMP '" in filters.lancedb
+    assert "array_has(sender_ids, 'u_jason')" in filters.lancedb
+
+
+def test_compile_filters_for_milvus_escapes_string_literals() -> None:
+    node = FilterNode.model_validate({"session_id": "ses's"})
+    filters = compile_filters_for_backends(node, owner_id="al'ice", owner_type="user")
+    assert "owner_id == \"al'ice\"" in filters.milvus
+    assert "session_id == \"ses's\"" in filters.milvus
+    assert "owner_id = 'al''ice'" in filters.lancedb
+    assert "session_id = 'ses''s'" in filters.lancedb

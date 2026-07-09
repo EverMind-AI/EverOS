@@ -12,17 +12,15 @@ multi-BM25-column pattern.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.lancedb import KnowledgeTopic, get_table
+from everos.infra.persistence.index import KnowledgeTopic, knowledge_topic_repo
 
 from .base import (
     RecallerDeps,
-    build_or_query_multi_column,
     cosine_score_from_distance,
     row_to_candidate,
 )
@@ -78,26 +76,15 @@ class KnowledgeTopicRecaller:
         matching the query in either its summary or its content body is
         surfaced without double-counting.
         """
-        column_queries = build_or_query_multi_column(
-            self._deps.tokenizer, query, KnowledgeTopic.BM25_FIELDS
-        )
-        if column_queries is None:
+        terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
+        if not terms:
             return []
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
-
-        async def _query_one(column: str) -> list[dict]:
-            return (
-                await table.query()
-                .nearest_to_text(column_queries[column])
-                .where(where)
-                .limit(limit)
-                .to_list()
-            )
-
-        per_column = await asyncio.gather(
-            *(_query_one(col) for col in KnowledgeTopic.BM25_FIELDS),
+        merged_rows = await knowledge_topic_repo.sparse_search(
+            terms,
+            where,
+            columns=KnowledgeTopic.BM25_FIELDS,
+            limit=limit,
         )
-        merged_rows = _merge_bm25_results(per_column, limit=limit)
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
             for r in merged_rows
@@ -109,15 +96,7 @@ class KnowledgeTopicRecaller:
         """Cosine ANN over the ``summary`` vector (1024-d)."""
         if not vector:
             return []
-        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
-        rows = (
-            await table.query()
-            .nearest_to(list(vector))
-            .distance_type("cosine")
-            .where(where)
-            .limit(limit)
-            .to_list()
-        )
+        rows = await knowledge_topic_repo.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
                 r,

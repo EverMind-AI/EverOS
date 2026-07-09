@@ -91,6 +91,8 @@ def test_dotfile_paths(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path)
     assert mr.index_dir == tmp_path / ".index"
     assert mr.lancedb_dir == tmp_path / ".index" / "lancedb"
+    assert mr.milvus_dir == tmp_path / ".index" / "milvus"
+    assert mr.milvus_db == tmp_path / ".index" / "milvus" / "milvus.db"
     assert mr.sqlite_dir == tmp_path / ".index" / "sqlite"
     assert mr.system_db == tmp_path / ".index" / "sqlite" / "system.db"
     assert mr.lock_file == tmp_path / ".lock"
@@ -104,6 +106,7 @@ def test_ensure_creates_required_dirs(tmp_path: Path) -> None:
     assert mr.index_dir.is_dir()
     assert mr.sqlite_dir.is_dir()
     assert mr.lancedb_dir.is_dir()
+    assert mr.milvus_dir.is_dir()
     assert mr.tmp_dir.is_dir()
     # User-visible dirs are NOT pre-created.
     assert not mr.agents_dir().exists()

@@ -375,6 +375,30 @@ class CascadeSettings(BaseModel):
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
 
 
+class IndexSettings(BaseModel):
+    """Derived-index backend selection."""
+
+    backend: Literal["lancedb", "milvus"] = "lancedb"
+
+
+class MilvusSettings(BaseModel):
+    """Remote Milvus Server or Zilliz Cloud connection settings.
+
+    Embedded Milvus Lite is intentionally unsupported. Deployments that select
+    the Milvus backend must configure an external endpoint and should use a
+    unique database or collection prefix when sharing a cluster.
+    """
+
+    uri: str = ""
+    token: SecretStr = SecretStr("")
+    db_name: str = ""
+    consistency_level: Literal["Strong", "Bounded", "Session", "Eventually"] = (
+        "Session"
+    )
+    dimension: int = Field(default=1024, ge=1)
+    collection_prefix: str = Field(default="everos", min_length=1)
+
+
 class KnowledgeSearchSettings(BaseModel):
     """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
 
@@ -448,6 +472,8 @@ class Settings(BaseSettings):
     api: ApiSettings = ApiSettings()
     sqlite: SqliteSettings = SqliteSettings()
     lancedb: LanceDBSettings = LanceDBSettings()
+    index: IndexSettings = IndexSettings()
+    milvus: MilvusSettings = MilvusSettings()
     llm: LLMSettings = LLMSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     rerank: RerankSettings = RerankSettings()

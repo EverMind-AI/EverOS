@@ -106,25 +106,25 @@ class _StubEpisodeRecaller:
         self.last_where: str | None = None
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Any, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = where
+        self.last_where = str(where)
         return list(self._sparse[:limit])
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Any, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = where
+        self.last_where = str(where)
         return list(self._dense[:limit])
 
     async def fetch_by_parent_ids(
-        self, parent_ids: Sequence[str], where: str
+        self, parent_ids: Sequence[str], where: Any
     ) -> list[Candidate]:
         by_parent = {str(c.metadata.get("parent_id", "")): c for c in self._dense}
         return [by_parent[p] for p in parent_ids if p in by_parent]
 
     async def fetch_by_entry_ids(
-        self, entry_ids: Sequence[str], where: str
+        self, entry_ids: Sequence[str], where: Any
     ) -> list[Candidate]:
         by_entry = {str(c.metadata.get("entry_id", "")): c for c in self._dense}
         return [by_entry[e] for e in entry_ids if e in by_entry]
@@ -152,7 +152,7 @@ class _StubAtomicFactRecaller:
     async def facts_for_episodes(
         self,
         ep_to_parents: Mapping[str, Sequence[str]],
-        where: str,
+        where: Any,
         *,
         per_episode: int,
         query_vector: Any = None,
@@ -203,7 +203,7 @@ class _StubAgentSkillRecaller:
         return list(self._dense)
 
     async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: str, *, limit: int
+        self, case_ids: Sequence[str], where: Any, *, limit: int
     ) -> list[Candidate]:
         return list(self._by_case)
 

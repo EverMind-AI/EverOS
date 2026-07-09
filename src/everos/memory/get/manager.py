@@ -12,7 +12,7 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 Reads only — never writes. Filters are compiled through
 :func:`compile_filters_for_get` so the column allow-list stays
 shared with :mod:`memory.search`. Pagination + in-memory sort
-runs through :meth:`LanceRepoBase.find_where_paginated`.
+runs through the configured derived index repository.
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ from .dto import (
     GetRequest,
     GetResponse,
 )
-from .filters_adapter import compile_filters_for_get
+from .filters_adapter import compile_filters_for_get_backends
 
 if TYPE_CHECKING:
     from everos.core.persistence.lancedb import LanceRepoBase
-    from everos.infra.persistence.lancedb import (
+    from everos.infra.persistence.index import (
         AgentCase,
         AgentSkill,
         Episode,
@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 
 class GetManager:
-    """Dispatch ``GetRequest`` to the matching LanceDB-backed repo and
+    """Dispatch ``GetRequest`` to the matching derived index repo and
     shape rows into the public DTO."""
 
     def __init__(
@@ -70,7 +70,7 @@ class GetManager:
     async def get(self, req: GetRequest) -> GetResponse:
         request_id = resolve_request_id()
         descending = req.sort_order == "desc"
-        where = compile_filters_for_get(
+        where = compile_filters_for_get_backends(
             req.filters,
             owner_id=req.owner_id,
             owner_type=req.owner_type,
@@ -187,7 +187,7 @@ class GetManager:
 
     async def _fetch_profile(self, owner_id: str) -> list[GetProfileItem]:
         """Fetch the owner's single profile row from the ``user_profile``
-        LanceDB table (kept in sync with ``users/<id>/user.md`` by cascade).
+        Derived index row (kept in sync with ``users/<id>/user.md`` by cascade).
 
         Profile is one-row-per-owner KV — there is no pagination / sort /
         filter surface, so at most one item is returned. Mirrors the

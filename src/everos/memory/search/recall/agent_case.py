@@ -13,17 +13,15 @@ the multi-BM25-column pattern.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.lancedb import AgentCase, get_table
+from everos.infra.persistence.index import AgentCase, agent_case_repo
 
 from .base import (
     RecallerDeps,
-    build_or_query_multi_column,
     cosine_score_from_distance,
     row_to_candidate,
 )
@@ -50,43 +48,15 @@ class AgentCaseRecaller:
         per BM25 column (``MatchQuery`` is column-bound), then the
         two per-column result lists merge by id keeping the max score.
         """
-        column_queries = build_or_query_multi_column(
-            self._deps.tokenizer, query, AgentCase.BM25_FIELDS
-        )
-        if column_queries is None:
+        terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
+        if not terms:
             return []
-        table = await get_table(AgentCase.TABLE_NAME, AgentCase)
-
-        async def _query_one(column: str) -> list[dict]:
-            return (
-                await table.query()
-                .nearest_to_text(column_queries[column])
-                .where(where)
-                .limit(limit)
-                .to_list()
-            )
-
-        per_column = await asyncio.gather(
-            *(_query_one(col) for col in AgentCase.BM25_FIELDS),
+        merged_rows = await agent_case_repo.sparse_search(
+            terms,
+            where,
+            columns=AgentCase.BM25_FIELDS,
+            limit=limit,
         )
-        # Merge by id, keep the max BM25 score across the two columns.
-        # task_intent hits typically score higher (the retrieval anchor);
-        # approach hits catch queries that match a step detail.
-        best: dict[str, dict] = {}
-        for rows in per_column:
-            for r in rows:
-                rid = r.get("id")
-                if not isinstance(rid, str):
-                    continue
-                score = float(r.get("_score", 0.0))
-                existing = best.get(rid)
-                if existing is None or score > float(existing.get("_score", 0.0)):
-                    merged = dict(r)
-                    merged["_score"] = score
-                    best[rid] = merged
-        merged_rows = sorted(
-            best.values(), key=lambda r: float(r.get("_score", 0.0)), reverse=True
-        )[:limit]
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
             for r in merged_rows
@@ -97,15 +67,7 @@ class AgentCaseRecaller:
     ) -> list[Candidate]:
         if not vector:
             return []
-        table = await get_table(AgentCase.TABLE_NAME, AgentCase)
-        rows = (
-            await table.query()
-            .nearest_to(list(vector))
-            .distance_type("cosine")
-            .where(where)
-            .limit(limit)
-            .to_list()
-        )
+        rows = await agent_case_repo.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
                 r,

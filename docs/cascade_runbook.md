@@ -1,9 +1,13 @@
 # Cascade Runbook
 
-The cascade daemon keeps LanceDB in sync with the markdown files under
-the memory root. Service / entry points only ever write markdown; the
-daemon is the **sole** writer of the LanceDB index. This runbook covers
-the recurring operational questions.
+The cascade daemon keeps the configured derived index in sync with the
+markdown files under the memory root. Service / entry points only ever write
+markdown; the daemon is the **sole** writer of the derived index. This runbook
+covers the recurring operational questions.
+
+Sections that mention LanceDB-specific schemas, index cache, file descriptors,
+or `lance error` messages apply to the default LanceDB backend. Milvus uses the
+same cascade queue with backend-specific collection management.
 
 ## What runs where
 
@@ -13,7 +17,7 @@ providers in order:
 1. **Metrics** — Prometheus collector.
 2. **LLM** — LLM client initialisation.
 3. **SQLite** — system DB + schema (`SQLModel.metadata.create_all`).
-4. **LanceDB** — async connection + schema verification + FTS indexes.
+4. **Derived index** — async connection + schema verification + search indexes.
 5. **Cascade** — watcher + scanner + worker, all in-process tasks.
 6. **OME** — offline memory engine.
 
@@ -23,7 +27,7 @@ The cascade subsystem itself is three independent loops:
 |---|---|---|
 | Watcher | `watchdog` filesystem events (sync thread) | `md_change_state.upsert` per registered kind |
 | Scanner | Periodic walk (`scan_interval_seconds`, default 30 s) | Same — catches changes the watcher missed |
-| Worker | `claim_pending_batch` polling (default 1 s when idle) | Handler dispatch → LanceDB upsert / delete |
+| Worker | `claim_pending_batch` polling (default 1 s when idle) | Handler dispatch → index upsert / delete |
 
 Every loop talks to the same `md_change_state` sqlite table. The
 worker's claim mode (`pending → processing → done/failed`) keeps

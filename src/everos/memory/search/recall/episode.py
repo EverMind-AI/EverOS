@@ -7,11 +7,10 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.lancedb import Episode, get_table
+from everos.infra.persistence.index import Episode, active_backend, episode_repo
 
 from .base import (
     RecallerDeps,
-    build_or_query,
     cosine_score_from_distance,
     row_to_candidate,
 )
@@ -55,12 +54,14 @@ class EpisodeRecaller:
         Mirrors enterprise's ``bool.should + minimum_should_match=1``
         ES design.
         """
-        bq = build_or_query(self._deps.tokenizer, query, column=Episode.BM25_FIELDS[0])
-        if bq is None:
+        terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
+        if not terms:
             return []
-        table = await get_table(Episode.TABLE_NAME, Episode)
-        rows = (
-            await table.query().nearest_to_text(bq).where(where).limit(limit).to_list()
+        rows = await episode_repo.sparse_search(
+            terms,
+            where,
+            columns=Episode.BM25_FIELDS,
+            limit=limit,
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
@@ -72,16 +73,7 @@ class EpisodeRecaller:
     ) -> list[Candidate]:
         if not vector:
             return []
-        table = await get_table(Episode.TABLE_NAME, Episode)
-        rows = (
-            await table.query()
-            .nearest_to(list(vector))
-            .column("vector")
-            .distance_type("cosine")
-            .where(where)
-            .limit(limit)
-            .to_list()
-        )
+        rows = await episode_repo.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
                 r,
@@ -113,6 +105,10 @@ class EpisodeRecaller:
         """
         if not vector:
             return []
+        if active_backend() == "milvus":
+            return await self.dense_recall(vector, where, limit=limit)
+        from everos.infra.persistence.lancedb import get_table
+
         table = await get_table(Episode.TABLE_NAME, Episode)
         rows = (
             await table.query()
@@ -149,8 +145,7 @@ class EpisodeRecaller:
         No ``limit`` — the full owner partition is required for cluster
         membership matching.
         """
-        table = await get_table(Episode.TABLE_NAME, Episode)
-        rows = await table.query().where(where).to_list()
+        rows = await episode_repo.search(where=where, limit=10_000)
         result: list[Candidate] = []
         for r in rows:
             entry_id = r.get("entry_id")
@@ -173,8 +168,7 @@ class EpisodeRecaller:
         """Fetch episodes by entry_id (for facts whose parent_id is an entry_id)."""
         if not entry_ids:
             return []
-        table = await get_table(Episode.TABLE_NAME, Episode)
         quoted = ", ".join(f"'{_q(eid)}'" for eid in entry_ids)
         full_where = f"({where}) AND (entry_id IN ({quoted}))"
-        rows = await table.query().where(full_where).limit(len(entry_ids)).to_list()
+        rows = await episode_repo.search(where=full_where, limit=len(entry_ids))
         return [row_to_candidate(r, source="vector", score=0.0) for r in rows]
