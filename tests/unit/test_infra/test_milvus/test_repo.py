@@ -109,6 +109,7 @@ async def test_milvus_episode_repo_upsert_search_filter_and_delete() -> None:
     rows = await episode_repo.find_where(filters, limit=10)
     assert {row.id for row in rows} == {"u1_ep1", "u1_ep2"}
     assert rows[0].timestamp.utcoffset() == dt.timedelta(0)
+    assert await episode_repo.count() == 2
 
     sparse = await episode_repo.sparse_search(
         ["apple"], filters, columns=Episode.BM25_FIELDS, limit=5

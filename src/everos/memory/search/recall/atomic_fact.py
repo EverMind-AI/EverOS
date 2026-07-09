@@ -32,6 +32,7 @@ from .base import (
 _NOISE_COLUMNS = frozenset(
     {"vector", "_distance", "_score", "created_at", "updated_at"}
 )
+_MAX_FACT_RECALL_LIMIT = 1024
 
 
 class AtomicFactRecaller:
@@ -160,7 +161,10 @@ class AtomicFactRecaller:
         quoted = ", ".join(f"'{_q(pid)}'" for pid in parent_to_eps)
         clause = f"parent_id IN ({quoted})"
         full_where = f"({where}) AND ({clause})"
-        limit = per_episode * max(len(parent_to_eps), 1)
+        # Milvus server / Zilliz Cloud reject search topK values above 1024.
+        # The fact expansion only needs a bounded candidate pool for top-N
+        # competition, so keep the same cap for every derived-index backend.
+        limit = min(per_episode * max(len(parent_to_eps), 1), _MAX_FACT_RECALL_LIMIT)
         if query_vector:
             return await atomic_fact_repo.dense_search(
                 query_vector, full_where, limit=limit

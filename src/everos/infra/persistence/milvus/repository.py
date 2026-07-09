@@ -167,9 +167,15 @@ class MilvusRepoBase[T: BaseLanceTable]:
     async def count(self) -> int:
         await self.ensure_collection()
         client = await get_client()
-        stats = await _run(client.get_collection_stats, self.collection_name)
-        row_count = stats.get("row_count", 0)
-        return int(row_count)
+        rows = await _run(
+            client.query,
+            self.collection_name,
+            filter="",
+            output_fields=["count(*)"],
+        )
+        if not rows:
+            return 0
+        return int(rows[0].get("count(*)", 0))
 
     async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
         if id_field != "id":

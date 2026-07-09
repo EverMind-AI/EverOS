@@ -29,6 +29,7 @@ from everos.infra.persistence.lancedb import (
     atomic_fact_repo,
     lancedb_manager,
 )
+from everos.memory.search.recall import atomic_fact as atomic_fact_module
 from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps
 
@@ -265,6 +266,34 @@ async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
     )
 
     assert out["alice_ep_a"][0].score == 0.0
+
+
+async def test_facts_for_episodes_caps_dense_recall_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Large parent fan-out must not exceed Milvus/Zilliz search topK limits."""
+    captured: dict[str, int] = {}
+
+    async def fake_dense_search(vector, where, *, limit):  # type: ignore[no-untyped-def]
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(
+        atomic_fact_module.atomic_fact_repo,
+        "dense_search",
+        fake_dense_search,
+    )
+    ep_to_parents = {f"alice_ep_{i}": [f"parent_{i}"] for i in range(80)}
+
+    out = await _recaller().facts_for_episodes(
+        ep_to_parents,
+        "owner_id = 'alice' AND owner_type = 'user'",
+        per_episode=20,
+        query_vector=_unit_vector(0),
+    )
+
+    assert out == {}
+    assert captured["limit"] == 1024
 
 
 # ── Dual parent_id (post-1.5 migration) ────────────────────────────────
