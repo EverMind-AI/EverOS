@@ -550,8 +550,10 @@ class MilvusRepoBase[T: BaseLanceTable]:
                     out[name] = from_timestamp(int(value))
             elif name in row:
                 value = row[name]
-                if name in self.schema.BM25_FIELDS and value == "" and _is_optional(
-                    field.annotation
+                if (
+                    name in self.schema.BM25_FIELDS
+                    and value == ""
+                    and _is_optional(field.annotation)
                 ):
                     out[name] = None
                 else:

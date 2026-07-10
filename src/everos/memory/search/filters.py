@@ -190,9 +190,7 @@ def _compile_filters_backend(
     # (Reflection V1 marks superseded entries). Agent tables don't have it.
     if owner_type == "user":
         base.append(
-            "deprecated_by IS NULL"
-            if backend == "lancedb"
-            else "deprecated_by is null"
+            "deprecated_by IS NULL" if backend == "lancedb" else "deprecated_by is null"
         )
     if node is None:
         return " AND ".join(base)

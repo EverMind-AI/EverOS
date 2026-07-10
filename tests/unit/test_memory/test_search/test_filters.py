@@ -276,7 +276,7 @@ def test_compile_filters_for_backends_preserves_lancedb_default() -> None:
     filters = compile_filters_for_backends(None, owner_id="u_a", owner_type="user")
     assert str(filters) == filters.lancedb
     assert "owner_id = 'u_a'" in filters.lancedb
-    assert "owner_id == \"u_a\"" in filters.milvus
+    assert 'owner_id == "u_a"' in filters.milvus
     assert "deprecated_by IS NULL" in filters.lancedb
     assert "deprecated_by is null" in filters.milvus
 
@@ -295,7 +295,7 @@ def test_compile_filters_for_milvus_timestamp_and_array() -> None:
 def test_compile_filters_for_milvus_escapes_string_literals() -> None:
     node = FilterNode.model_validate({"session_id": "ses's"})
     filters = compile_filters_for_backends(node, owner_id="al'ice", owner_type="user")
-    assert "owner_id == \"al'ice\"" in filters.milvus
-    assert "session_id == \"ses's\"" in filters.milvus
+    assert 'owner_id == "al\'ice"' in filters.milvus
+    assert 'session_id == "ses\'s"' in filters.milvus
     assert "owner_id = 'al''ice'" in filters.lancedb
     assert "session_id = 'ses''s'" in filters.lancedb

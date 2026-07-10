@@ -278,9 +278,7 @@ episode_repo = _IndexRepoRouter(_lancedb.episode_repo, "episode_repo", Episode)
 atomic_fact_repo = _IndexRepoRouter(
     _lancedb.atomic_fact_repo, "atomic_fact_repo", AtomicFact
 )
-foresight_repo = _IndexRepoRouter(
-    _lancedb.foresight_repo, "foresight_repo", Foresight
-)
+foresight_repo = _IndexRepoRouter(_lancedb.foresight_repo, "foresight_repo", Foresight)
 agent_case_repo = _IndexRepoRouter(
     _lancedb.agent_case_repo, "agent_case_repo", AgentCase
 )
