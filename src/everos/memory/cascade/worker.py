@@ -63,6 +63,13 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
 DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 10.0
 DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS = 60.0
+_OPTIMIZE_FAILURE_ALERT_THRESHOLD = 5
+"""Consecutive ``optimize()`` failures (per kind) before the log is
+escalated from ``warning`` to ``error``. A one-off failure is benign
+(next tick retries); a sustained streak means compaction + version
+cleanup are stuck and the index dir will grow unbounded — that must
+surface to health checks / alerting rather than rot as a warning nobody
+reads (the failure mode behind lance-format/lance#7653)."""
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
 
@@ -137,6 +144,12 @@ class _KindOptimizerState:
     last_run_at: float = 0.0
     last_prune_at: float = 0.0
     dirty: bool = False
+    optimize_failures: int = 0
+    """Consecutive ``optimize()`` failure count; reset to 0 on success.
+    Drives escalation to ``error`` at
+    :data:`_OPTIMIZE_FAILURE_ALERT_THRESHOLD` so a stuck optimize (which
+    stalls version cleanup and grows the index dir) is not swallowed as a
+    silent warning stream."""
     task: asyncio.Task[None] | None = None
     rebuild_task: asyncio.Task[None] | None = None
     """In-flight rebuild task slot, separate from ``task`` so ordinary
@@ -485,16 +498,33 @@ class CascadeWorker:
             await repo.optimize(cleanup_older_than=cleanup)
             if should_prune and state is not None:
                 state.last_prune_at = now
+            if state is not None:
+                state.optimize_failures = 0
             logger.debug(
                 "cascade_lancedb_optimized",
                 kind=kind,
                 pruned=should_prune,
             )
         except Exception as exc:
-            logger.warning(
+            failures = 0
+            if state is not None:
+                state.optimize_failures += 1
+                failures = state.optimize_failures
+            # A one-off failure is benign (next tick retries). A sustained
+            # streak means optimize — compaction *and* version cleanup — is
+            # stuck, so the index dir grows unbounded; escalate to error so
+            # it surfaces to health checks / alerting instead of rotting as
+            # a warning nobody reads (see lance-format/lance#7653).
+            log = (
+                logger.error
+                if failures >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD
+                else logger.warning
+            )
+            log(
                 "cascade_lancedb_optimize_failed",
                 kind=kind,
                 pruned=should_prune,
+                consecutive_failures=failures,
                 error=f"{type(exc).__name__}: {exc}",
             )
 

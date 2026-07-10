@@ -24,6 +24,12 @@ first access; row population is the cascade daemon's job (see
 ``12_cascade_design.md``).
 """
 
+import contextlib
+import datetime as dt
+
+from everos.core.observability.logging import get_logger
+from everos.core.persistence import MemoryRoot
+
 # Importing ``tables`` registers every business :class:`BaseLanceTable`
 # schema so callers can rely on the package alone to surface every schema.
 from . import tables as tables
@@ -69,19 +75,71 @@ class LanceDBSchemaMismatchError(RuntimeError):
     """
 
 
+_FTS_INDEX_SCHEMA_VERSION = 2
+"""Bump when the FTS index build config changes so existing on-disk
+indexes get rebuilt at startup. v2 = ``with_position=False`` (see
+:meth:`BaseLanceTable.ensure_fts_indexes` + lance-format/lance#7653)."""
+
+
+async def migrate_fts_indexes() -> None:
+    """One-time rebuild of FTS indexes that predate the current config.
+
+    Older indexes were built with ``with_position=True``; that position
+    posting List overflows lance's compaction once it grows large
+    (``Max offset exceeds length of values``, lance-format/lance#7653),
+    which aborts ``optimize()`` — including version cleanup — so the
+    index dir grows unbounded until the disk fills.
+
+    Rebuilds every business table's FTS index with the current
+    :meth:`BaseLanceTable.ensure_fts_indexes` config (``with_position``
+    now off) and reclaims the orphaned index files / data fragments the
+    crashed-optimize churn left behind. Guarded by a version marker in
+    the LanceDB dir so it runs at most once per bump; the rebuild is
+    O(N) but only on the first startup after upgrade.
+    """
+    logger = get_logger(__name__)
+    marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
+    try:
+        current = int(marker.read_text().strip()) if marker.exists() else 0
+    except (ValueError, OSError):
+        current = 0
+    if current >= _FTS_INDEX_SCHEMA_VERSION:
+        return
+    logger.info("fts_index_migration_started", target=_FTS_INDEX_SCHEMA_VERSION)
+    for schema in _BUSINESS_SCHEMAS:
+        if not schema.BM25_FIELDS:
+            continue
+        table = await get_table(schema.TABLE_NAME, schema)
+        # Drop existing indexes (everos only builds FTS here; mirrors
+        # LanceRepoBase.rebuild_indexes) then rebuild with the new config.
+        for idx in await table.list_indices():
+            await table.drop_index(idx.name)
+        await schema.ensure_fts_indexes(table)
+        # Reclaim the orphaned index dirs + data fragments the crashed
+        # optimize loop piled up. Safe now: the crashing index is gone,
+        # so compaction no longer decodes a position List.
+        with contextlib.suppress(Exception):
+            await table.optimize(cleanup_older_than=dt.timedelta(seconds=0))
+    marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
+    logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
+
+
 async def ensure_business_indexes() -> None:
     """Ensure FTS (BM25) indexes for every business table (idempotent).
 
-    Called once at startup by :class:`LanceDBLifespanProvider`. Walks
-    the 5 business schemas (each schema owns its ``TABLE_NAME`` +
-    ``BM25_FIELDS``), opens each table via :func:`get_table`, and
-    delegates to ``schema.ensure_fts_indexes(table)``. Already-indexed
-    columns are skipped, so re-runs are no-ops.
+    Called once at startup by :class:`LanceDBLifespanProvider`. First
+    runs :func:`migrate_fts_indexes` (one-time, marker-guarded) to
+    rebuild any pre-fix ``with_position=True`` indexes, then walks the
+    business schemas (each owns its ``TABLE_NAME`` + ``BM25_FIELDS``),
+    opens each table via :func:`get_table`, and delegates to
+    ``schema.ensure_fts_indexes(table)``. Already-indexed columns are
+    skipped, so re-runs are no-ops.
 
     Adding a new business table = adding it to ``_BUSINESS_SCHEMAS``;
     everything else (table name, columns to index) reads off the
     schema's ClassVars.
     """
+    await migrate_fts_indexes()
     for schema in _BUSINESS_SCHEMAS:
         table = await get_table(schema.TABLE_NAME, schema)
         await schema.ensure_fts_indexes(table)
@@ -134,6 +192,7 @@ __all__ = [
     "get_connection",
     "get_table",
     "knowledge_topic_repo",
+    "migrate_fts_indexes",
     "user_profile_repo",
     "verify_business_schemas",
 ]

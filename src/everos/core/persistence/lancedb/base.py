@@ -127,7 +127,16 @@ class BaseLanceTable(LanceModel):
           filtering and a divided source of truth.
         - ``ascii_folding=True`` — strips diacritics (é→e) on Latin
           characters; no-op on CJK.
-        - ``with_position=True`` — enables phrase queries.
+        - ``with_position=False`` — everos does OR-mode BM25 recall
+          (``MatchQuery`` clauses; see ``search.recall.base.build_or_query``),
+          never phrase queries, so token positions are never read.
+          Building the position posting List is therefore pure overhead
+          **and** triggers a ``Max offset exceeds length of values``
+          offset-overflow crash inside lance's compaction once the
+          position lists grow large (upstream lance-format/lance#7653).
+          That crash blocks ``optimize()`` — including version cleanup —
+          so the index dir grows unbounded until the disk fills. Keeping
+          positions off avoids both the overhead and the crash.
 
         Subclasses normally do not need to override this — declaring
         :attr:`BM25_FIELDS` is enough.
@@ -142,7 +151,7 @@ class BaseLanceTable(LanceModel):
             await table.create_index(
                 column=field,
                 config=FTS(
-                    with_position=True,
+                    with_position=False,
                     base_tokenizer="whitespace",
                     lower_case=True,
                     stem=True,
