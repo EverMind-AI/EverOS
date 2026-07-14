@@ -401,10 +401,14 @@ class InstrumentedEverOS:
             if top_score is not None:
                 span.set_attribute("everos.search.top_score", top_score)
                 span.set_attribute("everos.search.hit", top_score >= hit_threshold)
+            else:
+                # Nothing scored came back: a genuine miss. Record hit so it
+                # still counts in recall hit-rate; no top_score (no hit to score).
+                span.set_attribute("everos.search.hit", False)
 
         # Recall-quality -> Langfuse scores (visible in evals/dashboards).
         # Pushed AFTER the span closes so exporter/network time never
-        # inflates the measured search latency. Skipped on a miss.
+        # inflates the measured search latency.
         if top_score is not None:
             pushed = push_score(trace_id_hex, "recall_top_score", top_score,
                                 observation_id=retriever_obs_id,
@@ -414,6 +418,13 @@ class InstrumentedEverOS:
                        observation_id=retriever_obs_id,
                        comment=f"top_score >= {hit_threshold}")
             resp["_scores_pushed"] = pushed
+        else:
+            # Miss: record hit=0 so empty recalls still count in hit-rate;
+            # no top_score is pushed (there is no hit to score).
+            resp["_scores_pushed"] = push_score(
+                trace_id_hex, "recall_hit", 0.0,
+                observation_id=retriever_obs_id,
+                comment=f"no hit >= {hit_threshold} (empty recall)")
         resp["_trace_id"] = trace_id_hex
         return resp
 
