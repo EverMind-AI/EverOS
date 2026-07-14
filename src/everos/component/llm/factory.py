@@ -42,4 +42,5 @@ def build_llm_provider(settings: LLMSettings) -> LLMClient:
         model=settings.model,
         api_key=settings.api_key.get_secret_value(),
         base_url=settings.base_url,
+        timeout=settings.timeout_seconds,
     )

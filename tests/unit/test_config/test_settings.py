@@ -76,6 +76,21 @@ def test_env_overrides_toml(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.sqlite.synchronous == "NORMAL"
 
 
+def test_llm_timeout_env_overrides_everos_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "myroot"
+    root.mkdir()
+    (root / "everos.toml").write_text(
+        "[llm]\ntimeout_seconds = 90.0\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("EVEROS_LLM__TIMEOUT_SECONDS", "135.0")
+
+    settings = Settings(_everos_root=root)
+
+    assert settings.llm.timeout_seconds == 135.0
+
+
 def test_init_args_override_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVEROS_SQLITE__BUSY_TIMEOUT_MS", "10000")
     from everos.config.settings import SqliteSettings
@@ -98,6 +113,13 @@ def test_negative_busy_timeout_rejected() -> None:
         Settings.model_validate({"sqlite": {"busy_timeout_ms": -1}})
 
 
+def test_non_positive_llm_timeout_rejected() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"llm": {"timeout_seconds": 0}})
+
+
 def test_load_settings_is_cached() -> None:
     a = load_settings()
     b = load_settings()
@@ -118,6 +140,7 @@ def test_embedding_rerank_defaults() -> None:
     assert s.rerank.api_key.get_secret_value() == ""
     assert s.rerank.timeout_seconds == 30.0
     assert s.llm.api_key.get_secret_value() == ""
+    assert s.llm.timeout_seconds == 60.0
 
 
 def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:
