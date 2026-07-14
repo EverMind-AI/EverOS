@@ -647,3 +647,59 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
     assert repo_a._write_lock(repo_a.table_name) is not repo_b._write_lock(
         repo_b.table_name
     )
+
+
+# ── migrate_fts_indexes (one-time rebuild of pre-fix with_position indexes) ──
+
+
+async def test_migrate_fts_indexes_runs_once_and_rebuilds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """migrate_fts_indexes rebuilds existing FTS indexes once, guarded by a
+    version marker in the LanceDB dir (fix for lance-format/lance#7653).
+
+    White-box surfaces: the ``.fts_index_version`` marker file and
+    ``AsyncTable.list_indices`` on the global-connection table.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    import everos.infra.persistence.lancedb as lancedb_infra
+    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence.lancedb import (
+        dispose_connection,
+        get_table,
+        migrate_fts_indexes,
+    )
+
+    monkeypatch.setattr(lancedb_infra, "_BUSINESS_SCHEMAS", (_SearchNote,))
+    await dispose_connection()
+    try:
+        table = await get_table(_SearchNote.TABLE_NAME, _SearchNote)
+        await table.add(
+            [
+                _SearchNote(
+                    id="1",
+                    text="hello world",
+                    tokens="hello world",
+                    vector=[1, 0, 0, 0],
+                )
+            ]
+        )
+        await _SearchNote.ensure_fts_indexes(table)
+        assert any("tokens" in (i.columns or []) for i in await table.list_indices())
+
+        marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
+        assert not marker.exists()
+
+        # First run: migrates + writes the marker, index still present.
+        await migrate_fts_indexes()
+        assert marker.read_text().strip() == "2"
+        assert any("tokens" in (i.columns or []) for i in await table.list_indices())
+
+        # Marker present → second run is a no-op. Drop the index, re-run,
+        # and confirm it is NOT rebuilt (migration skipped, not re-executed).
+        for i in await table.list_indices():
+            await table.drop_index(i.name)
+        await migrate_fts_indexes()
+        assert not list(await table.list_indices())
+    finally:
+        await dispose_connection()

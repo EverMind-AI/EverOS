@@ -571,3 +571,65 @@ async def test_rebuild_failure_does_not_crash_daemon(
     await w.stop()
     # Worker is still alive (stop() returned cleanly).
     assert w._task is None
+
+
+class _OptimizeFailingRepo(_FakeLanceRepo):
+    """Fake repo whose ``optimize()`` raises until ``fail`` is cleared."""
+
+    def __init__(self, **kw) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(**kw)
+        self.fail = True
+
+    async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
+        if self.fail:
+            raise RuntimeError("Max offset of 9 exceeds length of values 3")
+        await super().optimize(cleanup_older_than=cleanup_older_than)
+
+
+async def test_optimize_failures_counted_escalated_and_reset(
+    patched_repo: _FakeRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Layer-2 stop-gap for lance-format/lance#7653.
+
+    Consecutive ``optimize()`` failures are counted, escalate
+    warning→error once the threshold is hit, and reset to 0 on the next
+    success — instead of being swallowed as a silent warning stream that
+    lets the index dir grow until the disk fills.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    calls: list[tuple[str, str]] = []
+
+    class _SpyLogger:
+        def __getattr__(self, level: str):  # type: ignore[no-untyped-def]
+            def rec(event: str, **_kw) -> None:  # type: ignore[no-untyped-def]
+                calls.append((level, event))
+
+            return rec
+
+    monkeypatch.setattr(wmod, "logger", _SpyLogger())
+
+    repo = _OptimizeFailingRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.05,
+    )
+    w._optimizer_states["episode"] = wmod._KindOptimizerState()
+
+    threshold = wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD
+    for _ in range(threshold):
+        await w._run_optimize_once("episode")
+
+    state = w._optimizer_states["episode"]
+    assert state.optimize_failures == threshold
+
+    fail_logs = [lvl for lvl, ev in calls if ev == "cascade_lancedb_optimize_failed"]
+    assert fail_logs[:-1] == ["warning"] * (threshold - 1)
+    assert fail_logs[-1] == "error"
+
+    # A subsequent success resets the streak.
+    repo.fail = False
+    await w._run_optimize_once("episode")
+    assert state.optimize_failures == 0
