@@ -29,6 +29,7 @@ Embedding source: ``summary`` (mirrors the search recaller's anchor).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any, ClassVar
 
@@ -91,8 +92,25 @@ class KnowledgeTopicHandler(Handler):
             }
         )
 
+        topic_payload = self._build_sqlite_payload(fields, md_path)
+
         prior = await knowledge_topic_repo.get_by_id(fields["node_id"])
         if prior is not None and prior.content_sha256 == digest:
+            rows = await knowledge_topic_sqlite_repo.get_topics_by_ids(
+                [fields["node_id"]]
+            )
+            if not rows or not self._sqlite_row_matches_payload(
+                rows[0],
+                topic_payload,
+            ):
+                await knowledge_topic_sqlite_repo.upsert_from_handler(topic_payload)
+                return HandlerOutcome(
+                    md_path=md_path,
+                    kind=self.kind,
+                    upserted=1,
+                    deleted=0,
+                    skipped=0,
+                )
             return HandlerOutcome(
                 md_path=md_path,
                 kind=self.kind,
@@ -104,7 +122,6 @@ class KnowledgeTopicHandler(Handler):
         row = await self._build_lance_row(fields, digest, md_path)
         await knowledge_topic_repo.upsert([row])
 
-        topic_payload = self._build_sqlite_payload(fields, md_path)
         await knowledge_topic_sqlite_repo.upsert_from_handler(topic_payload)
 
         return HandlerOutcome(
@@ -114,6 +131,18 @@ class KnowledgeTopicHandler(Handler):
             deleted=0,
             skipped=0,
         )
+
+    def _sqlite_row_matches_payload(
+        self,
+        row: Any,
+        payload: TopicUpsertPayload,
+    ) -> bool:
+        """Return whether SQLite already mirrors the parsed topic payload."""
+        for key, value in dataclasses.asdict(payload).items():
+            current = row.get(key) if isinstance(row, dict) else getattr(row, key, None)
+            if current != value:
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Private helpers

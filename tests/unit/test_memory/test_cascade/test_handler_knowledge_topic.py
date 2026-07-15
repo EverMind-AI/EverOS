@@ -86,6 +86,9 @@ class _FakeSqliteRepo:
         self.upserts.append(data)
         self.rows[payload.node_id] = data
 
+    async def get_topics_by_ids(self, node_ids: list[str]) -> list[dict]:
+        return [self.rows[nid] for nid in node_ids if nid in self.rows]
+
     async def delete_by_md_path(self, md_path: str) -> int:
         self.deletes.append(md_path)
         before = len(self.rows)
@@ -230,7 +233,7 @@ async def test_handle_added_or_modified_upserts_to_both_stores(
     assert sq["md_path"] == md_path
 
 
-async def test_same_digest_skips(
+async def test_same_digest_skips_when_sqlite_matches(
     memory_root: MemoryRoot,
     fake_lance: _FakeLanceRepo,
     fake_sqlite: _FakeSqliteRepo,
@@ -248,6 +251,54 @@ async def test_same_digest_skips(
     # Only one upsert batch total.
     assert len(fake_lance.upserts) == 1
     assert len(fake_sqlite.upserts) == 1
+
+
+async def test_same_digest_repairs_missing_sqlite_row(
+    memory_root: MemoryRoot,
+    fake_lance: _FakeLanceRepo,
+    fake_sqlite: _FakeSqliteRepo,
+) -> None:
+    """If LanceDB is current but SQLite lost the row, rehydrate SQLite."""
+    md_path = _write_topic_md(memory_root)
+    handler = _handler(memory_root)
+
+    first = await handler.handle_added_or_modified(md_path)
+    assert first.upserted == 1
+
+    fake_sqlite.rows.clear()
+    fake_sqlite.upserts.clear()
+
+    second = await handler.handle_added_or_modified(md_path)
+
+    assert second.upserted == 1
+    assert second.skipped == 0
+    assert len(fake_lance.upserts) == 1
+    assert len(fake_sqlite.upserts) == 1
+    assert fake_sqlite.upserts[0]["node_id"] == "node_001"
+
+
+async def test_same_digest_repairs_stale_sqlite_row(
+    memory_root: MemoryRoot,
+    fake_lance: _FakeLanceRepo,
+    fake_sqlite: _FakeSqliteRepo,
+) -> None:
+    """If LanceDB is current but SQLite differs, refresh SQLite."""
+    md_path = _write_topic_md(memory_root)
+    handler = _handler(memory_root)
+
+    first = await handler.handle_added_or_modified(md_path)
+    assert first.upserted == 1
+
+    fake_sqlite.rows["node_001"]["summary"] = "stale summary"
+    fake_sqlite.upserts.clear()
+
+    second = await handler.handle_added_or_modified(md_path)
+
+    assert second.upserted == 1
+    assert second.skipped == 0
+    assert len(fake_lance.upserts) == 1
+    assert len(fake_sqlite.upserts) == 1
+    assert fake_sqlite.upserts[0]["summary"] == "Overview of budget planning practices."
 
 
 async def test_wrong_type_skips(
