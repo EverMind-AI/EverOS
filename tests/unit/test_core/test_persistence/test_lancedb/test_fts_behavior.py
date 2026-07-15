@@ -8,6 +8,7 @@ the following configuration::
     stem=True
     remove_stop_words=True
     ascii_folding=True
+    with_position=False
     language="English" (tantivy default)
 
 The app-layer ``JiebaTokenizer`` already handles segmentation +
@@ -22,6 +23,7 @@ as the docstring claims:
   app-layer JiebaTokenizer is the single source of truth for
   stop-word filtering (English + Chinese)
 - ascii_folding=True → diacritics on Latin chars normalised (café → cafe)
+- with_position=False → omit unused phrase-query positions so optimize can compact
 - CJK pass-through → no stemming applied to CJK
 
 Tests build a fresh in-memory-ish LanceDB store under ``tmp_path``,
@@ -33,11 +35,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import lancedb
 import pytest
 from lancedb import AsyncTable
+from lancedb.index import FTS
 
 from everos.core.persistence.lancedb import BaseLanceTable
 
@@ -50,6 +53,25 @@ class _FtsSpec(BaseLanceTable):
 
     id: str
     body: str
+
+
+class _FtsConfigSpy:
+    """Capture index configuration passed through the public schema seam."""
+
+    def __init__(self) -> None:
+        self.created: list[tuple[str, FTS, bool]] = []
+
+    async def list_indices(self) -> list[object]:
+        return []
+
+    async def create_index(
+        self,
+        column: str,
+        *,
+        config: FTS,
+        replace: bool = False,
+    ) -> None:
+        self.created.append((column, config, replace))
 
 
 @pytest.fixture
@@ -73,6 +95,19 @@ async def _query_ids(table: AsyncTable, text: str) -> set[str]:
     """Run a BM25 keyword query over the ``body`` column, return matched ids."""
     rows = await table.query().nearest_to_text(text, columns="body").limit(10).to_list()
     return {r["id"] for r in rows}
+
+
+async def test_fts_index_disables_positions() -> None:
+    """FTS creation omits positions because EverOS does not run phrase queries."""
+    table = _FtsConfigSpy()
+
+    await _FtsSpec.ensure_fts_indexes(cast(AsyncTable, table))
+
+    assert len(table.created) == 1
+    column, config, replace = table.created[0]
+    assert column == "body"
+    assert config.with_position is False
+    assert replace is False
 
 
 # ── lower_case=True ────────────────────────────────────────────────────
