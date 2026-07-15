@@ -330,7 +330,26 @@ class CascadeWorker:
                 if row.change_type == "deleted":
                     outcome = await handler.handle_deleted(row.md_path)
                 else:
-                    outcome = await handler.handle_added_or_modified(row.md_path)
+                    try:
+                        outcome = await handler.handle_added_or_modified(row.md_path)
+                    except FileNotFoundError as exc:
+                        absolute = handler._deps.memory_root.root / row.md_path
+                        if absolute.exists():
+                            raise RecoverableError(
+                                "handler dependency disappeared while source md "
+                                "still exists"
+                            ) from exc
+                        # Watcher events can be stale by the time the worker
+                        # reads the path (for example, delete followed by a
+                        # fast replace). Reconcile the durable stores to the
+                        # filesystem state instead of leaving the old row
+                        # indexed as a permanent failure.
+                        logger.info(
+                            "cascade_worker_missing_path_reconciled_as_delete",
+                            md_path=row.md_path,
+                            kind=row.kind,
+                        )
+                        outcome = await handler.handle_deleted(row.md_path)
             except RecoverableError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(
