@@ -205,6 +205,20 @@ def _j(obj: Any) -> str:
     return s if len(s) <= _TRUNC else s[:_TRUNC] + "…"
 
 
+def _top_score_from_data(data: dict) -> float | None:
+    """Best hit score across all scored result arrays in a real search
+    response. Each array is already sorted desc by the server, so the top
+    hit is derivable from the public API output alone — no server-internal
+    detail needed. Returns None when nothing scored came back (a miss)."""
+    scores = [
+        float(item["score"])
+        for key in ("episodes", "profiles", "agent_cases", "agent_skills")
+        for item in (data.get(key) or [])
+        if item.get("score") is not None
+    ]
+    return max(scores) if scores else None
+
+
 class InstrumentedEverOS:
     """Wraps an EverOS transport (real HTTP server or mock) and emits the
     spans that the proposed server-side instrumentation would emit.
@@ -266,28 +280,35 @@ class InstrumentedEverOS:
             })
             detail = resp.get("_detail", {})
 
-            # 1. LLM extraction, a *generation*: model + token usage.
-            #    EverOS does not compute cost; Langfuse derives it from
-            #    model + usage in its model-usage views.
-            with self._tracer.start_as_current_span("everos.extract") as g:
-                self._common(g, session_id=session_id, user_id=user_id,
-                             app_id=app_id, project_id=project_id,
-                             obs_type="generation", op="extract")
-                g.set_attribute("gen_ai.request.model", detail.get("model", "gpt-4.1-mini"))
-                g.set_attribute("langfuse.observation.input", _j(detail.get("buffered_messages", [])))
-                g.set_attribute("langfuse.observation.output", _j(detail.get("memory_cell", {})))
-                usage = detail.get("usage", {})
-                g.set_attribute("gen_ai.usage.input_tokens", usage.get("input", 0))
-                g.set_attribute("gen_ai.usage.output_tokens", usage.get("output", 0))
-                time.sleep(detail.get("extract_s", 0.05))
+            # Extraction (generation w/ model+tokens), markdown persist, and the
+            # async index trace all describe server-internal facts the HTTP API
+            # doesn't expose yet. Emit them with the mock / once native
+            # instrumentation ships; skip on a real server rather than fabricate.
+            # The top-level everos.memory.flush span (real latency + output) is
+            # always emitted.
+            if detail:
+                # 1. LLM extraction, a *generation*: model + token usage.
+                #    EverOS does not compute cost; Langfuse derives it from
+                #    model + usage in its model-usage views.
+                with self._tracer.start_as_current_span("everos.extract") as g:
+                    self._common(g, session_id=session_id, user_id=user_id,
+                                 app_id=app_id, project_id=project_id,
+                                 obs_type="generation", op="extract")
+                    g.set_attribute("gen_ai.request.model", detail.get("model", "gpt-4.1-mini"))
+                    g.set_attribute("langfuse.observation.input", _j(detail.get("buffered_messages", [])))
+                    g.set_attribute("langfuse.observation.output", _j(detail.get("memory_cell", {})))
+                    usage = detail.get("usage", {})
+                    g.set_attribute("gen_ai.usage.input_tokens", usage.get("input", 0))
+                    g.set_attribute("gen_ai.usage.output_tokens", usage.get("output", 0))
+                    time.sleep(detail.get("extract_s", 0.05))
 
-            # 2. Markdown persistence (atomic tmp+fsync+rename), strong consistency
-            with self._tracer.start_as_current_span("everos.persist.markdown") as p:
-                self._common(p, session_id=session_id, user_id=user_id,
-                             app_id=app_id, project_id=project_id, op="persist")
-                p.set_attribute("langfuse.observation.output",
-                                _j({"md_files": detail.get("md_files", [])}))
-                time.sleep(0.008)
+                # 2. Markdown persistence (atomic tmp+fsync+rename), strong consistency
+                with self._tracer.start_as_current_span("everos.persist.markdown") as p:
+                    self._common(p, session_id=session_id, user_id=user_id,
+                                 app_id=app_id, project_id=project_id, op="persist")
+                    p.set_attribute("langfuse.observation.output",
+                                    _j({"md_files": detail.get("md_files", [])}))
+                    time.sleep(0.008)
 
             span.set_attribute("langfuse.observation.output", _j(resp["data"]))
 
@@ -295,16 +316,18 @@ class InstrumentedEverOS:
         #    "cascade" daemon (file watcher + debounce + entry diff -> LanceDB).
         #    It is therefore emitted as its OWN short-lived trace, correlated
         #    to the originating write by session_id, not as a child span.
-        with self._tracer.start_as_current_span("everos.cascade.index") as ix:
-            self._common(ix, session_id=session_id, user_id=user_id,
-                         app_id=app_id, project_id=project_id, op="index")
-            ix.set_attribute("langfuse.observation.input",
-                             _j({"triggered_by": "markdown change",
-                                 "correlates_to_session": session_id}))
-            ix.set_attribute("langfuse.observation.output",
-                             _j({"rows_indexed": detail.get("rows_indexed", 0),
-                                 "index_lag_ms": detail.get("index_lag_ms", 500)}))
-            time.sleep(0.02)
+        #    Server-internal, so mock / native only.
+        if detail:
+            with self._tracer.start_as_current_span("everos.cascade.index") as ix:
+                self._common(ix, session_id=session_id, user_id=user_id,
+                             app_id=app_id, project_id=project_id, op="index")
+                ix.set_attribute("langfuse.observation.input",
+                                 _j({"triggered_by": "markdown change",
+                                     "correlates_to_session": session_id}))
+                ix.set_attribute("langfuse.observation.output",
+                                 _j({"rows_indexed": detail.get("rows_indexed", 0),
+                                     "index_lag_ms": detail.get("index_lag_ms", 500)}))
+                time.sleep(0.02)
 
         return resp
 
@@ -332,58 +355,76 @@ class InstrumentedEverOS:
             resp = self._t("/api/v1/memory/search", payload)
             detail = resp.get("_detail", {})
 
-            # 1. Query embedding
-            with self._tracer.start_as_current_span("everos.search.embed_query") as e:
-                self._common(e, session_id=session_id, user_id=user_id, agent_id=agent_id,
-                             app_id=app_id, project_id=project_id,
-                             obs_type="embedding", op="embed")
-                e.set_attribute("gen_ai.request.model",
-                                detail.get("embed_model", "Qwen/Qwen3-Embedding-4B"))
-                e.set_attribute("langfuse.observation.input", _j(query))
-                # compact output — never dump the raw vector into telemetry
-                e.set_attribute("langfuse.observation.output",
-                                _j({"embedding_dims": detail.get("embed_dims", 2560)}))
-                e.set_attribute("gen_ai.usage.input_tokens", detail.get("embed_tokens", 0))
-                time.sleep(detail.get("embed_s", 0.03))
+            # embed / hybrid_recall / rerank describe INTERNAL pipeline stages the
+            # HTTP API doesn't expose yet. Emit them with the mock / once native
+            # instrumentation ships; skip on a real server rather than fabricate.
+            if detail:
+                # 1. Query embedding
+                with self._tracer.start_as_current_span("everos.search.embed_query") as e:
+                    self._common(e, session_id=session_id, user_id=user_id, agent_id=agent_id,
+                                 app_id=app_id, project_id=project_id,
+                                 obs_type="embedding", op="embed")
+                    e.set_attribute("gen_ai.request.model",
+                                    detail.get("embed_model", "Qwen/Qwen3-Embedding-4B"))
+                    e.set_attribute("langfuse.observation.input", _j(query))
+                    # compact output — never dump the raw vector into telemetry
+                    e.set_attribute("langfuse.observation.output",
+                                    _j({"embedding_dims": detail.get("embed_dims", 2560)}))
+                    e.set_attribute("gen_ai.usage.input_tokens", detail.get("embed_tokens", 0))
+                    time.sleep(detail.get("embed_s", 0.03))
 
-            # 2. Hybrid recall: single LanceDB query = BM25 + vector ANN + filter
-            with self._tracer.start_as_current_span("everos.search.hybrid_recall") as h:
-                self._common(h, session_id=session_id, user_id=user_id, agent_id=agent_id,
-                             app_id=app_id, project_id=project_id,
-                             obs_type="retriever", op="recall")
-                h.set_attribute("langfuse.observation.input",
-                                _j({"bm25": True, "vector_ann": True, "filters": None}))
-                h.set_attribute("langfuse.observation.output",
-                                _j({"candidates": detail.get("candidates", 0)}))
-                time.sleep(detail.get("recall_s", 0.03))
+                # 2. Hybrid recall: single LanceDB query = BM25 + vector ANN + filter
+                with self._tracer.start_as_current_span("everos.search.hybrid_recall") as h:
+                    self._common(h, session_id=session_id, user_id=user_id, agent_id=agent_id,
+                                 app_id=app_id, project_id=project_id,
+                                 obs_type="retriever", op="recall")
+                    h.set_attribute("langfuse.observation.input",
+                                    _j({"bm25": True, "vector_ann": True, "filters": None}))
+                    h.set_attribute("langfuse.observation.output",
+                                    _j({"candidates": detail.get("candidates", 0)}))
+                    time.sleep(detail.get("recall_s", 0.03))
 
-            # 3. Rerank (cross-encoder) — scores become Langfuse scores
-            with self._tracer.start_as_current_span("everos.search.rerank") as r:
-                self._common(r, session_id=session_id, user_id=user_id, agent_id=agent_id,
-                             app_id=app_id, project_id=project_id, op="rerank")
-                r.set_attribute("langfuse.observation.metadata.rerank_model",
-                                detail.get("rerank_model", "Qwen/Qwen3-Reranker-4B"))
-                r.set_attribute("langfuse.observation.output", _j(detail.get("ranked", [])))
-                time.sleep(detail.get("rerank_s", 0.05))
+                # 3. Rerank (cross-encoder)
+                with self._tracer.start_as_current_span("everos.search.rerank") as r:
+                    self._common(r, session_id=session_id, user_id=user_id, agent_id=agent_id,
+                                 app_id=app_id, project_id=project_id, op="rerank")
+                    r.set_attribute("langfuse.observation.metadata.rerank_model",
+                                    detail.get("rerank_model", "Qwen/Qwen3-Reranker-4B"))
+                    r.set_attribute("langfuse.observation.output", _j(detail.get("ranked", [])))
+                    time.sleep(detail.get("rerank_s", 0.05))
 
-            # Compact result summary on the retriever span
-            hits = detail.get("ranked", [])
-            top_score = float(hits[0]["score"]) if hits else 0.0
+            # Recall quality is derivable from the REAL response — every hit
+            # carries a fused/reranked score — so it works against a live server
+            # today, not just the mock. None means a miss (nothing scored).
+            top_score = _top_score_from_data(resp["data"])
             span.set_attribute("langfuse.observation.output", _j(resp["data"]))
-            span.set_attribute("everos.search.top_score", top_score)
-            span.set_attribute("everos.search.hit", top_score >= hit_threshold)
+            if top_score is not None:
+                span.set_attribute("everos.search.top_score", top_score)
+                span.set_attribute("everos.search.hit", top_score >= hit_threshold)
+            else:
+                # Nothing scored came back: a genuine miss. Record hit so it
+                # still counts in recall hit-rate; no top_score (no hit to score).
+                span.set_attribute("everos.search.hit", False)
 
         # Recall-quality -> Langfuse scores (visible in evals/dashboards).
         # Pushed AFTER the span closes so exporter/network time never
         # inflates the measured search latency.
-        pushed = push_score(trace_id_hex, "recall_top_score", top_score,
-                            observation_id=retriever_obs_id,
-                            comment="fused+reranked score of top memory hit")
-        push_score(trace_id_hex, "recall_hit",
-                   1.0 if top_score >= hit_threshold else 0.0,
-                   observation_id=retriever_obs_id,
-                   comment=f"top_score >= {hit_threshold}")
-        resp["_scores_pushed"] = pushed
+        if top_score is not None:
+            pushed = push_score(trace_id_hex, "recall_top_score", top_score,
+                                observation_id=retriever_obs_id,
+                                comment="fused+reranked score of top memory hit")
+            push_score(trace_id_hex, "recall_hit",
+                       1.0 if top_score >= hit_threshold else 0.0,
+                       observation_id=retriever_obs_id,
+                       comment=f"top_score >= {hit_threshold}")
+            resp["_scores_pushed"] = pushed
+        else:
+            # Miss: record hit=0 so empty recalls still count in hit-rate;
+            # no top_score is pushed (there is no hit to score).
+            resp["_scores_pushed"] = push_score(
+                trace_id_hex, "recall_hit", 0.0,
+                observation_id=retriever_obs_id,
+                comment=f"no hit >= {hit_threshold} (empty recall)")
         resp["_trace_id"] = trace_id_hex
         return resp
 
@@ -398,18 +439,23 @@ class InstrumentedEverOS:
             resp = self._t("/api/v1/ome/trigger", {"name": strategy, "force": True})
             detail = resp.get("_detail", {})
 
-            with self._tracer.start_as_current_span("everos.reflect.consolidate") as g:
-                self._common(g, session_id=session_id, user_id=user_id,
-                             obs_type="generation", op="consolidate")
-                g.set_attribute("gen_ai.request.model", detail.get("model", "gpt-4.1-mini"))
-                g.set_attribute("langfuse.observation.input",
-                                _j(detail.get("episodes_in", [])))
-                g.set_attribute("langfuse.observation.output",
-                                _j(detail.get("consolidated", {})))
-                usage = detail.get("usage", {})
-                g.set_attribute("gen_ai.usage.input_tokens", usage.get("input", 0))
-                g.set_attribute("gen_ai.usage.output_tokens", usage.get("output", 0))
-                time.sleep(detail.get("reflect_s", 0.08))
+            # The consolidation generation (model + tokens) is server-internal;
+            # emit it with the mock / once native instrumentation ships, skip on
+            # a real server. The top-level everos.ome.<strategy> agent span (real
+            # latency + output) is always emitted.
+            if detail:
+                with self._tracer.start_as_current_span("everos.reflect.consolidate") as g:
+                    self._common(g, session_id=session_id, user_id=user_id,
+                                 obs_type="generation", op="consolidate")
+                    g.set_attribute("gen_ai.request.model", detail.get("model", "gpt-4.1-mini"))
+                    g.set_attribute("langfuse.observation.input",
+                                    _j(detail.get("episodes_in", [])))
+                    g.set_attribute("langfuse.observation.output",
+                                    _j(detail.get("consolidated", {})))
+                    usage = detail.get("usage", {})
+                    g.set_attribute("gen_ai.usage.input_tokens", usage.get("input", 0))
+                    g.set_attribute("gen_ai.usage.output_tokens", usage.get("output", 0))
+                    time.sleep(detail.get("reflect_s", 0.08))
 
             span.set_attribute("langfuse.observation.output", _j(resp["data"]))
             return resp
