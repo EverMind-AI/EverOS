@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from everalgo.types import Candidate
 
+from everos.component.rerank.protocol import RerankResult
 from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import ConfigurationError
 from everos.infra.persistence.sqlite.tables.knowledge import (
@@ -23,6 +24,8 @@ from everos.infra.persistence.sqlite.tables.knowledge import (
 from everos.service.knowledge import (
     DocumentContext,
     SearchKnowledgeResult,
+    _enrich_with_content,
+    _run_category_pipeline,
     compile_knowledge_where,
     search_knowledge,
 )
@@ -167,6 +170,128 @@ class TestCompileKnowledgeWhere:
         result = compile_knowledge_where("app@org+v1", "proj_1")
         assert "app@org+v1" in result
         assert "proj_1" in result
+
+
+class TestKnowledgeRerankContent:
+    async def test_empty_sqlite_content_uses_summary_only_for_reranking(self) -> None:
+        candidate = _candidate(
+            node_id="n_empty_content",
+            summary="Non-empty topic summary for reranking.",
+            content="",
+        )
+        topic = MagicMock(node_id="n_empty_content", content="")
+
+        with patch(
+            f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+            new=AsyncMock(return_value=[topic]),
+        ):
+            enriched = await _enrich_with_content([candidate])
+
+        assert enriched[0].metadata["content"] == ""
+        assert enriched[0].metadata["rerank_content"] == (
+            "Non-empty topic summary for reranking."
+        )
+
+    async def test_blank_content_and_summary_fall_through_to_topic_name(self) -> None:
+        candidate = _candidate(
+            node_id="n_blank_summary",
+            summary="  \t ",
+            topic_name="Useful Topic Name",
+        )
+        topic = MagicMock(node_id="n_blank_summary", content=" \n ")
+
+        with patch(
+            f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+            new=AsyncMock(return_value=[topic]),
+        ):
+            enriched = await _enrich_with_content([candidate])
+
+        assert enriched[0].metadata["content"] == " \n "
+        assert enriched[0].metadata["rerank_content"] == "Useful Topic Name"
+
+    async def test_missing_row_and_blank_metadata_fall_back_to_candidate_id(
+        self,
+    ) -> None:
+        candidate = _candidate(
+            node_id="n_stable_fallback",
+            summary=" ",
+            topic_name="\n",
+        )
+
+        with patch(
+            f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            enriched = await _enrich_with_content([candidate])
+
+        assert enriched[0].metadata["content"] == ""
+        assert enriched[0].metadata["rerank_content"] == "n_stable_fallback"
+
+    async def test_all_blank_fields_use_nonempty_terminal_fallback(self) -> None:
+        candidate = _candidate(node_id="", summary=" ", topic_name="\n")
+
+        with patch(
+            f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            enriched = await _enrich_with_content([candidate])
+
+        assert enriched[0].metadata["rerank_content"] == "Knowledge topic"
+
+    async def test_nonempty_sqlite_content_remains_authoritative(self) -> None:
+        candidate = _candidate(node_id="n_full_content", summary="Fallback summary")
+        topic = MagicMock(
+            node_id="n_full_content",
+            content="\n  Authoritative body.  \n",
+        )
+
+        with patch(
+            f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+            new=AsyncMock(return_value=[topic]),
+        ):
+            enriched = await _enrich_with_content([candidate])
+
+        assert enriched[0].metadata["content"] == "\n  Authoritative body.  \n"
+        assert enriched[0].metadata["rerank_content"] == "Authoritative body."
+
+    async def test_category_pipeline_sends_nonempty_rerank_passage(self) -> None:
+        candidate = _candidate(
+            node_id="n_provider_seam",
+            summary="Provider-safe topic summary.",
+            content="",
+        )
+        topic = MagicMock(node_id="n_provider_seam", content="")
+        recaller = AsyncMock()
+        recaller.sparse_recall = AsyncMock(return_value=[candidate])
+        reranker = AsyncMock()
+        reranker.rerank = AsyncMock(return_value=[RerankResult(0, 0.9)])
+        config = _mock_settings().knowledge.search
+
+        async def _run_facade(query, *, base_retrieve, rerank_fn, **_kwargs):
+            recalled = await base_retrieve(query, 10)
+            return await rerank_fn(query, recalled)
+
+        with (
+            patch(f"{_MOD}._build_recaller", return_value=recaller),
+            patch(
+                f"{_MOD}.knowledge_topic_sqlite_repo.get_topics_by_ids",
+                new=AsyncMock(return_value=[topic]),
+            ),
+            patch("everalgo.rank.acategory_retrieve", new=_run_facade),
+        ):
+            await _run_category_pipeline(
+                "query",
+                "app_id = 'default' AND project_id = 'default'",
+                method="keyword",
+                vector=[],
+                reranker=reranker,
+                config=config,
+                top_k=5,
+            )
+
+        documents = reranker.rerank.await_args.args[1]
+        assert documents == ["Provider-safe topic summary."]
+        assert all(document.strip() for document in documents)
 
 
 # ── search_knowledge ─────────────────────────────────────────────────────────
