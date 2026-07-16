@@ -26,6 +26,7 @@ import datetime as dt
 import time
 import unittest.mock as mock
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -103,6 +104,19 @@ class _BareExceptionHandler(_OkHandler):
         raise RuntimeError("unexpected boom")
 
 
+class _MissingFileHandler(_OkHandler):
+    def __init__(self, root: Path) -> None:
+        self._deps = mock.Mock(memory_root=mock.Mock(root=root))
+        self.deleted_paths: list[str] = []
+
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        raise FileNotFoundError(md_path)
+
+    async def handle_deleted(self, md_path: str) -> HandlerOutcome:
+        self.deleted_paths.append(md_path)
+        return await super().handle_deleted(md_path)
+
+
 @pytest.fixture
 def patched_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeRepo:
     """Drop a fake repo onto the module the worker imports."""
@@ -155,6 +169,40 @@ async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
     await w.drain_once()
     _path, retryable, _err, _retry = patched_repo.failed[0]
     assert retryable is False
+
+
+async def test_missing_file_during_upsert_is_reconciled_as_delete(
+    patched_repo: _FakeRepo,
+    tmp_path: Path,
+) -> None:
+    """A stale add/modify event must not leave the prior row indexed."""
+    patched_repo.batch = [_Row(md_path="vanished.md", change_type="modified")]
+    handler = _MissingFileHandler(tmp_path)
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    await w.drain_once()
+
+    assert handler.deleted_paths == ["vanished.md"]
+    assert patched_repo.done == ["vanished.md"]
+    assert patched_repo.failed == []
+
+
+async def test_missing_dependency_does_not_delete_an_existing_source(
+    patched_repo: _FakeRepo,
+    tmp_path: Path,
+) -> None:
+    """Only disappearance of the source md is treated as a delete."""
+    (tmp_path / "present.md").write_text("still here", encoding="utf-8")
+    patched_repo.batch = [_Row(md_path="present.md", change_type="modified")]
+    handler = _MissingFileHandler(tmp_path)
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    await w.drain_once()
+
+    assert handler.deleted_paths == []
+    assert patched_repo.done == []
+    assert patched_repo.failed[0][0] == "present.md"
+    assert patched_repo.failed[0][1] is True
 
 
 async def test_unknown_kind_marks_permanent_without_handler(
