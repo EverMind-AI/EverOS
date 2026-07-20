@@ -103,6 +103,20 @@ class _BareExceptionHandler(_OkHandler):
         raise RuntimeError("unexpected boom")
 
 
+class _VanishedFileHandler(_OkHandler):
+    """Simulate a file removed after its modified event was queued."""
+
+    def __init__(self) -> None:
+        self.deleted_paths: list[str] = []
+
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        raise FileNotFoundError(md_path)
+
+    async def handle_deleted(self, md_path: str) -> HandlerOutcome:
+        self.deleted_paths.append(md_path)
+        return await super().handle_deleted(md_path)
+
+
 @pytest.fixture
 def patched_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeRepo:
     """Drop a fake repo onto the module the worker imports."""
@@ -155,6 +169,21 @@ async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
     await w.drain_once()
     _path, retryable, _err, _retry = patched_repo.failed[0]
     assert retryable is False
+
+
+async def test_modified_event_for_vanished_file_is_processed_as_delete(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A stale modified event must not leave the indexed row behind."""
+    patched_repo.batch = [_Row(md_path="vanished.md", change_type="modified")]
+    handler = _VanishedFileHandler()
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    await w.drain_once()
+
+    assert handler.deleted_paths == ["vanished.md"]
+    assert patched_repo.done == ["vanished.md"]
+    assert patched_repo.failed == []
 
 
 async def test_unknown_kind_marks_permanent_without_handler(

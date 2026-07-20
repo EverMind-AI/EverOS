@@ -330,7 +330,10 @@ class CascadeWorker:
                 if row.change_type == "deleted":
                     outcome = await handler.handle_deleted(row.md_path)
                 else:
-                    outcome = await handler.handle_added_or_modified(row.md_path)
+                    try:
+                        outcome = await handler.handle_added_or_modified(row.md_path)
+                    except FileNotFoundError:
+                        outcome = await handler.handle_deleted(row.md_path)
             except RecoverableError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(

@@ -33,7 +33,7 @@ To cite the software itself:
 
 ```
 EverOS: local-first memory runtime for AI agents
-Version: 1.1.0
+Version: 1.1.4
 URL: https://github.com/EverMind-AI/EverOS
 License: Apache 2.0
 ```

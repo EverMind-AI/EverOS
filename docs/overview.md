@@ -86,4 +86,4 @@ Strict single-direction dependency, enforced by `import-linter` in CI.
 
 ## Status
 
-**Latest stable release: v1.1.0** (PyPI) — the v1 API is stable.
+**Latest stable release: v1.1.4** (PyPI) — the v1 API is stable.
