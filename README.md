@@ -102,6 +102,7 @@ for fast retrieval and self-evolving reuse.
 | Capability | Provider | Used for | Fill these `.env` slots |
 | --- | --- | --- | --- |
 | Chat + multimodal | [OpenRouter](https://openrouter.ai/) | `LLM` / `MULTIMODAL` | `EVEROS_LLM__API_KEY`, `EVEROS_MULTIMODAL__API_KEY` |
+| Chat | Atlas Cloud OpenAI-compatible endpoint | `LLM` | `EVEROS_LLM__PROVIDER=atlascloud`, `EVEROS_LLM__API_KEY` |
 | Embedding + rerank | [DeepInfra](https://deepinfra.com/) | `EMBEDDING` / `RERANK` | `EVEROS_EMBEDDING__API_KEY`, `EVEROS_RERANK__API_KEY` |
 
 You can use other OpenAI-compatible providers by changing the matching

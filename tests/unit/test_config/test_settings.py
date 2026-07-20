@@ -118,6 +118,34 @@ def test_embedding_rerank_defaults() -> None:
     assert s.rerank.api_key.get_secret_value() == ""
     assert s.rerank.timeout_seconds == 30.0
     assert s.llm.api_key.get_secret_value() == ""
+    assert s.llm.provider == "openrouter"
+
+
+def test_atlascloud_llm_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ATLASCLOUD_API_KEY", "atlas-key")
+    s = Settings(llm={"provider": "atlascloud"})
+
+    assert s.llm.provider == "atlascloud"
+    assert s.llm.model == "qwen/qwen3.5-flash"
+    assert s.llm.base_url == "https://api.atlascloud.ai/v1"
+    assert s.llm.api_key is not None
+    assert s.llm.api_key.get_secret_value() == "atlas-key"
+
+
+def test_atlascloud_llm_provider_preserves_explicit_values() -> None:
+    s = Settings(
+        llm={
+            "provider": "atlascloud",
+            "model": "deepseek-ai/deepseek-v4-pro",
+            "api_key": "custom-key",
+            "base_url": "https://proxy.example.test/v1",
+        }
+    )
+
+    assert s.llm.model == "deepseek-ai/deepseek-v4-pro"
+    assert s.llm.base_url == "https://proxy.example.test/v1"
+    assert s.llm.api_key is not None
+    assert s.llm.api_key.get_secret_value() == "custom-key"
 
 
 def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:
