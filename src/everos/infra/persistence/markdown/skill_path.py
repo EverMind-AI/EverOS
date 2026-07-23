@@ -10,8 +10,4 @@ from __future__ import annotations
 
 def encode_skill_name_segment(skill_name: str) -> str:
     """Return one collision-safe path component for a semantic skill name."""
-    return (
-        skill_name.replace("%", "%25")
-        .replace("/", "%2F")
-        .replace("\\", "%5C")
-    )
+    return skill_name.replace("%", "%25").replace("/", "%2F").replace("\\", "%5C")

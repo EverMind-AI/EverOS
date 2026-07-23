@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from everos.core.persistence import MemoryRoot
+from everos.core.persistence import MarkdownWriter, MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,
     AgentSkillReader,
@@ -127,3 +127,31 @@ async def test_read_script_round_trip(
 
 async def test_read_script_returns_none_when_missing(reader: AgentSkillReader) -> None:
     assert await reader.read_script("agent_x", "alpha", "ghost.py") is None
+
+
+async def test_reader_resolves_encoded_directory_from_original_name(
+    root: MemoryRoot, reader: AgentSkillReader
+) -> None:
+    name = "SDK/API verification"
+    fm = _make_fm(name=name)
+    encoded_dir = (
+        root.agents_dir() / "agent_x" / "skills" / "skill_SDK%2FAPI verification"
+    )
+    markdown_writer = MarkdownWriter(root)
+    await markdown_writer.write_markdown(
+        encoded_dir / "SKILL.md",
+        frontmatter=fm.model_dump(exclude_none=False),
+        body="Verify SDK APIs.\n",
+    )
+    await markdown_writer.write(
+        encoded_dir / "references" / "types.md", "Type definitions\n"
+    )
+    await markdown_writer.write(encoded_dir / "scripts" / "verify.py", "print('ok')\n")
+
+    main = await reader.read_main("agent_x", name, schema=AgentSkillFrontmatter)
+    assert main is not None
+    frontmatter, body = main
+    assert frontmatter.name == name
+    assert body == "Verify SDK APIs."
+    assert await reader.read_reference("agent_x", name, "types") == "Type definitions"
+    assert await reader.read_script("agent_x", name, "verify.py") == "print('ok')"

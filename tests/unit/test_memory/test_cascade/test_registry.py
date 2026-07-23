@@ -37,6 +37,11 @@ from everos.memory.cascade import KIND_REGISTRY, match_kind
             "default_app/default_project/agents/a1/skills/skill_contract_risk_scan/SKILL.md",
             "agent_skill",
         ),
+        (
+            "default_app/default_project/agents/a1/skills/"
+            "skill_SDK%2FAPI verification/SKILL.md",
+            "agent_skill",
+        ),
     ],
 )
 def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -> None:
@@ -54,6 +59,10 @@ def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -
         ".cache/foo.md",
         "users/u1/episodes/episode-2026-05-14.md.swp",  # swap file
         "agents/a1/skills/skill_x/references/notes.md",  # reference, not main
+        (
+            "default_app/default_project/agents/a1/skills/"
+            "skill_SDK/API verification/SKILL.md"
+        ),
         # Valid episode shape but MISSING the <app>/<project> prefix — must be
         # rejected so a prefix-less path can never silently match (the scanner
         # would otherwise find nothing while the watcher matched, a split brain).

@@ -25,6 +25,9 @@ from typing import TypeVar
 import anyio
 
 from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.infra.persistence.markdown.skill_path import (
+    encode_skill_name_segment,
+)
 
 from ..mds import AgentSkillFrontmatter
 
@@ -121,7 +124,10 @@ class AgentSkillReader:
             self._root.agents_dir(app_id, project_id)
             / agent_id
             / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-            / f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
+            / (
+                f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}"
+                f"{encode_skill_name_segment(skill_name)}"
+            )
         )
 
     def _main_path(

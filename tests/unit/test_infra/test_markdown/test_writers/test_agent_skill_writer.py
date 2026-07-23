@@ -145,3 +145,47 @@ async def test_write_main_normalises_trailing_newline(
         root.agents_dir() / "agent_x" / "skills" / "skill_alpha" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert text.endswith("no-newline-end\n")
+
+
+async def test_write_main_encodes_separator_without_changing_frontmatter(
+    root: MemoryRoot, writer: AgentSkillWriter
+) -> None:
+    name = "SDK/API verification"
+    fm = _make_fm(name=name)
+    path = await writer.write_main(
+        "agent_x", name, frontmatter=fm, body="Verify SDK APIs."
+    )
+    expected = (
+        root.agents_dir()
+        / "agent_x"
+        / "skills"
+        / "skill_SDK%2FAPI verification"
+        / "SKILL.md"
+    )
+    assert path == expected
+    assert expected.is_file()
+    assert not (
+        root.agents_dir()
+        / "agent_x"
+        / "skills"
+        / "skill_SDK"
+        / "API verification"
+        / "SKILL.md"
+    ).exists()
+    parsed = await MarkdownReader.read(expected)
+    assert parsed.frontmatter["name"] == name
+
+
+async def test_write_attachments_share_encoded_skill_directory(
+    root: MemoryRoot, writer: AgentSkillWriter
+) -> None:
+    name = r"SDK/API\verification"
+    reference = await writer.write_reference(
+        "agent_x", name, "types", "Type definitions"
+    )
+    script = await writer.write_script("agent_x", name, "verify.py", "print('ok')")
+    expected_dir = (
+        root.agents_dir() / "agent_x" / "skills" / "skill_SDK%2FAPI%5Cverification"
+    )
+    assert reference == expected_dir / "references" / "types.md"
+    assert script == expected_dir / "scripts" / "verify.py"
