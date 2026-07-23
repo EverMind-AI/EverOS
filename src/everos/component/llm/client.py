@@ -51,6 +51,7 @@ def get_llm_client() -> LLMClient:
             model=llm_cfg.model,
             api_key=api_key,
             base_url=llm_cfg.base_url,
+            timeout=llm_cfg.timeout_seconds,
         )
     )
     logger.info("llm_client_built", model=llm_cfg.model)

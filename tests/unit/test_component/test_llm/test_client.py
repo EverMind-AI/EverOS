@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 
 import pytest
+from everalgo.llm.config import LLMConfig
 from pydantic import SecretStr
 
 from everos.component.llm import LLMNotConfiguredError
@@ -23,6 +24,7 @@ def _patch_settings(
     *,
     api_key: str | None,
     base_url: str | None,
+    timeout_seconds: float = 60.0,
 ) -> None:
     """Stub the ``load_settings`` reference bound inside the client module."""
     cfg = Settings(
@@ -30,6 +32,7 @@ def _patch_settings(
             model="gpt-4.1-mini",
             api_key=SecretStr(api_key) if api_key is not None else None,
             base_url=base_url,
+            timeout_seconds=timeout_seconds,
         )
     )
     monkeypatch.setattr(_client_mod, "load_settings", lambda: cfg)
@@ -62,3 +65,28 @@ def test_returns_singleton_when_configured(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert first is sentinel
     assert first is second
+
+
+def test_passes_configured_timeout_to_everalgo_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_singleton(monkeypatch)
+    _patch_settings(
+        monkeypatch,
+        api_key="sk-test",
+        base_url="https://example.test",
+        timeout_seconds=135.0,
+    )
+    sentinel = object()
+    received_timeouts: list[float] = []
+
+    def fake_build_client(cfg: LLMConfig) -> object:
+        received_timeouts.append(cfg.timeout)
+        return sentinel
+
+    monkeypatch.setattr(_client_mod, "build_client", fake_build_client)
+
+    client = _client_mod.get_llm_client()
+
+    assert client is sentinel
+    assert received_timeouts == [135.0]

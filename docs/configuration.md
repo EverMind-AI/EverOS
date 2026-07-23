@@ -106,6 +106,7 @@ everos init --root /data/everos
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
+| `timeout_seconds` | float | `60.0` | No | Per-request timeout in seconds. Must be greater than zero. |
 
 ### `[multimodal]`
 
