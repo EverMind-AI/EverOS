@@ -1,0 +1,56 @@
+# Publishes to PyPI via Trusted Publishing (OIDC) — no stored token.
+# Fires on a version tag (vX.Y.Z, plus PEP 440 pre-releases vX.Y.ZrcN / aN / bN).
+# The `release` environment gates the upload behind manual approval; configure
+# required reviewers under Settings → Environments → release.
+#
+# One-time setup on PyPI (project owner, cannot be done from CI):
+#   PyPI → project `everos` → Settings → Publishing → add a GitHub trusted
+#   publisher: owner=EverMind-AI, repo=EverOS, workflow=release.yml,
+#   environment=release.
+name: Release
+
+on:
+  push:
+    tags:
+      # vX.Y.Z plus PEP 440 pre-release/dev suffixes (rc1 / a1 / b1 / .dev1).
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build + publish to PyPI
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # Guard: the tag must match the package version, so a mistyped tag can't
+      # publish the wrong release.
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.+)"/\1/')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag != pyproject version $pkg"
+            exit 1
+          fi
+
+      - name: Build + smoke-test the package
+        run: make package # builds sdist+wheel into dist/ and import-smokes it
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
