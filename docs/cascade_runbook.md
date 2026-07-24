@@ -82,6 +82,39 @@ The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background
 task. So it's safe to run in parallel with a live `everos server`.
 
+## Rebuild the index: `everos cascade rebuild`
+
+The safe recovery from a drifted or corrupt LanceDB index. It rebuilds
+the whole index from markdown (the source of truth) in one shot:
+
+```bash
+everos cascade rebuild          # prompts for confirmation
+everos cascade rebuild --yes    # non-interactive
+```
+
+What it does, in order:
+
+1. **Drops** every business LanceDB table (`drop_business_tables`) and
+   evicts them from the connection cache.
+2. **Recreates** them empty from the current schema + FTS indexes
+   (`ensure_business_indexes`).
+3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
+   md file re-enqueues as `added` on the next scan.
+4. **Re-scans + drains** (`sync_once`): re-embeds and re-inserts every
+   md entry.
+
+It deliberately **skips `verify_business_schemas`** — the drift it
+recovers from would otherwise trip that guard on startup before the
+rebuild could run (chicken-and-egg).
+
+Why not a bare `rm`:
+
+| Recovery | Re-populates `done` entries | Preserves `unprocessed_buffer` |
+|---|---|---|
+| `rm -rf .index/lancedb` | ❌ scanner skips `done` rows → empty index | ✅ |
+| `rm -rf .index` | ✅ | ❌ deletes un-extracted messages |
+| `everos cascade rebuild` | ✅ | ✅ |
+
 ## Recovery paths
 
 ### LanceDB schema drift on startup
@@ -91,15 +124,28 @@ an on-disk table has columns the current Pydantic schema does not
 declare (or vice versa), the boot fails with:
 
 ```
-LanceDB table 'episode' schema drift: missing=[...], extra=[...].
-The index is rebuildable from md — recover with
-`rm -rf ~/.everos/.index/lancedb` and restart.
+LanceDB table 'episode' schema drift: missing=[...], extra=[...],
+type_drift=[...]. The index is rebuildable from md — recover with
+`everos cascade rebuild`.
 ```
 
-This is the documented recovery: delete the index, restart the
-server, the scanner will pick up every md file on its first sweep and
-the worker repopulates LanceDB. Markdown is the source of truth, so
-no data is lost.
+`verify_business_schemas` compares both the column **names** and their
+**Arrow types** against the current schema. Catching type drift matters:
+an `episode.subject_vector` column left as `string` (or `null`) by an
+older build, while the schema now declares a 1024-d `fixed_size_list`,
+has the same column *name* — so a name-only check would wave it through
+and it would detonate later inside `merge_insert` as an opaque
+`LanceError(IO): Spill has sent an error` (EverOS #337). The type check
+turns that into this clean startup error.
+
+Recover with **`everos cascade rebuild`** (documented above). Do **not** just
+`rm -rf ~/.everos/.index/lancedb`: that clears the vectors but leaves
+`md_change_state` marked `done`, so the scanner skips every already-
+indexed file and the index comes back **empty**. And do **not**
+`rm -rf ~/.everos/.index`: that also deletes `unprocessed_buffer`
+(messages received but not yet extracted — not rebuildable from md).
+`cascade rebuild` is correct on both counts. Markdown is the source of
+truth, so no memory content is lost.
 
 ### inotify watch-limit exhaustion (Linux)
 
@@ -262,7 +308,9 @@ is a deployment-side change with no schema work.
 
 ## What cascade does NOT do (yet)
 
-- **Schema migration**: LanceDB column changes require `rm -rf`.
+- **Schema migration**: LanceDB has no in-place column migration; a
+  schema change is recovered by rebuilding from md (`everos cascade
+  rebuild`), not an automatic `ALTER`.
 - **Parent-id back-link**: Episode rows currently carry
   `parent_id=None`; the writer doesn't preserve the source memcell id
   in the entry inline. Tracked separately.

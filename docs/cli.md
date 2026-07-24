@@ -43,8 +43,10 @@ Each subcommand lives in its own module under
 registered in `cli/main.py`. The CLI is intentionally small — hot-path
 business (`/add` `/flush` `/search` `/get`) is the **HTTP API**, not the
 CLI; the CLI covers setup (`init`), running the server, and index ops
-(`cascade`). There is no `reindex` command — rebuild by deleting
-`<root>/.index/lancedb` and restarting, or run `everos cascade sync`.
+(`cascade`). There is no `reindex` command — for an incremental
+catch-up run `everos cascade sync`; to rebuild the whole index from
+markdown (recovery from drift / corruption) run `everos cascade
+rebuild`.
 
 ## `everos server start`
 
