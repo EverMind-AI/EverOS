@@ -156,35 +156,38 @@ async def _seed_user_profiles(rows: list[dict[str, Any]]) -> list[UserProfile]:
 
 
 async def _seed_user_memory_cluster(eps: list[dict], *, owner_id: str) -> None:
-    """Seed one ``user_memory`` cluster covering every memcell in ``eps``.
+    """Seed one ``user_memory`` cluster covering every episode in ``eps``.
 
     The AGENTIC episode path goes through ``acluster_retrieve`` (see
     ``memory/search/agentic.py``), which narrows hybrid candidates to the
-    union of cluster member memcell ids. Tests that exercise the AGENTIC
+    union of cluster member ids. Production user_memory clusters store
+    episode ``entry_id`` members (``member_type="episode"``; see
+    ``strategies/trigger_profile_clustering.py``), matching the entry_id
+    keying of ``fetch_all_for_owner``. Tests that exercise the AGENTIC
     method therefore need at least one cluster whose members cover the
-    seeded episodes' ``parent_id``s — otherwise ``cluster_scoped`` yields
+    seeded episodes' ``entry_id``s — otherwise ``cluster_scoped`` yields
     nothing and the agentic pipeline returns ``[]``.
 
     Centroid is embedded from one of the episode bodies via the live
     embedder; with a single cluster the cosine ranking against the query
     is trivial (only one candidate), so any reasonable anchor works.
     """
-    memcell_ids = list({ep["parent_id"] for ep in eps})
+    entry_ids = list({ep["entry_id"] for ep in eps})
     centroid_text = eps[0]["episode"]
     centroid_vec = await get_embedding_capability().require().embed(centroid_text)
     await cluster_repo.upsert_with_members(
         AlgoCluster(
             id=mint_cluster_id(),
             centroid=np.asarray(centroid_vec, dtype=np.float32),
-            count=len(memcell_ids),
+            count=len(entry_ids),
             last_ts=int(time.time() * 1000),
             preview=[ep["episode"][:80] for ep in eps[:3]],
-            members=memcell_ids,
+            members=entry_ids,
         ),
         owner_id=owner_id,
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
 
@@ -1070,27 +1073,28 @@ async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
     """
     eps = _eps_for_owner(search_seed, "caroline")
     await _seed_episodes(eps)
-    ep_parent_ids = {r["parent_id"] for r in eps}
+    ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_parent_ids
+        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
-    assert matching_facts, "seed should have at least one fact sharing a memcell"
+    assert matching_facts, "seed should have at least one fact bridging an episode"
     await _seed_atomic_facts(matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=5)
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["episodes"], "hybrid should return at least one episode"
-    # Whichever facts *do* get embedded must share parent_id with their
-    # host episode (the memcell-bridge invariant).
+    # Whichever facts *do* get embedded must bridge to their host episode
+    # via ``parent_id == episode.entry_id`` (the current fact-linkage
+    # invariant; see extract_atomic_facts).
     for ep in data["episodes"]:
         if not ep["atomic_facts"]:
             continue
-        host_parent = next((e["parent_id"] for e in eps if e["id"] == ep["id"]), None)
+        host_entry = next((e["entry_id"] for e in eps if e["id"] == ep["id"]), None)
         for fact in ep["atomic_facts"]:
             seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
             if seed_fact is not None:
-                assert seed_fact["parent_id"] == host_parent
+                assert seed_fact["parent_id"] == host_entry
 
 
 @pytest.mark.slow
@@ -1122,11 +1126,11 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
 
     eps = _eps_for_owner(search_seed, "caroline")
     await _seed_episodes(eps)
-    ep_parent_ids = {r["parent_id"] for r in eps}
+    ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_parent_ids
+        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
-    assert matching_facts, "seed should have at least one fact sharing a memcell"
+    assert matching_facts, "seed should have at least one fact bridging an episode"
     await _seed_atomic_facts(matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=10)
@@ -1139,8 +1143,8 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
         "alpha=0 should let hierarchical eviction promote >=1 fact"
     )
 
-    # Memcell-bridge invariant — every attached fact's parent_id must
-    # match its host episode's parent_id.
+    # Fact-linkage invariant — every attached fact's parent_id must match
+    # its host episode's entry_id (current fact→episode bridge).
     eps_by_id = {e["id"]: e for e in eps}
     for ep in data["episodes"]:
         host = eps_by_id.get(ep["id"])
@@ -1149,7 +1153,7 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
         for fact in ep["atomic_facts"]:
             seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
             if seed_fact is not None:
-                assert seed_fact["parent_id"] == host["parent_id"]
+                assert seed_fact["parent_id"] == host["entry_id"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1284,7 +1288,7 @@ async def test_search_filter_error_returns_422(
     # FastAPI's default ``{"detail": ...}``). The FilterError text
     # lands in ``error.message``.
     body = resp.json()
-    assert body["error"]["code"] == "HTTP_ERROR"
+    assert body["error"]["code"] == "INVALID_INPUT"
     assert "this_field_does_not_exist" in body["error"]["message"]
 
 
@@ -1312,7 +1316,7 @@ async def test_vector_search_with_session_filter(
     base = _eps_for_owner(search_seed, "caroline")
     facts = _facts_for_owner(search_seed, "caroline")
     half = len(base) // 2
-    target_parent_ids = {r["parent_id"] for r in base[:half]}
+    target_parent_ids = {r["entry_id"] for r in base[:half]}
 
     await _seed_episodes(
         [{**r, "session_id": "sess_target"} for r in base[:half]]
@@ -1376,7 +1380,7 @@ async def test_agentic_search_with_timestamp_filter(
         [
             {
                 **f,
-                "parent_id": eps_post[i % len(eps_post)]["parent_id"],
+                "parent_id": eps_post[i % len(eps_post)]["entry_id"],
                 "timestamp": eps_post[i % len(eps_post)]["timestamp"],
             }
             for i, f in enumerate(facts)
