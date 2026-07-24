@@ -90,7 +90,8 @@ visually distinct from a user-named one).
     table `md_change_state`) — there is no `.cascade.log` / `.manifest.json`
     file in the current implementation. The `<app>/<project>` nesting is
     real and always present (`default_app/default_project` for the default
-    scope). There is **no `everos reindex` command** (see
+    scope). There is no command literally named `reindex`, but
+    `everos cascade rebuild` rebuilds the index from markdown (see
     [Operating it](#operating-it)).
 
 The path manager is
@@ -296,12 +297,17 @@ The CLI ([cli.md](cli.md)) is intentionally small:
 | `everos cascade status` | queue / LSN summary |
 | `everos cascade sync` | drain the cascade queue now (force md → LanceDB) |
 | `everos cascade fix` | list failed rows / re-enqueue retryable ones |
+| `everos cascade rebuild` | rebuild the whole index from markdown (drift / corruption recovery) |
 
 !!! warning "There is no `everos reindex` or `everos flush`"
-    - **Reindex** = the index is rebuildable: stop the server,
-      `rm -rf <memory-root>/.index/lancedb`, restart — the cascade
-      rebuilds from markdown. For an incremental catch-up, use
-      `everos cascade sync`.
+    - **Reindex** = the index is rebuildable from markdown. To rebuild
+      the whole index, run `everos cascade rebuild` — it drops the
+      LanceDB tables and re-indexes from md, re-populating even entries
+      the queue already marked `done` and preserving un-extracted
+      buffered messages. (A bare `rm -rf <memory-root>/.index/lancedb`
+      is **not** enough: the cascade queue still shows those files
+      `done`, so the scanner skips them and the index comes back empty.)
+      For an incremental catch-up, use `everos cascade sync`.
     - **Flush** is an HTTP endpoint (`POST /api/v2/memory/flush`), not a
       CLI command — it forces *extraction* of the session buffer, which is
       a different thing from forcing *index sync* (`cascade sync`).
