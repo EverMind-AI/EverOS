@@ -20,13 +20,15 @@ Hyperparameters are aligned to the memsys_opensource ``AgenticConfig`` defaults
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from everalgo.rank.agentic import aagentic_retrieve
 from everalgo.rank.hybrid import ahybrid_retrieve
 from everalgo.types import Candidate
 
+from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.tracing import memory_span
 from everos.memory.search.callbacks import build_rerank_fn
 from everos.memory.search.shaper import (
@@ -54,6 +56,48 @@ _ROUND1_RERANK_TOP_N: int = 10  # round1_rerank_top_n
 _ROUND2_CAP: int = 40  # combined_total
 _MULTI_QUERY_COUNT: int = 3  # num_queries
 _REFINEMENT_STRATEGY: str = "multi_query"
+
+
+def _to_everalgo_doc_metadata(
+    metadata: dict[str, Any], *, text_field: str
+) -> dict[str, Any]:
+    """Bridge agent recall metadata to the everalgo ``_format_docs`` contract.
+
+    ``aagentic_retrieve`` renders round-1 candidates into the sufficiency /
+    multi-query LLM prompt via ``everalgo.rank.agentic._format_docs``, which
+    reads ``metadata["episode"]`` as a dict with ``subject`` + ``content`` and
+    a ms-epoch ``metadata["timestamp"]``. Agent-kind rows carry their body in
+    ``text_field`` (``task_intent`` / ``skill``) and the time in ``timestamp``
+    (datetime); without this bridge ``_format_docs`` raises ``TypeError``.
+    Mirrors the episode path's bridge in ``agentic.py``.
+    ``_restore_shaper_metadata`` reverts it before DTO shaping.
+    """
+    bridged = dict(metadata)
+    content = metadata.get(text_field)
+    if isinstance(content, str):
+        bridged["episode"] = {
+            "subject": metadata.get("subject", ""),
+            "content": content,
+        }
+    timestamp = metadata.get("timestamp")
+    if isinstance(timestamp, _dt.datetime):
+        bridged["timestamp"] = to_timestamp_ms(timestamp)
+    return bridged
+
+
+def _restore_shaper_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Revert ``_to_everalgo_doc_metadata`` before agent-DTO shaping.
+
+    The shaper reads ``timestamp`` as a ``datetime``; the bridged ms-epoch
+    int must be reverted. The injected ``episode`` dict is inert for the
+    agent shapers (they read case/skill fields), so it is simply dropped.
+    """
+    reverted = dict(metadata)
+    timestamp = metadata.get("timestamp")
+    if isinstance(timestamp, (int, float)):
+        reverted["timestamp"] = from_timestamp(timestamp)
+    reverted.pop("episode", None)
+    return reverted
 
 
 async def search_agent_cases_agentic(
@@ -171,7 +215,7 @@ async def _run_agentic_retrieve(
             observation_type="retriever",
             metadata={"phase": "agentic_hybrid"},
         ):
-            return await ahybrid_retrieve(
+            hits = await ahybrid_retrieve(
                 q,
                 dense_retrieve=_dense,
                 sparse_retrieve=_sparse,
@@ -180,6 +224,19 @@ async def _run_agentic_retrieve(
                 sparse_candidates=_SPARSE_CANDIDATES,
                 rrf_k=_HYBRID_RRF_K,
             )
+        # Bridge to the everalgo doc contract so ``_format_docs`` (the LLM
+        # sufficiency / multi-query prompt) sees an episode dict + ms
+        # timestamp; agent-kind rows otherwise lack it and _format_docs raises.
+        return [
+            c.model_copy(
+                update={
+                    "metadata": _to_everalgo_doc_metadata(
+                        c.metadata, text_field=recaller.text_field
+                    )
+                }
+            )
+            for c in hits
+        ]
 
     rerank_fn = build_rerank_fn(reranker, text_field=recaller.text_field)
 
@@ -197,4 +254,9 @@ async def _run_agentic_retrieve(
         multi_query_count=_MULTI_QUERY_COUNT,
         rrf_k=_HYBRID_RRF_K,
     )
-    return candidates
+    # Revert the doc-contract bridge so the agent DTO shapers see the
+    # original metadata shape (timestamp as datetime, no ``episode`` dict).
+    return [
+        c.model_copy(update={"metadata": _restore_shaper_metadata(c.metadata)})
+        for c in candidates
+    ]
