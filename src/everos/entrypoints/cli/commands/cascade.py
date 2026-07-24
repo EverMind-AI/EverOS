@@ -1,6 +1,6 @@
 """``everos cascade`` subcommand group.
 
-Three one-shot operations on the cascade subsystem, all run in-process
+One-shot operations on the cascade subsystem, all run in-process
 without standing up the FastAPI app:
 
 - ``cascade sync [PATH]`` — flush the work queue. With ``PATH`` the
@@ -15,6 +15,11 @@ without standing up the FastAPI app:
   vectors, build clusters, extract skills. See
   :func:`everos.entrypoints.cli.commands._backfill_cmd.run_backfill`
   for the phase orchestration.
+- ``cascade rebuild`` — drop every business LanceDB table and re-index
+  all md from scratch. Recovery for a drifted / corrupt index; safe
+  because md is the source of truth and un-extracted buffered messages
+  are preserved. Skips the schema-verify guard (which the drift would
+  otherwise trip on startup).
 
 CLI is in-process (12 doc §7.1 + 16 doc §9.2): it constructs the same
 :class:`CascadeOrchestrator` as the daemon but only calls
@@ -43,6 +48,7 @@ from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.lancedb import (
     dispose_connection,
+    drop_business_tables,
     ensure_business_indexes,
     get_connection,
     verify_business_schemas,
@@ -125,18 +131,24 @@ _VERBOSE_OPTION_HELP = (
 
 
 @asynccontextmanager
-async def _runtime():  # type: ignore[no-untyped-def]
+async def _runtime(*, verify: bool = True):  # type: ignore[no-untyped-def]
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
     The CLI piggybacks on the same singletons as the running daemon
     (lazy + process-wide), so if a server happens to be running on
     the same memory root, both share state correctly.
+
+    ``verify=False`` skips :func:`verify_business_schemas` — required by
+    ``cascade rebuild``, whose whole purpose is to recover from a table
+    whose schema *has* drifted; running the guard there would abort
+    startup before the rebuild could fix it (chicken-and-egg).
     """
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     await get_connection()
-    await verify_business_schemas()
+    if verify:
+        await verify_business_schemas()
     await ensure_business_indexes()
     try:
         yield
@@ -409,6 +421,59 @@ def backfill(
         typer.echo("  everos cascade backfill --phase <phase-name> --yes")
         raise typer.Exit(code=130) from None
     raise typer.Exit(code=code)
+
+
+# ── rebuild ────────────────────────────────────────────────────────────────
+
+
+@app.command("rebuild")
+def rebuild(
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
+    ] = False,
+) -> None:
+    """Rebuild the LanceDB index from markdown (recover from schema drift).
+
+    Drops every business LanceDB table and re-indexes all md from
+    scratch. Markdown is the source of truth, so no memory content is
+    lost, and this is the **safe** recovery from a drifted / corrupt
+    index (e.g. the ``verify_business_schemas`` startup failure):
+
+    - unlike ``rm -rf ~/.everos/.index/lancedb``, it re-populates
+      already-indexed entries (that command leaves the cascade queue
+      marked ``done``, so nothing re-indexes and the index comes back
+      empty);
+    - unlike ``rm -rf ~/.everos/.index``, it preserves SQLite state that
+      is NOT rebuildable from md — notably ``unprocessed_buffer``
+      (messages received but not yet extracted).
+    """
+    if not yes:
+        typer.confirm(
+            "Drop all LanceDB business tables and re-index from markdown?",
+            abort=True,
+        )
+
+    async def _run() -> None:
+        # verify=False: the on-disk schema may be exactly what we're here
+        # to fix; the startup guard would abort before we could rebuild.
+        async with _runtime(verify=False):
+            dropped = await drop_business_tables()
+            typer.echo(
+                f"dropped {len(dropped)} LanceDB table(s): "
+                f"{', '.join(dropped) or '(none)'}"
+            )
+            # Recreate the tables (current schema) + FTS indexes.
+            await ensure_business_indexes()
+            # Clear the work queue so every md file re-enqueues as `added`.
+            cleared = await md_change_state_repo.reset_all()
+            typer.echo(f"reset {cleared} cascade queue row(s)")
+            # Re-scan + drain: re-embed and re-insert every md entry.
+            orchestrator = _build_orchestrator()
+            processed = await orchestrator.sync_once()
+            typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
+
+    asyncio.run(_run())
 
 
 # ── helpers ──────────────────────────────────────────────────────────────

@@ -175,6 +175,118 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     assert "pending:                  1" in result.stdout
 
 
+def _fake_orchestrator_factory():  # type: ignore[no-untyped-def]
+    from everos.component.tokenizer import build_tokenizer
+    from everos.core.persistence import MemoryRoot
+    from everos.memory.cascade import CascadeOrchestrator
+
+    def _build() -> CascadeOrchestrator:
+        root = MemoryRoot.default()
+        root.ensure()
+        return CascadeOrchestrator(
+            memory_root=root,
+            embedder=_StubEmbedder(),
+            tokenizer=build_tokenizer(),
+        )
+
+    return _build
+
+
+def test_rebuild_recovers_drifted_index_and_reindexes(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cascade rebuild`` recovers a type-drifted index.
+
+    Proves the three properties bare ``rm`` can't offer together:
+    (1) it runs despite a schema-type drift that trips the normal
+    startup guard (``verify_business_schemas``); (2) it drops + recreates
+    the drifted table with the current (correct) type; (3) it re-indexes
+    md from scratch even for entries the queue already marked ``done``.
+    """
+    import datetime as _dt
+
+    import lancedb
+    import pyarrow as pa
+
+    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence.lancedb import get_table
+    from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
+    from everos.infra.persistence.lancedb.tables.episode import Episode
+    from everos.infra.persistence.markdown import AtomicFactWriter
+
+    root = MemoryRoot.default()
+    root.ensure()
+    owner_id = "u_rebuild"
+    bucket = _dt.date(2026, 5, 18)
+    md_path = (
+        f"default_app/default_project/users/{owner_id}/.atomic_facts/"
+        f"atomic_fact-{bucket.isoformat()}.md"
+    )
+
+    async def _seed_md() -> None:
+        writer = AtomicFactWriter(root=root)
+        items = [
+            (
+                {
+                    "owner_id": owner_id,
+                    "session_id": f"s_{j}",
+                    "timestamp": "2026-05-18T07:04:26+00:00",
+                    "parent_id": f"mc_{j}",
+                    "sender_ids": [owner_id],
+                },
+                {"Fact": f"seed fact {j}"},
+            )
+            for j in range(2)
+        ]
+        await writer.append_entries(owner_id, items, date=bucket)
+
+    async def _drift_episode_table() -> None:
+        conn = await lancedb.connect_async(str(root.lancedb_dir))
+        drifted = pa.schema(
+            [
+                pa.field("subject_vector", pa.string(), nullable=True)
+                if f.name == "subject_vector"
+                else f
+                for f in Episode.to_arrow_schema()
+            ]
+        )
+        await conn.create_table("episode", schema=drifted)
+        conn.close()
+
+    async def _episode_subject_vector_type():  # type: ignore[no-untyped-def]
+        tbl = await get_table("episode", Episode)
+        return (await tbl.schema()).field("subject_vector").type
+
+    async def _atomic_fact_row_count() -> int:
+        tbl = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
+        return await tbl.count_rows(filter=f"md_path = '{md_path}'")
+
+    asyncio.run(_seed_md())
+    asyncio.run(_drift_episode_table())
+    asyncio.run(_dispose_all())
+
+    monkeypatch.setattr(
+        cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
+    )
+
+    # Contrast: a normal command boots via _runtime() → verify trips on the drift.
+    status_result = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert status_result.exit_code != 0
+    asyncio.run(_dispose_all())
+
+    # rebuild skips verify, recreates the table, and re-indexes md.
+    result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "rebuild complete" in result.stdout
+    asyncio.run(_dispose_all())
+
+    # Table recreated with the correct vector type; md re-indexed.
+    assert asyncio.run(_episode_subject_vector_type()).equals(
+        Episode.to_arrow_schema().field("subject_vector").type
+    )
+    assert asyncio.run(_atomic_fact_row_count()) == 2
+
+
 # Reduce false negatives on date drift.
 def test_resolve_relative_via_command_arg(cli_runtime: Path) -> None:
     """An absolute path under the root works through ``cascade sync <path>``."""

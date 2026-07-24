@@ -34,6 +34,7 @@ from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 # schema so callers can rely on the package alone to surface every schema.
 from . import tables as tables
 from .lancedb_manager import dispose_connection as dispose_connection
+from .lancedb_manager import drop_tables as _drop_tables
 from .lancedb_manager import get_connection as get_connection
 from .lancedb_manager import get_table as get_table
 from .repos import agent_case_repo as agent_case_repo
@@ -68,9 +69,10 @@ class LanceDBSchemaMismatchError(RuntimeError):
     from the corresponding Pydantic schema.
 
     Cascade re-builds LanceDB from md (the SoT), so the recovery is
-    deterministic: delete the index directory and let it reindex.
-    The lifespan surfaces the explicit ``rm -rf ~/.everos/.index/
-    lancedb`` instruction in the error message; see
+    deterministic: ``everos cascade rebuild`` drops the business tables
+    and re-indexes from md, preserving SQLite state that is *not*
+    rebuildable from md (notably ``unprocessed_buffer`` — messages not
+    yet extracted). The error message surfaces that command; see
     ``docs/cascade_runbook.md`` for the wider context.
     """
 
@@ -292,37 +294,69 @@ async def ensure_business_indexes() -> None:
 
 async def verify_business_schemas() -> None:
     """Fail loud at startup if an existing LanceDB table's columns don't
-    match its current Pydantic schema.
+    match its current Pydantic schema — in **name or type**.
 
     LanceDB doesn't migrate columns automatically; an older index dir
-    (e.g. with the pre-``content_sha256`` shape) would fail
-    unpredictably on upsert. Checking column names up-front turns that
-    into a clean startup error pointing the user at the recovery path
-    (``rm -rf ~/.everos/.index/lancedb`` — the index is rebuildable
-    from md, see ``12_cascade_design.md``).
+    would fail unpredictably on upsert. Checking the schema up-front
+    turns that into a clean startup error pointing the user at the
+    recovery path (``rm -rf ~/.everos/.index/lancedb`` — the index is
+    rebuildable from md, see ``12_cascade_design.md``).
+
+    Both dimensions are checked against ``schema.to_arrow_schema()`` —
+    the exact schema ``get_table`` builds the table from, so a healthy
+    table never false-positives:
+
+    * **Column set** — a missing / extra column (e.g. a pre-``content_sha256``
+      table) is caught by name.
+    * **Column type** — a column whose on-disk Arrow type drifted from
+      the current schema. This is the class of drift behind EverOS #337:
+      an ``episode.subject_vector`` column left as ``string`` (or ``null``)
+      by an older build, while the current schema declares a 1024-d
+      ``fixed_size_list``. The name matches, so a name-only check waves it
+      through and it detonates deep inside ``merge_insert`` as an opaque
+      ``LanceError(IO): Spill has sent an error``. Comparing types surfaces
+      it here instead.
     """
     for schema in _BUSINESS_SCHEMAS:
         table = await get_table(schema.TABLE_NAME, schema)
-        arrow_schema = await table.schema()
-        actual = set(arrow_schema.names)
-        expected = set(schema.model_fields.keys())
-        missing = expected - actual
-        extra = actual - expected
-        if missing or extra:
+        on_disk = await table.schema()
+        expected = schema.to_arrow_schema()
+        on_disk_names = set(on_disk.names)
+        expected_names = set(expected.names)
+        missing = expected_names - on_disk_names
+        extra = on_disk_names - expected_names
+        # Type drift on columns present in both, compared against the
+        # authoritative to_arrow_schema() Arrow types.
+        type_drift = [
+            f"{name}: on-disk {on_disk.field(name).type} "
+            f"!= expected {expected.field(name).type}"
+            for name in sorted(on_disk_names & expected_names)
+            if not on_disk.field(name).type.equals(expected.field(name).type)
+        ]
+        if missing or extra or type_drift:
             raise LanceDBSchemaMismatchError(
                 f"LanceDB table {schema.TABLE_NAME!r} schema drift: "
-                f"missing={sorted(missing)}, extra={sorted(extra)}.\n"
+                f"missing={sorted(missing)}, extra={sorted(extra)}, "
+                f"type_drift={type_drift}.\n"
                 "Recovery, escalating:\n"
                 "  1. Restart the server — an in-flight migration may "
                 "still be finishing (harmless if this is your first "
                 "restart after upgrading EverOS).\n"
-                "  2. If restart doesn't clear it, the on-disk index is "
-                "genuinely out of sync with the code's schema. Because "
-                "the LanceDB index is fully rebuildable from md, wipe "
-                "it: `rm -rf ~/.everos/.index/lancedb` and restart — "
-                "the cascade daemon will re-index from the source-of-"
-                "truth markdown."
+                "  2. If restart doesn't clear it, recover with "
+                "`everos cascade rebuild` (drops + re-indexes from md, "
+                "preserving un-extracted buffered messages)."
             )
+
+
+async def drop_business_tables() -> list[str]:
+    """Drop every business LanceDB table; return the names dropped.
+
+    The tables are a rebuildable projection of markdown, so dropping is
+    non-destructive to memory content — ``cascade rebuild`` recreates and
+    re-populates them from md. Evicts the dropped tables from the manager
+    cache so a later :func:`get_table` reopens the fresh table.
+    """
+    return await _drop_tables([schema.TABLE_NAME for schema in _BUSINESS_SCHEMAS])
 
 
 __all__ = [
@@ -341,6 +375,7 @@ __all__ = [
     "agent_skill_repo",
     "atomic_fact_repo",
     "dispose_connection",
+    "drop_business_tables",
     "ensure_business_indexes",
     "episode_repo",
     "foresight_repo",

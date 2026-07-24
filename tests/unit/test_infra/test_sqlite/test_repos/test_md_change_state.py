@@ -394,6 +394,33 @@ async def test_reset_retryable_to_pending_zero_when_none_eligible(
     assert await repo.reset_retryable_to_pending() == 0
 
 
+# ── reset_all ───────────────────────────────────────────────────────────
+
+
+async def test_reset_all_clears_every_row(repo: _MdChangeStateRepo) -> None:
+    """`cascade rebuild` engine: every row is deleted regardless of status."""
+    await repo.upsert("a.md", kind="episode", change_type="added", mtime=0.0)
+    await repo.claim_one("a.md")
+    await repo.mark_done("a.md")  # a: done
+    await repo.upsert("b.md", kind="episode", change_type="added", mtime=0.0)
+    await repo.claim_one("b.md")
+    await repo.mark_failed("b.md", retryable=False, error="x", new_retry_count=0)
+    await repo.upsert("c.md", kind="episode", change_type="added", mtime=0.0)  # pending
+
+    deleted = await repo.reset_all()
+
+    assert deleted == 3
+    assert await repo.get_by_id("a.md") is None
+    assert await repo.get_by_id("b.md") is None
+    assert await repo.get_by_id("c.md") is None
+    summary = await repo.queue_summary()
+    assert summary.pending == 0 and summary.done == 0
+
+
+async def test_reset_all_zero_on_empty_table(repo: _MdChangeStateRepo) -> None:
+    assert await repo.reset_all() == 0
+
+
 # ── list_failed ─────────────────────────────────────────────────────────
 
 

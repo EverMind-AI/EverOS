@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -415,6 +415,24 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_changed_at=now,
                 )
             )
+            await s.commit()
+            return int(result.rowcount or 0)
+
+    async def reset_all(self) -> int:
+        """`cascade rebuild` engine: clear the entire work-queue table.
+
+        This table is pure sync bookkeeping — a projection of (md ×
+        index) — so deleting every row forces the next scan to treat
+        every md file as newly ``added`` and re-index it from scratch.
+        Touches **only** ``md_change_state``; other SQLite tables
+        (``memcell``, ``unprocessed_buffer``, …) are left intact, which
+        is what makes ``cascade rebuild`` non-destructive to un-extracted
+        buffered messages.
+
+        Returns the number of rows deleted.
+        """
+        async with session_scope(self._factory) as s:
+            result = await s.execute(delete(MdChangeState))
             await s.commit()
             return int(result.rowcount or 0)
 

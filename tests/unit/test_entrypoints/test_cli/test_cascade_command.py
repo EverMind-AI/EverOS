@@ -3,7 +3,7 @@
 The orchestrator paths require live sqlite + lancedb singletons; those
 are exercised by integration tests. Here we cover:
 
-- subcommand registration (sync / status / fix)
+- subcommand registration (sync / status / fix / rebuild)
 - ``--help`` exit codes
 - ``_resolve_relative`` (path arithmetic vs. memory root)
 - ``_print_failed_table`` (formatting of failed rows)
@@ -25,9 +25,9 @@ from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.infra.persistence.sqlite import dispose_engine, get_engine
 
 
-def test_app_registers_four_commands() -> None:
+def test_app_registers_expected_commands() -> None:
     names = {cmd.name for cmd in cascade_mod.app.registered_commands}
-    assert names == {"sync", "status", "fix", "backfill"}
+    assert names == {"sync", "status", "fix", "backfill", "rebuild"}
 
 
 def test_help_exits_zero() -> None:
@@ -36,6 +36,7 @@ def test_help_exits_zero() -> None:
     assert "sync" in result.stdout
     assert "status" in result.stdout
     assert "fix" in result.stdout
+    assert "rebuild" in result.stdout
 
 
 def test_resolve_relative_under_root(

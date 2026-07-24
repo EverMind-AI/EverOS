@@ -11,6 +11,7 @@ manually.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from lancedb import AsyncConnection, AsyncTable
 
@@ -51,6 +52,27 @@ async def get_table(
                 _tables[name] = await conn.create_table(name, schema=schema)
                 logger.info("lancedb_table_created", name=name)
         return _tables[name]
+
+
+async def drop_tables(names: Sequence[str]) -> list[str]:
+    """Drop the named tables if present; return the names actually dropped.
+
+    Each dropped table is also evicted from the cache so a later
+    :func:`get_table` recreates it fresh from the current schema. Used by
+    ``cascade rebuild`` to reset a corrupt / drifted index — the tables
+    are a rebuildable projection of markdown, so dropping is safe.
+    """
+    async with _lock:
+        conn = await _ensure_connection_locked()
+        existing = set((await conn.list_tables()).tables)
+        dropped: list[str] = []
+        for name in names:
+            if name in existing:
+                await conn.drop_table(name)
+                _tables.pop(name, None)
+                dropped.append(name)
+                logger.info("lancedb_table_dropped", name=name)
+        return dropped
 
 
 async def dispose_connection() -> None:
