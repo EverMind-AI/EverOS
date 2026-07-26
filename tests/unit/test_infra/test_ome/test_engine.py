@@ -621,3 +621,52 @@ async def test_enqueue_run_rolls_back_counter_on_add_job_failure(
     finally:
         monkeypatch.undo()
         await engine.stop()
+
+
+@pytest.mark.asyncio
+async def test_engine_emit_links_strategy_to_request_trace(cfg: OMEConfig) -> None:
+    """End-to-end: emit inside a request span → the engine captures the
+    traceparent at enqueue, threads it across APScheduler, and the strategy
+    body runs under the SAME trace as the triggering request."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        current_trace_ids,
+        init_tracing,
+        memory_span,
+        shutdown_tracing,
+    )
+
+    seen_tid: list[str] = []
+
+    @offline_strategy(name="tid_collector", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, ctx: StrategyContext) -> None:
+        ids = current_trace_ids()  # inside the everos.ome.* span
+        seen_tid.append(ids[0] if ids else "")
+
+    engine = OfflineEngine(config=cfg)
+    engine.register(s)
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(InMemorySpanExporter()),
+    )
+    await engine.start()
+    try:
+        with memory_span("everos.memory.flush", observation_type="span") as req:
+            req_tid = format(req.get_span_context().trace_id, "032x")
+            await engine.emit(_E())  # traceparent captured at _enqueue_run here
+        for _ in range(50):
+            if seen_tid:
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        await engine.stop()
+        shutdown_tracing()
+
+    assert seen_tid, "strategy did not run"
+    assert seen_tid[0] == req_tid  # same trace as the triggering request

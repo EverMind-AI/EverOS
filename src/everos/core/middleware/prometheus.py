@@ -42,18 +42,27 @@ _SKIP_PATHS = frozenset({"/metrics", "/health", "/healthz", "/favicon.ico"})
 
 
 def _normalize_path(request: Request) -> str:
-    """Resolve the route template (e.g. ``/users/{user_id}``) for stable labels."""
+    """Resolve the full route template (e.g. ``/api/v1/users/{user_id}``).
+
+    Built from the concrete request path with matched path params folded
+    back to ``{name}`` placeholders — NOT from ``route.path``. A route
+    mounted under a prefix (the ``/api/vN`` version aliases) only carries
+    its router-relative path on the route object (e.g. ``/memory/get``);
+    the prefix lives on the mounted router. Using ``route.path`` would drop
+    the version prefix and collapse v1/v2 traffic into one label, so the
+    label is rebuilt from ``url.path`` instead. Unmatched requests (no
+    ``route`` in scope) fold to a single bucket to bound cardinality.
+    """
     scope = getattr(request, "scope", {})
     route = scope.get("route") if isinstance(scope, dict) else None
-    if route is not None and hasattr(route, "path"):
-        return route.path
-    if request.path_params:
-        path = request.url.path
-        for name, value in request.path_params.items():
-            if str(value) in path:
-                path = path.replace(str(value), f"{{{name}}}")
-        return path
-    return "{unmatched}"
+    if route is None:
+        return "{unmatched}"
+    path = request.url.path
+    for name, value in request.path_params.items():
+        value_str = str(value)
+        if value_str:
+            path = path.replace(value_str, f"{{{name}}}")
+    return path
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):

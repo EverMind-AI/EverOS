@@ -8,8 +8,9 @@ import pytest
 from pydantic import SecretStr
 
 from everos.component.llm import LLMNotConfiguredError
+from everos.component.llm._usage_client import UsageRecordingClient
 from everos.config import Settings
-from everos.config.settings import LLMSettings
+from everos.config.settings import LLMSettings, ObservabilitySettings
 
 _client_mod = importlib.import_module("everos.component.llm.client")
 
@@ -62,3 +63,42 @@ def test_returns_singleton_when_configured(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert first is sentinel
     assert first is second
+
+
+def _patch_settings_with_observability(
+    monkeypatch: pytest.MonkeyPatch, *, enabled: bool
+) -> None:
+    cfg = Settings(
+        llm=LLMSettings(
+            model="gpt-4.1-mini",
+            api_key=SecretStr("sk-test"),
+            base_url="https://example.test",
+        ),
+        observability=ObservabilitySettings(enabled=enabled),
+    )
+    monkeypatch.setattr(_client_mod, "load_settings", lambda: cfg)
+
+
+def test_wraps_client_when_observability_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_singleton(monkeypatch)
+    _patch_settings_with_observability(monkeypatch, enabled=True)
+    sentinel = object()
+    monkeypatch.setattr(_client_mod, "build_client", lambda cfg: sentinel)
+
+    client = _client_mod.get_llm_client()
+
+    assert isinstance(client, UsageRecordingClient)
+    assert client._inner is sentinel
+
+
+def test_does_not_wrap_client_when_observability_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_singleton(monkeypatch)
+    _patch_settings_with_observability(monkeypatch, enabled=False)
+    sentinel = object()
+    monkeypatch.setattr(_client_mod, "build_client", lambda cfg: sentinel)
+
+    assert _client_mod.get_llm_client() is sentinel

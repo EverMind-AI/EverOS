@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from everos.core.lifespan import (
     LifespanProvider,
     MetricsLifespanProvider,
+    TracingLifespanProvider,
     build_lifespan,
 )
 from everos.core.middleware import (
@@ -23,6 +24,7 @@ from everos.core.middleware import (
     DEFAULT_CORS_ORIGINS,
     ProfileMiddleware,
     PrometheusMiddleware,
+    RequestIdMiddleware,
 )
 from everos.core.observability.logging import get_logger
 
@@ -68,7 +70,8 @@ def create_app(
         cors_allow_methods: Allowed CORS methods (default: ``["*"]``).
         cors_allow_headers: Allowed CORS headers (default: ``["*"]``).
         lifespan_providers: Optional list of LifespanProvider; defaults to
-            ``[MetricsLifespanProvider(), SqliteLifespanProvider(),
+            ``[TracingLifespanProvider(), MetricsLifespanProvider(),
+            LLMLifespanProvider(), SqliteLifespanProvider(),
             LanceDBLifespanProvider(), CascadeLifespanProvider(),
             OmeLifespanProvider()]``.
 
@@ -79,6 +82,7 @@ def create_app(
 
     if lifespan_providers is None:
         lifespan_providers = [
+            TracingLifespanProvider(),
             MetricsLifespanProvider(),
             LLMLifespanProvider(),
             SqliteLifespanProvider(),
@@ -113,15 +117,32 @@ def create_app(
     )
     app.add_middleware(PrometheusMiddleware)
     app.add_middleware(ProfileMiddleware)
+    # Outermost: every request gets a request id before any other middleware
+    # or handler runs, so all logs + the response header carry it.
+    app.add_middleware(RequestIdMiddleware)
 
-    # Routes.
+    # Infra endpoints — deliberately unversioned.
     app.include_router(health.router)
     app.include_router(metrics.router)
-    app.include_router(memorize.router)
-    app.include_router(search.router)
-    app.include_router(get.router)
-    app.include_router(ome.router)
-    app.include_router(knowledge.router)
+
+    # Business API — served under both /api/v2 (cloud-aligned name) and
+    # /api/v1 (retained as a permanent backward-compatible alias). The same
+    # router object is mounted twice, so both prefixes resolve to the exact
+    # same handlers; FastAPI's default operationId embeds the path, so the
+    # two copies get distinct OpenAPI ids automatically (no collision).
+    # v1 and v2 stay identical by construction — see test_api_versioning.
+    # v1 first — retained alias, behavior identical.
+    app.include_router(memorize.router, prefix="/api/v1")
+    app.include_router(search.router, prefix="/api/v1")
+    app.include_router(get.router, prefix="/api/v1")
+    app.include_router(ome.router, prefix="/api/v1")
+    app.include_router(knowledge.router, prefix="/api/v1")
+    # v2 — cloud-aligned name, same routers.
+    app.include_router(memorize.router, prefix="/api/v2")
+    app.include_router(search.router, prefix="/api/v2")
+    app.include_router(get.router, prefix="/api/v2")
+    app.include_router(ome.router, prefix="/api/v2")
+    app.include_router(knowledge.router, prefix="/api/v2")
 
     logger.info("app_created", docs_enabled=enable_docs)
     return app

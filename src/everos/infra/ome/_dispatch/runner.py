@@ -29,6 +29,7 @@ from structlog.contextvars import bound_contextvars
 
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
+from everos.core.observability.tracing import memory_span, use_traceparent
 from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome.decorator import StrategyMeta
@@ -113,6 +114,7 @@ class Runner:
         *,
         run_id: str,
         max_retries_snapshot: int,
+        traceparent: str | None = None,
     ) -> None:
         """Execute ``meta.func(event, ctx)`` with the attempt retry loop.
 
@@ -141,6 +143,7 @@ class Runner:
                     event_topic=event_topic,
                     event_payload=event_payload,
                     max_retries_snapshot=max_retries_snapshot,
+                    traceparent=traceparent,
                 )
                 if terminated:
                     return
@@ -155,6 +158,7 @@ class Runner:
         event_topic: str,
         event_payload: str,
         max_retries_snapshot: int,
+        traceparent: str | None = None,
     ) -> bool:
         """Run one attempt; return ``True`` if a terminal state was
         written (success / dead-letter or persistence failure), ``False``
@@ -185,7 +189,23 @@ class Runner:
             try:
                 token = _CURRENT_STRATEGY.set(meta)
                 try:
-                    await meta.func(event, ctx)
+                    # Continue the triggering request's trace when a traceparent
+                    # was carried across the APScheduler boundary; otherwise the
+                    # agent span roots its own trace (e.g. cron / recovery).
+                    with (
+                        use_traceparent(traceparent),
+                        memory_span(
+                            f"everos.ome.{meta.name}",
+                            observation_type="agent",
+                            metadata={
+                                "strategy": meta.name,
+                                "run_id": current_run_id,
+                                "attempt": attempt,
+                                "event_topic": event_topic,
+                            },
+                        ),
+                    ):
+                        await meta.func(event, ctx)
                 finally:
                     _CURRENT_STRATEGY.reset(token)
             except StrategyContractError as e:

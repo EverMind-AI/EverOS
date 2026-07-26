@@ -21,3 +21,11 @@ paths:
 - **Metrics** go through `core.observability.metrics` (Prometheus); don't invent
   ad-hoc counters. Histograms/counters/gauges have registry helpers.
 - Don't log secrets, API keys, or full memory content at `info`/above.
+- **Tracing** (optional, `[otel]` extra, **off by default**): open spans with
+  `memory_span(...)` from `core.observability.tracing` — it stamps the Langfuse
+  `langfuse.*` attributes and is a no-op until `[observability] enabled`, so call
+  sites never branch on config. LLM / embedding token usage rides
+  `set_generation_usage` onto the active span (Langfuse computes cost).
+  Request/response content is emitted only when `capture_content` is on
+  (redaction hook + truncation). `request_id` is kept independent of the OTel
+  `trace_id`; an upstream `traceparent` header is continued when present.

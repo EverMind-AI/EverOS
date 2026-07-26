@@ -59,7 +59,7 @@ from everos.service import (
 # a shared module would be cleaner but is out of scope for this PR.
 from .memorize import PathSafeId, SuccessEnvelope
 
-router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 # ── Annotated param types (satisfies B008) ──────────────────────────────────

@@ -119,8 +119,32 @@ async def test_path_params_normalized(client: AsyncClient) -> None:
 # ── _normalize_path direct tests (defensive fallback branches) ─────────
 
 
-def test_normalize_path_uses_path_params_fallback() -> None:
-    """When scope has no ``route`` but ``path_params`` is set, substitute names."""
+def test_normalize_path_uses_full_request_path_not_route_path() -> None:
+    """Label is built from the full request path (keeps the mount prefix) with
+    path params folded to ``{name}`` — NOT from the route's router-relative
+    path. A versioned alias mounts the router under ``/api/vN``, so the route
+    object only carries ``/memory/{id}``; the label must keep the prefix.
+    """
+    from types import SimpleNamespace
+
+    from everos.core.middleware.prometheus import _normalize_path
+
+    fake_req = SimpleNamespace(
+        scope={"route": SimpleNamespace(path="/memory/{id}")},
+        url=SimpleNamespace(path="/api/v1/memory/abc"),
+        path_params={"id": "abc"},
+    )
+    # type: ignore[arg-type] — helper accepts anything duck-typed.
+    assert _normalize_path(fake_req) == "/api/v1/memory/{id}"  # type: ignore[arg-type]
+
+
+def test_normalize_path_unmatched_even_with_path_params() -> None:
+    """No matched ``route`` in scope → ``{unmatched}``, even if params are set.
+
+    ``path_params`` is only populated by route matching, so their presence
+    without a route means no real match — we do not trust them to build a
+    label (that would risk unbounded cardinality from unmatched paths).
+    """
     from types import SimpleNamespace
 
     from everos.core.middleware.prometheus import _normalize_path
@@ -130,8 +154,7 @@ def test_normalize_path_uses_path_params_fallback() -> None:
         url=SimpleNamespace(path="/x/abc/y"),
         path_params={"id": "abc"},
     )
-    # type: ignore[arg-type] — helper accepts anything duck-typed.
-    assert _normalize_path(fake_req) == "/x/{id}/y"  # type: ignore[arg-type]
+    assert _normalize_path(fake_req) == "{unmatched}"  # type: ignore[arg-type]
 
 
 def test_normalize_path_unmatched_fallback() -> None:

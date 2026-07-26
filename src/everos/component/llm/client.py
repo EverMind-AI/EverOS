@@ -16,6 +16,8 @@ from everalgo.llm.protocols import LLMClient
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 
+from ._usage_client import UsageRecordingClient
+
 logger = get_logger(__name__)
 
 
@@ -38,7 +40,8 @@ def get_llm_client() -> LLMClient:
     if _llm_client is not None:
         return _llm_client
 
-    llm_cfg = load_settings().llm
+    settings = load_settings()
+    llm_cfg = settings.llm
     api_key = (
         llm_cfg.api_key.get_secret_value() if llm_cfg.api_key is not None else None
     )
@@ -46,13 +49,18 @@ def get_llm_client() -> LLMClient:
         raise LLMNotConfiguredError(
             "LLM is required; set EVEROS_LLM__API_KEY + EVEROS_LLM__BASE_URL"
         )
-    _llm_client = build_client(
+    client: LLMClient = build_client(
         LLMConfig(
             model=llm_cfg.model,
             api_key=api_key,
             base_url=llm_cfg.base_url,
         )
     )
+    # Wrap for OTel token capture only when tracing is on — keeps the
+    # disabled path (the default) allocation- and overhead-free.
+    if settings.observability.enabled:
+        client = UsageRecordingClient(client)
+    _llm_client = client
     logger.info("llm_client_built", model=llm_cfg.model)
     return _llm_client
 

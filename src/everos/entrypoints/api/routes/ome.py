@@ -8,13 +8,13 @@ from pydantic import BaseModel
 from everos.core.errors import NotFoundError
 from everos.core.observability.logging import get_logger
 
-router = APIRouter(prefix="/api/v1/ome", tags=["ome"])
+router = APIRouter(prefix="/ome", tags=["ome"])
 
 logger = get_logger(__name__)
 
 
 class TriggerRequest(BaseModel):
-    """Request body for ``POST /api/v1/ome/trigger``."""
+    """Request body for ``POST /api/v2/ome/trigger``."""
 
     name: str
     timeout: float = 120.0
@@ -22,7 +22,7 @@ class TriggerRequest(BaseModel):
 
 
 class TriggerResponse(BaseModel):
-    """Response body for ``POST /api/v1/ome/trigger``."""
+    """Response body for ``POST /api/v2/ome/trigger``."""
 
     status: str
     name: str

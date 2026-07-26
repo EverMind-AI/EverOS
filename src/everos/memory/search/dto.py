@@ -1,4 +1,4 @@
-"""Public DTOs for ``POST /api/v1/memory/search``.
+"""Public DTOs for ``POST /api/v2/memory/search``.
 
 Contract per the final design:
 
@@ -56,7 +56,7 @@ class FilterNode(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    """Request body for ``POST /api/v1/memory/search``.
+    """Request body for ``POST /api/v2/memory/search``.
 
     Callers identify the memory owner via ``user_id`` XOR ``agent_id`` —
     exactly one must be set. Internally the manager + compile_filters keep

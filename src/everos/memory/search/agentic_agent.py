@@ -27,6 +27,7 @@ from everalgo.rank.agentic import aagentic_retrieve
 from everalgo.rank.hybrid import ahybrid_retrieve
 from everalgo.types import Candidate
 
+from everos.core.observability.tracing import memory_span
 from everos.memory.search.callbacks import build_rerank_fn
 from everos.memory.search.shaper import (
     shape_agent_case_from_candidate,
@@ -165,15 +166,20 @@ async def _run_agentic_retrieve(
         return await recaller.sparse_recall(q, where, limit=k)
 
     async def hybrid_full(q: str, k: int) -> list[Candidate]:
-        return await ahybrid_retrieve(
-            q,
-            dense_retrieve=_dense,
-            sparse_retrieve=_sparse,
-            top_n=k,
-            dense_candidates=_DENSE_CANDIDATES,
-            sparse_candidates=_SPARSE_CANDIDATES,
-            rrf_k=_HYBRID_RRF_K,
-        )
+        with memory_span(
+            "everos.search.recall",
+            observation_type="retriever",
+            metadata={"phase": "agentic_hybrid"},
+        ):
+            return await ahybrid_retrieve(
+                q,
+                dense_retrieve=_dense,
+                sparse_retrieve=_sparse,
+                top_n=k,
+                dense_candidates=_DENSE_CANDIDATES,
+                sparse_candidates=_SPARSE_CANDIDATES,
+                rrf_k=_HYBRID_RRF_K,
+            )
 
     rerank_fn = build_rerank_fn(reranker, text_field=recaller.text_field)
 

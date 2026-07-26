@@ -383,6 +383,53 @@ class KnowledgeSettings(BaseModel):
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
+class ObservabilitySettings(BaseModel):
+    """``[observability]`` — OpenTelemetry tracing export.
+
+    Off by default. When ``enabled`` is true a ``TracerProvider`` is built
+    once at startup and standard OTLP/HTTP spans are exported to
+    ``endpoint``. The signal is pure OpenTelemetry — vendor-neutral — so it
+    works with any OTLP backend (Langfuse, an OTel Collector, ...); EverOS
+    does not depend on any vendor SDK.
+
+    ``langfuse_*`` are convenience credentials for pushing recall-quality
+    *scores* to Langfuse (a Langfuse-specific REST call, independent of the
+    OTLP span stream). Leave unset for a pure vendor-neutral OTLP export.
+
+    Env binding:
+        EVEROS_OBSERVABILITY__ENABLED
+        EVEROS_OBSERVABILITY__EXPORTER
+        EVEROS_OBSERVABILITY__ENDPOINT
+        EVEROS_OBSERVABILITY__SERVICE_NAME
+        EVEROS_OBSERVABILITY__SAMPLE_RATE
+        EVEROS_OBSERVABILITY__LANGFUSE_PUBLIC_KEY / __LANGFUSE_SECRET_KEY
+        EVEROS_OBSERVABILITY__LANGFUSE_HOST
+        EVEROS_OBSERVABILITY__EMIT_RECALL_SCORES
+        EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD
+    """
+
+    enabled: bool = False
+    exporter: Literal["otlp_http", "none"] = "otlp_http"
+    endpoint: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    service_name: str = "everos"
+    sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Privacy: when False (default) spans carry metadata only — no query text,
+    # extracted memory, or .md paths. Set True to also emit request/response
+    # content as span input/output (redacted + truncated).
+    capture_content: bool = False
+
+    # Langfuse scores (recall-quality feedback) — optional, Langfuse-specific.
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str | None = None
+    emit_recall_scores: bool = True
+    # ``hit`` threshold: only meaningful for calibrated-score methods
+    # (HYBRID LR / rerank / agentic). Not bounded to [0, 1] because raw
+    # BM25 scores are unbounded; tune per method on the eval side.
+    recall_hit_threshold: float = 0.6
+
+
 class Settings(BaseSettings):
     """Top-level application settings."""
 
@@ -398,6 +445,7 @@ class Settings(BaseSettings):
     clustering: ClusteringSettings = ClusteringSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
 
     model_config = SettingsConfigDict(
         env_prefix="EVEROS_",

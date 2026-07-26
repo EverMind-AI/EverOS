@@ -23,6 +23,8 @@ from collections.abc import Sequence
 
 import openai
 
+from everos.core.observability.tracing import memory_span, set_generation_usage
+
 from .protocol import EmbeddingServiceError
 
 
@@ -86,13 +88,26 @@ class OpenAIEmbeddingProvider:
 
     async def _embed_chunk(self, chunk: list[str]) -> list[list[float]]:
         """One ``/embeddings`` call, semaphore-guarded."""
-        async with self._semaphore:
-            try:
-                response = await self._client.embeddings.create(
-                    model=self._model,
-                    input=chunk,
-                )
-            except openai.OpenAIError as exc:
-                raise EmbeddingServiceError(str(exc)) from exc
-        # OpenAI returns ``data`` indexed by request order; truncate to ``dim``.
-        return [list(item.embedding[: self.dim]) for item in response.data]
+        # Wrap in an EMBEDDING-typed span so token usage lands on an embedding
+        # observation (which Langfuse can price) rather than the enclosing
+        # retriever span. nested_only: skip when there is no active trace (e.g.
+        # cascade-time indexing) so we don't spawn one root trace per chunk.
+        with memory_span(
+            "everos.embedding", observation_type="embedding", nested_only=True
+        ):
+            async with self._semaphore:
+                try:
+                    response = await self._client.embeddings.create(
+                        model=self._model,
+                        input=chunk,
+                    )
+                except openai.OpenAIError as exc:
+                    raise EmbeddingServiceError(str(exc)) from exc
+            # Embeddings report only input (prompt) tokens.
+            usage = getattr(response, "usage", None)
+            set_generation_usage(
+                model=self._model,
+                input_tokens=usage.prompt_tokens if usage else None,
+            )
+            # OpenAI returns ``data`` indexed by request order; truncate to ``dim``.
+            return [list(item.embedding[: self.dim]) for item in response.data]
