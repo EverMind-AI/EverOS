@@ -38,6 +38,19 @@ make help         # list every target
 CI runs the **same** `make` targets, so a green `make ci` locally predicts a
 green pipeline.
 
+### Submodules
+
+Agent-host plugins live in [EverMind-AI/plugins](https://github.com/EverMind-AI/plugins),
+referenced as a git submodule at `plugins/`. A plain clone leaves that directory
+empty — populate it once with:
+
+```bash
+git submodule update --init   # or clone with: git clone --recurse-submodules
+```
+
+The submodule is pinned to a specific commit; it is not needed for Python
+development or `make ci`, which never touch `plugins/`.
+
 ### Configuration
 
 Settings load in ascending priority:

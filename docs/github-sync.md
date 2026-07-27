@@ -31,6 +31,9 @@ community-facing text). Keep the GitHub versions:
 
 ### Workflow & CI
 
+- `.gitmodules` + the `plugins` gitlink — GitHub-only submodule reference to
+  [EverMind-AI/plugins](https://github.com/EverMind-AI/plugins); an archive
+  refresh must not delete or overwrite them
 - `CLAUDE.md` — says `main` branch, not `dev`/`master`
 - `CONTRIBUTING.md` — says "curated PR contributions", not "no external PRs"
 - `.github/PULL_REQUEST_TEMPLATE.md` — GitHub PR template
