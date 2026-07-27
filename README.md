@@ -25,7 +25,6 @@
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Documentation](#documentation)
-- [Star Us](#star-us)
 - [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
@@ -648,23 +647,6 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Star Us
-
-If EverOS is useful to your agent stack, please star the repo. It helps more
-builders discover the project and gives the memory ecosystem a stronger signal
-to keep improving.
-
-### Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
 
 <br>
 <div align="right">

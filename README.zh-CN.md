@@ -25,7 +25,6 @@
 - [快速开始](#快速开始)
 - [使用场景](#使用场景)
 - [文档](#文档)
-- [Star 支持](#star-支持)
 - [EverMind 生态](#evermind-生态)
 - [参与贡献](#参与贡献)
 
@@ -657,22 +656,6 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 迁移说明
 - [CHANGELOG.md](CHANGELOG.md) - 发布记录
 - [CONTRIBUTING.md](CONTRIBUTING.md) - 如何贡献
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Star 支持
-
-如果 EverOS 对你的 Agent stack 有帮助，请 Star 这个仓库。它会帮助更多
-builders 发现这个项目，也会给 memory ecosystem 一个更强的信号，让它持续改进。
-
-### Star 趋势
-
-[![Star 趋势图](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
 
 <br>
 <div align="right">
