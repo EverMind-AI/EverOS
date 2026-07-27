@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 BLOCKED_DIR_NAMES = frozenset(
     {
@@ -93,7 +93,11 @@ def _tracked_paths() -> list[str]:
         stdout=subprocess.PIPE,
         text=False,
     )
-    return [raw.decode("utf-8") for raw in result.stdout.split(b"\0") if raw]
+    names = (raw.decode("utf-8") for raw in result.stdout.split(b"\0") if raw)
+    # `git ls-files` also lists submodule gitlinks (e.g. `plugins`) — directories
+    # on disk, or absent entirely in a clone without --recurse-submodules. The
+    # guard checks regular files only.
+    return [name for name in names if Path(name).is_file()]
 
 
 def main() -> int:

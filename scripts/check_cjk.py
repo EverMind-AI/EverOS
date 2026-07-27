@@ -47,7 +47,10 @@ def _is_allowlisted(path: str) -> bool:
 
 def _tracked_files() -> list[str]:
     out = subprocess.check_output(["git", "ls-files"], text=True)
-    return out.splitlines()
+    # `git ls-files` also lists submodule gitlinks (e.g. `plugins`) — directories
+    # on disk, or absent entirely in a clone without --recurse-submodules. The
+    # scanner reads regular files only.
+    return [line for line in out.splitlines() if os.path.isfile(line)]
 
 
 def main() -> int:

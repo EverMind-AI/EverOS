@@ -53,7 +53,11 @@ def _tracked_paths() -> list[Path]:
         stdout=subprocess.PIPE,
         text=False,
     )
-    return [Path(raw.decode("utf-8")) for raw in result.stdout.split(b"\0") if raw]
+    paths = (Path(raw.decode("utf-8")) for raw in result.stdout.split(b"\0") if raw)
+    # `git ls-files` also lists submodule gitlinks (e.g. `plugins`) — directories
+    # on disk, or absent entirely in a clone without --recurse-submodules. The
+    # guard scans regular files only.
+    return [path for path in paths if path.is_file()]
 
 
 def _tracked_text_files() -> Iterable[tuple[str, str]]:
