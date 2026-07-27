@@ -11,6 +11,8 @@ Public surface:
 - :class:`LLMNotConfiguredError` — raised when credentials are missing.
 - :class:`OpenAIProvider` — concrete provider wrapping
   ``openai.AsyncOpenAI`` against any OpenAI-compatible endpoint.
+- :class:`OllamaProvider` — local Ollama LLM provider with sensible
+  defaults (``http://localhost:11434/v1``, ``"ollama"`` key).
 - :func:`build_llm_provider` — settings-driven factory.
 - :func:`get_llm_client` — process-wide lazy singleton accessor.
 
@@ -24,6 +26,7 @@ from .client import LLMNotConfiguredError as LLMNotConfiguredError
 from .client import get_llm_client as get_llm_client
 from .client import get_multimodal_llm_client as get_multimodal_llm_client
 from .factory import build_llm_provider as build_llm_provider
+from .ollama_provider import OllamaProvider as OllamaProvider
 from .openai_provider import OpenAIProvider as OpenAIProvider
 from .protocol import ChatMessage as ChatMessage
 from .protocol import ChatResponse as ChatResponse
@@ -37,6 +40,7 @@ __all__ = [
     "LLMClient",
     "LLMError",
     "LLMNotConfiguredError",
+    "OllamaProvider",
     "OpenAIProvider",
     "Usage",
     "build_llm_provider",
