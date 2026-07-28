@@ -7,6 +7,8 @@ and from ``agents/<owner_id>/episodes/...`` symmetrically.
 
 from __future__ import annotations
 
+from everos.config.settings import load_settings
+
 import datetime as _dt
 from typing import ClassVar
 
@@ -16,7 +18,7 @@ from ._parent_type import ParentType
 
 # Vector dimension is settings-managed at runtime; the class-level
 # constant pins the schema dim used at table creation.
-_DIM = 1024
+_DIM = load_settings().embedding.dim
 
 
 class Episode(BaseLanceTable):

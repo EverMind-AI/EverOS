@@ -180,6 +180,7 @@ class EmbeddingSettings(BaseModel):
         EVEROS_EMBEDDING__MAX_RETRIES
         EVEROS_EMBEDDING__BATCH_SIZE
         EVEROS_EMBEDDING__MAX_CONCURRENT
+        EVEROS_EMBEDDING__DIM
     """
 
     model: str | None = None
@@ -189,6 +190,7 @@ class EmbeddingSettings(BaseModel):
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
     max_concurrent: int = Field(default=50, ge=1)
+    dim: int = Field(default=1024, gt=0)
 
 
 class RerankSettings(BaseModel):

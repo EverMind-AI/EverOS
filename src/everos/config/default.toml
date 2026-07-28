@@ -83,6 +83,9 @@ timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
 max_concurrent  = 5
+# Vector dimension used by LanceDB vector columns and the embedding provider.
+# Override via EVEROS_EMBEDDING__DIM.
+dim             = 1024
 
 [rerank]
 # Rerank provider. Override via env:
