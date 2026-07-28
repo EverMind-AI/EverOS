@@ -19,6 +19,7 @@ import asyncio
 from pathlib import Path
 from typing import ClassVar
 
+import anyio
 import pytest
 
 from everos.config import LanceDBSettings
@@ -687,12 +688,12 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         await _SearchNote.ensure_fts_indexes(table)
         assert any("tokens" in (i.columns or []) for i in await table.list_indices())
 
-        marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
-        assert not marker.exists()
+        marker = anyio.Path(MemoryRoot.default().lancedb_dir / ".fts_index_version")
+        assert not await marker.exists()
 
         # First run: migrates + writes the marker, index still present.
         await migrate_fts_indexes()
-        assert marker.read_text().strip() == "2"
+        assert (await marker.read_text()).strip() == "2"
         assert any("tokens" in (i.columns or []) for i in await table.list_indices())
 
         # Marker present → second run is a no-op. Drop the index, re-run,

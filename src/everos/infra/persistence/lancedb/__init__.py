@@ -27,6 +27,8 @@ first access; row population is the cascade daemon's job (see
 import contextlib
 import datetime as dt
 
+import anyio
+
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 
@@ -98,9 +100,11 @@ async def migrate_fts_indexes() -> None:
     O(N) but only on the first startup after upgrade.
     """
     logger = get_logger(__name__)
-    marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
+    marker = anyio.Path(MemoryRoot.default().lancedb_dir / ".fts_index_version")
     try:
-        current = int(marker.read_text().strip()) if marker.exists() else 0
+        current = (
+            int((await marker.read_text()).strip()) if await marker.exists() else 0
+        )
     except (ValueError, OSError):
         current = 0
     if current >= _FTS_INDEX_SCHEMA_VERSION:
@@ -120,7 +124,7 @@ async def migrate_fts_indexes() -> None:
         # so compaction no longer decodes a position List.
         with contextlib.suppress(Exception):
             await table.optimize(cleanup_older_than=dt.timedelta(seconds=0))
-    marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
+    await marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
     logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
 
 
