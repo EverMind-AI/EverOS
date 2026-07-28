@@ -17,10 +17,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from everalgo.types import CategorySpec, KnowledgeMemory, ParsedContent
 
+from everos.core.errors import PathTraversalError
 from everos.service.knowledge import (
     CategoryOverview,
     DocumentDetail,
     DocumentOverviewItem,
+    _resolve_original_file_path,
+    _write_original_file,
     create_document,
     get_document,
     list_categories,
@@ -402,6 +405,127 @@ async def test_move_preserves_original(knowledge_dir: Path) -> None:
 
     assert (new_dir / _ORIGINAL_DIR / "file.pdf").read_bytes() == file_content
     assert not list(old_dir.parent.glob(old_dir.name))
+
+
+# ── SEC-1: absolute source_name must not escape _original/ (CWE-22) ─────────
+
+
+async def test_create_document_absolute_filename_stays_in_original(
+    knowledge_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """An absolute multipart filename must not write outside _original/.
+
+    Regression for the knowledge-upload sibling of the sender_id traversal:
+    ``Path(base) / "/abs"`` discards ``base``, so a filename like
+    ``/tmp/pwned.txt`` would otherwise plant attacker bytes at an arbitrary
+    writable path (e.g. ``~/.bashrc``) rather than under the document dir.
+    """
+    doc_id = "d_sec000000001"
+    sentinel = tmp_path / "pwned.txt"  # sibling of knowledge_dir, i.e. outside it
+    payload = b"owned"
+    mock_ext = AsyncMock()
+    mock_ext.aextract.return_value = _make_memories(doc_id)
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_repo:
+        mock_repo.doc_id_exists = AsyncMock(return_value=False)
+        result = await create_document(
+            extractor=mock_ext,
+            parsed=ParsedContent(text="content"),
+            title="Traversal",
+            knowledge_dir=knowledge_dir,
+            source_name=str(sentinel),  # absolute path as filename
+            source_type="file",
+            doc_id=doc_id,
+            category_id="Sports",
+            file_content=payload,
+        )
+
+    # The attacker-chosen absolute path must NOT have been written.
+    assert not sentinel.exists(), "absolute filename escaped _original/"
+    # Bytes land safely under the document's _original/ as a basename.
+    doc_dir = Path(result.md_path)
+    assert (doc_dir / _ORIGINAL_DIR / "pwned.txt").read_bytes() == payload
+
+
+# ── SEC-2: ``..``-laden source_name must not walk out of _original/ ─────────
+
+
+async def test_create_document_dotdot_filename_stays_in_original(
+    knowledge_dir: Path,
+) -> None:
+    """A relative-traversal filename keeps only a contained basename."""
+    doc_id = "d_sec000000002"
+    payload = b"traverse"
+    mock_ext = AsyncMock()
+    mock_ext.aextract.return_value = _make_memories(doc_id)
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_repo:
+        mock_repo.doc_id_exists = AsyncMock(return_value=False)
+        result = await create_document(
+            extractor=mock_ext,
+            parsed=ParsedContent(text="content"),
+            title="Dotdot",
+            knowledge_dir=knowledge_dir,
+            source_name="../../../../etc/cron.d/pwned",
+            source_type="file",
+            doc_id=doc_id,
+            category_id="Sports",
+            file_content=payload,
+        )
+
+    doc_dir = Path(result.md_path)
+    # Only the basename survives, contained in _original/.
+    assert (doc_dir / _ORIGINAL_DIR / "pwned").read_bytes() == payload
+    # Nothing escaped above the document directory into a smuggled tree.
+    assert not (doc_dir.parent.parent / "etc").exists()
+
+
+# ── SEC-3: degenerate source_name is rejected, touches no filesystem ────────
+
+
+async def test_write_original_file_rejects_degenerate_name(tmp_path: Path) -> None:
+    """A source_name reducing to ``.``/``..``/empty raises before any write."""
+    doc_dir = tmp_path / "doc"
+    doc_dir.mkdir()
+
+    with pytest.raises(PathTraversalError):
+        await _write_original_file(doc_dir, "..", b"x")
+
+    # The guard runs before mkdir, so no _original/ directory was created.
+    assert not (doc_dir / _ORIGINAL_DIR).exists()
+
+
+# ── SEC-4: read side never resolves a crafted label to an out-of-dir file ───
+
+
+async def test_resolve_original_file_path_rejects_traversal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stored source_name pointing outside _original/ resolves to None.
+
+    Without sanitisation, ``doc_dir/_original/ / "/abs/secret"`` collapses to
+    ``/abs/secret`` and would leak an arbitrary readable file back to the
+    caller via ``original_file_path``.
+    """
+    from everos.config import load_settings
+    from everos.core.persistence import MemoryRoot
+
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    load_settings.cache_clear()
+    MemoryRoot._instance = None
+
+    doc_rel = Path("app/proj/knowledge/Sports/doc")
+    (tmp_path / doc_rel).mkdir(parents=True)
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"top secret")
+
+    resolved = await _resolve_original_file_path(str(doc_rel / "index.md"), str(secret))
+    assert resolved is None
+
+    load_settings.cache_clear()
+    MemoryRoot._instance = None
 
 
 # ── TC-8: DocumentOverviewItem slim fields ──────────────────────────────────

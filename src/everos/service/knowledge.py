@@ -21,7 +21,7 @@ import shutil
 import time
 from collections.abc import Sequence
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -35,6 +35,7 @@ from everos.core.errors import (
     DocumentNotFoundError,
     DuplicateDocumentError,
     ExtractionEmptyError,
+    PathTraversalError,
     TopicNotFoundError,
 )
 from everos.core.observability.logging import get_logger
@@ -922,19 +923,58 @@ def _apply_category_fallback(
     return patched
 
 
+def _safe_original_filename(source_name: str) -> str:
+    """Reduce an untrusted upload filename to a single safe path component.
+
+    The multipart ``filename`` is attacker-controlled. Used verbatim as a
+    path segment it enables traversal (CWE-22): ``Path(base) / "/abs/path"``
+    discards ``base`` because the right operand is absolute, and
+    ``base / ".."`` walks upward — so a filename of ``/home/u/.bashrc`` or
+    ``../../x`` would let a caller write (or read back) outside the
+    ``_original/`` directory. Reducing to the trailing component of both
+    POSIX and Windows-style paths strips any directory part; the residual
+    ``.`` / ``..`` / empty cases (which a basename can still be, e.g. a
+    filename of ``..``) are rejected outright.
+
+    Args:
+        source_name: The client-supplied multipart filename.
+
+    Returns:
+        A single filename component safe to join under ``_original/``.
+
+    Raises:
+        PathTraversalError: If no safe filename can be derived.
+    """
+    # PurePosixPath does not split on "\\"; strip backslash segments too so a
+    # Windows-style ``..\\..\\x`` or ``C:\\x`` filename cannot survive.
+    name = PurePosixPath(source_name).name.rsplit("\\", 1)[-1]
+    if name in {"", ".", ".."}:
+        raise PathTraversalError(
+            f"upload filename is not a valid file component: {source_name!r}"
+        )
+    return name
+
+
 async def _resolve_original_file_path(
     md_path: str, source_name: str | None
 ) -> str | None:
     """Derive the original file path from md_path and source_name.
 
     Returns the absolute path string if the file exists on disk,
-    ``None`` otherwise (legacy documents or missing source_name).
+    ``None`` otherwise (legacy documents, missing source_name, or a stored
+    source_name that does not reduce to a safe in-``_original/`` filename —
+    the read side sanitises identically to the write side so a crafted
+    provenance label can never resolve to an out-of-directory file).
     """
     if not source_name:
         return None
+    try:
+        safe_name = _safe_original_filename(source_name)
+    except PathTraversalError:
+        return None
     memory_root = MemoryRoot.default()
     doc_dir = memory_root.root / Path(md_path).parent
-    candidate = doc_dir / _ORIGINAL_DIR_NAME / source_name
+    candidate = doc_dir / _ORIGINAL_DIR_NAME / safe_name
     if await anyio.Path(candidate).is_file():
         return str(candidate)
     return None
@@ -943,10 +983,24 @@ async def _resolve_original_file_path(
 async def _write_original_file(
     doc_dir: Path, source_name: str, file_content: bytes
 ) -> Path:
-    """Write the uploaded binary to ``_original/`` and return its path."""
+    """Write the uploaded binary to ``_original/`` and return its path.
+
+    ``source_name`` is the untrusted multipart filename: it is reduced to a
+    safe basename, and the resolved target is asserted to stay inside
+    ``_original/`` *before* any filesystem touch, so a crafted filename can
+    neither escape the document directory nor create out-of-root parents.
+    """
     original_dir = doc_dir / _ORIGINAL_DIR_NAME
+    safe_name = _safe_original_filename(source_name)
+    target = original_dir / safe_name
+    # Defense-in-depth backstop mirroring the markdown writer's
+    # ``_ensure_within_root``: resolve() collapses ``..``/symlinks before the
+    # containment check, which holds even though target does not exist yet.
+    if not target.resolve().is_relative_to(original_dir.resolve()):
+        raise PathTraversalError(
+            f"original file target escapes {_ORIGINAL_DIR_NAME}/: {target}"
+        )
     await anyio.Path(original_dir).mkdir(parents=True, exist_ok=True)
-    target = original_dir / source_name
     await anyio.Path(target).write_bytes(file_content)
     return target
 
