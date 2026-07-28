@@ -62,7 +62,7 @@ dependencies = [
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
     # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-user-memory==0.3.1",
+    "everalgo-user-memory==0.3.2",
     "everalgo-agent-memory==0.3.1",
     "everalgo-rank==0.4.1",
     "everalgo-knowledge==0.1.1",

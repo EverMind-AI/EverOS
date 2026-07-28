@@ -546,16 +546,16 @@ wheels = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-boundary" },
     { name = "everalgo-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/81/bbb1d9681d59a0237d4a8ff7f11e317c754a518f285da18e05015a443201/everalgo_user_memory-0.3.1.tar.gz", hash = "sha256:ae7a2582c1b15a4303fb576fa67c518511ca9aa63572ae2addf975856ddfb321", size = 56065, upload-time = "2026-06-24T02:53:41.311Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/1f/f3f3f264083f8253b1ffdd87f9f3edc4c8f22790112fe2fae93f5c01457a/everalgo_user_memory-0.3.2.tar.gz", hash = "sha256:9aa66a29dbd53176fe99a6482ca4d428158e085d146e14830e44cdd7a67840d6", size = 56591, upload-time = "2026-07-21T09:17:09.018Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/7b/22491eeec4db1b7fa38dc12db301fe9fecb18f29b3c40fd6e3975505d3f7/everalgo_user_memory-0.3.1-py3-none-any.whl", hash = "sha256:ef9f3a1573b301222f669e7b29bd554b1b68602a5185b36845023e5e573f05b1", size = 54389, upload-time = "2026-06-24T02:53:40.392Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/55/e22d6dff61fb766b33677ff68a64cd2edd78502f5feb2a3eb19ed82f7588/everalgo_user_memory-0.3.2-py3-none-any.whl", hash = "sha256:958fef976dff6961ff62858b73c867131ca3f511b5f515b1610e4818bdf2d024", size = 54128, upload-time = "2026-07-21T09:17:07.952Z" },
 ]
 
 [[package]]
@@ -625,7 +625,7 @@ requires-dist = [
     { name = "everalgo-knowledge", specifier = "==0.1.1" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = ">=0.2.1" },
     { name = "everalgo-rank", specifier = "==0.4.1" },
-    { name = "everalgo-user-memory", specifier = "==0.3.1" },
+    { name = "everalgo-user-memory", specifier = "==0.3.2" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "jieba", specifier = ">=0.42.1,<1.0" },
