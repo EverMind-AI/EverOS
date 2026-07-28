@@ -13,9 +13,11 @@ Run inside ``service.memorize`` via ``asyncio.gather`` alongside
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.user_memory import EpisodeExtractor
 
@@ -36,6 +38,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _TRACK = "user_memory"
+_EXTRACT_MAX_RETRIES = 2
+_EXTRACT_RETRY_BACKOFF = 1.0
 
 
 def _root_relative(path: str) -> str:
@@ -122,8 +126,14 @@ class UserMemoryPipeline:
             ) as extract_span:
                 # Token usage is recorded onto this span by the LLM client
                 # wrapper when the extractor issues its chat() call.
-                algo_ep = await self._ep_ext.aextract(
-                    cell, sender_id=None, prompt=episode_prompt
+                #
+                # Retry on ValueError: everalgo raises ValueError when the
+                # LLM returns malformed JSON (e.g. OpenRouter partial
+                # response with finish_reason=stop). Transient — same input
+                # typically succeeds on retry. TODO: catch a typed
+                # ExtractionError once everalgo introduces one.
+                algo_ep = await _extract_with_retry(
+                    self._ep_ext, cell, episode_prompt, memcell_id
                 )
                 # Extracted memory text (only when capture_content is on).
                 capture_output(extract_span, algo_ep.episode)
@@ -281,3 +291,27 @@ def _episode_to_entry_body(
         sections["Summary"] = str(summary)
     sections["Content"] = episode.episode
     return inline, sections
+
+
+async def _extract_with_retry(
+    extractor: EpisodeExtractor,
+    cell: AlgoMemCell,
+    prompt: str | None,
+    memcell_id: str,
+) -> AlgoEpisode:
+    """Call everalgo episode extraction with retry on malformed LLM output."""
+    for attempt in range(_EXTRACT_MAX_RETRIES):
+        try:
+            return await extractor.aextract(cell, sender_id=None, prompt=prompt)
+        except ValueError as exc:
+            wait = _EXTRACT_RETRY_BACKOFF * (attempt + 1)
+            logger.warning(
+                "episode_extract_retry",
+                memcell_id=memcell_id,
+                attempt=attempt,
+                error=str(exc)[:200],
+                backoff_s=wait,
+            )
+            await asyncio.sleep(wait)
+    # Final attempt — a ValueError here propagates to the caller.
+    return await extractor.aextract(cell, sender_id=None, prompt=prompt)
