@@ -14,7 +14,7 @@ import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.clustering import cluster_by_geometry
 
-from everos.component.embedding import get_embedder
+from everos.component.embedding import get_embedding_capability
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.infra.ome.context import StrategyContext
@@ -37,6 +37,36 @@ logger = get_logger(__name__)
 async def trigger_profile_clustering(
     event: EpisodeExtracted, ctx: StrategyContext
 ) -> None:
+    # Body-guard: capability is checked here for defensive degradation.
+    # When embedding is unavailable we cannot vectorise the episode, so
+    # the strategy silently no-ops — no work, no owner lock, no OME
+    # retry pressure. Tier upgrades require a server restart; this
+    # guard is not a hot-reload mechanism, it just keeps dispatch clean
+    # when capability was absent at engine start.
+    #
+    # Log level is intentionally ``debug`` here (and at the three sibling
+    # body-guards in ``trigger_skill_clustering``, ``extract_agent_skill``,
+    # and ``reflect_episodes``) rather than the ``info`` used by
+    # ``cascade.registry`` and the reflection orchestrator's
+    # ``cascade_registry_knowledge_gated_off`` /
+    # ``reflection_orchestrator_disabled`` events. Rationale (PR #361
+    # round-3 review #8, accepted intentional asymmetry): the
+    # registry/orchestrator gate events fire ONCE per process at startup
+    # and are useful lifecycle signals worth ``info``. The per-dispatch
+    # body-guards fire on EVERY memorize/reflection dispatch under Tier 1
+    # — a busy chat session emits hundreds. At ``info`` they would flood
+    # structured-log consumers even when the process-wide default level
+    # is ``WARNING`` (which suppresses stdout but not the sink). ``debug``
+    # keeps this per-event signal cheap and opt-in via ``--verbose`` for
+    # diagnosing why a strategy isn't running.
+    if not get_embedding_capability().available:
+        logger.debug(
+            "strategy_gated_off_embedding_unavailable",
+            strategy_name="trigger_profile_clustering",
+            owner_id=event.owner_id,
+        )
+        return
+
     # Serialise on owner_id: the strategy reads the user's full cluster
     # set, picks merge target by geometry, then upserts — concurrent runs
     # on the same owner_id would race the read → decide → write cycle.
@@ -46,7 +76,12 @@ async def trigger_profile_clustering(
     partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
     async with get_partition_lock("trigger_profile_clustering", partition):
         # 1. Embed the episode_text into a vector.
-        vector_list = await get_embedder().embed(event.episode_text)
+        # ``.require()`` is defensive: the body-guard above already
+        # returned when the capability was missing, so this cannot raise
+        # in the guarded path. Routing through the capability keeps a
+        # single shared provider (one client, one semaphore) per process.
+        embedder = get_embedding_capability().require()
+        vector_list = await embedder.embed(event.episode_text)
         vector = np.asarray(vector_list, dtype=np.float32)
 
         # 2. Load this user's existing user-memory clusters (scoped to space).

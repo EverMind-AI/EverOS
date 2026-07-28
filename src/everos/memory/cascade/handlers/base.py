@@ -6,10 +6,13 @@ row state. The handler is the *only* cascade-side piece that knows
 the per-kind row shape; everything around it (watcher / scanner /
 worker / orchestrator / CLI) is kind-agnostic.
 
-Per-kind handlers share the same dependencies bundle — embedding,
-tokenizer, memory-root path resolver — packaged as
-:class:`HandlerDeps`. Construct it once at orchestrator startup, pass
-to every handler factory, no per-row resolution churn.
+Per-kind handlers share the same dependencies bundle — tokenizer,
+memory-root path resolver — packaged as :class:`HandlerDeps`.
+Construct it once at orchestrator startup, pass to every handler
+factory, no per-row resolution churn. Embedding is a soft dependency:
+handlers fetch it themselves via
+:func:`everos.component.embedding.get_embedding_capability` rather
+than receiving it here.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ from __future__ import annotations
 import abc
 import dataclasses
 
-from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 
@@ -35,7 +37,6 @@ class HandlerDeps:
     """
 
     memory_root: MemoryRoot
-    embedder: EmbeddingProvider
     tokenizer: Tokenizer
 
 

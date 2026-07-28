@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import DocumentUpsertPayload
@@ -40,16 +39,6 @@ class _StubTokenizer(Tokenizer):
 
     def tokenize_batch(self, texts):  # type: ignore[no-untyped-def]
         return [self.tokenize(t) for t in texts]
-
-
-class _StubEmbedder(EmbeddingProvider):
-    dim = 1024
-
-    async def embed(self, text: str) -> list[float]:
-        return [0.0] * self.dim
-
-    async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
-        return [await self.embed(t) for t in texts]
 
 
 # ── Fake repo ──────────────────────────────────────────────────────────
@@ -138,7 +127,6 @@ def _handler(memory_root: MemoryRoot) -> KnowledgeDocumentHandler:
     return KnowledgeDocumentHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )

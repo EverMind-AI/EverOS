@@ -76,4 +76,4 @@ class Foresight(BaseLanceTable):
     (owner_id / session_id / timestamp / parent_id / sender_ids) is NOT
     in the hash. See :attr:`ForesightHandler.content_change_keys`."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

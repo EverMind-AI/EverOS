@@ -44,7 +44,7 @@ _writer: AgentCaseWriter | None = None
 def _get_writer() -> AgentCaseWriter:
     global _writer
     if _writer is None:
-        _writer = AgentCaseWriter(root=MemoryRoot.default())
+        _writer = AgentCaseWriter(root=MemoryRoot.resolve())
     return _writer
 
 

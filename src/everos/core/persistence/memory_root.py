@@ -23,7 +23,7 @@ The cascade queue, LSN watermark, and change audit all live in
 
 The default location and tunables come from :class:`everos.config.Settings`
 (loaded from ``config/default.toml`` + ``EVEROS_*`` environment variables);
-:meth:`MemoryRoot.default` resolves the configured path.
+:meth:`MemoryRoot.resolve` resolves the configured path.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ class MemoryRoot:
         object.__setattr__(self, "root", resolved)
 
     @classmethod
-    def default(cls, *, explicit_root: str | None = None) -> MemoryRoot:
+    def resolve(cls, *, explicit_root: str | None = None) -> MemoryRoot:
         """Return the memory-root resolved from CLI / env / default.
 
         Resolution: ``explicit_root`` > ``EVEROS_ROOT`` env > ``~/.everos``.

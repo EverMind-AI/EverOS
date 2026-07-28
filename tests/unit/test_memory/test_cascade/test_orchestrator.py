@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from sqlmodel import SQLModel
 
-from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import (
@@ -17,16 +16,6 @@ from everos.infra.persistence.lancedb import (
 )
 from everos.infra.persistence.sqlite import dispose_engine, get_engine
 from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
-
-
-class _StubEmbedder(EmbeddingProvider):
-    dim = 1024
-
-    async def embed(self, text: str) -> list[float]:
-        return [0.0] * self.dim
-
-    async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
-        return [[0.0] * self.dim for _ in texts]
 
 
 @pytest.fixture
@@ -45,7 +34,7 @@ async def runtime(
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     await ensure_business_indexes()
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
     await dispose_connection()
     await dispose_engine()
 
@@ -53,7 +42,6 @@ async def runtime(
 def _make_orchestrator(memory_root: MemoryRoot) -> CascadeOrchestrator:
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,

@@ -34,6 +34,7 @@ from .lifespans import (
     LanceDBLifespanProvider,
     LLMLifespanProvider,
     OmeLifespanProvider,
+    ParserLifespanProvider,
     SqliteLifespanProvider,
 )
 from .routes import (
@@ -71,9 +72,9 @@ def create_app(
         cors_allow_headers: Allowed CORS headers (default: ``["*"]``).
         lifespan_providers: Optional list of LifespanProvider; defaults to
             ``[TracingLifespanProvider(), MetricsLifespanProvider(),
-            LLMLifespanProvider(), SqliteLifespanProvider(),
-            LanceDBLifespanProvider(), CascadeLifespanProvider(),
-            OmeLifespanProvider()]``.
+            LLMLifespanProvider(), ParserLifespanProvider(),
+            SqliteLifespanProvider(), LanceDBLifespanProvider(),
+            CascadeLifespanProvider(), OmeLifespanProvider()]``.
 
     Returns:
         FastAPI: Configured application instance.
@@ -85,6 +86,7 @@ def create_app(
             TracingLifespanProvider(),
             MetricsLifespanProvider(),
             LLMLifespanProvider(),
+            ParserLifespanProvider(),
             SqliteLifespanProvider(),
             LanceDBLifespanProvider(),
             CascadeLifespanProvider(),

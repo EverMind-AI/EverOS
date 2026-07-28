@@ -39,11 +39,11 @@ from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.component.embedding import (
-    EmbeddingNotConfiguredError,
     EmbeddingServiceError,
-    get_embedder,
+    get_embedding_capability,
 )
 from everos.component.llm import get_llm_client
+from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
@@ -102,7 +102,7 @@ _writer: AgentSkillWriter | None = None
 def _get_writer() -> AgentSkillWriter:
     global _writer
     if _writer is None:
-        _writer = AgentSkillWriter(root=MemoryRoot.default())
+        _writer = AgentSkillWriter(root=MemoryRoot.resolve())
     return _writer
 
 
@@ -113,6 +113,25 @@ def _get_writer() -> AgentSkillWriter:
     max_retries=3,
 )
 async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) -> None:
+    # Body-guard: capability is checked here for defensive degradation.
+    # Belt-and-suspenders even though the upstream
+    # trigger_skill_clustering already gates on the same capability — a
+    # direct emit of SkillClusterUpdated (tests, future features) should
+    # still degrade cleanly without an owner lock or OME retry pressure.
+    # Tier upgrades require a server restart; this guard is not a
+    # hot-reload mechanism.
+    #
+    # ``debug`` level (not ``info``) is intentional; see the body-guard
+    # in :func:`everos.memory.strategies.trigger_profile_clustering` for
+    # the shared rationale (PR #361 round-3 review #8).
+    if not get_embedding_capability().available:
+        logger.debug(
+            "strategy_gated_off_embedding_unavailable",
+            strategy_name="extract_agent_skill",
+            agent_id=event.agent_id,
+        )
+        return
+
     # Serialise on agent_id: SKILL.md is addressed by (agent_id, skill_name)
     # — concurrent runs across different clusters of the same agent can
     # both decide to add the same skill_name and clobber the file. Different
@@ -269,10 +288,16 @@ async def _resolve_query_vector(target: LanceAgentCase) -> list[float]:
         return list(target.vector)
     if not target.task_intent:
         return []
+    # ``.require()`` is defensive: the strategy body-guard checks
+    # ``.available`` before we reach this helper, so this branch will
+    # not raise ``ProviderNotConfiguredError`` in normal operation. The
+    # catch stays so a misconfiguration surfacing later (or a direct
+    # unit-test call to this helper without the guard) still degrades
+    # to ``[]`` instead of blowing up mid-strategy.
     try:
-        embedder = get_embedder()
+        embedder = get_embedding_capability().require()
         return list(await embedder.embed(target.task_intent))
-    except (EmbeddingNotConfiguredError, EmbeddingServiceError) as exc:
+    except (ProviderNotConfiguredError, EmbeddingServiceError) as exc:
         logger.warning(
             "agent_skill_query_embed_failed",
             case_entry_id=target.entry_id,

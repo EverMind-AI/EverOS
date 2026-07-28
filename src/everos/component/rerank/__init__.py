@@ -5,6 +5,9 @@ Public surface:
 - :class:`RerankProvider` — Protocol every provider satisfies.
 - :class:`RerankResult` / :class:`RerankServiceError` — value type + error.
 - :class:`RerankError` — backward-compat alias for :class:`RerankServiceError`.
+- :class:`RerankCapability` — soft-dependency wrapper around an optional
+  :class:`RerankProvider` (``available`` / ``require``; no soft-degrade
+  accessor — rerank has no write path to degrade).
 - :class:`DeepInfraRerankProvider` — DeepInfra inference-API rerank.
 - :class:`VllmRerankProvider` — OpenAI-compat ``/v1/rerank`` (vLLM,
   self-hosted, other compatible servers).
@@ -12,6 +15,8 @@ Public surface:
   ``gte-rerank-v2`` native text-rerank endpoint.
 - :func:`build_rerank_provider` — settings-driven factory that picks
   the concrete provider via ``settings.rerank.provider``.
+- :func:`get_rerank_capability` — process-wide lazy singleton accessor
+  for :class:`RerankCapability`.
 
 External usage::
 
@@ -22,6 +27,8 @@ External usage::
 
 from everos.core.errors import RerankServiceError as RerankServiceError
 
+from .accessor import get_rerank_capability as get_rerank_capability
+from .capability import RerankCapability as RerankCapability
 from .dashscope_provider import DashScopeRerankProvider as DashScopeRerankProvider
 from .deepinfra_provider import DeepInfraRerankProvider as DeepInfraRerankProvider
 from .factory import build_rerank_provider as build_rerank_provider
@@ -33,10 +40,12 @@ from .vllm_provider import VllmRerankProvider as VllmRerankProvider
 __all__ = [
     "DashScopeRerankProvider",
     "DeepInfraRerankProvider",
+    "RerankCapability",
     "RerankError",
     "RerankProvider",
     "RerankResult",
     "RerankServiceError",
     "VllmRerankProvider",
     "build_rerank_provider",
+    "get_rerank_capability",
 ]

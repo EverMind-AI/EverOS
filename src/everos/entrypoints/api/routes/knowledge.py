@@ -25,15 +25,18 @@ if TYPE_CHECKING:
     from everos.service.knowledge import KnowledgeExtractor
 
 from everalgo.types import ParsedContent
-from fastapi import APIRouter, Path, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, UploadFile
 from fastapi.params import Form
 from pydantic import BaseModel, Field
 
+from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
+from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.errors import (
     InvalidInputError,
+    ProviderNotConfiguredError,
     UnsupportedModalityError,
 )
 from everos.core.persistence import MemoryRoot
@@ -59,6 +62,49 @@ from everos.service import (
 # a shared module would be cleaner but is out of scope for this PR.
 from .memorize import PathSafeId, SuccessEnvelope
 
+_KNOWLEDGE_FEATURE = "knowledge"
+
+
+def _require_knowledge_capabilities() -> None:
+    """Per-endpoint gate: knowledge writes/search are atomic on embed + rerank.
+
+    ``cascade.registry.build_handlers`` gates the ``knowledge_topic`` /
+    ``knowledge_document`` cascade handlers off as an atomic pair when
+    either capability is unavailable, so a document
+    written without both would enqueue into a cascade kind with no
+    handler and get stuck ``failed(retryable=False)`` — silently
+    disappearing from search instead of surfacing an error. Gating the
+    write and search entrypoints turns that into an immediate 422
+    instead of a misleading 200 (upload "succeeds") or a 500 further
+    down a service call that assumed the provider was there.
+
+    Attached per-endpoint (not router-wide) so read / list / delete /
+    metadata-patch routes stay reachable after a Tier-3 → Tier-2/1
+    downgrade: users can still inspect and clean up their existing docs
+    (rename, recategorize, delete) even when the providers that would
+    embed or rerank new content are no longer configured. Title /
+    category patches only rewrite md frontmatter (and move the doc
+    directory when category changes) — no embed or rerank code runs on
+    that path.
+
+    Checks both capabilities (not just embedding) up front so a client
+    missing only rerank gets a rerank-specific message rather than
+    passing this gate and failing later inside search.
+    """
+    if not get_embedding_capability().available:
+        raise ProviderNotConfiguredError(
+            provider="embedding",
+            feature=_KNOWLEDGE_FEATURE,
+        )
+    if not get_rerank_capability().available:
+        raise ProviderNotConfiguredError(
+            provider="rerank",
+            feature=_KNOWLEDGE_FEATURE,
+        )
+
+
+# Router prefix is /knowledge; app.py mounts it under both /api/v1 and
+# /api/v2 (see create_app — v1 retained as a permanent alias).
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
@@ -276,6 +322,47 @@ def _reject_oversized_upload(file: UploadFile) -> None:
         raise InvalidInputError(f"Uploaded file exceeds the {limit_mib:.1f} MiB limit.")
 
 
+_PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(
+    {"md", "txt", "rst", "markdown", "text"}
+)
+
+
+def _looks_like_utf8_text(file: UploadFile) -> bool:
+    """Decide whether to skip the parser and go straight to UTF-8 decode.
+
+    A file is treated as plain UTF-8 text when its ``content_type`` starts
+    with ``text/`` (browsers set this for ``.md`` / ``.txt`` uploads), or
+    when the mime is missing / ``application/octet-stream`` (typical for
+    ``curl -F file=@x.md`` without an explicit ``type=`` hint) AND the
+    filename extension is on a small allowlist. This short-circuits the
+    parser path — which depends on ``[multimodal]`` being configured —
+    for the common case of uploading a markdown/plaintext knowledge doc.
+    """
+    mime = (file.content_type or "").lower()
+    if mime.startswith("text/"):
+        return True
+    if mime and mime != "application/octet-stream":
+        return False
+    if file.filename and "." in file.filename:
+        return file.filename.rsplit(".", 1)[-1].lower() in _PLAIN_TEXT_EXTENSIONS
+    return False
+
+
+def _decode_as_utf8(raw_bytes: bytes) -> ParsedContent:
+    """Decode ``raw_bytes`` as UTF-8 or raise a caller-friendly error."""
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UnsupportedModalityError(
+            "File is not UTF-8 text. "
+            "Install everos[multimodal] for PDF/HTML/DOCX support."
+        ) from exc
+    parsed = ParsedContent(text=text)
+    if not parsed.text or not parsed.text.strip():
+        raise InvalidInputError("Uploaded file has no valid content.")
+    return parsed
+
+
 async def _parse_upload(
     file: UploadFile, *, raw_bytes: bytes | None = None
 ) -> ParsedContent:
@@ -293,6 +380,12 @@ async def _parse_upload(
 
     if raw_bytes is None:
         raw_bytes = await file.read()
+
+    # Short-circuit plain-text uploads even when everalgo.parser is
+    # installed — the parser path depends on [multimodal] being
+    # configured, which markdown/plaintext ingestion doesn't need.
+    if _looks_like_utf8_text(file):
+        return _decode_as_utf8(raw_bytes)
 
     if parser_available():
         from everalgo.types import RawFile  # Deferred: optional dep
@@ -313,17 +406,7 @@ async def _parse_upload(
             raise InvalidInputError("Uploaded file has no valid content.")
         return parsed
 
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise UnsupportedModalityError(
-            "File is not UTF-8 text. "
-            "Install everos[multimodal] for PDF/HTML/DOCX support."
-        ) from exc
-    parsed = ParsedContent(text=text)
-    if not parsed.text or not parsed.text.strip():
-        raise InvalidInputError("Uploaded file has no valid content.")
-    return parsed
+    return _decode_as_utf8(raw_bytes)
 
 
 def _map_create_result(result: CreateDocumentResult) -> DocumentCreateResponse:
@@ -432,7 +515,11 @@ def _map_search_result(result: SearchKnowledgeResult) -> KnowledgeSearchResponse
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/documents", status_code=201)
+@router.post(
+    "/documents",
+    status_code=201,
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def create_document_route(
     request: Request,
@@ -450,7 +537,7 @@ async def create_document_route(
     parsed = await _parse_upload(file, raw_bytes=file_content)
     source_name = file.filename
 
-    knowledge_dir = MemoryRoot.default().knowledge_dir(app_id, project_id)
+    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
     extractor = _build_extractor()
 
     result = await create_document(
@@ -466,7 +553,11 @@ async def create_document_route(
     return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
 
 
-@router.put("/documents/{doc_id}", status_code=200)
+@router.put(
+    "/documents/{doc_id}",
+    status_code=200,
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def replace_document_route(
     request: Request,
@@ -484,7 +575,7 @@ async def replace_document_route(
     file_content = await file.read()
     parsed = await _parse_upload(file, raw_bytes=file_content)
 
-    knowledge_dir = MemoryRoot.default().knowledge_dir(app_id, project_id)
+    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
     extractor = _build_extractor()
 
     result = await replace_document(
@@ -576,7 +667,10 @@ async def get_topic_route(
     return SuccessEnvelope(request_id=rid, data=_map_topic_detail(detail))
 
 
-@router.post("/search")
+@router.post(
+    "/search",
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 async def search_knowledge_route(
     request: Request,
     req: KnowledgeSearchRequest,

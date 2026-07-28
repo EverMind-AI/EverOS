@@ -38,7 +38,7 @@ _writer: ForesightWriter | None = None
 def _get_writer() -> ForesightWriter:
     global _writer
     if _writer is None:
-        _writer = ForesightWriter(root=MemoryRoot.default())
+        _writer = ForesightWriter(root=MemoryRoot.resolve())
     return _writer
 
 

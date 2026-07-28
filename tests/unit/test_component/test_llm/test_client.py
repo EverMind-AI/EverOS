@@ -40,7 +40,7 @@ def test_raises_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _reset_singleton(monkeypatch)
     _patch_settings(monkeypatch, api_key=None, base_url="https://example.test")
 
-    with pytest.raises(LLMNotConfiguredError, match="EVEROS_LLM__API_KEY"):
+    with pytest.raises(LLMNotConfiguredError, match=r"\[llm\]"):
         _client_mod.get_llm_client()
 
 
@@ -48,7 +48,7 @@ def test_raises_when_base_url_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _reset_singleton(monkeypatch)
     _patch_settings(monkeypatch, api_key="sk-test", base_url=None)
 
-    with pytest.raises(LLMNotConfiguredError, match="EVEROS_LLM__BASE_URL"):
+    with pytest.raises(LLMNotConfiguredError, match=r"\[llm\]"):
         _client_mod.get_llm_client()
 
 

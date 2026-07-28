@@ -40,7 +40,7 @@ import pytest
 from everalgo.clustering import Cluster as AlgoCluster
 from httpx import ASGITransport, AsyncClient
 
-from everos.component.embedding import get_embedder
+from everos.component.embedding import get_embedding_capability
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence.lancedb import (
@@ -96,21 +96,22 @@ async def client(
     async with _engine.begin() as _conn:
         await _conn.run_sync(_SQLModel.metadata.create_all)
 
-    # Search service: reset all lazy singletons so each test rebuilds
+    # Search service: reset the manager singleton so each test rebuilds
     # against the just-monkey-patched memory root + .env creds.
-    for attr in (
-        "_manager",
-        "_embedding",
-        "_reranker",
-        "_llm_client",
-    ):
-        setattr(search_service_mod, attr, None)
-    for attr in (
-        "_embedding_resolved",
-        "_rerank_resolved",
-        "_llm_resolved",
-    ):
-        setattr(search_service_mod, attr, False)
+    search_service_mod._manager = None
+
+    # Embedding / rerank / LLM route through their process-wide
+    # capability / singleton accessors — reset those directly so each
+    # test rebuilds against the just-monkey-patched memory root + .env
+    # creds (also covered by the autouse fixtures in
+    # ``tests/conftest.py``; kept explicit here for locality with the
+    # rest of this fixture's singleton reset).
+    embedding_acc = import_module("everos.component.embedding.accessor")
+    rerank_acc = import_module("everos.component.rerank.accessor")
+    llm_client_mod = import_module("everos.component.llm.client")
+    embedding_acc._capability = None
+    rerank_acc._capability = None
+    llm_client_mod._llm_client = None
 
     app = create_app(lifespan_providers=[])
     transport = ASGITransport(app=app)
@@ -170,7 +171,7 @@ async def _seed_user_memory_cluster(eps: list[dict], *, owner_id: str) -> None:
     """
     memcell_ids = list({ep["parent_id"] for ep in eps})
     centroid_text = eps[0]["episode"]
-    centroid_vec = await get_embedder().embed(centroid_text)
+    centroid_vec = await get_embedding_capability().require().embed(centroid_text)
     await cluster_repo.upsert_with_members(
         AlgoCluster(
             id=mint_cluster_id(),
@@ -428,14 +429,12 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     can rank them (zero vectors are undefined under cosine distance —
     the dense path returns 0 hits for them).
     """
-    from everos.service.search import _get_embedding
-
     case_intent = "refactor authentication middleware"
     case_approach = "split provider lookup from session decode"
     skill_desc = "refactor authentication middleware reliably"
     skill_body = "step-by-step approach for auth refactors"
 
-    embedder = _get_embedding()
+    embedder = get_embedding_capability().provider
     if embedder is not None:
         case_vec, skill_vec = await embedder.embed_batch(
             [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
@@ -578,8 +577,6 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
     surface it on its own; the bridge is the path that does, and LLM
     rerank keeps it because the topic is genuinely relevant.
     """
-    from everos.service.search import _get_embedding
-
     case_id_with_owner = "a_bridge_ac_1"  # mirrors AgentCase.id = "<owner>_<entry_id>"
     case_intent = "refactor authentication middleware"
     case_approach = "split provider lookup from session decode"
@@ -595,7 +592,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
         "independently."
     )
 
-    embedder = _get_embedding()
+    embedder = get_embedding_capability().provider
     assert embedder is not None, "live_llm test requires a real embedder"
     case_vec, skill_vec = await embedder.embed_batch(
         [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]

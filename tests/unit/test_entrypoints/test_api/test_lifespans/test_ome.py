@@ -19,7 +19,7 @@ async def test_lifespan_starts_and_stops_engine(
     svc = importlib.import_module("everos.service.memorize")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / "ome.toml").write_text("# test\n")
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)

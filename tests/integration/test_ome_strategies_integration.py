@@ -95,11 +95,11 @@ async def test_emit_dispatches_both_strategies_to_success(
 
     svc = importlib.import_module("everos.service.memorize")
 
-    # Redirect MemoryRoot.default() to tmp_path so _get_engine() writes ome.db
+    # Redirect MemoryRoot.resolve() to tmp_path so _get_engine() writes ome.db
     # under the test's isolated temp directory instead of the real ~/.everos.
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     # Reset singletons so they rebuild against the patched MemoryRoot.
@@ -279,7 +279,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
 
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
@@ -374,7 +374,7 @@ async def test_skill_chain_e2e(
 
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
@@ -407,11 +407,17 @@ async def test_skill_chain_e2e(
         source_case_ids=["ac_20260517_0001"],
     )
 
+    # ``trigger_skill_clustering`` and ``extract_agent_skill`` both body-guard
+    # on ``get_embedding_capability().available`` and then resolve the
+    # concrete embedder via ``.require()``. Installing the deterministic
+    # embedder as the accessor's cached capability handles both the guard
+    # check and the actual embed calls in one shot.
+    import everos.component.embedding.accessor as _emb_acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(_emb_acc, "_capability", EmbeddingCapability(provider=embedder))
+
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
             return_value=fake_llm,
@@ -522,7 +528,7 @@ async def test_profile_chain_e2e(
 
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
@@ -561,11 +567,18 @@ async def test_profile_chain_e2e(
     fake_episode_row.parent_id = "mc_aaaaaaaaaaa1"
     fake_episode_row.entry_id = "ep_20260517_0001"
 
+    # ``trigger_profile_clustering`` body-guards on
+    # ``get_embedding_capability().available`` and then resolves the concrete
+    # embedder via ``.require()``; ``extract_user_profile._profile_applies``
+    # reads the same accessor on the ``EpisodeExtracted`` branch. Installing
+    # the deterministic embedder as the accessor's cached capability handles
+    # both the guard check and the actual embed calls in one shot.
+    import everos.component.embedding.accessor as _emb_acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(_emb_acc, "_capability", EmbeddingCapability(provider=embedder))
+
     with (
-        patch(
-            "everos.memory.strategies.trigger_profile_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.extract_user_profile.episode_repo"
         ) as mock_episode_repo,

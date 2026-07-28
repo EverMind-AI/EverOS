@@ -4,10 +4,47 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from everos import __version__
+from everos.component.capabilities import compute_disabled_features
+from everos.component.embedding import get_embedding_capability
+from everos.component.multimodal import get_multimodal_llm_capability
+from everos.component.parser import parser_available
+from everos.component.rerank import get_rerank_capability
+
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    """Liveness probe — returns ``{"status": "ok"}`` with HTTP 200."""
-    return {"status": "ok"}
+async def health() -> dict:
+    """Liveness probe with capabilities and disabled features.
+
+    Returns a dict containing:
+    - status: "ok"
+    - version: semantic version string
+    - capabilities: dict mapping capability names to availability booleans
+    - disabled_features: list of feature names that are disabled due to
+      missing capabilities
+    """
+    # ``llm`` is hardcoded ``True`` — kept for symmetry with the caps
+    # dict rather than probed live. Rationale: LLM is a Tier-1 hard
+    # requirement enforced at startup by ``LLMLifespanProvider``
+    # (lifespans/llm.py), which eagerly calls ``get_llm_client()`` and
+    # raises ``LLMNotConfiguredError`` if credentials are missing —
+    # FastAPI startup then fails, so ``/health`` is unreachable
+    # without a working LLM. Any code path that reaches this handler
+    # therefore has ``get_llm_client()`` returning a real client. If
+    # the LLM capability is ever downgraded to soft (like embed /
+    # rerank), swap this literal for a real probe.
+    caps = {
+        "llm": True,
+        "embed": get_embedding_capability().available,
+        "rerank": get_rerank_capability().available,
+        "multimodal_llm": get_multimodal_llm_capability().available,
+        "parser": parser_available(),
+    }
+    return {
+        "status": "ok",
+        "version": __version__,
+        "capabilities": caps,
+        "disabled_features": compute_disabled_features(caps),
+    }

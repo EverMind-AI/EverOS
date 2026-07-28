@@ -72,17 +72,32 @@ class CascadeScanner:
         self._task = None
         logger.info("cascade_scanner_stopped")
 
-    async def scan_once(self) -> list[ReconcileDecision]:
+    async def scan_once(
+        self, *, kinds: set[str] | None = None
+    ) -> list[ReconcileDecision]:
         """One scan + reconcile pass; returns the decisions that were
         upserted into :class:`MdChangeState`.
 
         Exposed so the CLI ``cascade sync`` command can trigger a sweep
         without owning a long-lived scanner task.
+
+        Args:
+            kinds: Restrict the walk to specific md kinds (e.g.
+                ``{"agent_skill"}``). ``None`` — the default — walks
+                every kind in :data:`KIND_REGISTRY`, matching the
+                background scanner loop's behaviour.
         """
         scan_inputs = await asyncio.to_thread(
-            _collect_scan_inputs, self._memory_root.root
+            _collect_scan_inputs, self._memory_root.root, kinds
         )
         state = await _load_state_snapshot()
+        if kinds is not None:
+            # reconcile() emits ``deleted`` for every state row missing
+            # from the scan input — with a kind-scoped scan, the state
+            # snapshot must be scoped too, or non-``kinds`` rows would
+            # get spuriously deleted just because we didn't look at
+            # them this sweep.
+            state = {p: s for p, s in state.items() if s.kind in kinds}
         decisions = reconcile(scan_inputs, state)
         for decision in decisions:
             await md_change_state_repo.upsert(
@@ -113,8 +128,17 @@ class CascadeScanner:
                 continue
 
 
-def _collect_scan_inputs(root: Path) -> list[ScanInput]:
+def _collect_scan_inputs(root: Path, kinds: set[str] | None = None) -> list[ScanInput]:
     """Walk ``root`` once per registered kind, returning every match.
+
+    ``kinds`` — when non-``None`` — restricts the walk to specs whose
+    ``name`` appears in the set; other kinds' md files are neither
+    stat'd nor emitted. Used by kind-scoped sync callers (e.g. Phase-3
+    backfill) so their sweep doesn't touch queue state for unrelated
+    kinds. The paired state-snapshot filter lives in :meth:`scan_once`
+    (reconcile itself is kind-agnostic) — both sides must be scoped or
+    reconcile would emit spurious ``deleted`` decisions for rows the
+    scan simply chose not to look at.
 
     ``stat()`` failure mode discrimination is **load-bearing**: the
     reconciler treats "in state but not in scan" as a deletion signal,
@@ -142,6 +166,8 @@ def _collect_scan_inputs(root: Path) -> list[ScanInput]:
     """
     inputs: list[ScanInput] = []
     for spec in KIND_REGISTRY:
+        if kinds is not None and spec.name not in kinds:
+            continue
         for absolute in root.glob(spec.path_glob()):
             try:
                 mtime = absolute.stat().st_mtime

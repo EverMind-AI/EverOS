@@ -15,12 +15,31 @@ import pytest
 import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.strategies.trigger_profile_clustering import (
     trigger_profile_clustering,
 )
+
+
+def _install_embedder(
+    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
+) -> None:
+    """Install ``embedder`` as the process-wide embedding capability.
+
+    Replaces the pre-M-a pattern of ``patch(".strategy.get_embedder",
+    return_value=...)``: the strategy now resolves the embedder via
+    ``get_embedding_capability().require()``, so injecting at the
+    accessor is the only knob. The autouse fixture in
+    ``tests/conftest.py`` seeds ``Capability(provider=None)`` for
+    hermeticity; this helper swaps in a live provider both for the
+    body-guard check and the ``.require().embed()`` call.
+    """
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
 
 
 @pytest.fixture(autouse=True)
@@ -62,13 +81,10 @@ async def test_creates_new_cluster_when_no_existing(
     """Empty existing → cluster_by_geometry returns None → new cluster persisted."""
     embedder = MagicMock()
     embedder.embed = AsyncMock(return_value=[0.1] * 1024)
+    _install_embedder(monkeypatch, embedder)
     ctx = FakeStrategyContext()
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_profile_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_profile_clustering.cluster_repo"
         ) as mock_repo,
@@ -120,10 +136,13 @@ async def test_creates_new_cluster_when_no_existing(
 
 
 @pytest.mark.asyncio
-async def test_merges_into_existing_cluster_when_algo_matches() -> None:
+async def test_merges_into_existing_cluster_when_algo_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """algo returns merged Cluster → persisted under the existing id."""
     embedder = MagicMock()
     embedder.embed = AsyncMock(return_value=[0.2] * 1024)
+    _install_embedder(monkeypatch, embedder)
     ctx = FakeStrategyContext()
 
     existing_cluster = AlgoCluster(
@@ -144,10 +163,6 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     )
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_profile_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_profile_clustering.cluster_repo"
         ) as mock_repo,
@@ -173,7 +188,9 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
 # ── partition lock (owner_id-level serialisation) ────────────────────────
 
 
-async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
+async def _run_serialisation_probe(
+    owner_a: str, owner_b: str, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
     """Drive two trigger_profile_clustering runs and record entry/exit order."""
     log: list[str] = []
 
@@ -192,12 +209,9 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
 
     mock_embedder = MagicMock()
     mock_embedder.embed = AsyncMock(return_value=np.zeros(1024, dtype=np.float32))
+    _install_embedder(monkeypatch, mock_embedder)
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_profile_clustering.get_embedder",
-            return_value=mock_embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_profile_clustering.cluster_repo"
         ) as mock_repo,
@@ -222,20 +236,66 @@ async def _run_serialisation_probe(owner_a: str, owner_b: str) -> list[str]:
     return log
 
 
-async def test_partition_lock_serialises_runs_on_same_owner() -> None:
+async def test_partition_lock_serialises_runs_on_same_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two runs sharing ``owner_id`` must not overlap critical sections."""
-    log = await _run_serialisation_probe("u_alice", "u_alice")
+    log = await _run_serialisation_probe("u_alice", "u_alice", monkeypatch)
     assert log in (
         ["enter:ep_run_a", "leave:ep_run_a", "enter:ep_run_b", "leave:ep_run_b"],
         ["enter:ep_run_b", "leave:ep_run_b", "enter:ep_run_a", "leave:ep_run_a"],
     )
 
 
-async def test_partition_lock_lets_different_owners_run_in_parallel() -> None:
+async def test_partition_lock_lets_different_owners_run_in_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Runs on distinct ``owner_id`` must overlap (no false serialisation)."""
-    log = await _run_serialisation_probe("u_alice", "u_bob")
+    log = await _run_serialisation_probe("u_alice", "u_bob", monkeypatch)
     assert log.index("enter:ep_run_a") < log.index("leave:ep_run_b")
     assert log.index("enter:ep_run_b") < log.index("leave:ep_run_a")
+
+
+# ── body-guard (embedding capability) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_returns_without_side_effects_when_embedding_unavailable() -> None:
+    """Capability unavailable → early return; no embed, no repo, no emit.
+
+    Registration is unconditional (OME registry is frozen after start()),
+    so the strategy self-gates at body entry. When capability flips back
+    on later the very next dispatch runs the full body without a restart.
+    """
+    ctx = FakeStrategyContext()
+    with (
+        patch(
+            "everos.memory.strategies.trigger_profile_clustering.get_embedding_capability",
+            return_value=EmbeddingCapability(provider=None),
+        ),
+        patch(
+            "everos.memory.strategies.trigger_profile_clustering.cluster_repo"
+        ) as mock_repo,
+        structlog.testing.capture_logs() as captured,
+    ):
+        mock_repo.list_for_owner = AsyncMock(
+            side_effect=AssertionError("cluster_repo must not be touched"),
+        )
+        mock_repo.upsert_with_members = AsyncMock(
+            side_effect=AssertionError("cluster_repo must not be touched"),
+        )
+
+        await trigger_profile_clustering(_event(), ctx)
+
+    assert ctx.emitted == []
+    gated = [
+        e
+        for e in captured
+        if e.get("event") == "strategy_gated_off_embedding_unavailable"
+    ]
+    assert len(gated) == 1
+    assert gated[0]["strategy_name"] == "trigger_profile_clustering"
+    assert gated[0]["owner_id"] == "u_alice"
 
 
 async def test_applies_to_rejects_non_pipeline_source() -> None:

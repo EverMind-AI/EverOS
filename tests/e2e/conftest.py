@@ -61,7 +61,7 @@ _MEMORIZE_SINGLETONS: tuple[str, ...] = (
 )
 
 # OME strategy modules carry module-level lazy singletons (``_writer`` /
-# ``_reader``) that capture ``MemoryRoot.default()`` at first call. They
+# ``_reader``) that capture ``MemoryRoot.resolve()`` at first call. They
 # survive across tests, so the second test writes its output to the
 # **first test's** tmp_path. Reset all of them per-test.
 _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -75,7 +75,7 @@ _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _reset_strategy_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Null every strategy ``_writer`` / ``_reader`` so the next test
-    rebuilds against its own ``MemoryRoot.default()`` (driven by the
+    rebuilds against its own ``MemoryRoot.resolve()`` (driven by the
     fresh ``EVEROS_ROOT`` env var set by the calling fixture).
     """
     for mod_name, attrs in _STRATEGY_SINGLETONS:

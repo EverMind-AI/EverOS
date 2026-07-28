@@ -41,7 +41,7 @@ async def test_get_engine_registers_all_strategies(
     svc = importlib.import_module("everos.service.memorize")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
 

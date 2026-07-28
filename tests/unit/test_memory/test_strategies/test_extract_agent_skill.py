@@ -1,11 +1,12 @@
 """Tests for :func:`extract_agent_skill`.
 
 Mocked seams: ``cluster_repo`` (sqlite), ``agent_case_repo`` /
-``agent_skill_repo`` (LanceDB), ``get_embedder`` (component),
-``AgentSkillExtractor`` (algo), ``AgentSkillWriter`` (md). Each
-retry-class exception (cluster missing / case-not-indexed) bubbles up so
-OME's ``max_retries`` machinery catches the race instead of the strategy
-implementing its own backoff loop.
+``agent_skill_repo`` (LanceDB), :class:`EmbeddingCapability` (component,
+injected via :func:`_install_embedder`), ``AgentSkillExtractor`` (algo),
+``AgentSkillWriter`` (md). Each retry-class exception (cluster missing
+/ case-not-indexed) bubbles up so OME's ``max_retries`` machinery
+catches the race instead of the strategy implementing its own backoff
+loop.
 
 LanceDB repo behaviour itself (predicate isolation, cosine ranking,
 ``_distance`` stripping) lives under
@@ -22,11 +23,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
+import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.component.embedding import (
-    EmbeddingNotConfiguredError,
+    EmbeddingCapability,
+    EmbeddingProvider,
     EmbeddingServiceError,
 )
 from everos.infra.ome.testing import FakeStrategyContext
@@ -43,6 +46,46 @@ from everos.memory.strategies.extract_agent_skill import (
     _select_supporting_cases,
     extract_agent_skill,
 )
+
+
+class _StubEmbedder(EmbeddingProvider):
+    """Minimal ``EmbeddingProvider`` for tests that only need the body-guard
+    to pass and never inspect the embedded vector."""
+
+    dim = 1024
+
+    async def embed(self, text: str) -> list[float]:
+        return [0.0] * self.dim
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [await self.embed(t) for t in texts]
+
+
+def _install_embedder(
+    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
+) -> None:
+    """Install ``embedder`` as the process-wide embedding capability.
+
+    ``extract_agent_skill`` and its helpers resolve the embedder via
+    ``get_embedding_capability().require()``, so this is the only
+    injection knob. The autouse fixture in ``tests/conftest.py`` seeds
+    ``Capability(provider=None)`` for hermeticity; this helper swaps in
+    a live provider for both the body-guard check and any subsequent
+    ``.require().embed()`` calls.
+    """
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
+
+
+@pytest.fixture
+def embed_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Convenience fixture: install a no-op stub embedder as the capability.
+
+    For tests that only need to exercise the body past the guard and do
+    not care what vector is returned.
+    """
+    _install_embedder(monkeypatch, _StubEmbedder())
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +185,50 @@ async def test_strategy_meta_is_attached() -> None:
     assert meta.max_retries == 3
 
 
-async def test_raises_when_cluster_missing_for_retry() -> None:
+async def test_returns_without_side_effects_when_embedding_unavailable() -> None:
+    """Capability unavailable → early return; no cluster fetch, no writes.
+
+    Belt-and-suspenders with the upstream ``trigger_skill_clustering``
+    gate: a direct emit of ``SkillClusterUpdated`` (tests, future
+    features) should degrade cleanly without an OME retry.
+    """
+    with (
+        patch(
+            "everos.memory.strategies.extract_agent_skill.get_embedding_capability",
+            return_value=EmbeddingCapability(provider=None),
+        ),
+        patch("everos.memory.strategies.extract_agent_skill.cluster_repo") as mock_repo,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.agent_case_repo"
+        ) as mock_case_repo,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
+        ) as mock_skill_repo,
+        structlog.testing.capture_logs() as captured,
+    ):
+        mock_repo.get_with_members = AsyncMock(
+            side_effect=AssertionError("cluster_repo must not be touched"),
+        )
+        mock_case_repo.find_by_owner_entry = AsyncMock(
+            side_effect=AssertionError("agent_case_repo must not be touched"),
+        )
+        mock_skill_repo.count_in_cluster = AsyncMock(
+            side_effect=AssertionError("agent_skill_repo must not be touched"),
+        )
+
+        await extract_agent_skill(_event(), FakeStrategyContext())
+
+    gated = [
+        e
+        for e in captured
+        if e.get("event") == "strategy_gated_off_embedding_unavailable"
+    ]
+    assert len(gated) == 1
+    assert gated[0]["strategy_name"] == "extract_agent_skill"
+    assert gated[0]["agent_id"] == "agent_42"
+
+
+async def test_raises_when_cluster_missing_for_retry(embed_available: None) -> None:
     """No cluster row yet — OME will retry the run."""
     with patch(
         "everos.memory.strategies.extract_agent_skill.cluster_repo"
@@ -152,7 +238,9 @@ async def test_raises_when_cluster_missing_for_retry() -> None:
             await extract_agent_skill(_event(), FakeStrategyContext())
 
 
-async def test_raises_when_target_case_not_yet_in_lancedb() -> None:
+async def test_raises_when_target_case_not_yet_in_lancedb(
+    embed_available: None,
+) -> None:
     """LanceDB has not yet indexed the freshly-written case — let OME retry."""
     with (
         patch(
@@ -174,6 +262,7 @@ async def test_raises_when_target_case_not_yet_in_lancedb() -> None:
 @pytest.mark.asyncio
 async def test_extracts_and_persists_with_cluster_id_stamped(
     monkeypatch: pytest.MonkeyPatch,
+    embed_available: None,
 ) -> None:
     """End-to-end (mocked): extractor emits skills → writer stamps cluster_id."""
     target = _lance_case("ac_20260517_0001", vector=[0.1] * 1024)
@@ -290,7 +379,9 @@ async def test_select_existing_skills_large_cluster_with_vector_uses_topk() -> N
     assert call_kwargs["top_k"] == MAX_SKILLS_IN_PROMPT
 
 
-async def test_select_existing_skills_large_cluster_recomputes_embedding() -> None:
+async def test_select_existing_skills_large_cluster_recomputes_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``total > K`` but case has no vector → re-embed ``task_intent`` on the fly."""
     target = _lance_case("ac_001", vector=[], task_intent="how to summarise docs")
     topk_skills = [_lance_skill(name=f"s{i}") for i in range(MAX_SKILLS_IN_PROMPT)]
@@ -298,16 +389,11 @@ async def test_select_existing_skills_large_cluster_recomputes_embedding() -> No
 
     mock_embedder = MagicMock()
     mock_embedder.embed = AsyncMock(return_value=fresh_vec)
+    _install_embedder(monkeypatch, mock_embedder)
 
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
-        ) as mock_repo,
-        patch(
-            "everos.memory.strategies.extract_agent_skill.get_embedder",
-            return_value=mock_embedder,
-        ),
-    ):
+    with patch(
+        "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
+    ) as mock_repo:
         mock_repo.count_in_cluster = AsyncMock(return_value=MAX_SKILLS_IN_PROMPT + 5)
         mock_repo.find_topk_relevant_in_cluster = AsyncMock(return_value=topk_skills)
         mock_repo.find_in_cluster = AsyncMock()
@@ -322,23 +408,20 @@ async def test_select_existing_skills_large_cluster_recomputes_embedding() -> No
     assert call_kwargs["query_vector"] == fresh_vec
 
 
-async def test_select_existing_skills_falls_back_to_scalar_when_embed_fails() -> None:
+async def test_select_existing_skills_falls_back_to_scalar_when_embed_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``total > K`` + no vector + embedder fails → scalar fetch capped at K."""
     target = _lance_case("ac_001", vector=[], task_intent="how to summarise docs")
     scalar_skills = [_lance_skill(name=f"s{i}") for i in range(MAX_SKILLS_IN_PROMPT)]
 
     mock_embedder = MagicMock()
     mock_embedder.embed = AsyncMock(side_effect=EmbeddingServiceError("provider down"))
+    _install_embedder(monkeypatch, mock_embedder)
 
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
-        ) as mock_repo,
-        patch(
-            "everos.memory.strategies.extract_agent_skill.get_embedder",
-            return_value=mock_embedder,
-        ),
-    ):
+    with patch(
+        "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
+    ) as mock_repo:
         mock_repo.count_in_cluster = AsyncMock(return_value=MAX_SKILLS_IN_PROMPT + 5)
         mock_repo.find_in_cluster = AsyncMock(return_value=scalar_skills)
         mock_repo.find_topk_relevant_in_cluster = AsyncMock()
@@ -357,41 +440,68 @@ async def test_select_existing_skills_falls_back_to_scalar_when_embed_fails() ->
 # ── _resolve_query_vector layered fallback ───────────────────────────────
 
 
-async def test_resolve_query_vector_prefers_persisted_vector() -> None:
-    """When ``target.vector`` is set, reuse it; never call the embedder."""
+async def test_resolve_query_vector_prefers_persisted_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``target.vector`` is set, reuse it; never touch the embedder."""
     target = _lance_case("ac_001", vector=[0.3] * 1024)
-    with patch(
-        "everos.memory.strategies.extract_agent_skill.get_embedder"
-    ) as mock_get_embedder:
-        got = await _resolve_query_vector(target)
+    exploding_embedder = MagicMock()
+    exploding_embedder.embed = AsyncMock(
+        side_effect=AssertionError("must not embed when vector is present")
+    )
+    _install_embedder(monkeypatch, exploding_embedder)
+
+    got = await _resolve_query_vector(target)
+
     assert got == [0.3] * 1024
-    mock_get_embedder.assert_not_called()
+    exploding_embedder.embed.assert_not_awaited()
 
 
-async def test_resolve_query_vector_returns_empty_when_no_text_either() -> None:
+async def test_resolve_query_vector_returns_empty_when_no_text_either(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No persisted vector + no task_intent → ``[]`` (no policy here)."""
     target = _lance_case("ac_001", vector=[], task_intent="")
-    with patch(
-        "everos.memory.strategies.extract_agent_skill.get_embedder"
-    ) as mock_get_embedder:
-        got = await _resolve_query_vector(target)
+    exploding_embedder = MagicMock()
+    exploding_embedder.embed = AsyncMock(
+        side_effect=AssertionError("must not embed when task_intent is empty")
+    )
+    _install_embedder(monkeypatch, exploding_embedder)
+
+    got = await _resolve_query_vector(target)
+
     assert got == []
-    mock_get_embedder.assert_not_called()
+    exploding_embedder.embed.assert_not_awaited()
 
 
-async def test_resolve_query_vector_swallows_embedder_not_configured() -> None:
-    """Missing embedder config is a deployment issue, not a strategy fault."""
+async def test_resolve_query_vector_swallows_provider_not_configured() -> None:
+    """Missing embedder config is a deployment issue, not a strategy fault.
+
+    The autouse ``_reset_embedding_capability_singleton`` fixture seeds the
+    accessor with ``Capability(provider=None)`` for hermeticity, so
+    ``.require()`` raises :class:`ProviderNotConfiguredError`; the helper
+    catches it and returns ``[]`` instead of propagating.
+    """
+    target = _lance_case("ac_001", vector=[], task_intent="hello")
+
+    got = await _resolve_query_vector(target)
+
+    assert got == []
+
+
+async def test_resolve_query_vector_swallows_provider_service_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live embedder raising :class:`EmbeddingServiceError` degrades to ``[]``."""
     target = _lance_case("ac_001", vector=[], task_intent="hello")
     mock_embedder = MagicMock()
-    mock_embedder.embed = AsyncMock(
-        side_effect=EmbeddingNotConfiguredError("no api key")
-    )
-    with patch(
-        "everos.memory.strategies.extract_agent_skill.get_embedder",
-        return_value=mock_embedder,
-    ):
-        got = await _resolve_query_vector(target)
+    mock_embedder.embed = AsyncMock(side_effect=EmbeddingServiceError("provider down"))
+    _install_embedder(monkeypatch, mock_embedder)
+
+    got = await _resolve_query_vector(target)
+
     assert got == []
+    mock_embedder.embed.assert_awaited_once_with("hello")
 
 
 # ── _select_supporting_cases ranking + cap ───────────────────────────────
@@ -568,7 +678,9 @@ async def _run_serialisation_probe(
     return log
 
 
-async def test_partition_lock_serialises_runs_on_same_agent() -> None:
+async def test_partition_lock_serialises_runs_on_same_agent(
+    embed_available: None,
+) -> None:
     """Two runs sharing ``agent_id`` must not overlap critical sections."""
     log = await _run_serialisation_probe("agent_42", "agent_42")
     assert log in (
@@ -577,7 +689,9 @@ async def test_partition_lock_serialises_runs_on_same_agent() -> None:
     )
 
 
-async def test_partition_lock_lets_different_agents_run_in_parallel() -> None:
+async def test_partition_lock_lets_different_agents_run_in_parallel(
+    embed_available: None,
+) -> None:
     """Runs on distinct ``agent_id`` must overlap (no false serialisation)."""
     log = await _run_serialisation_probe("agent_42", "agent_43")
     assert log.index("enter:ac_run_a") < log.index("leave:ac_run_b")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from everos.component.utils.config_hints import missing_config_error
 from everos.config import EmbeddingSettings
 
 from .openai_provider import OpenAIEmbeddingProvider
@@ -32,18 +33,11 @@ def build_embedding_provider(
         ValueError: If ``model``, ``api_key`` or ``base_url`` is unset.
     """
     if not settings.model:
-        raise ValueError(
-            "Embedding model is not configured "
-            "(set EVEROS_EMBEDDING__MODEL or [embedding] model in user toml)"
-        )
+        raise ValueError(missing_config_error("Embedding model", "embedding"))
     if not settings.api_key or not settings.api_key.get_secret_value():
-        raise ValueError(
-            "Embedding api_key is not configured (set EVEROS_EMBEDDING__API_KEY)"
-        )
+        raise ValueError(missing_config_error("Embedding api_key", "embedding"))
     if not settings.base_url:
-        raise ValueError(
-            "Embedding base_url is not configured (set EVEROS_EMBEDDING__BASE_URL)"
-        )
+        raise ValueError(missing_config_error("Embedding base_url", "embedding"))
     return OpenAIEmbeddingProvider(
         model=settings.model,
         api_key=settings.api_key.get_secret_value(),

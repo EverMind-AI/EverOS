@@ -19,7 +19,7 @@ async def test_get_engine_returns_singleton(
     from everos.core.persistence import MemoryRoot
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(_svc, "_ome_engine", None, raising=False)
 
@@ -35,7 +35,7 @@ async def test_get_user_pipeline_injects_engine(
     from everos.core.persistence import MemoryRoot
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(_svc, "_ome_engine", None, raising=False)
     monkeypatch.setattr(_svc, "_user_pipeline", None, raising=False)

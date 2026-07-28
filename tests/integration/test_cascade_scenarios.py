@@ -83,6 +83,12 @@ async def cascade_runtime(
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
+    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
+    # rather than through ``CascadeOrchestrator`` — patch the process-wide
+    # singleton so cascade never hits the fake network target above.
+    # ``test_lap_append_during_handler_no_loss`` re-patches with a slow
+    # variant to force a handler-in-flight race.
+    _patch_embedding_capability(monkeypatch, _StubEmbedder())
 
     await dispose_connection()
     await dispose_engine()
@@ -93,10 +99,20 @@ async def cascade_runtime(
     await ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
 
     await dispose_connection()
     await dispose_engine()
+
+
+def _patch_embedding_capability(
+    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
+) -> None:
+    """Patch the process-wide embedding capability singleton to *embedder*."""
+    import everos.component.embedding.accessor as acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
 
 
 def _build_orchestrator(
@@ -104,7 +120,6 @@ def _build_orchestrator(
 ) -> CascadeOrchestrator:
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=scan_interval,
@@ -486,6 +501,7 @@ async def test_concurrent_writes_different_owners_no_bleed(
 
 async def test_lap_append_during_handler_no_loss(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Writer keeps appending while worker is mid-handler.
 
@@ -500,9 +516,12 @@ async def test_lap_append_during_handler_no_loss(
             await asyncio.sleep(0.05)  # handler takes ~0.05*N entries
             return [0.0] * self.dim
 
+    # Override the fixture's default stub — this test needs latency to
+    # force a handler invocation to overlap later writer appends.
+    _patch_embedding_capability(monkeypatch, _SlowEmbedder())
+
     orchestrator = CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_SlowEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
@@ -564,7 +583,6 @@ def _build_orchestrator_fast_scanner(memory_root: MemoryRoot) -> CascadeOrchestr
     don't wait 30s for the fallback path."""
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=2.0,

@@ -36,6 +36,7 @@ class ErrorCode(StrEnum):
     CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +174,56 @@ class ConfigurationError(AppError):
     Raised when a mandatory setting (e.g. embedding model, rerank provider)
     is not configured but the code path requires it.
     """
+
+
+# TOML section name for each provider kind, keyed by the `provider` argument
+# passed to `ProviderNotConfiguredError`.
+_PROVIDER_SECTIONS: dict[str, str] = {
+    "llm": "llm",
+    "embedding": "embedding",
+    "rerank": "rerank",
+    "multimodal_llm": "multimodal",
+}
+
+
+class ProviderNotConfiguredError(ConfigurationError):
+    """Raised when a runtime path requires a provider that is not configured.
+
+    Maps to HTTP 422 via the FastAPI exception handler; the message is
+    directly user-facing and points at the toml file for remediation.
+
+    Args:
+        provider: Which provider is missing. One of ``"llm"``,
+            ``"embedding"``, ``"rerank"``, ``"multimodal_llm"``.
+        feature: Optional user-facing feature that required this
+            provider (e.g. ``"knowledge"``, ``"agent_hybrid"``).
+        alternative_hint: Optional alternative workaround the user can
+            take without configuring the missing provider (e.g. flip
+            ``enable_llm_rerank=true`` to use the LLM lane).
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        feature: str | None = None,
+        alternative_hint: str | None = None,
+    ) -> None:
+        # Lazy import: `config_hints` -> `core.persistence` -> `core.persistence
+        # .markdown.writer` imports `PathTraversalError` from this module, so a
+        # module-level import here would be circular.
+        from everos.component.utils.config_hints import missing_config_error
+
+        self.provider = provider
+        self.feature = feature
+        self.alternative_hint = alternative_hint
+        section = _PROVIDER_SECTIONS.get(provider, provider)
+        field_label = f"Provider '{provider}'"
+        if feature:
+            field_label += f" (required by {feature})"
+        message = missing_config_error(field_label, section)
+        if alternative_hint:
+            message += f" Alternative: {alternative_hint}"
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------

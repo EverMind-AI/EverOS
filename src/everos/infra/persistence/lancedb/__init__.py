@@ -28,7 +28,7 @@ import contextlib
 import datetime as dt
 
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
+from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
 # Importing ``tables`` registers every business :class:`BaseLanceTable`
 # schema so callers can rely on the package alone to surface every schema.
@@ -75,6 +75,11 @@ class LanceDBSchemaMismatchError(RuntimeError):
     """
 
 
+class LanceDBMigrationError(RuntimeError):
+    """Raised when :func:`migrate_table_schemas` cannot complete and
+    startup must abort rather than continue in a half-migrated state."""
+
+
 _FTS_INDEX_SCHEMA_VERSION = 2
 """Bump when the FTS index build config changes so existing on-disk
 indexes get rebuilt at startup. v2 = ``with_position=False`` (see
@@ -96,41 +101,180 @@ async def migrate_fts_indexes() -> None:
     crashed-optimize churn left behind. Guarded by a version marker in
     the LanceDB dir so it runs at most once per bump; the rebuild is
     O(N) but only on the first startup after upgrade.
+
+    Cross-process serialization: wrapped in :func:`memory_root_lock` so a
+    server startup racing with a concurrent ``everos cascade`` command
+    (both call this via :func:`ensure_business_indexes`) can't attempt
+    two concurrent rebuild passes. First process runs the migration and
+    writes the marker; second waits for the lock, re-checks the marker
+    on entry, and no-ops. Removes the same TOCTOU window between marker
+    read and the drop-index/rebuild loop that :issue:`M7` from the
+    PR #361 review flagged on the sibling schema migration.
     """
     logger = get_logger(__name__)
-    marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
-    try:
-        current = int(marker.read_text().strip()) if marker.exists() else 0
-    except (ValueError, OSError):
-        current = 0
-    if current >= _FTS_INDEX_SCHEMA_VERSION:
-        return
-    logger.info("fts_index_migration_started", target=_FTS_INDEX_SCHEMA_VERSION)
-    for schema in _BUSINESS_SCHEMAS:
-        if not schema.BM25_FIELDS:
-            continue
-        table = await get_table(schema.TABLE_NAME, schema)
-        # Drop existing indexes (everos only builds FTS here; mirrors
-        # LanceRepoBase.rebuild_indexes) then rebuild with the new config.
-        for idx in await table.list_indices():
-            await table.drop_index(idx.name)
-        await schema.ensure_fts_indexes(table)
-        # Reclaim the orphaned index dirs + data fragments the crashed
-        # optimize loop piled up. Safe now: the crashing index is gone,
-        # so compaction no longer decodes a position List.
-        with contextlib.suppress(Exception):
-            await table.optimize(cleanup_older_than=dt.timedelta(seconds=0))
-    marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
-    logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
+    memory_root = MemoryRoot.resolve()
+    async with memory_root_lock(memory_root):
+        marker = memory_root.lancedb_dir / ".fts_index_version"
+        try:
+            current = int(marker.read_text().strip()) if marker.exists() else 0
+        except (ValueError, OSError):
+            current = 0
+        if current >= _FTS_INDEX_SCHEMA_VERSION:
+            # Another process finished the migration while we waited
+            # for the lock. Nothing to do.
+            return
+        logger.info("fts_index_migration_started", target=_FTS_INDEX_SCHEMA_VERSION)
+        for schema in _BUSINESS_SCHEMAS:
+            if not schema.BM25_FIELDS:
+                continue
+            table = await get_table(schema.TABLE_NAME, schema)
+            # Drop existing indexes (everos only builds FTS here; mirrors
+            # LanceRepoBase.rebuild_indexes) then rebuild with the new config.
+            for idx in await table.list_indices():
+                await table.drop_index(idx.name)
+            await schema.ensure_fts_indexes(table)
+            # Reclaim the orphaned index dirs + data fragments the crashed
+            # optimize loop piled up. Safe now: the crashing index is gone,
+            # so compaction no longer decodes a position List.
+            with contextlib.suppress(Exception):
+                await table.optimize(cleanup_older_than=dt.timedelta(seconds=0))
+        marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
+        logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
+
+
+_TABLE_SCHEMA_VERSION = 2
+"""Bump when column nullability or presence changes on business tables.
+v2 = ``vector: Vector(_DIM) | None`` on the 6 business tables that carry
+a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
+
+.. note::
+
+   :func:`migrate_table_schemas` currently hard-codes the v2 alter — it
+   does not implement per-version dispatch. Bumping this constant to
+   ``3`` without first adding a dispatch table will short-circuit the
+   v3 migration entirely (the current body only compares
+   ``current >= _TABLE_SCHEMA_VERSION`` and then runs the v2-specific
+   alter unconditionally). Any future v3 migration MUST:
+
+   1. Add a ``_MIGRATIONS: dict[int, Callable[[], Awaitable[None]]]``
+      registry mapping target version → migration coroutine.
+   2. Rewrite :func:`migrate_table_schemas` to run every migration from
+      ``current + 1`` up to ``_TABLE_SCHEMA_VERSION`` in order, updating
+      the marker after each step so a mid-migration crash resumes at
+      the next step instead of replaying earlier ones.
+
+   Accepted as a design gap in PR #361 review finding #5 — not blocking
+   today because there is no v3.
+"""
+
+
+BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[BaseLanceTable], ...] = (
+    Episode,
+    AtomicFact,
+    Foresight,
+    AgentCase,
+    AgentSkill,
+    KnowledgeTopic,
+)
+"""Business schemas whose ``vector`` column needs the v2 nullability
+migration. ``Episode.subject_vector`` was already nullable in v1.1.1 and
+is intentionally left out of this migration. ``UserProfile`` has no
+vector column; ``knowledge_document`` has no LanceDB table."""
+
+
+async def migrate_table_schemas() -> None:
+    """One-time ``alter_columns`` making ``vector`` nullable on business tables.
+
+    Soft-dependency embedding mode lets cascade write ``vector=None`` for
+    rows it cannot embed; the on-disk column must allow that. LanceDB's
+    ``alter_columns`` is metadata-only (no data movement, no re-embed),
+    so this runs in milliseconds. Guarded by ``.table_schema_version``
+    so it runs at most once per version bump; per-table nullable check
+    is defense-in-depth so an already-migrated (or freshly-created,
+    already-nullable) table is a no-op rather than a redundant alter.
+
+    Cross-process serialization: wrapped in :func:`memory_root_lock` so
+    a server startup racing with a concurrent ``everos cascade`` command
+    (both call this via :func:`ensure_business_indexes`) doesn't attempt
+    two concurrent alter passes. First process runs the migration and
+    writes the marker; second waits for the lock, re-checks the marker
+    on entry, and no-ops. Removes the TOCTOU window between marker
+    read and alter that :issue:`M7` from the PR #361 review flagged.
+
+    Fail-loud semantics preserved: if ``alter_columns`` genuinely fails
+    for any table (LanceDB version mismatch, corrupted index), raises
+    :class:`LanceDBMigrationError`. Startup aborts rather than
+    continuing in a half-migrated state — cascade would otherwise write
+    ``vector=None`` (soft-dependency embedding) into a still NOT-NULL
+    column and every row would silently fail. Recovery escalates from
+    a plain restart (transient hiccup) to wiping the LanceDB index
+    directory (rebuildable from md, the SoT).
+    """
+    logger = get_logger(__name__)
+    memory_root = MemoryRoot.resolve()
+    async with memory_root_lock(memory_root):
+        marker = memory_root.lancedb_dir / ".table_schema_version"
+        try:
+            current = int(marker.read_text().strip()) if marker.exists() else 0
+        except (ValueError, OSError):
+            current = 0
+        if current >= _TABLE_SCHEMA_VERSION:
+            # Another process finished the migration while we waited
+            # for the lock. Nothing to do.
+            return
+        logger.info("table_schema_migration_started", target=_TABLE_SCHEMA_VERSION)
+        failed_schemas: list[str] = []
+        for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
+            table = await get_table(schema.TABLE_NAME, schema)
+            arrow_schema = await table.schema()
+            if arrow_schema.field("vector").nullable:
+                continue
+            try:
+                await table.alter_columns({"path": "vector", "nullable": True})
+            except Exception as exc:
+                logger.warning(
+                    "table_schema_migration_alter_failed",
+                    table=schema.TABLE_NAME,
+                    error=str(exc),
+                )
+                failed_schemas.append(schema.TABLE_NAME)
+
+        if failed_schemas:
+            logger.error(
+                "table_schema_migration_incomplete",
+                failed_schemas=failed_schemas,
+            )
+            raise LanceDBMigrationError(
+                f"LanceDB nullable-vector migration failed for tables "
+                f"{failed_schemas!r}. Startup aborted to prevent cascade "
+                f"from writing NULL vectors into NOT-NULL columns. This "
+                f"typically indicates a LanceDB version mismatch or a "
+                f"corrupted index. Recovery, in order of least- to "
+                f"most-destructive: (1) restart the process; a transient "
+                f"filesystem or LanceDB-side hiccup may resolve. (2) If "
+                f"the error persists, wipe the index directory "
+                f"`{memory_root.lancedb_dir}` and restart — cascade will "
+                f"re-index from source markdown."
+            )
+
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            marker.write_text(str(_TABLE_SCHEMA_VERSION))
+        except OSError:
+            logger.error("table_schema_migration_marker_write_failed", path=str(marker))
+            raise
+        logger.info("table_schema_migration_done", version=_TABLE_SCHEMA_VERSION)
 
 
 async def ensure_business_indexes() -> None:
     """Ensure FTS (BM25) indexes for every business table (idempotent).
 
     Called once at startup by :class:`LanceDBLifespanProvider`. First
-    runs :func:`migrate_fts_indexes` (one-time, marker-guarded) to
-    rebuild any pre-fix ``with_position=True`` indexes, then walks the
-    business schemas (each owns its ``TABLE_NAME`` + ``BM25_FIELDS``),
+    runs :func:`migrate_table_schemas` (schema first, one-time,
+    marker-guarded) to make ``vector`` columns nullable, then
+    :func:`migrate_fts_indexes` (index second, one-time, marker-guarded)
+    to rebuild any pre-fix ``with_position=True`` indexes, then walks
+    the business schemas (each owns its ``TABLE_NAME`` + ``BM25_FIELDS``),
     opens each table via :func:`get_table`, and delegates to
     ``schema.ensure_fts_indexes(table)``. Already-indexed columns are
     skipped, so re-runs are no-ops.
@@ -139,6 +283,7 @@ async def ensure_business_indexes() -> None:
     everything else (table name, columns to index) reads off the
     schema's ClassVars.
     """
+    await migrate_table_schemas()
     await migrate_fts_indexes()
     for schema in _BUSINESS_SCHEMAS:
         table = await get_table(schema.TABLE_NAME, schema)
@@ -173,12 +318,14 @@ async def verify_business_schemas() -> None:
 
 
 __all__ = [
+    "BUSINESS_SCHEMAS_WITH_VECTOR",
     "AgentCase",
     "AgentSkill",
     "AtomicFact",
     "Episode",
     "Foresight",
     "KnowledgeTopic",
+    "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",
     "ParentType",
     "UserProfile",
@@ -193,6 +340,7 @@ __all__ = [
     "get_table",
     "knowledge_topic_repo",
     "migrate_fts_indexes",
+    "migrate_table_schemas",
     "user_profile_repo",
     "verify_business_schemas",
 ]

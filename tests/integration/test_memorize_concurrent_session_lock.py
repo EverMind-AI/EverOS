@@ -92,7 +92,7 @@ async def memorize_env_locked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[Callable[..., AsyncMock]]:
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")

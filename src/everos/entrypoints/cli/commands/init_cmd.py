@@ -17,6 +17,7 @@ from pathlib import Path
 import typer
 
 from everos.config.settings import resolve_root
+from everos.entrypoints.cli._log_setup import configure_cli_logging
 
 _EVEROS_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default.toml"
 _OME_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default_ome.toml"
@@ -42,6 +43,12 @@ def register(parent: typer.Typer) -> None:
             "--print",
             help="Print the everos.toml template to stdout instead of writing to disk.",
         ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose",
+            "-v",
+            help="Emit INFO-level lifecycle logs (default: WARNING only).",
+        ),
     ) -> None:
         """Generate starter configuration files.
 
@@ -57,6 +64,7 @@ def register(parent: typer.Typer) -> None:
         - 0 — files created successfully (or printed to stdout).
         - 1 — files already exist and ``--force`` was not given.
         """
+        configure_cli_logging(verbose=verbose)
         if print_:
             import sys
 

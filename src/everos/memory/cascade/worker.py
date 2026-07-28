@@ -260,7 +260,7 @@ class CascadeWorker:
         self._rebuild_task = None
         logger.info("cascade_worker_stopped")
 
-    async def drain_once(self) -> int:
+    async def drain_once(self, *, kinds: set[str] | None = None) -> int:
         """Process one batch, return the number of rows handled.
 
         Used by CLI ``cascade sync`` and ``fix --apply`` to flush the
@@ -276,8 +276,19 @@ class CascadeWorker:
         merged before returning (CLI ``cascade sync``) call
         :meth:`_flush_optimizers` — :meth:`drain_until_empty` does this
         on their behalf.
+
+        Args:
+            kinds: Optional restriction on which ``kind`` values are
+                claimed. ``None`` (the default) claims across every
+                kind. Phase-3 backfill passes ``{"agent_skill"}`` so
+                the drain cannot flip an unrelated queued kind (e.g. a
+                queued ``knowledge_topic`` md whose handler this
+                process doesn't have registered) to
+                ``failed(retryable=False)``.
         """
-        batch = await md_change_state_repo.claim_pending_batch(self._batch_size)
+        batch = await md_change_state_repo.claim_pending_batch(
+            self._batch_size, kinds=kinds
+        )
         if not batch:
             return 0
         results = await asyncio.gather(*(self._process_one(row) for row in batch))
@@ -286,7 +297,12 @@ class CascadeWorker:
             self._schedule_optimize(kind)
         return len(batch)
 
-    async def drain_until_empty(self, *, max_passes: int = 100) -> int:
+    async def drain_until_empty(
+        self,
+        *,
+        max_passes: int = 100,
+        kinds: set[str] | None = None,
+    ) -> int:
         """Drain repeatedly until the queue is empty (or ``max_passes``).
 
         Returns the total number of rows processed. Bounded passes
@@ -298,10 +314,15 @@ class CascadeWorker:
         (CLI ``cascade sync``) get a fully merged index — not for
         visibility (the data is already searchable) but so ``sync``
         returns a deterministically optimized state.
+
+        The ``kinds`` filter is forwarded to :meth:`drain_once` on every
+        pass so the scoping intent holds end-to-end for scoped syncs
+        (Phase-3 backfill's ``{"agent_skill"}`` sweep); ``None`` keeps
+        the CLI ``cascade sync`` path drainining every kind.
         """
         total = 0
         for _ in range(max_passes):
-            processed = await self.drain_once()
+            processed = await self.drain_once(kinds=kinds)
             if processed == 0:
                 break
             total += processed

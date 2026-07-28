@@ -4,7 +4,8 @@ Drives the actual Typer commands against a real sqlite + lancedb under a
 tmp memory root. Validates the in-process orchestration that
 ``test_cascade_command`` (unit) cannot reach: ``_runtime()`` context,
 queue summary formatting, fix (no-rows path), and a full
-``cascade sync <path>`` round-trip with a stub embedder.
+``cascade sync <path>`` round-trip against an empty queue (no handler
+ever runs, so embedding availability is irrelevant here).
 
 The CLI commands call ``asyncio.run(_run())`` internally, so this test
 is **synchronous** — pytest-asyncio's auto mode would otherwise wrap it
@@ -22,21 +23,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.infra.persistence.lancedb import dispose_connection
 from everos.infra.persistence.sqlite import dispose_engine
-
-
-class _StubEmbedder(EmbeddingProvider):
-    dim = 1024
-
-    async def embed(self, text: str) -> list[float]:
-        return [0.0] * self.dim
-
-    async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
-        return [[0.0] * self.dim for _ in texts]
 
 
 @pytest.fixture
@@ -101,11 +91,10 @@ def test_sync_on_empty_queue_with_stub_embedder(
     from everos.memory.cascade import CascadeOrchestrator
 
     def fake_build_orchestrator() -> CascadeOrchestrator:
-        root = MemoryRoot.default()
+        root = MemoryRoot.resolve()
         root.ensure()
         return CascadeOrchestrator(
             memory_root=root,
-            embedder=_StubEmbedder(),
             tokenizer=build_tokenizer(),
         )
 
@@ -148,8 +137,7 @@ def test_sync_with_unmatched_path(
 
     def fake_build_orchestrator() -> CascadeOrchestrator:
         return CascadeOrchestrator(
-            memory_root=MemoryRoot.default(),
-            embedder=_StubEmbedder(),
+            memory_root=MemoryRoot.resolve(),
             tokenizer=build_tokenizer(),
         )
 

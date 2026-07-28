@@ -9,7 +9,7 @@ import pytest
 from everos.core.persistence import MemoryRoot
 
 
-def test_default_returns_home_everos(
+def test_resolve_returns_home_everos(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("EVEROS_ROOT", raising=False)
@@ -17,7 +17,7 @@ def test_default_returns_home_everos(
     from everos.config import load_settings
 
     load_settings.cache_clear()
-    mr = MemoryRoot.default()
+    mr = MemoryRoot.resolve()
     assert mr.root == (Path.home() / ".everos").resolve()
 
 
@@ -25,12 +25,12 @@ def test_default_from_everos_root_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "custom"))
-    mr = MemoryRoot.default()
+    mr = MemoryRoot.resolve()
     assert mr.root == (tmp_path / "custom").resolve()
 
 
-def test_default_explicit_root(tmp_path: Path) -> None:
-    mr = MemoryRoot.default(explicit_root=str(tmp_path / "explicit"))
+def test_resolve_explicit_root(tmp_path: Path) -> None:
+    mr = MemoryRoot.resolve(explicit_root=str(tmp_path / "explicit"))
     assert mr.root == (tmp_path / "explicit").resolve()
 
 

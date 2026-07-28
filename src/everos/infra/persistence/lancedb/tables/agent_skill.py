@@ -77,4 +77,4 @@ class AgentSkill(BaseLanceTable):
     changed (e.g. the watcher fires for unrelated stat updates). See
     :attr:`AgentSkillHandler.content_change_keys`."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

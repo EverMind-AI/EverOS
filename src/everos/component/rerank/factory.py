@@ -13,6 +13,7 @@ Adding a new provider = one match arm here + one new file under
 
 from __future__ import annotations
 
+from everos.component.utils.config_hints import missing_config_error
 from everos.config import RerankSettings
 
 from .dashscope_provider import DashScopeRerankProvider
@@ -38,22 +39,14 @@ def build_rerank_provider(settings: RerankSettings) -> RerankProvider:
             string) for ``vllm`` self-hosted endpoints.
     """
     if not settings.model:
-        raise ValueError(
-            "Rerank model is not configured "
-            "(set EVEROS_RERANK__MODEL or [rerank] model in user toml)"
-        )
+        raise ValueError(missing_config_error("Rerank model", "rerank"))
     if not settings.base_url:
-        raise ValueError(
-            "Rerank base_url is not configured (set EVEROS_RERANK__BASE_URL)"
-        )
+        raise ValueError(missing_config_error("Rerank base_url", "rerank"))
     api_key = settings.api_key.get_secret_value() if settings.api_key else ""
 
     if settings.provider == "deepinfra":
         if not api_key:
-            raise ValueError(
-                "DeepInfra rerank api_key is not configured "
-                "(set EVEROS_RERANK__API_KEY)"
-            )
+            raise ValueError(missing_config_error("DeepInfra rerank api_key", "rerank"))
         return DeepInfraRerankProvider(
             model=settings.model,
             api_key=api_key,
@@ -75,10 +68,7 @@ def build_rerank_provider(settings: RerankSettings) -> RerankProvider:
         )
     if settings.provider == "dashscope":
         if not api_key:
-            raise ValueError(
-                "DashScope rerank api_key is not configured "
-                "(set EVEROS_RERANK__API_KEY)"
-            )
+            raise ValueError(missing_config_error("DashScope rerank api_key", "rerank"))
         return DashScopeRerankProvider(
             model=settings.model,
             api_key=api_key,

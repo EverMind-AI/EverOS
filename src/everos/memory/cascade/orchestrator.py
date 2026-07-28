@@ -5,9 +5,11 @@ constructs it at startup, calls :meth:`start` once, and calls
 :meth:`stop` at shutdown. CLI ``cascade sync`` constructs its own
 instance but only invokes :meth:`drain_once` (no background tasks).
 
-Construction is dependency-injected: the embedding / tokenizer
-providers and the memory-root come in as constructor args so tests
-can swap them without monkey-patching module-level singletons.
+Construction is dependency-injected: the tokenizer provider and the
+memory-root come in as constructor args so tests can swap them
+without monkey-patching module-level singletons. Embedding is a soft
+dependency handled directly by handlers via the capability accessor,
+not threaded through here.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
-from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
@@ -53,7 +54,6 @@ class CascadeOrchestrator:
         self,
         *,
         memory_root: MemoryRoot,
-        embedder: EmbeddingProvider,
         tokenizer: Tokenizer,
         config: CascadeConfig | None = None,
     ) -> None:
@@ -61,7 +61,6 @@ class CascadeOrchestrator:
         self._config = config or CascadeConfig()
         deps = HandlerDeps(
             memory_root=memory_root,
-            embedder=embedder,
             tokenizer=tokenizer,
         )
         self._handlers = build_handlers(deps)
@@ -113,14 +112,31 @@ class CascadeOrchestrator:
         self._started = False
         logger.info("cascade_orchestrator_stopped")
 
-    async def sync_once(self) -> int:
-        """One scan + drain cycle (used by CLI ``cascade sync``).
+    async def sync_once(self, *, kinds: set[str] | None = None) -> int:
+        """One scan + drain cycle (used by CLI ``cascade sync`` and
+        Phase-3 backfill's post-write skill-file sync).
+
+        Args:
+            kinds: Optional restriction on which md kinds the scan
+                walks (e.g. ``{"agent_skill"}``). ``None`` — the default
+                for CLI ``cascade sync`` — scans every registered kind.
+                Phase 3 uses ``{"agent_skill"}`` so an unscoped sweep
+                doesn't tag unrelated kinds (notably ``knowledge_*``,
+                which the current process may not have handlers for)
+                as permanently failed.
 
         Returns the number of rows processed in this drain. The CLI
         loops on the returned count to know when to stop.
+
+        The ``kinds`` filter is threaded through **both** the scanner
+        AND the worker drain: the scanner scopes what gets enqueued,
+        the worker scopes what gets claimed. Round-1 wired only the
+        scanner side, so a scoped Phase-3 sync could still drain a
+        knowledge md queued in a prior tick and mark it permanently
+        failed — round-2 closes that end.
         """
-        await self._scanner.scan_once()
-        return await self._worker.drain_until_empty()
+        await self._scanner.scan_once(kinds=kinds)
+        return await self._worker.drain_until_empty(kinds=kinds)
 
     async def drain_once(self) -> int:
         """Drain the queue exactly once without scanning first."""

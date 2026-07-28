@@ -4,9 +4,12 @@ Ordered after SqliteLifespan + LanceDBLifespan: the orchestrator
 depends on both stores being ready before its watcher / scanner /
 worker tasks can take the first row.
 
-Construction reads the live :class:`Settings` to build the embedding +
-tokenizer providers. If either is misconfigured the lifespan fails
-fast — the daemon would be useless without them anyway.
+Construction reads the live :class:`Settings` to build the tokenizer
+provider, which fails fast if misconfigured. Embedding is a soft
+dependency: startup warms the process-wide
+:class:`~everos.component.embedding.EmbeddingCapability` singleton via
+:func:`get_embedding_capability`, which never raises — the daemon
+runs in keyword-only mode when embedding is unavailable.
 """
 
 from __future__ import annotations
@@ -15,9 +18,8 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from everos.component.embedding import build_embedding_provider
+from everos.component.embedding import get_embedding_capability
 from everos.component.tokenizer import build_tokenizer
-from everos.config import load_settings
 from everos.core.lifespan import LifespanProvider
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
@@ -34,15 +36,22 @@ class CascadeLifespanProvider(LifespanProvider):
         self._orchestrator: CascadeOrchestrator | None = None
 
     async def startup(self, app: FastAPI) -> Any:
-        settings = load_settings()
-        memory_root = MemoryRoot.default()
+        memory_root = MemoryRoot.resolve()
         memory_root.ensure()
 
-        embedder = build_embedding_provider(settings.embedding)
         tokenizer = build_tokenizer()
+
+        capability = get_embedding_capability()
+        if capability.available:
+            logger.info("cascade_startup_embed_available")
+        else:
+            logger.info(
+                "cascade_startup_embed_unavailable",
+                reason="embedding not configured; keyword-only mode",
+            )
+
         self._orchestrator = CascadeOrchestrator(
             memory_root=memory_root,
-            embedder=embedder,
             tokenizer=tokenizer,
         )
         await self._orchestrator.start()

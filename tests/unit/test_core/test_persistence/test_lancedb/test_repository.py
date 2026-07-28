@@ -687,7 +687,7 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         await _SearchNote.ensure_fts_indexes(table)
         assert any("tokens" in (i.columns or []) for i in await table.list_indices())
 
-        marker = MemoryRoot.default().lancedb_dir / ".fts_index_version"
+        marker = MemoryRoot.resolve().lancedb_dir / ".fts_index_version"
         assert not marker.exists()
 
         # First run: migrates + writes the marker, index still present.

@@ -64,4 +64,4 @@ class AtomicFact(BaseLanceTable):
     consolidated. Value is the cluster entry_id that supersedes this
     row. ``NULL`` means the row is still active."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

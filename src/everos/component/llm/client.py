@@ -17,6 +17,7 @@ from everalgo.llm.protocols import LLMClient
 from everalgo.llm.types import ChatMessage, ChatResponse
 from pydantic import BaseModel
 
+from everos.component.utils.config_hints import missing_config_error
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 
@@ -93,7 +94,7 @@ def get_llm_client() -> LLMClient:
     )
     if not api_key or not llm_cfg.base_url:
         raise LLMNotConfiguredError(
-            "LLM is required; set EVEROS_LLM__API_KEY + EVEROS_LLM__BASE_URL"
+            missing_config_error("LLM api_key and base_url", "llm")
         )
     client: LLMClient = build_client(
         LLMConfig(
@@ -133,8 +134,7 @@ def get_multimodal_llm_client() -> LLMClient:
     api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
     if not api_key or not cfg.base_url:
         raise LLMNotConfiguredError(
-            "Multimodal LLM is required for parsing; set "
-            "EVEROS_MULTIMODAL__API_KEY + EVEROS_MULTIMODAL__BASE_URL"
+            missing_config_error("Multimodal LLM api_key and base_url", "multimodal")
         )
     _multimodal_client = build_client(
         LLMConfig(

@@ -173,5 +173,24 @@ def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
     Returns a ``{kind_name: Handler}`` map used by the worker for
     dispatch. Constructing once at orchestrator startup keeps the
     per-row hot path free of factory churn.
+
+    Every handler registers unconditionally. Capability-dependent
+    steps live inside the handlers themselves:
+
+    - :class:`KnowledgeDocumentHandler` is SQLite-only; no capability
+      dependency.
+    - :class:`KnowledgeTopicHandler.handle_added_or_modified` calls
+      :func:`embed_or_none`, which writes ``vector=None`` when the
+      embedding capability is unavailable — the column has been
+      nullable since the embedding-soft-dependency migration.
+      ``handle_deleted`` is pure SQL/LanceDB delete.
+
+    Prior versions gated the two knowledge handlers off as an atomic
+    pair when embed OR rerank was unavailable — that gate broke the
+    delete path (worker marks the row failed with "no handler
+    registered", stranding SQLite / LanceDB rows after
+    ``shutil.rmtree`` cleared the md). Search-side gating is
+    enforced separately at the route level, so cascade does not need
+    to gate writes.
     """
     return {spec.name: spec.handler_factory(deps) for spec in KIND_REGISTRY}

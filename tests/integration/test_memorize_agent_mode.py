@@ -103,7 +103,7 @@ async def memorize_env(
 ) -> AsyncIterator[Callable[..., Any]]:
     """Same shape as the chat-baseline fixture; ``mode`` defaults to ``agent``."""
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")

@@ -23,7 +23,7 @@ import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.clustering import cluster_by_llm
 
-from everos.component.embedding import get_embedder
+from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
 from everos.core.observability.logging import get_logger
 from everos.infra.ome.context import StrategyContext
@@ -49,6 +49,23 @@ cases below this never produce a skill, so we don't bother clustering them."""
 async def trigger_skill_clustering(
     event: AgentCaseExtracted, ctx: StrategyContext
 ) -> None:
+    # Body-guard: capability is checked here for defensive degradation.
+    # When embedding is unavailable we cannot vectorise the case, so
+    # the strategy silently no-ops — no work, no agent lock, no OME
+    # retry pressure. Tier upgrades require a server restart; this
+    # guard is not a hot-reload mechanism.
+    #
+    # ``debug`` level (not ``info``) is intentional; see the body-guard
+    # in :func:`everos.memory.strategies.trigger_profile_clustering` for
+    # the shared rationale (PR #361 round-3 review #8).
+    if not get_embedding_capability().available:
+        logger.debug(
+            "strategy_gated_off_embedding_unavailable",
+            strategy_name="trigger_skill_clustering",
+            agent_id=event.agent_id,
+        )
+        return
+
     # Serialise on agent_id: the strategy reads the agent's full cluster
     # set, lets the LLM decide merge vs. mint, then upserts — concurrent
     # runs on the same agent_id would race the read → decide → write
@@ -67,7 +84,12 @@ async def trigger_skill_clustering(
             return
 
         # 2. Embed the case's task_intent into a vector.
-        vector_list = await get_embedder().embed(event.task_intent)
+        # ``.require()`` is defensive: the body-guard above already
+        # returned when the capability was missing, so this cannot raise
+        # in the guarded path. Routing through the capability keeps a
+        # single shared provider (one client, one semaphore) per process.
+        embedder = get_embedding_capability().require()
+        vector_list = await embedder.embed(event.task_intent)
         vector = np.asarray(vector_list, dtype=np.float32)
 
         # 3. Load this agent's existing skill clusters (scoped to space).

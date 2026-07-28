@@ -7,17 +7,24 @@ lifespan that brings up LanceDB / settings.
 
 Component policy (matches :class:`SearchManager` guards):
 
-* Embedding / rerank / LLM clients are **optional at boot**; they are
-  built lazily, and only the methods that need them fail (with a clear
+* Embedding / rerank / LLM clients are **optional at boot**; the manager
+  is built lazily and only the methods that need them fail (with a clear
   message) when the corresponding section of settings is empty.
 * ``KEYWORD`` searches therefore work without any of the three clients,
   which makes the endpoint usable in a freshly-installed dev setup.
+* All three providers are pulled from their process-wide capability /
+  singleton accessors (:func:`get_embedding_capability`,
+  :func:`get_rerank_capability`, :func:`get_llm_client`); this module
+  never keeps parallel singletons of its own.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from everos.component.embedding import get_embedding_capability
+from everos.component.llm import LLMNotConfiguredError, get_llm_client
+from everos.component.rerank import get_rerank_capability
 from everos.component.tokenizer import build_tokenizer
 from everos.core.observability.logging import get_logger
 from everos.memory.search import SearchRequest, SearchResponse
@@ -32,100 +39,36 @@ from everos.memory.search.recall import (
 )
 
 if TYPE_CHECKING:
-    from everos.component.embedding import EmbeddingProvider
     from everos.component.llm import LLMClient
-    from everos.component.rerank import RerankProvider
 
 logger = get_logger(__name__)
 
-# Lazy singletons ────────────────────────────────────────────────────────
-
+# Lazy singleton — the manager itself; every provider it needs comes
+# from its own process-wide accessor (see module docstring).
 _manager: SearchManager | None = None
-_embedding: EmbeddingProvider | None = None
-_reranker: RerankProvider | None = None
-_llm_client: LLMClient | None = None
-_embedding_resolved = False
-_rerank_resolved = False
-_llm_resolved = False
-
-
-def _get_embedding() -> EmbeddingProvider | None:
-    """Build the embedding client on first call. ``None`` when not configured."""
-    global _embedding, _embedding_resolved
-    if _embedding_resolved:
-        return _embedding
-
-    from everos.component.embedding import build_embedding_provider
-    from everos.config import load_settings
-
-    cfg = load_settings().embedding
-    if not cfg.model or not cfg.api_key or not cfg.api_key.get_secret_value():
-        logger.warning(
-            "embedding_not_configured",
-            hint="set [embedding] model / api_key to enable vector / hybrid search",
-        )
-        _embedding = None
-    else:
-        _embedding = build_embedding_provider(cfg)
-        logger.info("search_embedding_built", model=cfg.model)
-    _embedding_resolved = True
-    return _embedding
-
-
-def _get_reranker() -> RerankProvider | None:
-    """Build the rerank client on first call. ``None`` when not configured."""
-    global _reranker, _rerank_resolved
-    if _rerank_resolved:
-        return _reranker
-
-    from everos.component.rerank import build_rerank_provider
-    from everos.config import load_settings
-
-    cfg = load_settings().rerank
-    has_key = cfg.api_key and cfg.api_key.get_secret_value()
-    if not cfg.model or not cfg.base_url or not has_key:
-        logger.warning(
-            "rerank_not_configured",
-            hint="set [rerank] model / api_key / base_url to enable agentic search",
-        )
-        _reranker = None
-    else:
-        _reranker = build_rerank_provider(cfg)
-        logger.info("search_rerank_built", model=cfg.model, provider=cfg.provider)
-    _rerank_resolved = True
-    return _reranker
 
 
 def _get_llm_client() -> LLMClient | None:
-    """Lazily build the LLM client from settings (shared with memorize)."""
-    global _llm_client, _llm_resolved
-    if _llm_resolved:
-        return _llm_client
+    """Return the process-wide LLM client, or ``None`` when unset.
 
-    from everos.component.llm import build_llm_provider
-    from everos.config import load_settings
-
-    settings = load_settings()
-    cfg = settings.llm
-    if not cfg.api_key or not cfg.api_key.get_secret_value() or not cfg.base_url:
+    Delegates to :func:`everos.component.llm.get_llm_client` (which
+    caches its own singleton, validates ``api_key`` / ``base_url``, and
+    already wraps the client with ``UsageRecordingClient`` when
+    observability is enabled — see ``component/llm/client.py``) instead
+    of maintaining a parallel module-level singleton here. LLM is
+    optional for search — ``KEYWORD`` works without it — so
+    :class:`LLMNotConfiguredError` is swallowed into ``None`` and the
+    manager surfaces a clear error only when a method that actually
+    needs the LLM is invoked.
+    """
+    try:
+        return get_llm_client()
+    except LLMNotConfiguredError:
         logger.warning(
             "llm_not_configured",
             hint="set [llm] api_key / base_url to enable hybrid / agentic search",
         )
-        _llm_client = None
-    else:
-        client = build_llm_provider(cfg)
-        # Record token usage for the hybrid/agentic path, mirroring
-        # get_llm_client() — otherwise the heaviest LLM spend (query
-        # decomposition + rerank judge) is invisible in Langfuse.
-        if settings.observability.enabled:
-            from everos.component.llm._usage_client import UsageRecordingClient
-
-            client = UsageRecordingClient(client)
-        _llm_client = client
-        logger.info("search_llm_built", model=cfg.model)
-    _llm_resolved = True
-    return _llm_client
+        return None
 
 
 def _get_manager() -> SearchManager:
@@ -138,8 +81,8 @@ def _get_manager() -> SearchManager:
             agent_case_recaller=AgentCaseRecaller(deps),
             agent_skill_recaller=AgentSkillRecaller(deps),
             profile_recaller=ProfileRecaller(),
-            embedding=_get_embedding(),
-            reranker=_get_reranker(),
+            embedding=get_embedding_capability().provider,
+            reranker=get_rerank_capability().provider,
             llm_client=_get_llm_client(),
         )
     return _manager

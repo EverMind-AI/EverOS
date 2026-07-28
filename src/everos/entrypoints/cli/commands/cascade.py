@@ -11,6 +11,10 @@ without standing up the FastAPI app:
 - ``cascade fix`` — list every ``failed`` row. With ``--apply``, also
   reset ``retryable=TRUE`` rows back to ``pending`` and drain the
   worker once so the retry actually runs before the command returns.
+- ``cascade backfill`` — one-shot Tier 1 → Tier 2/3 migration: re-embed
+  vectors, build clusters, extract skills. See
+  :func:`everos.entrypoints.cli.commands._backfill_cmd.run_backfill`
+  for the phase orchestration.
 
 CLI is in-process (12 doc §7.1 + 16 doc §9.2): it constructs the same
 :class:`CascadeOrchestrator` as the daemon but only calls
@@ -21,6 +25,7 @@ scanner background task is started.
 from __future__ import annotations
 
 import asyncio
+import enum
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,11 +34,13 @@ from typing import Annotated
 import typer
 from sqlmodel import SQLModel
 
-from everos.component.embedding import build_embedding_provider
+from everos.component.embedding import get_embedding_capability
 from everos.component.tokenizer import build_tokenizer
 from everos.component.utils.datetime import to_display_tz
-from everos.config import load_settings
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
+from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.lancedb import (
     dispose_connection,
     ensure_business_indexes,
@@ -46,6 +53,8 @@ from everos.infra.persistence.sqlite import (
     md_change_state_repo,
 )
 from everos.memory.cascade import CascadeOrchestrator, match_kind
+
+logger = get_logger(__name__)
 
 app = typer.Typer(
     name="cascade",
@@ -61,10 +70,55 @@ def _cascade_callback(
         "--root",
         help="Memory root directory (env: EVEROS_ROOT, default: ~/.everos)",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Emit INFO-level lifecycle logs (default: WARNING only).",
+    ),
 ) -> None:
-    """Set memory root before any cascade subcommand runs."""
+    """Set memory root and log level before any cascade subcommand runs."""
+    configure_cli_logging(verbose=verbose)
+    _apply_root_env(root)
+
+
+def _apply_root_env(root: str | None) -> None:
+    """Set ``EVEROS_ROOT`` env var if a ``--root`` path was passed.
+
+    Called from both the group callback (subcommand-independent path)
+    and from each subcommand (subcommand-level ``--root``). Later calls
+    override earlier ones — a subcommand's ``--root`` wins over the
+    group callback's when both are supplied.
+    """
     if root:
         os.environ["EVEROS_ROOT"] = root
+
+
+def _apply_verbose_logging(verbose: bool | None) -> None:
+    """Re-apply the CLI log level from a subcommand-level ``--verbose``.
+
+    ``None`` means the subcommand did not receive its own ``--verbose``
+    flag — leave whatever level the group callback set (default
+    WARNING, or INFO if the user passed ``cascade --verbose``). A
+    ``True``/``False`` value came from the subcommand and wins over the
+    group callback (later configuration overrides earlier).
+
+    Mirrors :func:`_apply_root_env`'s "either position works" pattern
+    for symmetry — users can write ``everos cascade --verbose status``
+    or ``everos cascade status --verbose`` and get the same behaviour.
+    """
+    if verbose is not None:
+        configure_cli_logging(verbose=verbose)
+
+
+_ROOT_OPTION_HELP = (
+    "Memory root directory (alias for `cascade --root`; either position works)."
+)
+
+_VERBOSE_OPTION_HELP = (
+    "Emit INFO-level lifecycle logs (alias for `cascade --verbose`; "
+    "either position works)."
+)
 
 
 # ── shared runtime context ───────────────────────────────────────────────
@@ -92,14 +146,21 @@ async def _runtime():  # type: ignore[no-untyped-def]
 
 
 def _build_orchestrator() -> CascadeOrchestrator:
-    settings = load_settings()
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     memory_root.ensure()
-    embedder = build_embedding_provider(settings.embedding)
     tokenizer = build_tokenizer()
+
+    capability = get_embedding_capability()
+    if capability.available:
+        logger.info("cli_cascade_embed_available")
+    else:
+        logger.info(
+            "cli_cascade_embed_unavailable",
+            reason="embedding not configured; keyword-only mode",
+        )
+
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=embedder,
         tokenizer=tokenizer,
     )
 
@@ -116,8 +177,18 @@ def sync(
             "If omitted, only the existing queue is drained.",
         ),
     ] = None,
+    root: Annotated[
+        str | None,
+        typer.Option("--root", help=_ROOT_OPTION_HELP),
+    ] = None,
+    verbose: Annotated[
+        bool | None,
+        typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
+    ] = None,
 ) -> None:
     """Drain the cascade queue (and optionally re-enqueue a path first)."""
+    _apply_root_env(root)
+    _apply_verbose_logging(verbose)
 
     async def _run() -> None:
         async with _runtime():
@@ -144,8 +215,19 @@ def sync(
 
 
 @app.command("status")
-def status() -> None:
+def status(
+    root: Annotated[
+        str | None,
+        typer.Option("--root", help=_ROOT_OPTION_HELP),
+    ] = None,
+    verbose: Annotated[
+        bool | None,
+        typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
+    ] = None,
+) -> None:
     """Print the queue / LSN summary."""
+    _apply_root_env(root)
+    _apply_verbose_logging(verbose)
 
     async def _run() -> None:
         async with _runtime():
@@ -190,8 +272,18 @@ def fix(
             help="Re-enqueue every `retryable=TRUE` row and drain the worker.",
         ),
     ] = False,
+    root: Annotated[
+        str | None,
+        typer.Option("--root", help=_ROOT_OPTION_HELP),
+    ] = None,
+    verbose: Annotated[
+        bool | None,
+        typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
+    ] = None,
 ) -> None:
     """List failed rows (default) or re-enqueue retryable ones (``--apply``)."""
+    _apply_root_env(root)
+    _apply_verbose_logging(verbose)
 
     async def _run() -> None:
         async with _runtime():
@@ -234,6 +326,91 @@ def fix(
     asyncio.run(_run())
 
 
+# ── backfill ─────────────────────────────────────────────────────────────
+
+
+class _BackfillPhaseOption(enum.StrEnum):
+    """CLI-facing ``--phase`` choices — mirrors ``BackfillPhase.slug``."""
+
+    VECTORS = "vectors"
+    CLUSTERS = "clusters"
+    SKILLS = "skills"
+    ALL = "all"
+
+
+@app.command("backfill")
+def backfill(
+    phase: Annotated[
+        _BackfillPhaseOption,
+        typer.Option(
+            "--phase",
+            help=(
+                "Which phase to run — vectors (re-embed rows so they become "
+                "searchable by meaning, not just keyword), clusters (group "
+                "re-embedded episodes/agent cases into topics), skills "
+                "(extract reusable agent skills from clustered cases), or "
+                "all (run every phase in order). Default: all."
+            ),
+        ),
+    ] = _BackfillPhaseOption.ALL,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help=(
+                "Auto-confirm every phase's prompt instead of pausing for a "
+                "y/n answer. Without this flag, each phase shows its "
+                "token-count estimate and waits for confirmation first."
+            ),
+        ),
+    ] = False,
+    root: Annotated[
+        str | None,
+        typer.Option("--root", help=_ROOT_OPTION_HELP),
+    ] = None,
+    verbose: Annotated[
+        bool | None,
+        typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
+    ] = None,
+) -> None:
+    """Backfill embeddings, clusters, and agent skills after upgrading from
+    Tier 1 (LLM-only) to Tier 2/3 (embedding configured).
+
+    Runs up to three phases in order (see ``--phase``), each showing a
+    token-count estimate and confirming before doing any work. The
+    estimate is an input-token count only (K/M shorthand) — never a
+    price, since per-token pricing is provider-specific and can change.
+
+    Ctrl-C is safe: interrupting mid-phase prints a resume hint and exits
+    130. Every row and phase already written stays written, so
+    re-running the same ``--phase`` (or ``--phase all``) afterwards only
+    picks up what's left — nothing is redone from scratch.
+    """
+    _apply_root_env(root)
+    _apply_verbose_logging(verbose)
+
+    async def _run() -> int:
+        async with _runtime():
+            return await run_backfill(phase=phase.value, auto_yes=yes)
+
+    try:
+        code = asyncio.run(_run())
+    except KeyboardInterrupt:
+        # Safety net: run_backfill already catches CancelledError and
+        # returns 130 cleanly in the common case, but asyncio.Runner can
+        # still re-raise a bare KeyboardInterrupt past asyncio.run() on a
+        # second Ctrl-C. Without this, typer/click would convert it to
+        # Abort and exit 1 with no resume hint.
+        typer.secho(
+            "Interrupted — partial progress was written. Resume by running:",
+            fg=typer.colors.YELLOW,
+        )
+        typer.echo("  everos cascade backfill --phase <phase-name> --yes")
+        raise typer.Exit(code=130) from None
+    raise typer.Exit(code=code)
+
+
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
@@ -244,7 +421,7 @@ def _resolve_relative(p: Path) -> str:
     must match that convention before calling :meth:`force_enqueue`.
     Outside-the-root inputs surface as an error in the caller.
     """
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     absolute = p.expanduser().resolve()
     try:
         rel = absolute.relative_to(memory_root.root)

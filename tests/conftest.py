@@ -48,6 +48,59 @@ def _reset_settings_cache() -> Iterator[None]:
     dt_module._display_tz.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_embedding_capability_singleton() -> Iterator[None]:
+    """Force embedding capability to ``available=False`` for every test.
+
+    ``get_embedding_capability()`` lazily builds a process-wide singleton
+    on first call (see ``component.embedding.accessor``). Leaving the
+    cache as ``None`` between tests lets the accessor read ambient
+    settings — ``~/.everos/everos.toml`` on a developer machine, ``.env``
+    when loaded — which turns test outcomes into a function of the host
+    environment. Pre-seeding a ``Capability(provider=None)`` keeps the
+    suite hermetic: any body-guard that reads ``.available`` sees
+    ``False`` unless the test explicitly opts in by re-assigning
+    ``acc._capability`` (or patching the strategy module's own
+    ``get_embedding_capability`` reference).
+    """
+    import everos.component.embedding.accessor as acc
+    from everos.component.embedding import EmbeddingCapability
+
+    acc._capability = EmbeddingCapability(provider=None)
+    yield
+    acc._capability = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_rerank_capability_singleton() -> Iterator[None]:
+    """Force rerank capability to ``available=False`` for every test.
+
+    See :func:`_reset_embedding_capability_singleton` for rationale — the
+    rerank accessor has the same lazy-singleton shape.
+    """
+    import everos.component.rerank.accessor as acc
+    from everos.component.rerank import RerankCapability
+
+    acc._capability = RerankCapability(provider=None)
+    yield
+    acc._capability = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_multimodal_capability_singleton() -> Iterator[None]:
+    """Force multimodal capability to ``available=False`` for every test.
+
+    See :func:`_reset_embedding_capability_singleton` for rationale — the
+    multimodal accessor has the same lazy-singleton shape.
+    """
+    import everos.component.multimodal.accessor as acc
+    from everos.component.multimodal import MultimodalLLMCapability
+
+    acc._capability = MultimodalLLMCapability(provider=None)
+    yield
+    acc._capability = None
+
+
 @pytest.fixture(scope="session")
 def long_conversation() -> dict:
     """LoCoMo conv_0 fixture (419 messages, 19 batches, one session)."""

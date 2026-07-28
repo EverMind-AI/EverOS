@@ -23,6 +23,11 @@ from typing import Any, ClassVar
 import pytest
 from everalgo.types import Candidate, FactCandidate
 
+import everos.component.embedding.accessor as embedding_accessor
+import everos.component.rerank.accessor as rerank_accessor
+from everos.component.embedding import EmbeddingCapability
+from everos.component.rerank import RerankCapability
+from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 
@@ -264,6 +269,23 @@ def _agent_req(
     return SearchRequest(agent_id="agent_a", query="hi", method=method, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _capabilities_available_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_validate_components`` gates on the process-wide capability
+    singletons, independent of whatever ``embedding=`` / ``reranker=``
+    this module's stub manager was built with. Default both to available
+    so dispatch tests (which drive availability through ``_StubEmbedding``
+    / ``_StubReranker`` instead) aren't skewed by real host settings; the
+    handful of component-guard tests below override this explicitly.
+    """
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=object())
+    )
+    monkeypatch.setattr(
+        rerank_accessor, "_capability", RerankCapability(provider=object())
+    )
+
+
 # ── KEYWORD: user owner ────────────────────────────────────────────────
 
 
@@ -396,10 +418,17 @@ def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
 # ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
 
 
-async def test_vector_method_requires_embedding() -> None:
+async def test_vector_method_requires_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
+    )
     mgr = _build_manager()  # embedding=None by default
-    with pytest.raises(RuntimeError, match="embedding"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert excinfo.value.provider == "embedding"
+    assert excinfo.value.feature == "vector"
 
 
 async def test_vector_method_returns_episodes_via_maxsim() -> None:
@@ -528,10 +557,15 @@ async def test_vector_returns_empty_when_no_facts() -> None:
 # ── HYBRID / AGENTIC: prerequisite errors ──────────────────────────────
 
 
-async def test_hybrid_requires_embedding() -> None:
+async def test_hybrid_requires_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
+    )
     mgr = _build_manager()
-    with pytest.raises(RuntimeError, match="embedding"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    assert excinfo.value.provider == "embedding"
+    assert excinfo.value.feature == "user_hybrid"
 
 
 async def test_hybrid_does_not_require_llm_by_default() -> None:
@@ -544,10 +578,16 @@ async def test_hybrid_does_not_require_llm_by_default() -> None:
 
 
 async def test_hybrid_requires_llm_when_enable_llm_rerank_true() -> None:
-    """Setting ``enable_llm_rerank=True`` makes the LLM mandatory."""
+    """Setting ``enable_llm_rerank=True`` makes the LLM mandatory. The
+    guard raises the same :class:`ProviderNotConfiguredError` -> 422 as
+    the embedding / rerank branches (unified provider-missing vocabulary)."""
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="enable_llm_rerank"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.HYBRID, enable_llm_rerank=True))
+    assert excinfo.value.provider == "llm"
+    assert excinfo.value.feature == "user_hybrid"
+    assert excinfo.value.alternative_hint is not None
+    assert "enable_llm_rerank" in excinfo.value.alternative_hint
 
 
 async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
@@ -579,21 +619,33 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
     assert ep1_result.atomic_facts[0].id == "f1"
 
 
-async def test_agentic_requires_reranker_and_llm() -> None:
+async def test_agentic_requires_reranker_and_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="rerank provider"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    assert excinfo.value.provider == "rerank"
+    assert excinfo.value.feature == "agentic_search"
 
 
-async def test_agent_hybrid_requires_reranker_without_llm_rerank() -> None:
+async def test_agent_hybrid_requires_reranker_without_llm_rerank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``owner_type='agent'`` + HYBRID + ``enable_llm_rerank=False`` reaches
     the skill cross-encoder lane (``skill_hybrid``: rrf → cross-encoder),
     so a missing rerank provider must fail-fast with a config hint rather
     than crash deep inside the rerank callback.
     """
+    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="rerank provider"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_agent_req(method=SearchMethod.HYBRID))
+    assert excinfo.value.provider == "rerank"
+    assert excinfo.value.feature == "agent_hybrid"
+    assert excinfo.value.alternative_hint is not None
+    assert "enable_llm_rerank" in excinfo.value.alternative_hint
 
 
 async def test_agent_hybrid_with_llm_rerank_does_not_need_reranker() -> None:

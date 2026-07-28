@@ -53,7 +53,16 @@ class _FakeRepo:
         self.done: list[str] = []
         self.failed: list[tuple[str, bool, str, int]] = []
 
-    async def claim_pending_batch(self, _limit: int) -> list[_Row]:
+    async def claim_pending_batch(
+        self, _limit: int, *, kinds: set[str] | None = None
+    ) -> list[_Row]:
+        # Round-2 finding #3: worker now forwards a ``kinds`` scope to
+        # the repo. The fake honors it so ``drain_once(kinds=...)``
+        # exercises the plumbing end-to-end from tests.
+        if kinds is not None:
+            picked = [r for r in self.batch if r.kind in kinds]
+            self.batch = [r for r in self.batch if r.kind not in kinds]
+            return picked
         items, self.batch = self.batch, []
         return items
 
@@ -239,7 +248,9 @@ async def test_drain_until_empty_loops_until_no_batch(
     rows = [_Row(md_path=f"a{i}.md") for i in range(3)]
 
     class _ChunkedRepo(_FakeRepo):
-        async def claim_pending_batch(self, _limit: int) -> list[_Row]:
+        async def claim_pending_batch(
+            self, _limit: int, *, kinds: set[str] | None = None
+        ) -> list[_Row]:
             if not self.batch:
                 return []
             head, self.batch = self.batch[:1], self.batch[1:]
@@ -256,9 +267,13 @@ async def test_drain_until_empty_loops_until_no_batch(
 
 
 def test_worker_handler_deps_construct_with_real_classes() -> None:
-    """Sanity: HandlerDeps accepts the real provider Protocols."""
+    """Sanity: HandlerDeps accepts the real provider Protocols.
+
+    Embedding is no longer part of this shape — it's a soft dependency
+    handlers fetch themselves via ``get_embedding_capability()``.
+    """
     # No instantiation needed — just verifies the dataclass shape.
-    assert {"memory_root", "embedder", "tokenizer"} == {
+    assert {"memory_root", "tokenizer"} == {
         f.name for f in HandlerDeps.__dataclass_fields__.values()
     }
 

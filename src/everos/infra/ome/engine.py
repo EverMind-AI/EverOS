@@ -290,7 +290,8 @@ class OfflineEngine:
             self._idle_event.set()
             self._launch_scheduler()
             _ENGINES[self._engine_id] = self
-            await self._run_crash_recovery()
+            if self._config.crash_recovery_enabled:
+                await self._run_crash_recovery()
             self._register_scheduled_jobs()
             self._start_config_reloader()
             self._started = True
@@ -345,6 +346,13 @@ class OfflineEngine:
 
     async def _run_crash_recovery(self) -> None:
         """Scan ``run_record`` for stale RUNNING rows and re-enqueue them.
+
+        Runs on :meth:`start` when :attr:`OMEConfig.crash_recovery_enabled`
+        is ``True`` (default). One-shot engines that register a subset of
+        strategies (backfill Phase 2/3) opt out via
+        ``crash_recovery_enabled=False`` to avoid re-enqueueing the
+        server's stale rows into their own scheduler, whose registry
+        doesn't contain those strategy names.
 
         Treats rows whose ``started_at`` is older than
         ``crash_recovery_timeout_seconds`` as crashes from a previous

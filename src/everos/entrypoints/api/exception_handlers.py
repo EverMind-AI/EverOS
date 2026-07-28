@@ -43,6 +43,7 @@ from everos.core.errors import (
     InvalidInputError,
     NotFoundError,
     PathTraversalError,
+    ProviderNotConfiguredError,
     UnsupportedModalityError,
 )
 from everos.core.observability.logging import get_logger
@@ -241,6 +242,31 @@ async def configuration_handler(
     )
 
 
+async def provider_not_configured_handler(
+    request: Request,
+    exc: ProviderNotConfiguredError,
+) -> JSONResponse:
+    """ProviderNotConfiguredError -> 422 (client-actionable, unlike its parent).
+
+    Unlike a generic ``ConfigurationError`` (500 -- an operator bug), a
+    missing provider is something the caller can fix by editing
+    ``everos.toml``, so this more-specific subclass gets its own 422
+    mapping instead of falling through to ``configuration_handler``.
+    """
+    logger.warning(
+        "provider_not_configured_error",
+        path=str(request.url.path),
+        provider=exc.provider,
+        feature=exc.feature,
+    )
+    return _error_response(
+        request,
+        HTTP_422_UNPROCESSABLE_CONTENT,
+        ErrorCode.PROVIDER_NOT_CONFIGURED,
+        str(exc),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pydantic / FastAPI built-in exceptions
 # ---------------------------------------------------------------------------
@@ -350,7 +376,10 @@ def register_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InfrastructureError, infrastructure_handler)
     # Capability errors (permanent, not retryable)
     app.add_exception_handler(CapabilityError, capability_handler)
-    # Configuration errors
+    # Configuration errors (specific before parent)
+    app.add_exception_handler(
+        ProviderNotConfiguredError, provider_not_configured_handler
+    )
     app.add_exception_handler(ConfigurationError, configuration_handler)
     # FastAPI built-in exceptions
     app.add_exception_handler(HTTPException, http_exception_handler)

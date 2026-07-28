@@ -17,6 +17,17 @@ from everos.core.persistence.sqlite import RepoBase, session_scope
 from ..sqlite_manager import get_session_factory
 from ..tables import Memcell
 
+_SQLITE_IN_CHUNK = 500
+"""SQL ``IN (?, ?, ...)`` parameter cap for :meth:`_MemcellRepo.find_by_ids`.
+
+SQLite's ``SQLITE_MAX_VARIABLE_NUMBER`` defaults to 999 on the shipped
+amalgamation and rises to 32766 on ≥3.32; 500 stays well under the older
+cap and keeps the query planner's cost estimate cheap. Callers passing
+more ``memcell_ids`` than this fan out into multiple SELECTs, merged
+in-memory — see the direct-path selector in
+``memory/strategies/extract_user_profile.py`` where
+``last_profile_ts=0`` can pull an owner's entire episode history."""
+
 
 class _MemcellRepo(RepoBase[Memcell]):
     model = Memcell
@@ -36,16 +47,25 @@ class _MemcellRepo(RepoBase[Memcell]):
     async def find_by_ids(self, memcell_ids: list[str]) -> list[Memcell]:
         """Bulk fetch rows by primary key list — preserves caller order.
 
+        Chunked at ``_SQLITE_IN_CHUNK`` to protect against
+        ``SQLITE_MAX_VARIABLE_NUMBER`` blowups on large owner histories
+        (e.g. ``extract_user_profile``'s direct path when ``user.md``
+        doesn't exist yet — ``last_profile_ts=0`` fetches every memcell
+        the owner has ever produced).
+
         Used by offline strategies that pull every memcell in a cluster
         (membership lives in :class:`ClusterMember` and is supplied to
         the strategy via :class:`everalgo.clustering.Cluster.members`).
         """
         if not memcell_ids:
             return []
+        by_id: dict[str, Memcell] = {}
         async with session_scope(self._factory) as s:
-            stmt = select(Memcell).where(Memcell.memcell_id.in_(memcell_ids))
-            rows = list((await s.execute(stmt)).scalars().all())
-        by_id = {r.memcell_id: r for r in rows}
+            for start in range(0, len(memcell_ids), _SQLITE_IN_CHUNK):
+                chunk = memcell_ids[start : start + _SQLITE_IN_CHUNK]
+                stmt = select(Memcell).where(Memcell.memcell_id.in_(chunk))
+                rows = (await s.execute(stmt)).scalars().all()
+                by_id.update((r.memcell_id, r) for r in rows)
         return [by_id[mid] for mid in memcell_ids if mid in by_id]
 
 

@@ -29,13 +29,15 @@ import anyio
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate, CategorySpec, KnowledgeMemory, ParsedContent
 
+from everos.component.embedding import get_embedding_capability
+from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import (
-    ConfigurationError,
     DocumentNotFoundError,
     DuplicateDocumentError,
     ExtractionEmptyError,
     PathTraversalError,
+    ProviderNotConfiguredError,
     TopicNotFoundError,
 )
 from everos.core.observability.logging import get_logger
@@ -66,6 +68,7 @@ _DOC_ID_HEX_LEN = 12
 _MAX_MINT_RETRIES = 5
 _SCOPE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-@+]+$")
 _ORIGINAL_DIR_NAME = "_original"
+_KNOWLEDGE_FEATURE = "knowledge"
 
 
 class KnowledgeExtractor(Protocol):
@@ -519,7 +522,7 @@ async def delete_document(
 
     topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
 
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     doc_dir = memory_root.root / Path(row.md_path).parent
     if await anyio.Path(doc_dir).is_dir():
         await anyio.to_thread.run_sync(shutil.rmtree, doc_dir)
@@ -605,7 +608,7 @@ async def _backup_doc_dir(doc_id: str) -> tuple[Path, Path] | None:
     without reverse-engineering the name, or ``None`` when no directory
     exists.
     """
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     row = await knowledge_document_repo.get_by_doc_id(doc_id)
     if row is None:
         return None
@@ -844,7 +847,7 @@ async def patch_document(
     Raises:
         DocumentNotFoundError: When neither SQLite nor md files contain ``doc_id``.
     """
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     current = await _resolve_current_doc(doc_id, app_id, project_id, memory_root)
 
     new_title = title if title is not None else current.title
@@ -883,7 +886,7 @@ async def list_categories(app_id: str, project_id: str) -> list[CategoryOverview
     Returns:
         List of CategoryOverview with document counts from SQLite.
     """
-    knowledge_dir = MemoryRoot.default().knowledge_dir(app_id, project_id)
+    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
     await ensure_taxonomy(knowledge_dir)
     specs = await parse_taxonomy(knowledge_dir / ".taxonomy.md")
     counts = await knowledge_document_repo.count_by_category(app_id, project_id)
@@ -972,7 +975,7 @@ async def _resolve_original_file_path(
         safe_name = _safe_original_filename(source_name)
     except PathTraversalError:
         return None
-    memory_root = MemoryRoot.default()
+    memory_root = MemoryRoot.resolve()
     doc_dir = memory_root.root / Path(md_path).parent
     candidate = doc_dir / _ORIGINAL_DIR_NAME / safe_name
     if await anyio.Path(candidate).is_file():
@@ -1007,37 +1010,21 @@ async def _write_original_file(
 
 # ── Knowledge search ─────────────────────────────────────────────────────────
 
-# Lazy singleton — mirrors the pattern in service/search.py.
-_embedding: EmbeddingProvider | None = None
-_embedding_resolved = False
-
 
 def _get_embedding() -> EmbeddingProvider | None:
-    """Build the embedding client on first call. ``None`` when not configured."""
-    global _embedding, _embedding_resolved
-    if _embedding_resolved:
-        return _embedding
+    """Return the process-wide embedding provider, or ``None`` when unset.
 
-    from everos.component.embedding import (  # Deferred: singleton
-        build_embedding_provider,
-    )
-    from everos.config import load_settings  # Deferred: singleton
-
-    cfg = load_settings().embedding
-    if not cfg.model or cfg.api_key is None:
-        logger.warning(
-            "knowledge_embedding_not_configured",
-            hint="set [embedding] model / api_key to enable vector / hybrid search",
-        )
-        _embedding = None
-    else:
-        _embedding = build_embedding_provider(cfg)
-        logger.info("knowledge_embedding_built", model=cfg.model)
-    _embedding_resolved = True
-    return _embedding
+    Delegates to :func:`get_embedding_capability` instead of keeping a
+    parallel module-level singleton — mirrors ``service/search.py``, so
+    this module answers the same "is embedding configured?" question as
+    the health endpoint and the cascade write path.
+    """
+    return get_embedding_capability().provider
 
 
-# Lazy singleton — mirrors the pattern for _embedding above.
+# Lazy singleton — the recaller itself has no soft-dependency provider to
+# delegate to (it wraps a tokenizer, not embedding/rerank), so it keeps its
+# own module-level cache rather than a capability accessor.
 _recaller: KnowledgeTopicRecaller | None = None
 _recaller_resolved = False
 
@@ -1061,30 +1048,12 @@ def _build_recaller() -> KnowledgeTopicRecaller:
     return _recaller
 
 
-# Lazy singleton — mirrors the pattern for _embedding above.
-_reranker: RerankProvider | None = None
-_reranker_resolved = False
-
-
 def _get_reranker() -> RerankProvider | None:
-    """Build the rerank client on first call. ``None`` when not configured."""
-    global _reranker, _reranker_resolved
-    if _reranker_resolved:
-        return _reranker
+    """Return the process-wide rerank provider, or ``None`` when unset.
 
-    from everos.component.rerank import (  # Deferred: singleton
-        build_rerank_provider,
-    )
-    from everos.config import load_settings  # Deferred: singleton
-
-    cfg = load_settings().rerank
-    if not cfg.model or not cfg.base_url:
-        _reranker = None
-    else:
-        _reranker = build_rerank_provider(cfg)
-        logger.info("knowledge_reranker_built", model=cfg.model, provider=cfg.provider)
-    _reranker_resolved = True
-    return _reranker
+    Delegates to :func:`get_rerank_capability` — mirrors :func:`_get_embedding`.
+    """
+    return get_rerank_capability().provider
 
 
 # ── Search result types ──────────────────────────────────────────────────────
@@ -1261,23 +1230,25 @@ async def _to_search_hits(
 def _require_search_providers() -> tuple[EmbeddingProvider, RerankProvider]:
     """Return embedding + reranker providers, raising if not configured.
 
+    The HTTP router (``entrypoints.api.routes.knowledge``) already gates
+    both capabilities via ``Depends(_require_knowledge_capabilities)``, so
+    this check is normally redundant for HTTP callers -- it exists for
+    any non-HTTP caller of :func:`search_knowledge` that bypasses the
+    router dependency.
+
     Raises:
-        ConfigurationError: When the embedding or rerank provider is not
-            configured (a required setting is missing).
+        ProviderNotConfiguredError: When the embedding or rerank provider
+            is not configured (-> HTTP 422 when it does surface via HTTP).
     """
-    embedder = _get_embedding()
-    if embedder is None:
-        raise ConfigurationError(
-            "Embedding provider not configured. "
-            "Set EVEROS_EMBEDDING__MODEL and EVEROS_EMBEDDING__API_KEY."
+    embed = _get_embedding()
+    if embed is None:
+        raise ProviderNotConfiguredError(
+            provider="embedding", feature=_KNOWLEDGE_FEATURE
         )
-    reranker = _get_reranker()
-    if reranker is None:
-        raise ConfigurationError(
-            "Rerank provider not configured. "
-            "Set EVEROS_RERANK__MODEL and EVEROS_RERANK__BASE_URL."
-        )
-    return embedder, reranker
+    rerank = _get_reranker()
+    if rerank is None:
+        raise ProviderNotConfiguredError(provider="rerank", feature=_KNOWLEDGE_FEATURE)
+    return embed, rerank
 
 
 async def _run_category_pipeline(

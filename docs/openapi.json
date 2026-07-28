@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness probe — returns ``{\"status\": \"ok\"}`` with HTTP 200.",
+        "description": "Liveness probe with capabilities and disabled features.\n\nReturns a dict containing:\n- status: \"ok\"\n- version: semantic version string\n- capabilities: dict mapping capability names to availability booleans\n- disabled_features: list of feature names that are disabled due to\n  missing capabilities",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -20,9 +20,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Health Health Get"
                 }

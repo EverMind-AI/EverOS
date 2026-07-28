@@ -28,7 +28,7 @@ _lock = asyncio.Lock()
 async def get_connection() -> AsyncConnection:
     """Return the process-wide async LanceDB connection.
 
-    Built on first call from ``MemoryRoot.default().lancedb_dir`` and
+    Built on first call from ``MemoryRoot.resolve().lancedb_dir`` and
     ``Settings.lancedb``. Subsequent calls return the same instance.
     """
     async with _lock:
@@ -72,7 +72,7 @@ async def _ensure_connection_locked() -> AsyncConnection:
     global _conn
     if _conn is None:
         settings = load_settings()
-        memory_root = MemoryRoot.default()
+        memory_root = MemoryRoot.resolve()
         memory_root.ensure()
         _conn = await open_lancedb_connection(memory_root.lancedb_dir, settings.lancedb)
         logger.info(

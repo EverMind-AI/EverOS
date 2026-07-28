@@ -207,30 +207,48 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             row = await s.get(MdChangeState, md_path)
             return row
 
-    async def claim_pending_batch(self, limit: int = 100) -> list[MdChangeState]:
+    async def claim_pending_batch(
+        self,
+        limit: int = 100,
+        *,
+        kinds: set[str] | None = None,
+    ) -> list[MdChangeState]:
         """Claim up to ``limit`` pending rows in LSN order.
 
         Returns the claimed rows (now ``status='processing'``); empty
         list if none were pending. Sibling workers / processes may race
         on the same prefix — the per-row ``WHERE status='pending'``
         filter ensures each row lands in exactly one batch.
+
+        Args:
+            limit: Maximum rows to claim in one batch.
+            kinds: Optional restriction on which ``kind`` values are
+                eligible. ``None`` (the default) claims across every
+                registered kind — the shape the background worker and
+                the CLI ``cascade sync`` path have always used. Passing
+                a set restricts the SELECT + UPDATE to ``kind IN (...)``
+                via parameter binding (no string interpolation), so a
+                Phase-3 sync scoped to ``{"agent_skill"}`` cannot touch
+                unrelated kinds' queue state. Empty set is treated the
+                same as ``None`` — meaning "no kind filter" would be
+                surprising, but returning an empty result is what the
+                caller almost certainly meant, so we short-circuit.
         """
         if limit <= 0:
             return []
+        if kinds is not None and not kinds:
+            return []
         now = get_utc_now()
         async with session_scope(self._factory) as s:
-            picks = (
-                (
-                    await s.execute(
-                        select(MdChangeState.md_path)
-                        .where(MdChangeState.status == "pending")
-                        .order_by(MdChangeState.lsn)
-                        .limit(limit)
-                    )
-                )
-                .scalars()
-                .all()
+            pick_stmt = (
+                select(MdChangeState.md_path)
+                .where(MdChangeState.status == "pending")
+                .order_by(MdChangeState.lsn)
+                .limit(limit)
             )
+            if kinds is not None:
+                pick_stmt = pick_stmt.where(MdChangeState.kind.in_(kinds))
+            picks = (await s.execute(pick_stmt)).scalars().all()
             if not picks:
                 return []
             update_result = await s.execute(

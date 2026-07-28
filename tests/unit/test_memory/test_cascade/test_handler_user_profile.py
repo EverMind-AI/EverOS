@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import UserProfile
@@ -29,22 +28,6 @@ class _StubTokenizer(Tokenizer):
 
     def tokenize_batch(self, texts):  # type: ignore[no-untyped-def]
         return [self.tokenize(t) for t in texts]
-
-
-class _StubEmbedder(EmbeddingProvider):
-    """Profile handler does not embed; the stub stays as a no-op so the
-    shared :class:`HandlerDeps` shape is satisfied."""
-
-    dim = 1024
-
-    async def embed(self, text: str) -> list[float]:  # pragma: no cover
-        raise AssertionError("UserProfileHandler must not call the embedder")
-
-    async def embed_batch(  # pragma: no cover
-        self,
-        texts,  # type: ignore[no-untyped-def]
-    ):
-        raise AssertionError("UserProfileHandler must not call the embedder")
 
 
 class _FakeProfileRepo:
@@ -110,7 +93,6 @@ def _handler(memory_root: MemoryRoot) -> UserProfileHandler:
     return UserProfileHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )

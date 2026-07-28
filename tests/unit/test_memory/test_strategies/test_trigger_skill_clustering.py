@@ -1,8 +1,9 @@
 """Tests for :func:`trigger_skill_clustering`.
 
-Mock surface: ``cluster_by_llm``, ``get_embedder``, ``get_llm_client``,
-``cluster_repo`` — strategy is wired to use them as module-level imports
-so each ``patch`` swaps the symbol in the strategy module's namespace.
+Mock surface: ``cluster_by_llm``, ``get_llm_client``, ``cluster_repo`` —
+plus the process-wide :class:`EmbeddingCapability` singleton on the
+accessor module, swapped in via :func:`_install_embedder` for tests that
+must exercise the strategy past its body-guard.
 """
 
 from __future__ import annotations
@@ -15,12 +16,30 @@ import pytest
 import structlog.testing
 from everalgo.clustering import Cluster as AlgoCluster
 
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import AgentCaseExtracted, SkillClusterUpdated
 from everos.memory.strategies.trigger_skill_clustering import (
     trigger_skill_clustering,
 )
+
+
+def _install_embedder(
+    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
+) -> None:
+    """Install ``embedder`` as the process-wide embedding capability.
+
+    The strategy resolves the embedder via
+    ``get_embedding_capability().require()``, so the only injection knob
+    is the accessor's cached capability. The autouse fixture in
+    ``tests/conftest.py`` seeds ``Capability(provider=None)`` for
+    hermeticity; this helper swaps in a live provider for both the
+    body-guard check and the subsequent ``.require().embed()`` call.
+    """
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
 
 
 @pytest.fixture(autouse=True)
@@ -54,13 +73,18 @@ async def test_strategy_meta_is_attached() -> None:
     assert meta.max_retries == 2
 
 
-async def test_skips_when_quality_score_below_threshold() -> None:
+async def test_skips_when_quality_score_below_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """quality_score < 0.2 → log + early return; no embedding, no LLM, no repo call."""
+    exploding_embedder = MagicMock()
+    exploding_embedder.embed = AsyncMock(
+        side_effect=AssertionError("embedder must not be called on low-quality skip"),
+    )
+    _install_embedder(monkeypatch, exploding_embedder)
+
     ctx = FakeStrategyContext()
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_embedder"
-        ) as mock_emb,
         patch(
             "everos.memory.strategies.trigger_skill_clustering.cluster_repo"
         ) as mock_repo,
@@ -71,7 +95,7 @@ async def test_skips_when_quality_score_below_threshold() -> None:
     ):
         await trigger_skill_clustering(_event(quality_score=0.1), ctx)
 
-    mock_emb.assert_not_called()
+    exploding_embedder.embed.assert_not_awaited()
     mock_repo.list_for_owner.assert_not_called()
     mock_cluster.assert_not_called()
     assert ctx.emitted == []
@@ -87,13 +111,10 @@ async def test_creates_new_cluster_when_no_existing(
     """Empty existing list → cluster_by_llm returns None → new cluster persisted."""
     embedder = MagicMock()
     embedder.embed = AsyncMock(return_value=[0.1] * 1024)
+    _install_embedder(monkeypatch, embedder)
     ctx = FakeStrategyContext()
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
             return_value=object(),
@@ -149,10 +170,13 @@ async def test_creates_new_cluster_when_no_existing(
     assert emitted[0].agent_id == "agent_42"
 
 
-async def test_merges_into_existing_cluster_when_algo_matches() -> None:
+async def test_merges_into_existing_cluster_when_algo_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """algo returns a merged Cluster → persisted with the existing id."""
     embedder = MagicMock()
     embedder.embed = AsyncMock(return_value=[0.2] * 1024)
+    _install_embedder(monkeypatch, embedder)
     ctx = FakeStrategyContext()
 
     existing_cluster = AlgoCluster(
@@ -174,10 +198,6 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     )
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_embedder",
-            return_value=embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
             return_value=object(),
@@ -206,10 +226,59 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
     assert emitted[0].cluster_id == "cl_existing0001"
 
 
+# ── body-guard (embedding capability) ────────────────────────────────────
+
+
+async def test_returns_without_side_effects_when_embedding_unavailable() -> None:
+    """Capability unavailable → early return; no embed, no repo, no emit.
+
+    Registration is unconditional (OME registry is frozen after start()),
+    so the strategy self-gates at body entry. When capability flips back
+    on later the very next dispatch runs the full body without a restart.
+    """
+    ctx = FakeStrategyContext()
+    with (
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.get_embedding_capability",
+            return_value=EmbeddingCapability(provider=None),
+        ),
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.cluster_repo"
+        ) as mock_repo,
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.cluster_by_llm",
+            new=AsyncMock(
+                side_effect=AssertionError("cluster_by_llm must not be called")
+            ),
+        ),
+        structlog.testing.capture_logs() as captured,
+    ):
+        mock_repo.list_for_owner = AsyncMock(
+            side_effect=AssertionError("cluster_repo must not be touched"),
+        )
+        mock_repo.upsert_with_members = AsyncMock(
+            side_effect=AssertionError("cluster_repo must not be touched"),
+        )
+
+        await trigger_skill_clustering(_event(), ctx)
+
+    assert ctx.emitted == []
+    gated = [
+        e
+        for e in captured
+        if e.get("event") == "strategy_gated_off_embedding_unavailable"
+    ]
+    assert len(gated) == 1
+    assert gated[0]["strategy_name"] == "trigger_skill_clustering"
+    assert gated[0]["agent_id"] == "agent_42"
+
+
 # ── partition lock (agent_id-level serialisation) ────────────────────────
 
 
-async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
+async def _run_serialisation_probe(
+    agent_a: str, agent_b: str, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
     """Drive two trigger_skill_clustering runs and record entry/exit order.
 
     The clustering LLM call is the only awaited work inside the locked
@@ -227,12 +296,9 @@ async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
 
     mock_embedder = MagicMock()
     mock_embedder.embed = AsyncMock(return_value=np.zeros(1024, dtype=np.float32))
+    _install_embedder(monkeypatch, mock_embedder)
 
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_embedder",
-            return_value=mock_embedder,
-        ),
         patch(
             "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
             return_value=object(),
@@ -261,17 +327,21 @@ async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
     return log
 
 
-async def test_partition_lock_serialises_runs_on_same_agent() -> None:
+async def test_partition_lock_serialises_runs_on_same_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two runs sharing ``agent_id`` must not overlap critical sections."""
-    log = await _run_serialisation_probe("agent_42", "agent_42")
+    log = await _run_serialisation_probe("agent_42", "agent_42", monkeypatch)
     assert log in (
         ["enter:ac_run_a", "leave:ac_run_a", "enter:ac_run_b", "leave:ac_run_b"],
         ["enter:ac_run_b", "leave:ac_run_b", "enter:ac_run_a", "leave:ac_run_a"],
     )
 
 
-async def test_partition_lock_lets_different_agents_run_in_parallel() -> None:
+async def test_partition_lock_lets_different_agents_run_in_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Runs on distinct ``agent_id`` must overlap (no false serialisation)."""
-    log = await _run_serialisation_probe("agent_42", "agent_43")
+    log = await _run_serialisation_probe("agent_42", "agent_43", monkeypatch)
     assert log.index("enter:ac_run_a") < log.index("leave:ac_run_b")
     assert log.index("enter:ac_run_b") < log.index("leave:ac_run_a")

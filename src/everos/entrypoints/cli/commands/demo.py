@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from everos.component.utils.datetime import get_utc_now
+from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.tui.demo.data import (
     DEFAULT_MEMORY_SEED,
     DEFAULT_QUERY,
@@ -64,8 +65,15 @@ def register(parent: typer.Typer) -> None:
             "--server-url",
             help="EverOS server URL used by --live.",
         ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose",
+            "-v",
+            help="Emit INFO-level lifecycle logs (default: WARNING only).",
+        ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
+        configure_cli_logging(verbose=verbose)
         if live:
             _run_live_demo(
                 cinematic=cinematic,
