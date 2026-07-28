@@ -14,8 +14,11 @@ from everos.component.llm.client import (
     LLMNotConfiguredError,
     get_multimodal_llm_client,
 )
+from everos.core.observability.logging import get_logger
 
 from .capability import MultimodalLLMCapability
+
+logger = get_logger(__name__)
 
 _capability: MultimodalLLMCapability | None = None
 
@@ -29,13 +32,24 @@ def get_multimodal_llm_capability() -> MultimodalLLMCapability:
     endpoints, the health endpoint, the startup banner, and any other caller
     that needs to check "is multimodal parsing available?" without a hard
     dependency.
+
+    Build failures (``ValueError`` from the factory / ``LLMNotConfiguredError``
+    from missing settings) are logged as
+    ``multimodal_llm_capability_build_failed`` so an operator can distinguish
+    "not configured" from "misconfigured" — mirrors the equivalent warning on
+    the embedding and rerank accessors so all three optional providers surface
+    the same signal.
     """
     global _capability
     if _capability is not None:
         return _capability
     try:
         provider = get_multimodal_llm_client()
-    except (ValueError, LLMNotConfiguredError):
+    except (ValueError, LLMNotConfiguredError) as exc:
+        logger.warning(
+            "multimodal_llm_capability_build_failed",
+            reason=str(exc),
+        )
         provider = None
     _capability = MultimodalLLMCapability(provider=provider)
     return _capability

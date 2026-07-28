@@ -148,7 +148,7 @@ class AgentSkillHandler(Handler):
         embed_text = "\n".join(s for s in [name, description] if s)
         vector = await get_embedding_capability().embed_or_none(embed_text)
         if vector is None:
-            logger.info(
+            logger.debug(
                 "cascade_handler_embed_skipped",
                 kind=self.kind,
                 entry_id=skill_id,

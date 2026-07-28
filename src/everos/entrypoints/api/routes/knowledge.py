@@ -66,26 +66,38 @@ _KNOWLEDGE_FEATURE = "knowledge"
 
 
 def _require_knowledge_capabilities() -> None:
-    """Per-endpoint gate: knowledge writes/search are atomic on embed + rerank.
+    """Per-endpoint gate: knowledge writes/search require embed + rerank.
 
-    ``cascade.registry.build_handlers`` gates the ``knowledge_topic`` /
-    ``knowledge_document`` cascade handlers off as an atomic pair when
-    either capability is unavailable, so a document
-    written without both would enqueue into a cascade kind with no
-    handler and get stuck ``failed(retryable=False)`` — silently
-    disappearing from search instead of surfacing an error. Gating the
-    write and search entrypoints turns that into an immediate 422
-    instead of a misleading 200 (upload "succeeds") or a 500 further
-    down a service call that assumed the provider was there.
+    **Why the gate lives at the HTTP layer, not at cascade registry**:
+    cascade handlers register **unconditionally** now (see
+    ``memory/cascade/registry.py:177-194`` — the earlier atomic-pair
+    gate that lived there was removed because it broke the delete
+    path: a Tier-3 → Tier-2/1 downgrade would strand existing knowledge
+    documents with no handler to process their deletion). Handlers
+    body-guard the embed/rerank branches internally instead, so the
+    delete path stays reachable across tier changes.
 
-    Attached per-endpoint (not router-wide) so read / list / delete /
-    metadata-patch routes stay reachable after a Tier-3 → Tier-2/1
-    downgrade: users can still inspect and clean up their existing docs
-    (rename, recategorize, delete) even when the providers that would
-    embed or rerank new content are no longer configured. Title /
-    category patches only rewrite md frontmatter (and move the doc
-    directory when category changes) — no embed or rerank code runs on
-    that path.
+    Because the cascade layer no longer refuses the write, the HTTP
+    layer is now the *only* place that enforces "knowledge features
+    require Tier 3". Without this gate a Tier-1/2 upload would:
+
+    - accept the multipart request → md write succeeds
+    - enqueue for cascade → cascade handler body-guards on
+      ``get_embedding_capability().available`` and no-ops the
+      index write
+    - client sees 201 but the doc is permanently keyword-only /
+      unsearchable
+
+    Returning 422 up front is the honest answer.
+
+    **Attached per-endpoint (not router-wide)** so read / list /
+    delete / metadata-patch routes stay reachable after a Tier-3 →
+    Tier-2/1 downgrade: users can still inspect and clean up their
+    existing docs (rename, recategorize, delete) even when the
+    providers that would embed or rerank new content are no longer
+    configured. Title / category patches only rewrite md frontmatter
+    (and move the doc directory when category changes) — no embed or
+    rerank code runs on that path.
 
     Checks both capabilities (not just embedding) up front so a client
     missing only rerank gets a rerank-specific message rather than

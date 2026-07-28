@@ -16,6 +16,8 @@ Round-3 finding #4.
 
 from __future__ import annotations
 
+import pytest
+
 from everos.infra.persistence.lancedb import BUSINESS_SCHEMAS_WITH_VECTOR
 from everos.memory.cascade import _backfill
 
@@ -33,19 +35,34 @@ def test_table_specs_covers_business_schemas() -> None:
     assert spec_names == schema_names
 
 
-def test_drift_scenario_would_raise() -> None:
-    """Simulate a future contributor who adds a new business schema to
-    ``BUSINESS_SCHEMAS_WITH_VECTOR`` but forgets ``_TABLE_SPECS``.
+def test_drift_scenario_actually_raises_at_import() -> None:
+    """Prove the import-time guard actually fires when the two lists
+    diverge, not just that unequal sets are unequal (round-4 review
+    M10: the prior version of this test was a tautology — it never
+    touched ``_backfill`` and would stay green even if the guard
+    was deleted).
 
-    Runs the exact set-difference check the module executes at import
-    time against synthesised names to prove the guard fires on drift,
-    without patching the module's actual tuple (import-time guards are
-    only observable on import, so reloading with a monkeypatch is
-    unreliable — the module source is what re-executes).
+    Approach: reload ``memory.cascade._backfill`` with the
+    ``BUSINESS_SCHEMAS_WITH_VECTOR`` reference swapped to a superset
+    that contains a synthetic name absent from ``_TABLE_SPECS``. The
+    module's top-level assertion must trip during reload; the test
+    asserts on the resulting ``RuntimeError``.
     """
-    spec_names = {"episode", "atomic_fact"}
-    schema_names = {"episode", "atomic_fact", "new_business_kind"}
-    assert spec_names != schema_names, (
-        "test fixture: drift scenario must have unequal sets so the "
-        "assertion below is meaningful"
-    )
+    import importlib
+    from types import SimpleNamespace
+
+    import everos.infra.persistence.lancedb as lancedb_infra
+    import everos.memory.cascade._backfill as backfill_mod
+
+    real_schemas = tuple(lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR)
+    fake_schema = SimpleNamespace(TABLE_NAME="synthetic_drift_kind")
+    monkey_schemas = (*real_schemas, fake_schema)
+
+    original = lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR
+    lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR = monkey_schemas  # type: ignore[misc]
+    try:
+        with pytest.raises(RuntimeError, match=r"synthetic_drift_kind|drift"):
+            importlib.reload(backfill_mod)
+    finally:
+        lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR = original  # type: ignore[misc]
+        importlib.reload(backfill_mod)  # restore module state

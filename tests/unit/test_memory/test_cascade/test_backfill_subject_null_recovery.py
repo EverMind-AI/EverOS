@@ -124,9 +124,12 @@ async def test_subject_only_failure_leaves_row_in_backlog() -> None:
     for values, _where in repo.updates:
         assert "vector" in values
         assert "subject_vector" not in values
-    # Primary side succeeded — rows are "processed" this pass.
-    assert result.rows_processed == len(rows)
-    assert result.rows_failed == 0
+    # Subject side failed for every row — round-4 review J7: rows with
+    # any needed side still NULL count as ``rows_failed`` so the CLI
+    # exit code escalates to COMPLETED_WITH_FAILURES (4). The widened
+    # scan filter picks them up next run to retry the missing side.
+    assert result.rows_processed == 0
+    assert result.rows_failed == len(rows)
 
     # The widened Episode scan filter would still match these rows
     # since their subject_vector remains NULL.

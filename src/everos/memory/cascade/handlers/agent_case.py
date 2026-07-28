@@ -70,7 +70,7 @@ class AgentCaseHandler(BaseDailyLogHandler):
         approach_tokens = self._deps.tokenizer.tokenize(approach)
         vector = await get_embedding_capability().embed_or_none(task_intent)
         if vector is None:
-            logger.info(
+            logger.debug(
                 "cascade_handler_embed_skipped",
                 kind=self.kind,
                 entry_id=entry.entry_id,

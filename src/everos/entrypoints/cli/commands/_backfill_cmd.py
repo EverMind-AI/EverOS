@@ -255,15 +255,8 @@ class TyperPresenter:
     CI-mode presenter) can slot in without touching the memory layer.
     """
 
-    def phase_header(self, phase: BackfillPhase) -> None:
-        _print_phase_header(phase)
-
-    def nothing_to_backfill(self, message: str) -> None:
-        colour = (
-            typer.colors.YELLOW
-            if "could not be read" in message
-            else (typer.colors.GREEN)
-        )
+    def nothing_to_backfill(self, message: str, *, scan_failed: bool = False) -> None:
+        colour = typer.colors.YELLOW if scan_failed else typer.colors.GREEN
         typer.secho(message, fg=colour)
 
     def capability_missing(self, *, provider: str, feature: str, message: str) -> None:
@@ -368,6 +361,15 @@ async def run_backfill(*, phase: str, auto_yes: bool) -> int:
                     )
                     _print_summary(summary, exit_code=2)
                     return 2
+                if result.blocked_by_server:
+                    # Fail fast BEFORE any embed API call — Phase 2 / 3
+                    # already do this preflight; without it here,
+                    # ``--phase all`` against a running server burns
+                    # through Phase 1's real token budget and only
+                    # halts at Phase 2 (see PR #361 review J10).
+                    logger.warning("cascade_backfill_blocked_by_server", phase=p.slug)
+                    _print_summary(summary, exit_code=3)
+                    return 3
                 if result.aborted:
                     # Policy (PR #361 round-3 review #11, accepted):
                     # typing ``n`` at Phase 1's confirmation aborts the

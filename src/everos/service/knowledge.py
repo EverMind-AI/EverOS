@@ -36,6 +36,7 @@ from everos.core.errors import (
     DocumentNotFoundError,
     DuplicateDocumentError,
     ExtractionEmptyError,
+    InvalidInputError,
     PathTraversalError,
     ProviderNotConfiguredError,
     TopicNotFoundError,
@@ -926,6 +927,18 @@ def _apply_category_fallback(
     return patched
 
 
+_MAX_FILENAME_BYTES = 255
+"""Portable filesystem filename byte-length ceiling.
+
+macOS HFS+/APFS, most Linux filesystems (ext4/xfs/btrfs) and Windows
+NTFS all cap a single directory entry at 255 bytes of UTF-8. Rather
+than let the OS surface the ceiling as a raw ``OSError[ENAMETOOLONG]``
+at ``write_bytes`` time (which reaches the HTTP layer as a 500), we
+validate up front and raise a caller-friendly ``InvalidInputError``
+that maps to 400.
+"""
+
+
 def _safe_original_filename(source_name: str) -> str:
     """Reduce an untrusted upload filename to a single safe path component.
 
@@ -939,6 +952,18 @@ def _safe_original_filename(source_name: str) -> str:
     ``.`` / ``..`` / empty cases (which a basename can still be, e.g. a
     filename of ``..``) are rejected outright.
 
+    Also validates two failure modes the OS would otherwise raise as
+    500 during ``write_bytes`` (round-4 review M1):
+
+    - **NUL byte** in the filename → ``ValueError: embedded null
+      character`` from the syscall layer. Rejected up front as a
+      400-mapped ``InvalidInputError``.
+    - **Filename > 255 bytes UTF-8** → ``OSError[ENAMETOOLONG]`` from
+      the syscall layer. Same up-front rejection.
+
+    Both are validated **before** ``KnowledgeWriter.write`` runs, so a
+    doomed upload never leaves half-a-document on disk.
+
     Args:
         source_name: The client-supplied multipart filename.
 
@@ -947,13 +972,25 @@ def _safe_original_filename(source_name: str) -> str:
 
     Raises:
         PathTraversalError: If no safe filename can be derived.
+        InvalidInputError: If the filename contains a NUL byte or
+            exceeds the filesystem's byte-length ceiling.
     """
+    if "\x00" in source_name:
+        raise InvalidInputError(
+            f"upload filename must not contain a NUL byte (got {source_name!r})"
+        )
     # PurePosixPath does not split on "\\"; strip backslash segments too so a
     # Windows-style ``..\\..\\x`` or ``C:\\x`` filename cannot survive.
     name = PurePosixPath(source_name).name.rsplit("\\", 1)[-1]
     if name in {"", ".", ".."}:
         raise PathTraversalError(
             f"upload filename is not a valid file component: {source_name!r}"
+        )
+    if len(name.encode("utf-8")) > _MAX_FILENAME_BYTES:
+        raise InvalidInputError(
+            "upload filename exceeds the "
+            f"{_MAX_FILENAME_BYTES}-byte filesystem ceiling "
+            f"(got {len(name.encode('utf-8'))} bytes)"
         )
     return name
 

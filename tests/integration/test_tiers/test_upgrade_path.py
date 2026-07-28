@@ -29,6 +29,7 @@ from everos.infra.persistence.lancedb import (
     atomic_fact_repo,
     get_table,
 )
+from everos.memory.cascade import _backfill as _backfill_mod
 
 from .conftest import _tier_client, add_payload, cascade_progress
 
@@ -149,6 +150,14 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             "rows written before the upgrade must still be NULL pre-backfill"
         )
 
+        # ``run_backfill`` refuses to run against a live OME lock (Phase
+        # 1 / 2 / 3 all preflight it — round-4 review J10 aligned Phase
+        # 1 with the other two). In-process this test still holds the
+        # server lifespan open around the call, so bypass the probe
+        # locally to simulate the intended "server stopped, then
+        # backfill runs" sequence. A real user's flow does stop the
+        # server; the probe is the mechanism that enforces it.
+        monkeypatch.setattr(_backfill_mod, "_probe_ome_lock_available", lambda: True)
         exit_code = await run_backfill(phase="vectors", auto_yes=True)
         assert exit_code == 0
 

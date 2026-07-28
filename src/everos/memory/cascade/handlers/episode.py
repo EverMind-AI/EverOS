@@ -90,7 +90,7 @@ class EpisodeHandler(BaseDailyLogHandler):
             vector = await capability.embed_or_none(text)
             subject_vector = None
         if vector is None:
-            logger.info(
+            logger.debug(
                 "cascade_handler_embed_skipped",
                 kind=self.kind,
                 entry_id=entry.entry_id,

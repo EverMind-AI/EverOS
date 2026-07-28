@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness probe with capabilities and disabled features.\n\nReturns a dict containing:\n- status: \"ok\"\n- version: semantic version string\n- capabilities: dict mapping capability names to availability booleans\n- disabled_features: list of feature names that are disabled due to\n  missing capabilities",
+        "description": "Liveness probe with capabilities and disabled features.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -20,9 +20,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -2716,6 +2714,71 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthCapabilities": {
+        "properties": {
+          "llm": {
+            "type": "boolean",
+            "title": "Llm"
+          },
+          "embed": {
+            "type": "boolean",
+            "title": "Embed"
+          },
+          "rerank": {
+            "type": "boolean",
+            "title": "Rerank"
+          },
+          "multimodal_llm": {
+            "type": "boolean",
+            "title": "Multimodal Llm"
+          },
+          "parser": {
+            "type": "boolean",
+            "title": "Parser"
+          }
+        },
+        "type": "object",
+        "required": [
+          "llm",
+          "embed",
+          "rerank",
+          "multimodal_llm",
+          "parser"
+        ],
+        "title": "HealthCapabilities",
+        "description": "Availability flags for the five capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/HealthCapabilities"
+          },
+          "disabled_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Disabled Features"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "capabilities",
+          "disabled_features"
+        ],
+        "title": "HealthResponse",
+        "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities`` and\n``disabled_features`` are typed. A bare ``-> dict`` return type\ndegrades the OpenAPI response to ``additionalProperties: true``,\nwhich robs clients (and codegen) of any structure to lean on."
       },
       "KnowledgeSearchRequest": {
         "properties": {

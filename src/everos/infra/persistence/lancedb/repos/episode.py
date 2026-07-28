@@ -111,6 +111,19 @@ class _EpisodeRepo(LanceDailyLogRepoBase[Episode]):
                 historical windows should pass a bound to avoid pulling
                 every memcell for the owner.
 
+                **CAVEAT — limit is NOT "newest N"**: LanceDB does not
+                push ORDER BY down; ``.limit(N)`` truncates whatever
+                the scan returns first (typically fragment / insertion
+                order for an append-only table = OLDEST N). The
+                ascending-by-timestamp sort below runs on the already-
+                truncated Python list, so the returned rows are the
+                *oldest matching subset*, not the newest. Callers that
+                need "most recent N" MUST either fetch unlimited and
+                slice in Python (accepting the memory cost), or apply
+                a tighter ``after_ts`` bound to shrink the matching
+                set upstream. A regression here would silently window
+                profile extraction over the wrong slice of history.
+
         Returns:
             When ``columns`` is ``None``: list of ``Episode`` objects
             ordered ascending by timestamp (existing behaviour).

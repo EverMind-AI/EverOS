@@ -76,7 +76,7 @@ class ForesightHandler(BaseDailyLogHandler):
         tokens = self._deps.tokenizer.tokenize(text)
         vector = await get_embedding_capability().embed_or_none(text)
         if vector is None:
-            logger.info(
+            logger.debug(
                 "cascade_handler_embed_skipped",
                 kind=self.kind,
                 entry_id=entry.entry_id,

@@ -144,6 +144,46 @@ def _patch_phase3_scans_have_data(monkeypatch) -> None:
     monkeypatch.setattr(_backfill, "_scan_skill_source", _fake_scan_skill_source)
 
 
+async def test_phase_vectors_preflight_returns_blocked_by_server(
+    _isolated_root: Path, _capability_available: None, monkeypatch
+) -> None:
+    """Phase 1 preflight parity with Phase 2/3.
+
+    Regression: prior to PR #361 review J10, ``_run_phase_vectors``
+    only preflighted capability, not the OME lock. Running
+    ``--phase all`` against a live server would burn Phase 1's full
+    embed API cost before Phase 2 finally halted with exit 3. Phase 1
+    must fail fast BEFORE any provider call.
+    """
+
+    async def _fake_scan():
+        # Scan must never run — preflight should short-circuit first.
+        raise AssertionError("Phase 1 scan ran despite blocked server")
+
+    monkeypatch.setattr(_backfill, "_scan_null_vector_backlog", _fake_scan)
+    monkeypatch.setattr(_backfill, "_probe_ome_lock_available", lambda: False)
+    result = await _backfill._run_phase_vectors(
+        auto_yes=True, presenter=_FailingConfirmPresenter()
+    )
+    assert result.aborted is True
+    assert result.blocked_by_server is True
+    assert result.rows_processed == 0
+
+
+async def test_run_backfill_phase_vectors_exits_3_when_blocked(
+    _isolated_root: Path, _capability_available: None, monkeypatch, capsys
+) -> None:
+    """``run_backfill --phase vectors`` maps blocked_by_server → exit 3."""
+
+    async def _fake_scan():
+        raise AssertionError("Phase 1 scan ran despite blocked server")
+
+    monkeypatch.setattr(_backfill, "_scan_null_vector_backlog", _fake_scan)
+    monkeypatch.setattr(_backfill, "_probe_ome_lock_available", lambda: False)
+    exit_code = await _backfill_cmd.run_backfill(phase="vectors", auto_yes=True)
+    assert exit_code == 3
+
+
 async def test_phase_clusters_preflight_returns_blocked_by_server(
     _isolated_root: Path, _capability_available: None, monkeypatch
 ) -> None:

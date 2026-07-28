@@ -1,4 +1,24 @@
-"""Cross-process serialization for the LanceDB migration entrypoints.
+"""LanceDB migration lock **wiring** — pins that the migration is
+guarded by :func:`memory_root_lock`, NOT the flock semantics itself.
+
+**Scope caveat (important for reviewers and future maintainers)**:
+this module verifies the *wiring under test* — that
+:func:`migrate_table_schemas` and :func:`migrate_fts_indexes` invoke
+:func:`memory_root_lock` as their outer context manager, and that
+the marker is re-checked inside the lock so a loser no-ops. To make
+those assertions tractable in-process, every test here
+``monkeypatch.setattr(lancedb_infra, "memory_root_lock", <fake>)``
+with either a tracking async context manager or a single-process
+``asyncio.Lock`` stand-in.
+
+The ``fcntl.flock`` **semantics themselves** — multi-process
+exclusion — cannot be exercised in-process (see the concurrent-tasks
+test where this is called out inline). Real flock coverage lives in
+``tests/unit/test_core/test_persistence/test_locking.py`` (spawns
+subprocesses, exercises actual OS-level ``LOCK_EX`` semantics). If
+:func:`memory_root_lock` ever changes implementation (e.g. dropping
+``fcntl.flock`` for an in-process lock), that separate test suite is
+what will regress — not this one.
 
 Round-2 review finding M7: :func:`migrate_table_schemas` (and its
 sibling :func:`migrate_fts_indexes`) were guarded only by an on-disk
@@ -8,7 +28,7 @@ read the marker as 0, both proceed to mutate the schema, and races
 could corrupt the on-disk state.
 
 The fix wraps each migration in :func:`memory_root_lock` and re-checks
-the marker *after* lock acquisition. This module pins that contract:
+the marker *after* lock acquisition. This module pins that wiring:
 
 * the lock is acquired around every migration invocation;
 * the marker is re-checked inside the lock so a process that lost the
@@ -18,7 +38,9 @@ the marker *after* lock acquisition. This module pins that contract:
   message escalates from restart to wipe rather than jumping straight
   to a destructive recovery hint;
 * two concurrent asyncio tasks serialize through the (faked) lock,
-  demonstrating the intended race behavior.
+  demonstrating the intended sequencing behavior with the caveat
+  that in-process ``asyncio.Lock`` is a proxy for the flock's
+  ordering guarantee, not for the exclusion guarantee itself.
 """
 
 from __future__ import annotations

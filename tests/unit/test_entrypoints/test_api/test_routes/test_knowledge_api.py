@@ -533,6 +533,13 @@ async def test_post_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file without parser → UnsupportedModalityError → 415."""
+    # ``parser_available()`` is @lru_cache'd — clear it so this test's
+    # sys.modules patch actually reaches the import check instead of
+    # hitting a stale cached True/False from an earlier test in the
+    # same worker (round-4 review M7).
+    from everos.component.parser import parser_available
+
+    parser_available.cache_clear()
     with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
         resp = await client.post(
             "/api/v1/knowledge/documents",
@@ -541,6 +548,7 @@ async def test_post_binary_file_without_parser_returns_415(
             },
             data={"title": "Binary Test"},
         )
+    parser_available.cache_clear()  # leave clean for the next test
     assert resp.status_code == 415
 
 
@@ -548,6 +556,9 @@ async def test_put_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file on PUT → UnsupportedModalityError → 415."""
+    from everos.component.parser import parser_available
+
+    parser_available.cache_clear()
     with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
         resp = await client.put(
             "/api/v1/knowledge/documents/d_aabbccddee01",
@@ -556,6 +567,7 @@ async def test_put_binary_file_without_parser_returns_415(
             },
             data={"title": "Binary Test"},
         )
+    parser_available.cache_clear()
     assert resp.status_code == 415
 
 

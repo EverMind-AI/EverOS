@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -38,6 +39,7 @@ import portalocker
 from everos.component.embedding import EmbeddingProvider, get_embedding_capability
 from everos.component.tokenizer import build_tokenizer
 from everos.component.utils.datetime import to_timestamp_ms
+from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, MemoryRoot, SQLModel
 from everos.core.persistence.lancedb import BaseLanceTable, LanceRepoBase
@@ -123,8 +125,20 @@ class BackfillPresenter(Protocol):
       interactive prompt and return ``True``.
     """
 
-    def phase_header(self, phase: BackfillPhase) -> None: ...
-    def nothing_to_backfill(self, message: str) -> None: ...
+    def nothing_to_backfill(self, message: str, *, scan_failed: bool = False) -> None:
+        """Report a phase yielded nothing to do.
+
+        ``scan_failed`` distinguishes "phase had no data because the
+        input space is empty" (``False`` — green happy path) from
+        "phase had rows but the scan itself dropped some to storage
+        errors" (``True`` — yellow degradation warning). The CLI layer
+        colour-picks off this flag; **do not sniff substrings of
+        ``message``** (fragile — a domain-side wording change would
+        silently flip the colour). ``message`` remains a plain string
+        so implementations can present it verbatim.
+        """
+        ...
+
     def capability_missing(
         self, *, provider: str, feature: str, message: str
     ) -> None: ...
@@ -153,10 +167,7 @@ class NullBackfillPresenter:
     prompt.
     """
 
-    def phase_header(self, phase: BackfillPhase) -> None:
-        return None
-
-    def nothing_to_backfill(self, message: str) -> None:
+    def nothing_to_backfill(self, message: str, *, scan_failed: bool = False) -> None:
         return None
 
     def capability_missing(self, *, provider: str, feature: str, message: str) -> None:
@@ -313,6 +324,9 @@ class _PhaseResult:
     ``blocked_by_capability`` names the missing provider (currently only
     ``"embedding"``) when a preflight short-circuits the phase before it
     can start; the CLI orchestrator maps that to exit code 2.
+    ``blocked_by_server`` mirrors the Phase 2 / Phase 3 field — set when
+    the OME lock preflight fails (server running), so ``run_backfill``
+    can exit 3 before any embed API call is made.
     """
 
     rows_processed: int = 0
@@ -320,6 +334,7 @@ class _PhaseResult:
     tokens_embedded: int = 0
     aborted: bool = False
     blocked_by_capability: str | None = None
+    blocked_by_server: bool = False
 
 
 def _q(value: str) -> str:
@@ -654,6 +669,30 @@ async def _backfill_table(
                 updates["subject_vector"] = subject_vectors[row.id]
             if not updates:
                 continue
+            # A row is only "fully processed" if every side it needed
+            # actually made it into ``updates``. When the primary
+            # succeeded but the subject batch failed (or per-row retry
+            # dropped the subject), the row still carries a NULL side
+            # on disk and the widened scan filter (``vector IS NULL OR
+            # subject_vector IS NULL``) re-picks it next run —
+            # automation must see a non-zero ``rows_failed`` for the
+            # exit code to escalate to COMPLETED_WITH_FAILURES (4)
+            # instead of falsely reporting SUCCESS (0). Two guards
+            # tighten the check: (1) consult per-side ``needs_*`` so a
+            # row where ``needs_primary=False`` (primary already on
+            # disk from a prior pass) isn't counted as a gap; (2) gate
+            # the subject-side arm on the SPEC having a subject_of
+            # extractor at all — tables without a subject column
+            # (e.g. atomic_fact) intentionally leave every row absent
+            # from ``subject_vectors`` and must not be flagged.
+            spec_has_subject = backlog.spec.subject_of is not None
+            row_has_subject = row.subject_text is not None
+            side_gap = (row.needs_primary and row.id not in primary_map) or (
+                spec_has_subject
+                and row.needs_subject
+                and row_has_subject
+                and row.id not in subject_vectors
+            )
             try:
                 await backlog.spec.repo.update(updates, where=f"id = '{_q(row.id)}'")
             except Exception:
@@ -665,9 +704,23 @@ async def _backfill_table(
                     exc_info=True,
                 )
                 continue
-            # A row is "processed" once at least one side advanced
-            # this pass. If both sides advanced (or if only the needed
-            # side did), the row is fully embedded.
+            # Partial-side gap: the write succeeded for at least one
+            # side but some needed side is still NULL. Count against
+            # ``rows_failed`` so the CLI's exit-4 (COMPLETED_WITH_FAILURES)
+            # semantics fires instead of silently exit-0.
+            if side_gap:
+                result.rows_failed += 1
+                logger.warning(
+                    "cascade_backfill_row_partial_embed",
+                    table=backlog.table_name,
+                    row_id=row.id,
+                    missing_side=(
+                        "primary" if row.id not in primary_map else "subject"
+                    ),
+                )
+                continue
+            # A row is "processed" once every side it needed advanced
+            # this pass.
             result.rows_processed += 1
             result.tokens_embedded += row.tokens
 
@@ -681,9 +734,17 @@ async def _backfill_table(
     # lance-format/lance#7653). Gate on rows_processed > 0 so a no-op
     # backlog doesn't pay the compact cost. Best-effort maintenance:
     # a failure here does not invalidate the writes.
+    #
+    # ``cleanup_older_than=timedelta(0)`` also physically prunes
+    # older manifest versions right now — without it, ``optimize()``
+    # only compacts fragments and leaves the pre-compaction manifest
+    # chain on disk, so the ``.index/lancedb`` directory still grows
+    # (round-4 review M2). Backfill has no reason to preserve older
+    # manifest versions — pruning immediately mirrors the migration
+    # path (see ``lancedb/__init__.py:140``).
     if result.rows_processed > 0:
         try:
-            await backlog.spec.repo.optimize()
+            await backlog.spec.repo.optimize(cleanup_older_than=dt.timedelta(0))
             logger.info(
                 "cascade_backfill_table_optimized",
                 table=backlog.table_name,
@@ -731,13 +792,22 @@ async def _run_phase_vectors(
     # touches ``require()``.
     capability = get_embedding_capability()
     if not capability.available:
-        from everos.core.errors import ProviderNotConfiguredError
-
         err = ProviderNotConfiguredError(provider="embedding", feature="backfill")
         presenter.capability_missing(
             provider="embedding", feature="backfill", message=str(err)
         )
         return _PhaseResult(blocked_by_capability="embedding")
+
+    # Phase 2 / Phase 3 both preflight the OME lock; Phase 1 must do
+    # the same. Otherwise ``--phase all`` starts against a running
+    # server, burns through Phase 1's embed API calls (real token
+    # cost + potential commit conflict with the live cascade worker),
+    # then only halts at Phase 2's preflight with exit 3. Fail fast
+    # here so the user's next action is "stop the server" — not
+    # "reimburse this month's embedding bill".
+    if not await anyio.to_thread.run_sync(_probe_ome_lock_available):
+        presenter.server_running()
+        return _PhaseResult(aborted=True, blocked_by_server=True)
 
     backlog, scan_failed = await _scan_null_vector_backlog()
     total_rows = sum(len(tb.rows) for tb in backlog)
@@ -745,7 +815,8 @@ async def _run_phase_vectors(
         if scan_failed:
             presenter.nothing_to_backfill(
                 f"Nothing to backfill — {scan_failed:,} row(s) could not be "
-                "read and were skipped (see logs)."
+                "read and were skipped (see logs).",
+                scan_failed=True,
             )
         else:
             presenter.nothing_to_backfill(
@@ -1086,8 +1157,6 @@ async def _run_phase_clusters(
     # transient (stop the server and try again).
     capability = get_embedding_capability()
     if not capability.available:
-        from everos.core.errors import ProviderNotConfiguredError
-
         err = ProviderNotConfiguredError(provider="embedding", feature="backfill")
         presenter.capability_missing(
             provider="embedding", feature="backfill", message=str(err)
@@ -1433,8 +1502,6 @@ async def _run_phase_skills(
     # Ordering mirrors :func:`_run_phase_clusters`.
     capability = get_embedding_capability()
     if not capability.available:
-        from everos.core.errors import ProviderNotConfiguredError
-
         err = ProviderNotConfiguredError(
             provider="embedding", feature="skill_extraction_backfill"
         )

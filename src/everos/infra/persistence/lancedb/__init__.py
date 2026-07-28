@@ -311,9 +311,17 @@ async def verify_business_schemas() -> None:
         if missing or extra:
             raise LanceDBSchemaMismatchError(
                 f"LanceDB table {schema.TABLE_NAME!r} schema drift: "
-                f"missing={sorted(missing)}, extra={sorted(extra)}. "
-                "The index is rebuildable from md — recover with "
-                "`rm -rf ~/.everos/.index/lancedb` and restart."
+                f"missing={sorted(missing)}, extra={sorted(extra)}.\n"
+                "Recovery, escalating:\n"
+                "  1. Restart the server — an in-flight migration may "
+                "still be finishing (harmless if this is your first "
+                "restart after upgrading EverOS).\n"
+                "  2. If restart doesn't clear it, the on-disk index is "
+                "genuinely out of sync with the code's schema. Because "
+                "the LanceDB index is fully rebuildable from md, wipe "
+                "it: `rm -rf ~/.everos/.index/lancedb` and restart — "
+                "the cascade daemon will re-index from the source-of-"
+                "truth markdown."
             )
 
 

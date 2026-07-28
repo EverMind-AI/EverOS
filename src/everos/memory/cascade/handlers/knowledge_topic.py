@@ -199,7 +199,7 @@ class KnowledgeTopicHandler(Handler):
         )
         vector = await get_embedding_capability().embed_or_none(fields["summary"])
         if vector is None:
-            logger.info(
+            logger.debug(
                 "cascade_handler_embed_skipped",
                 kind=self.kind,
                 entry_id=fields["node_id"],

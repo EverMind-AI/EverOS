@@ -78,8 +78,13 @@ class _FakeRepo:
         if self.update_fails:
             raise RuntimeError("simulated per-row write failure")
 
-    async def optimize(self) -> None:
+    async def optimize(self, *, cleanup_older_than=None) -> None:
+        # ``cleanup_older_than`` mirrors the real ``LanceRepoBase.optimize``
+        # signature — round-4 review M2 added the kwarg at the backfill
+        # call site to physically prune old manifest versions, and this
+        # test double must accept it without breaking prior coverage.
         self.optimize_calls += 1
+        self.last_cleanup_older_than = cleanup_older_than
         if self.optimize_fails:
             raise RuntimeError("simulated optimize failure (e.g. lock contention)")
 
