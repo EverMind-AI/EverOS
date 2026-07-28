@@ -1,64 +1,73 @@
-# EverOS × Langfuse (OpenTelemetry)
+# EverOS × Langfuse (native OpenTelemetry)
 
-Trace EverOS memory operations — writes, LLM extraction, recall with quality
-scores, and reflection — into [Langfuse](https://langfuse.com) as OpenTelemetry
-spans, so an agent's memory layer becomes visible and evaluable next to the rest
-of its traces.
+EverOS emits OpenTelemetry spans for its own memory operations — write, memcell
+boundary + episode extraction (LLM), search with recall-quality scores, and OME
+reflection — and exports them over OTLP to any backend, including
+[Langfuse](https://langfuse.com). There is **no wrapper and no extra
+instrumentation code**: enable it in config and the traces appear.
 
-This is a thin, dependency-light wrapper (pure OpenTelemetry SDK, no Langfuse
-package dependency). The same spans work with Langfuse Cloud, self-hosted
-Langfuse, or any other OTLP backend.
+## Enable
 
-## Files
+1. Install the optional OpenTelemetry extra:
 
-- `everos_langfuse.py` — the instrumentation wrapper (`init_tracing`,
-  `InstrumentedEverOS`, `HTTPTransport`, recall-score push).
-- `demo.py` — a runnable end-to-end example. Ships a mock transport, so it runs
-  with **no EverOS server required**; set `EVEROS_BASE_URL` to trace a real one.
+   ```bash
+   pip install "everos[otel]"
+   ```
 
-## Span model
+2. Add `[observability]` to your `everos.toml`. The Langfuse keys derive the
+   OTLP endpoint and auth automatically:
+
+   ```toml
+   [observability]
+   enabled             = true
+   langfuse_public_key = "pk-lf-..."
+   langfuse_secret_key = "sk-lf-..."
+   langfuse_host       = "https://us.cloud.langfuse.com"   # EU: https://cloud.langfuse.com
+   # capture_content   = true   # opt-in: also record query / extracted memory text
+   ```
+
+   Container/CI equivalent via env vars: `EVEROS_OBSERVABILITY__ENABLED=true`,
+   `EVEROS_OBSERVABILITY__LANGFUSE_PUBLIC_KEY=...`, and so on.
+
+3. Run EverOS normally:
+
+   ```bash
+   everos server start
+   ```
+
+Off by default — with `enabled = false` (or the `otel` extra absent) there is
+zero tracing overhead.
+
+## What you get
 
 | EverOS operation | Langfuse observation |
 | --- | --- |
-| `POST /api/v1/memory/add` | span `everos.memory.add` |
-| `POST /api/v1/memory/flush` → extraction | span + generation `everos.extract` (model + tokens) |
+| `POST /api/v1/memory/add` · `flush` | span `everos.memory.add` / `everos.memory.flush` |
+| memcell boundary detection (LLM) | generation `everos.memcell.boundary` (model + tokens) |
+| episode extraction (LLM) | generation `everos.extract` |
 | markdown persistence | span `everos.persist.markdown` |
-| async index sync | span `everos.cascade.index` (separate correlated trace) |
-| `POST /api/v1/memory/search` | retriever `everos.memory.search` |
-| ↳ embedding / hybrid recall / rerank | embedding / retriever / span |
-| `POST /api/v1/ome/trigger` | agent `everos.ome.<strategy>` + generation |
+| `POST /api/v1/memory/search` | retriever `everos.memory.search` → `recall` / `rank` |
+| query / recall embedding | embedding `everos.embedding` |
+| OME reflection strategies | agent `everos.ome.<strategy>` (linked to the triggering request's trace) |
 
-`langfuse.session.id` / `langfuse.user.id` are set on every span; recall quality
-is pushed as Langfuse scores (`recall_top_score`, `recall_hit`).
+`langfuse.session.id` / `langfuse.user.id` group the traces; recall quality is
+pushed as Langfuse scores (`recall_top_score` always, and `recall_hit` for
+calibrated methods — HYBRID / AGENTIC). Query and memory text are captured only
+when `capture_content = true`.
 
-## Run
+## Try it
+
+With a server running and `[observability]` enabled:
 
 ```bash
-pip install opentelemetry-sdk opentelemetry-exporter-otlp requests
-
-export LANGFUSE_PUBLIC_KEY="pk-lf-..."
-export LANGFUSE_SECRET_KEY="sk-lf-..."
-export LANGFUSE_HOST="https://us.cloud.langfuse.com"   # EU: https://cloud.langfuse.com
-
 python demo.py
 ```
 
-- With no keys set, `demo.py` still runs against the built-in mock and writes a
-  local `spans.jsonl` (offline inspection) — nothing is sent anywhere.
-- With Langfuse keys set, the same spans and recall scores flow into your
-  Langfuse project. Open **Tracing → Traces** (filter by tag `everos` / `memory`).
-- To trace a real deployment, set `EVEROS_BASE_URL` to a running EverOS server
-  (see the [EverOS quickstart](../../README.md)); the instrumentation is identical.
-
-## Privacy
-
-Spans carry non-sensitive metadata (latency, token counts, model names, scores)
-by default. Capturing raw query or memory content as span input/output is opt-in.
-The demo uses synthetic data, and its `public_traces` flag (safe only for
-synthetic data) marks the resulting traces as publicly shareable.
+It drives one add → flush → search (keyword / hybrid / agentic) cycle against
+`http://127.0.0.1:8000` using only the standard library, then tells you to open
+Langfuse → **Tracing** filtered to `session.id = langfuse_demo`.
 
 ## Learn more
 
-- Langfuse OpenTelemetry docs: https://langfuse.com/integrations/native/opentelemetry
-- Native, opt-in instrumentation inside EverOS core is planned; this wrapper is
-  the interim path and mirrors the same span model.
+- Langfuse OpenTelemetry: https://langfuse.com/integrations/native/opentelemetry
+- Config reference: the `[observability]` block in `src/everos/config/default.toml`.

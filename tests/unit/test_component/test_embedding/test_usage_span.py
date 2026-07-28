@@ -31,7 +31,9 @@ class _FakeEmbeddings:
     def __init__(self, response: object) -> None:
         self._response = response
 
-    async def create(self, *, model: str, input: list[str]) -> object:
+    async def create(
+        self, *, model: str, input: list[str], dimensions: object = None
+    ) -> object:
         return self._response
 
 

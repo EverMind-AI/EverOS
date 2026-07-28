@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,6 +38,20 @@ from everos.core.persistence.sqlite import RepoBase, session_scope
 
 from ..sqlite_manager import get_session_factory
 from ..tables import MdChangeState
+
+MTIME_TOLERANCE_SECONDS = 0.01
+"""Absolute mtime delta (seconds) treated as "unchanged".
+
+Used both by the upsert's retry_count carry-over CASE (below) and by the
+cascade reconciler's stable-mtime check
+(:func:`everos.memory.cascade.reconciler.reconcile`). The two comparisons
+share this single source of truth so their notions of "same file" stay
+in lock-step; drift would leave upsert preserving ``retry_count`` while
+the reconciler skips re-enqueue (or vice versa), corrupting the retry
+budget.
+
+Sized to absorb SQLite ``REAL`` round-trip loss (~5 µs) so a stable
+mtime does not oscillate the reconcile decision every scanner tick."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,9 +108,13 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
           ``lsn = MAX(lsn) + 1``.
         - **Existing row** → bump ``last_changed_at``, refresh
           ``kind`` / ``change_type`` / ``mtime``, reset status back to
-          ``pending``, zero ``retry_count`` / ``error`` / ``retryable``,
-          and assign a fresh ``MAX(lsn) + 1`` so the worker re-processes
-          this path *after* anything queued in between.
+          ``pending``, clear ``error`` / ``retryable``, and assign a
+          fresh ``MAX(lsn) + 1`` so the worker re-processes this path
+          *after* anything queued in between. ``retry_count`` is
+          conditionally preserved: if the row was ``failed`` and the
+          mtime is unchanged (scanner auto-retry), ``retry_count``
+          carries over so the worker can enforce a total retry budget;
+          otherwise it resets to 0 (new content deserves a fresh start).
 
         The fresh LSN on re-enqueue is the property that lets the worker
         rely on ``ORDER BY lsn`` for ordering without losing fairness
@@ -134,8 +152,16 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                         "status": "pending",
                         "retryable": None,
                         "last_attempt_at": None,
-                        "retry_count": 0,
                         "error": None,
+                        "retry_count": text(
+                            "CASE"
+                            " WHEN md_change_state.status = 'failed'"
+                            " AND ABS(md_change_state.mtime - :new_mtime)"
+                            f" < {MTIME_TOLERANCE_SECONDS}"
+                            " THEN md_change_state.retry_count"
+                            " ELSE 0"
+                            " END"
+                        ).bindparams(new_mtime=mtime),
                     },
                 )
             )

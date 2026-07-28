@@ -40,7 +40,7 @@ class TracingLifespanProvider(LifespanProvider):
         """
         settings = load_settings().observability
         enabled = init_tracing(settings)
-        scores = init_score_sink(settings)
+        scores = await init_score_sink(settings)
         logger.info("tracing_lifespan_startup", enabled=enabled, scores=scores)
         return enabled
 

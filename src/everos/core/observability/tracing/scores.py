@@ -117,11 +117,14 @@ class RecallScoreSink:
 _sink: RecallScoreSink | None = None
 
 
-def init_score_sink(settings: ObservabilitySettings) -> bool:
+async def init_score_sink(settings: ObservabilitySettings) -> bool:
     """Build + start the sink when Langfuse creds + emit_recall_scores are set.
 
     Returns True if a sink was installed, False otherwise (disabled, scores
     off, or missing creds) — in which case ``emit_recall_scores`` is a no-op.
+
+    Idempotent: a re-init without an intervening shutdown tears down the
+    previous sink first, so its worker task + httpx client are not orphaned.
     """
     global _sink
     if not settings.enabled or not settings.emit_recall_scores:
@@ -131,6 +134,9 @@ def init_score_sink(settings: ObservabilitySettings) -> bool:
     host = settings.langfuse_host
     if not (pk and sk and host):
         return False
+
+    if _sink is not None:
+        await shutdown_score_sink()
 
     import httpx
 
@@ -156,10 +162,15 @@ def emit_recall_scores(
     trace_id: str,
     observation_id: str | None,
     top_score: float,
-    hit: bool,
+    hit: bool | None,
     method: str,
 ) -> None:
-    """Enqueue recall_top_score + recall_hit; no-op when the sink is off."""
+    """Enqueue recall_top_score (always) + recall_hit (only when ``hit`` is
+    a verdict); no-op when the sink is off.
+
+    ``hit=None`` means the method's score is uncalibrated (KEYWORD/VECTOR),
+    so no hit verdict is pushed — only the raw top score.
+    """
     if _sink is None:
         return
     comment = f"method={method}"
@@ -168,11 +179,12 @@ def emit_recall_scores(
             trace_id, observation_id, "recall_top_score", float(top_score), comment
         )
     )
-    _sink.enqueue(
-        ScoreRecord(
-            trace_id, observation_id, "recall_hit", 1.0 if hit else 0.0, comment
+    if hit is not None:
+        _sink.enqueue(
+            ScoreRecord(
+                trace_id, observation_id, "recall_hit", 1.0 if hit else 0.0, comment
+            )
         )
-    )
 
 
 async def shutdown_score_sink() -> None:

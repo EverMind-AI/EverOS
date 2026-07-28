@@ -283,6 +283,36 @@ async def test_user_keyword_returns_episodes_only() -> None:
     assert resp.data.profiles == []
 
 
+async def test_recall_hit_emitted_only_for_calibrated_methods(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """recall_hit is meaningful only for calibrated-score methods (HYBRID LR
+    / AGENTIC rerank). For KEYWORD (unbounded BM25) the code must emit
+    top_score but NOT a hit verdict — a fixed 0.6 threshold against an
+    unbounded score is an always-hit signal that inflates the dashboard."""
+    import everos.memory.search.manager as mgr_mod
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(mgr_mod, "current_trace_ids", lambda: ("t" * 32, "s" * 16))
+    monkeypatch.setattr(mgr_mod, "emit_recall_scores", lambda **kw: calls.append(kw))
+
+    # KEYWORD: raw BM25 score well above the threshold, but uncalibrated.
+    kw_mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=7.5)])
+    await kw_mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    assert len(calls) == 1
+    assert calls[0]["method"] == "keyword"
+    assert calls[0]["top_score"] == 7.5
+    assert calls[0]["hit"] is None  # no hit verdict for an uncalibrated method
+
+    # HYBRID: calibrated LR score → a real boolean hit verdict is emitted.
+    calls.clear()
+    hy_mgr = _build_manager(embedding=_StubEmbedding())
+    await hy_mgr.search(_user_req(method=SearchMethod.HYBRID))
+    assert len(calls) == 1
+    assert calls[0]["method"] == "hybrid"
+    assert isinstance(calls[0]["hit"], bool)
+
+
 async def test_search_uses_propagated_request_id_when_bound() -> None:
     """When a request id is bound upstream (middleware), ``search`` reuses it
     instead of minting a fresh one, so the response id matches the trace."""
@@ -1062,41 +1092,63 @@ async def test_hybrid_agent_emits_recall_and_rank(_search_spans: Any) -> None:
     assert "everos.search.rank" in spans
 
 
-async def test_search_emits_top_score_and_hit_on_span(_search_spans: Any) -> None:
-    """search sets everos.search.top_score (max item score) + everos.search.hit
-    (>= recall_hit_threshold, default 0.6) on the retriever span — always, no
-    Langfuse needed."""
+async def test_search_emits_top_score_without_hit_for_keyword(
+    _search_spans: Any,
+) -> None:
+    """KEYWORD sets everos.search.top_score (max item score) but NOT
+    everos.search.hit — an unbounded BM25 score forced through a fixed
+    threshold would be a misleading always-hit verdict."""
     mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=0.75)])
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
-    spans = _span_index(_search_spans)
-    attrs = spans["everos.memory.search"].attributes
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert attrs["everos.search.top_score"] == pytest.approx(0.75)
+    assert "everos.search.hit" not in attrs
+
+
+async def test_search_emits_hit_when_calibrated_above_threshold(
+    _search_spans: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HYBRID is calibrated ([0, 1]) so a top score >= recall_hit_threshold
+    (default 0.6) sets everos.search.hit = True on the retriever span."""
+    import everos.memory.search.manager as mgr_mod
+
+    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.9)
+    mgr = _build_manager(embedding=_StubEmbedding())
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert attrs["everos.search.top_score"] == pytest.approx(0.9)
     assert attrs["everos.search.hit"] is True
 
 
-async def test_search_hit_false_when_below_threshold(_search_spans: Any) -> None:
-    mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=0.3)])
-    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
-    spans = _span_index(_search_spans)
-    attrs = spans["everos.memory.search"].attributes
+async def test_search_hit_false_when_calibrated_below_threshold(
+    _search_spans: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import everos.memory.search.manager as mgr_mod
+
+    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.3)
+    mgr = _build_manager(embedding=_StubEmbedding())
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert attrs["everos.search.top_score"] == pytest.approx(0.3)
     assert attrs["everos.search.hit"] is False
 
 
-async def test_search_top_score_zero_when_no_results(_search_spans: Any) -> None:
+async def test_search_top_score_zero_without_hit_for_keyword(
+    _search_spans: Any,
+) -> None:
     mgr = _build_manager()  # no candidates
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
-    spans = _span_index(_search_spans)
-    attrs = spans["everos.memory.search"].attributes
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert attrs["everos.search.top_score"] == pytest.approx(0.0)
-    assert attrs["everos.search.hit"] is False
+    assert "everos.search.hit" not in attrs
 
 
 async def test_search_enqueues_recall_scores(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When tracing is active, search hands recall_top_score/hit to the score
-    sink with the retriever span's trace_id (032x) + observation_id (016x)."""
+    """When tracing is active, search hands recall_top_score to the score
+    sink with the retriever span's trace_id (032x) + observation_id (016x).
+    KEYWORD is uncalibrated so hit is None (no recall_hit is pushed)."""
     import everos.memory.search.manager as mgr_mod
 
     captured: dict[str, Any] = {}
@@ -1109,7 +1161,7 @@ async def test_search_enqueues_recall_scores(
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
 
     assert captured["top_score"] == pytest.approx(0.75)
-    assert captured["hit"] is True
+    assert captured["hit"] is None
     assert captured["method"] == "keyword"
     assert len(captured["trace_id"]) == 32
     assert len(captured["observation_id"]) == 16
@@ -1128,6 +1180,27 @@ async def test_search_captures_query_when_content_on(_search_spans: Any) -> None
 
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert json.loads(attrs["langfuse.observation.input"])["query"] == "hi"
+
+
+async def test_search_captures_returned_hits_when_content_on(
+    _search_spans: Any,
+) -> None:
+    """capture_content on → the search span records the returned hit ids
+    (episodes/agent_cases/agent_skills), not just the query."""
+    from everos.core.observability.tracing import set_capture_content
+
+    set_capture_content(True)
+    try:
+        mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+        await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    finally:
+        set_capture_content(False)
+    import json
+
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    out = json.loads(attrs["langfuse.observation.output"])
+    assert out["episodes"] == ["ep_1"]
+    assert out["agent_cases"] == [] and out["agent_skills"] == []
 
 
 async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:

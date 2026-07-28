@@ -125,6 +125,36 @@ async def test_child_spans_nest_across_asyncio_gather(
         assert spans[child].context.trace_id == trace_id
 
 
+def test_init_tracing_tears_down_previous_provider() -> None:
+    """Re-init without an intervening shutdown must not leak the previous
+    provider (its export thread + OTLP socket): the old provider is shut
+    down first, so its span processor receives ``shutdown()``."""
+    from opentelemetry.sdk.trace import SpanProcessor
+
+    class _SpyProcessor(SpanProcessor):
+        def __init__(self) -> None:
+            self.shutdown_called = False
+
+        def on_start(self, span: object, parent_context: object = None) -> None:
+            pass
+
+        def on_end(self, span: object) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            self.shutdown_called = True
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
+
+    settings = ObservabilitySettings(enabled=True, endpoint="http://collector.invalid")
+    first, second = _SpyProcessor(), _SpyProcessor()
+    init_tracing(settings, span_processor=first)
+    init_tracing(settings, span_processor=second)
+    assert first.shutdown_called is True
+    assert second.shutdown_called is False
+
+
 def test_resolve_otlp_target_derives_from_langfuse_creds() -> None:
     import base64
 

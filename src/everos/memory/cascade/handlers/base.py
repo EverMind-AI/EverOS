@@ -45,7 +45,7 @@ class Handler(abc.ABC):
     ``handle_added_or_modified`` and ``handle_deleted`` are the two
     cases the worker dispatches on, derived from
     :class:`MdChangeState.change_type`. Either may raise — the worker
-    catches and classifies (``RecoverableError`` vs unrecoverable) to
+    catches and classifies (``ExternalServiceError`` vs unrecoverable) to
     drive the retry / failed-state lifecycle.
     """
 

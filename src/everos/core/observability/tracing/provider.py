@@ -117,6 +117,11 @@ def init_tracing(
         logger.warning("observability_enabled_but_otel_not_installed")
         return False
 
+    # Idempotent: a re-init without an intervening shutdown would otherwise
+    # orphan the previous provider's export thread + OTLP socket.
+    if _provider is not None:
+        shutdown_tracing()
+
     from everos import __version__
 
     resource = Resource.create(

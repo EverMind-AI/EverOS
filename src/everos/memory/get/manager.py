@@ -1,4 +1,4 @@
-"""GetManager — top-level orchestrator for ``POST /api/v1/memory/get``.
+"""GetManager — top-level orchestrator for ``POST /api/v2/memory/get``.
 
 Hard partition by ``(owner_type, memory_type)`` (validated by
 :class:`GetRequest`):

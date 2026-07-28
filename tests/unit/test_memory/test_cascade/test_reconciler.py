@@ -22,6 +22,8 @@ def _state(
     kind: str = "episode",
     status: str = "done",
     change_type: str = "modified",
+    retryable: bool | None = None,
+    retry_count: int = 0,
 ) -> PriorState:
     return PriorState(
         md_path=path,
@@ -29,6 +31,8 @@ def _state(
         mtime=mtime,
         status=status,
         change_type=change_type,
+        retryable=retryable,
+        retry_count=retry_count,
     )
 
 
@@ -54,13 +58,31 @@ def test_done_state_with_matching_mtime_is_skipped() -> None:
     assert decisions == []
 
 
-def test_pending_state_with_matching_mtime_still_emits_modified() -> None:
-    """Pending / failed states are NOT terminal — re-emit so worker re-runs."""
+def test_pending_state_with_matching_mtime_is_skipped() -> None:
+    """Pending + unchanged mtime → skip (already queued, no re-upsert)."""
     decisions = reconcile(
         [_scan("a.md", mtime=1.0)],
         state={"a.md": _state("a.md", mtime=1.0, status="pending")},
     )
-    assert [(d.md_path, d.change_type) for d in decisions] == [("a.md", "modified")]
+    assert decisions == []
+
+
+def test_processing_state_with_matching_mtime_is_skipped() -> None:
+    """Processing + unchanged mtime → skip (worker is handling it)."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="processing")},
+    )
+    assert decisions == []
+
+
+def test_mtime_float_precision_loss_does_not_trigger_modified() -> None:
+    """SQLite REAL loses ~5 µs of mtime precision; must not re-queue."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1784034299.953285)],
+        state={"a.md": _state("a.md", mtime=1784034299.95328, status="done")},
+    )
+    assert decisions == []
 
 
 def test_deleted_path_emits_deleted_decision() -> None:
@@ -135,3 +157,42 @@ def test_mixed_scenario_preserves_order() -> None:
     }
     # Order: added/modified in scan order, deleted at the tail.
     assert decisions[-1].md_path == "gone.md"
+
+
+# ── failed + retryable interaction ─────────────────────────────────────────
+
+
+def test_failed_state_with_matching_mtime_still_emits_modified() -> None:
+    """Failed + retryable=True + unchanged mtime → re-emit for auto-retry."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="failed", retryable=True)},
+    )
+    assert [(d.md_path, d.change_type) for d in decisions] == [("a.md", "modified")]
+
+
+def test_failed_retryable_false_with_stable_mtime_is_skipped() -> None:
+    """Unrecoverable failures must not be auto-re-enqueued."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="failed", retryable=False)},
+    )
+    assert decisions == []
+
+
+def test_failed_retryable_true_with_stable_mtime_is_reenqueued() -> None:
+    """Transient failures auto-retry via scanner re-enqueue."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=1.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="failed", retryable=True)},
+    )
+    assert [(d.md_path, d.change_type) for d in decisions] == [("a.md", "modified")]
+
+
+def test_failed_with_changed_mtime_always_reenqueued() -> None:
+    """User edited the md — re-process regardless of retryable value."""
+    decisions = reconcile(
+        [_scan("a.md", mtime=2.0)],
+        state={"a.md": _state("a.md", mtime=1.0, status="failed", retryable=False)},
+    )
+    assert [(d.md_path, d.change_type) for d in decisions] == [("a.md", "modified")]

@@ -1,4 +1,4 @@
-"""POST /api/v1/memory/get — paginated listing endpoint.
+"""POST /api/v2/memory/get — paginated listing endpoint.
 
 Thin adapter: validate the request DTO, dispatch to the service layer,
 return the envelope verbatim. ``request_id`` is generated inside the
@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from everos.memory.get import GetRequest, GetResponse
 from everos.service import get as get_service
 
-router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/get", response_model=GetResponse)

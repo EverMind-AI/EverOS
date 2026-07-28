@@ -9,11 +9,22 @@ Each cycle:
    :meth:`handle_added_or_modified` or :meth:`handle_deleted` based on
    the row's ``change_type``.
 3. On success: ``mark_done``.
-4. On :class:`RecoverableError`: retry inline up to ``MAX_RETRY``; if
-   all attempts fail, ``mark_failed(retryable=True)``.
+4. On :class:`~everos.core.errors.ExternalServiceError`: retry inline
+   up to ``MAX_RETRY``; if all attempts fail,
+   ``mark_failed(retryable=True)`` — unless the cross-cycle retry
+   budget (:data:`_MAX_TOTAL_RETRIES`) is also exhausted, in which
+   case ``retryable=False`` is set here directly so the row skips
+   one extra scanner cycle before the entry-check would demote it.
 5. On any other exception: ``mark_failed(retryable=False)`` (treated
    as unrecoverable, surfaces in ``cascade fix`` for the user to
    triage by editing the md).
+
+Before step 2, a row whose ``retry_count`` has already reached
+:data:`_MAX_TOTAL_RETRIES` (across scanner re-enqueue cycles, not just
+this batch's inline retries) is short-circuited straight to
+``mark_failed(retryable=False)`` without invoking the handler — this
+bounds the total retry budget so a persistently-failing row cannot
+retry forever.
 
 Batch processing is concurrent inside a batch (``asyncio.gather``);
 ordering across rows is best-effort — the LSN gives a deterministic
@@ -48,10 +59,10 @@ import datetime as dt
 import time
 from dataclasses import dataclass
 
+from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import MdChangeState, md_change_state_repo
 
-from .errors import RecoverableError
 from .handlers import Handler
 
 logger = get_logger(__name__)
@@ -70,6 +81,17 @@ escalated from ``warning`` to ``error``. A one-off failure is benign
 cleanup are stuck and the index dir will grow unbounded — that must
 surface to health checks / alerting rather than rot as a warning nobody
 reads (the failure mode behind lance-format/lance#7653)."""
+_MAX_TOTAL_RETRIES = 12
+"""Total retry budget across scanner re-enqueue cycles.
+
+Each cycle: worker retries up to ``MAX_RETRY`` (default 3) inline;
+scanner re-enqueues on the next 30s sweep; retry_count accumulates.
+12 ≈ 4 scanner cycles × 3 inline retries ≈ 2 minutes of retrying.
+
+Once exhausted, ``mark_failed(retryable=False)`` so the reconciler
+stops re-enqueuing. Recover via ``cascade fix --apply`` (resets
+retry_count) or editing the md (mtime change resets retry_count)."""
+
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
 
@@ -323,6 +345,21 @@ class CascadeWorker:
             )
             return None
 
+        if row.retry_count >= _MAX_TOTAL_RETRIES:
+            logger.warning(
+                "cascade_worker_retry_budget_exhausted",
+                md_path=row.md_path,
+                kind=row.kind,
+                retry_count=row.retry_count,
+            )
+            await md_change_state_repo.mark_failed(
+                row.md_path,
+                retryable=False,
+                error=f"retry budget exhausted after {row.retry_count} attempts",
+                new_retry_count=row.retry_count,
+            )
+            return None
+
         retry_count = row.retry_count
         last_error: str = ""
         for attempt in range(self._max_retry + 1):
@@ -333,8 +370,13 @@ class CascadeWorker:
                     try:
                         outcome = await handler.handle_added_or_modified(row.md_path)
                     except FileNotFoundError:
+                        # The md disappeared between scanner enqueue and here
+                        # (delete/modify race — cascade delete event may not
+                        # arrive if it fires while the row is already in
+                        # ``processing``). Fold into a deletion so the row
+                        # completes with ``mark_done`` instead of failing.
                         outcome = await handler.handle_deleted(row.md_path)
-            except RecoverableError as exc:
+            except ExternalServiceError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning(
                     "cascade_worker_recoverable",
@@ -346,9 +388,13 @@ class CascadeWorker:
                     retry_count += 1
                     await asyncio.sleep(self._retry_backoff * (attempt + 1))
                     continue
+                # Inline attempts exhausted. Only stay retryable when
+                # the cross-cycle budget still has room; otherwise
+                # demote directly instead of taking an extra scanner
+                # cycle to hit the entry-check short-circuit.
                 await md_change_state_repo.mark_failed(
                     row.md_path,
-                    retryable=True,
+                    retryable=retry_count < _MAX_TOTAL_RETRIES,
                     error=last_error,
                     new_retry_count=retry_count,
                 )
@@ -513,11 +559,6 @@ class CascadeWorker:
             if state is not None:
                 state.optimize_failures += 1
                 failures = state.optimize_failures
-            # A one-off failure is benign (next tick retries). A sustained
-            # streak means optimize — compaction *and* version cleanup — is
-            # stuck, so the index dir grows unbounded; escalate to error so
-            # it surfaces to health checks / alerting instead of rotting as
-            # a warning nobody reads (see lance-format/lance#7653).
             log = (
                 logger.error
                 if failures >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD
@@ -530,6 +571,20 @@ class CascadeWorker:
                 consecutive_failures=failures,
                 error=f"{type(exc).__name__}: {exc}",
             )
+            if failures >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD:
+                logger.info(
+                    "cascade_lancedb_optimize_fallback_rebuild",
+                    kind=kind,
+                    consecutive_failures=failures,
+                )
+                await self._run_rebuild_once(kind)
+                # Reset even when rebuild fails: rate-limits fallback
+                # rebuild to at most once per threshold failures. A
+                # failed rebuild defers cleanup to the 12h periodic
+                # sweep — harmless for correctness (see
+                # _run_rebuild_once docstring).
+                if state is not None:
+                    state.optimize_failures = 0
 
     async def _heartbeat_loop(self) -> None:
         """Periodic safety net for the optimizer.
@@ -603,7 +658,18 @@ class CascadeWorker:
         # Drain any in-flight optimize before taking the rebuild slot —
         # both would commit on the same manifest version. The optimize
         # runner reciprocates (it awaits ``state.rebuild_task`` on entry).
-        if state.task is not None and not state.task.done():
+        # Skip when ``state.task`` is the current task: the fallback-rebuild
+        # path in ``_run_optimize_once`` reaches here from *inside* the
+        # optimize runner itself, so awaiting ``state.task`` would be
+        # self-await (asyncio raises RuntimeError). Suppress catches it,
+        # but relying on that is fragile — the explicit check is the
+        # correctness contract; suppress remains only for unexpected
+        # optimize failures.
+        if (
+            state.task is not None
+            and not state.task.done()
+            and state.task is not asyncio.current_task()
+        ):
             with contextlib.suppress(Exception):
                 await state.task
         rebuild_task = asyncio.create_task(

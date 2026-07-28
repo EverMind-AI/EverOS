@@ -99,10 +99,10 @@ class MdChangeState(BaseTable, table=True):
     retryable: bool | None = Field(default=None)
     """Meaningful only when ``status='failed'``.
 
-    - ``TRUE`` — RecoverableError exhausted MAX_RETRY; ``cascade fix
+    - ``TRUE`` — ExternalServiceError exhausted MAX_RETRY; ``cascade fix
       --apply`` will re-enqueue this row (pending, retry_count reset).
-    - ``FALSE`` — UnrecoverableError (malformed YAML, schema error
-      etc.); requires editing the md and re-saving.
+    - ``FALSE`` — unrecoverable error (malformed YAML, schema error,
+      retry budget exhausted); requires editing the md and re-saving.
     - ``NULL`` — not a failed row (pending / processing / done).
     """
 

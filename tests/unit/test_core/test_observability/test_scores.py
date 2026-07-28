@@ -10,7 +10,41 @@ from __future__ import annotations
 
 import asyncio
 
-from everos.core.observability.tracing.scores import RecallScoreSink, ScoreRecord
+from pydantic import SecretStr
+
+from everos.config.settings import ObservabilitySettings
+from everos.core.observability.tracing.scores import (
+    RecallScoreSink,
+    ScoreRecord,
+    init_score_sink,
+    shutdown_score_sink,
+)
+
+
+async def test_init_score_sink_tears_down_previous() -> None:
+    """Re-init without an intervening shutdown must not leak the previous
+    sink's worker task + httpx client: the old sink is stopped first."""
+    settings = ObservabilitySettings(
+        enabled=True,
+        emit_recall_scores=True,
+        langfuse_public_key="pk",
+        langfuse_secret_key=SecretStr("sk"),
+        langfuse_host="https://us.cloud.langfuse.com",
+    )
+    from everos.core.observability.tracing import scores as scores_mod
+
+    try:
+        assert await init_score_sink(settings) is True
+        first = scores_mod._sink
+        assert first is not None and first._task is not None
+
+        assert await init_score_sink(settings) is True
+        # The previous sink was torn down (stop() nulls its task) and a new
+        # sink installed in its place.
+        assert first._task is None
+        assert scores_mod._sink is not first
+    finally:
+        await shutdown_score_sink()
 
 
 async def test_worker_sends_payload_in_langfuse_shape() -> None:

@@ -1,4 +1,4 @@
-"""SearchManager — top-level orchestrator for ``POST /api/v1/memory/search``.
+"""SearchManager — top-level orchestrator for ``POST /api/v2/memory/search``.
 
 Hard partition by ``owner_type``:
 
@@ -42,6 +42,7 @@ from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
     capture_input,
+    capture_output,
     current_trace_ids,
     emit_recall_scores,
     memory_span,
@@ -139,6 +140,14 @@ def _top_score(data: SearchData) -> float:
     return max((item.score for item in items), default=0.0)
 
 
+# Methods whose top score is calibrated to a comparable [0, 1] scale
+# (HYBRID → LR sigmoid, AGENTIC → cross-encoder), so the recall_hit
+# threshold is meaningful. KEYWORD (unbounded BM25) and single-route
+# VECTOR are excluded — a fixed threshold there yields a misleading
+# near-constant "hit" that inflates cross-method dashboards.
+_CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
+
+
 class SearchManager:
     """Orchestrates per-kind recall, fusion, and shape into the public DTO."""
 
@@ -222,13 +231,29 @@ class SearchManager:
                     unprocessed_messages=unprocessed,
                 )
 
+            # Returned hits (ids only) — content, so only when capture_content
+            # is on. This is the point of a search trace: what came back.
+            capture_output(
+                span,
+                {
+                    "episodes": [e.id for e in data.episodes],
+                    "agent_cases": [c.id for c in data.agent_cases],
+                    "agent_skills": [s.id for s in data.agent_skills],
+                },
+            )
+
             # Recall-quality signal on the span (always on; the Langfuse
             # scores push is separate and gated on creds — see the score sink).
+            # `hit` is only meaningful for calibrated-score methods; leave it
+            # unset for KEYWORD/VECTOR so an unbounded score isn't forced
+            # through a fixed threshold into a misleading always-hit verdict.
             top_score = _top_score(data)
-            threshold = load_settings().observability.recall_hit_threshold
-            hit = top_score >= threshold
             span.set_attribute("everos.search.top_score", top_score)
-            span.set_attribute("everos.search.hit", hit)
+            hit: bool | None = None
+            if req.method in _CALIBRATED_METHODS:
+                threshold = load_settings().observability.recall_hit_threshold
+                hit = top_score >= threshold
+                span.set_attribute("everos.search.hit", hit)
 
             # Push recall-quality scores to Langfuse out-of-band (no-op unless
             # a score sink is configured); attach to this retriever span.

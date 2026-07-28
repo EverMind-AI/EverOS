@@ -121,14 +121,28 @@ def create_app(
     # or handler runs, so all logs + the response header carry it.
     app.add_middleware(RequestIdMiddleware)
 
-    # Routes.
+    # Infra endpoints — deliberately unversioned.
     app.include_router(health.router)
     app.include_router(metrics.router)
-    app.include_router(memorize.router)
-    app.include_router(search.router)
-    app.include_router(get.router)
-    app.include_router(ome.router)
-    app.include_router(knowledge.router)
+
+    # Business API — served under both /api/v2 (cloud-aligned name) and
+    # /api/v1 (retained as a permanent backward-compatible alias). The same
+    # router object is mounted twice, so both prefixes resolve to the exact
+    # same handlers; FastAPI's default operationId embeds the path, so the
+    # two copies get distinct OpenAPI ids automatically (no collision).
+    # v1 and v2 stay identical by construction — see test_api_versioning.
+    # v1 first — retained alias, behavior identical.
+    app.include_router(memorize.router, prefix="/api/v1")
+    app.include_router(search.router, prefix="/api/v1")
+    app.include_router(get.router, prefix="/api/v1")
+    app.include_router(ome.router, prefix="/api/v1")
+    app.include_router(knowledge.router, prefix="/api/v1")
+    # v2 — cloud-aligned name, same routers.
+    app.include_router(memorize.router, prefix="/api/v2")
+    app.include_router(search.router, prefix="/api/v2")
+    app.include_router(get.router, prefix="/api/v2")
+    app.include_router(ome.router, prefix="/api/v2")
+    app.include_router(knowledge.router, prefix="/api/v2")
 
     logger.info("app_created", docs_enabled=enable_docs)
     return app

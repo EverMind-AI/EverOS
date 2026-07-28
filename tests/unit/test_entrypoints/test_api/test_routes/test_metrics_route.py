@@ -112,6 +112,26 @@ async def test_metrics_counter_increments_on_request(client: AsyncClient) -> Non
     assert after - before == 1.0, f"counter not bumped: {before} → {after}"
 
 
+async def test_v1_and_v2_recorded_under_distinct_path_labels(
+    client: AsyncClient,
+) -> None:
+    """v1 and v2 alias hits must NOT collapse into one metric label.
+
+    Both prefixes resolve to the same handler, but the ``path`` label must
+    keep the ``/api/vN`` prefix so existing dashboards keep working and
+    per-version traffic stays distinguishable. (Regression guard: the leaf
+    route only carries its router-relative path, so the label must be built
+    from the full request path, not ``route.path``.)
+    """
+    await client.post("/api/v1/memory/get", json={})
+    await client.post("/api/v2/memory/get", json={})
+
+    dump = (await client.get("/metrics")).text
+    recorded = _all_recorded_paths(dump)
+    assert "/api/v1/memory/get" in recorded, recorded
+    assert "/api/v2/memory/get" in recorded, recorded
+
+
 async def test_metrics_skip_paths_not_recorded(client: AsyncClient) -> None:
     """``_SKIP_PATHS`` (``/metrics``, ``/health``) never appear in the counter."""
     # Hit both endpoints. If they were *not* skipped, they'd show up in

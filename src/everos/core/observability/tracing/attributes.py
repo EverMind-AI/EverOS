@@ -85,6 +85,13 @@ except ImportError:  # pragma: no cover - only without the [otel] extra
     _OTEL_AVAILABLE = False
 
 
+def _has_active_span() -> bool:
+    """True when a valid span context is currently active (a parent exists)."""
+    if not _OTEL_AVAILABLE:
+        return False
+    return _otel_trace.get_current_span().get_span_context().is_valid
+
+
 @contextmanager
 def memory_span(
     name: str,
@@ -94,6 +101,7 @@ def memory_span(
     user_id: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     tags: Sequence[str] = DEFAULT_TAGS,
+    nested_only: bool = False,
 ) -> Iterator[Any]:
     """Open a span named ``name`` and stamp the langfuse.* attributes.
 
@@ -105,7 +113,14 @@ def memory_span(
         metadata: Flat mapping → ``langfuse.trace.metadata.<key>``; None
             values are dropped rather than emitted as the string "None".
         tags: ``langfuse.trace.tags`` list.
+        nested_only: When True, only open a span if one is already active.
+            Calls that run outside any request trace (e.g. cascade-time
+            embedding during indexing) would otherwise each start a NEW root
+            trace — a per-chunk trace explosion — so they no-op instead.
     """
+    if nested_only and not _has_active_span():
+        yield _otel_trace.get_current_span() if _OTEL_AVAILABLE else None
+        return
     tracer = get_tracer("everos")
     with tracer.start_as_current_span(name) as span:
         span.set_attribute(LF_OBSERVATION_TYPE, observation_type)
@@ -181,15 +196,26 @@ def set_generation_usage(
 ) -> None:
     """Record ``gen_ai.*`` model + token attributes on the current span.
 
+    Token counts ACCUMULATE: a span that wraps more than one ``chat`` call
+    (e.g. the agentic/rank search path issues several LLM calls under one
+    ``everos.search.rank`` span) sums each call's usage rather than letting
+    the last call overwrite the rest. ``model`` is set as-is (last wins).
+
     No-op when OTel is absent or there is no active recording span, so LLM
     client wrappers can call it unconditionally.
     """
     if not _OTEL_AVAILABLE:
         return
     span = _otel_trace.get_current_span()
+    # `.attributes` exists on a recording SDK span and reflects values set
+    # earlier in this span's life; a non-recording span has none (getattr
+    # falls back to {}), and set_attribute on it is itself a no-op.
+    existing = getattr(span, "attributes", None) or {}
     if model is not None:
         span.set_attribute(GEN_AI_REQUEST_MODEL, model)
     if input_tokens is not None:
-        span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
+        prior = existing.get(GEN_AI_USAGE_INPUT_TOKENS, 0)
+        span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, prior + input_tokens)
     if output_tokens is not None:
-        span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+        prior = existing.get(GEN_AI_USAGE_OUTPUT_TOKENS, 0)
+        span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, prior + output_tokens)

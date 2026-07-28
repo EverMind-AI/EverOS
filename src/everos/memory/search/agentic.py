@@ -202,19 +202,17 @@ async def search_episodes_agentic(
 
     # 6. cluster_scoped: narrows hybrid_full to top-K cluster member expansions.
     async def cluster_scoped(q: str, _k: int) -> list[Candidate]:
-        with memory_span(
-            "everos.search.recall",
-            observation_type="retriever",
-            metadata={"phase": "agentic_cluster_scoped"},
-        ):
-            return await acluster_retrieve(
-                q,
-                base_retrieve=hybrid_full,
-                base_candidates=_CLUSTER_BASE_CANDIDATES,
-                clusters=clusters,
-                all_docs=all_docs,
-                cluster_top_k=_CLUSTER_TOP_K,
-            )
+        # No recall span here: cluster_scoped delegates to hybrid_full, which
+        # owns the recall span (and does the embedding). Wrapping it too
+        # produced a duplicate, same-name everos.search.recall nested in itself.
+        return await acluster_retrieve(
+            q,
+            base_retrieve=hybrid_full,
+            base_candidates=_CLUSTER_BASE_CANDIDATES,
+            clusters=clusters,
+            all_docs=all_docs,
+            cluster_top_k=_CLUSTER_TOP_K,
+        )
 
     # 7. Cross-encoder rerank fn (2-arg RerankFn, no internal truncation).
     rerank_fn = build_rerank_fn(

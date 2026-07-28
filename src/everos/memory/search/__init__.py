@@ -1,7 +1,7 @@
 """memory.search — read path: hybrid retrieval over LanceDB.
 
 This subpackage owns the recall + adapter layer for ``POST
-/api/v1/memory/search``. All fusion / rerank / agentic algorithms are
+/api/v2/memory/search``. All fusion / rerank / agentic algorithms are
 delegated to :mod:`everalgo.rank`; this layer is responsible for:
 
 * compiling the Filters DSL into a LanceDB ``where`` string,

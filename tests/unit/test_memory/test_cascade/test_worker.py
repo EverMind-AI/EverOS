@@ -4,7 +4,7 @@ The pure-function pieces (registry / reconciler) get coverage in
 their own files. Here we focus on the worker's branch behaviour
 without touching the real handler / lancedb stack:
 
-- ``RecoverableError`` retries up to ``max_retry`` and then marks
+- ``ExternalServiceError`` retries up to ``max_retry`` and then marks
   ``retryable=TRUE``.
 - Any other exception marks ``retryable=FALSE`` immediately.
 - Successful handler ⇒ ``mark_done``.
@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from everos.memory.cascade.errors import RecoverableError, UnrecoverableError
+from everos.core.errors import EmbeddingServiceError
 from everos.memory.cascade.handlers import Handler, HandlerDeps
 from everos.memory.cascade.types import HandlerOutcome
 from everos.memory.cascade.worker import CascadeWorker
@@ -86,21 +86,14 @@ class _OkHandler(Handler):
         )
 
 
-class _RecoverableHandler(_OkHandler):
-    """Always raises RecoverableError."""
-
-    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
-        raise RecoverableError("embedding 503")
-
-
-class _UnrecoverableHandler(_OkHandler):
-    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
-        raise UnrecoverableError("YAML parse error")
-
-
 class _BareExceptionHandler(_OkHandler):
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
         raise RuntimeError("unexpected boom")
+
+
+class _ExternalServiceHandler(_OkHandler):
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        raise EmbeddingServiceError("embedding 503")
 
 
 class _VanishedFileHandler(_OkHandler):
@@ -135,12 +128,23 @@ async def test_ok_handler_marks_done(patched_repo: _FakeRepo) -> None:
     assert patched_repo.failed == []
 
 
-async def test_recoverable_handler_marks_retryable_after_max_retry(
+async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
+    """Anything that isn't ExternalServiceError counts as unrecoverable."""
+    patched_repo.batch = [_Row(md_path="a.md")]
+    w = CascadeWorker({"episode": _BareExceptionHandler()}, retry_backoff_seconds=0)
+    await w.drain_once()
+    _path, retryable, _err, _retry = patched_repo.failed[0]
+    assert retryable is False
+
+
+async def test_external_service_error_is_retried_then_retryable(
     patched_repo: _FakeRepo,
 ) -> None:
+    """ExternalServiceError (embedding / LLM / rerank) retries up to
+    max_retry then marks retryable=True."""
     patched_repo.batch = [_Row(md_path="a.md")]
     w = CascadeWorker(
-        {"episode": _RecoverableHandler()}, max_retry=2, retry_backoff_seconds=0
+        {"episode": _ExternalServiceHandler()}, max_retry=2, retry_backoff_seconds=0
     )
     await w.drain_once()
     assert patched_repo.done == []
@@ -148,27 +152,7 @@ async def test_recoverable_handler_marks_retryable_after_max_retry(
     path, retryable, _err, retry_count = patched_repo.failed[0]
     assert path == "a.md"
     assert retryable is True
-    assert retry_count == 2  # 2 retries after the initial attempt
-
-
-async def test_unrecoverable_handler_marks_permanent(
-    patched_repo: _FakeRepo,
-) -> None:
-    patched_repo.batch = [_Row(md_path="a.md")]
-    w = CascadeWorker({"episode": _UnrecoverableHandler()}, retry_backoff_seconds=0)
-    await w.drain_once()
-    _path, retryable, err, _retry = patched_repo.failed[0]
-    assert retryable is False
-    assert "UnrecoverableError" in err or "YAML parse error" in err
-
-
-async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
-    """Anything that isn't RecoverableError counts as unrecoverable."""
-    patched_repo.batch = [_Row(md_path="a.md")]
-    w = CascadeWorker({"episode": _BareExceptionHandler()}, retry_backoff_seconds=0)
-    await w.drain_once()
-    _path, retryable, _err, _retry = patched_repo.failed[0]
-    assert retryable is False
+    assert retry_count == 2
 
 
 async def test_modified_event_for_vanished_file_is_processed_as_delete(
@@ -194,6 +178,57 @@ async def test_unknown_kind_marks_permanent_without_handler(
     await w.drain_once()
     assert patched_repo.failed[0][1] is False
     assert "no handler" in patched_repo.failed[0][2]
+
+
+async def test_retry_budget_exhausted_marks_unrecoverable(
+    patched_repo: _FakeRepo,
+) -> None:
+    """When retry_count >= _MAX_TOTAL_RETRIES, the worker skips processing
+    and marks the row retryable=False so the scanner stops re-enqueuing."""
+    from everos.memory.cascade import worker as wmod
+
+    threshold = wmod._MAX_TOTAL_RETRIES
+    patched_repo.batch = [_Row(md_path="a.md", retry_count=threshold)]
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+    await w.drain_once()
+    assert patched_repo.done == []
+    assert len(patched_repo.failed) == 1
+    path, retryable, err, retry_count = patched_repo.failed[0]
+    assert path == "a.md"
+    assert retryable is False
+    assert "retry budget exhausted" in err
+    assert retry_count == threshold
+
+
+async def test_external_service_error_at_budget_edge_demotes_in_place(
+    patched_repo: _FakeRepo,
+) -> None:
+    """When inline retries push retry_count to the budget mid-batch, the
+    row is marked retryable=False directly instead of retryable=True
+    followed by a scanner-cycle demotion."""
+    from everos.memory.cascade import worker as wmod
+
+    threshold = wmod._MAX_TOTAL_RETRIES
+    max_retry = 3
+    # Enter with retry_count such that the inline retries bring it exactly
+    # to the budget: increments happen on attempts 0..max_retry-1.
+    starting = threshold - max_retry
+    patched_repo.batch = [_Row(md_path="a.md", retry_count=starting)]
+    w = CascadeWorker(
+        {"episode": _ExternalServiceHandler()},
+        max_retry=max_retry,
+        retry_backoff_seconds=0,
+    )
+    await w.drain_once()
+    assert patched_repo.done == []
+    assert len(patched_repo.failed) == 1
+    path, retryable, _err, retry_count = patched_repo.failed[0]
+    assert path == "a.md"
+    assert retry_count == threshold
+    assert retryable is False, (
+        "budget exhausted during inline retries → demote in place, "
+        "do not require another scanner cycle to hit retryable=False"
+    )
 
 
 async def test_drain_until_empty_loops_until_no_batch(
@@ -622,9 +657,10 @@ async def test_optimize_failures_counted_escalated_and_reset(
     """Layer-2 stop-gap for lance-format/lance#7653.
 
     Consecutive ``optimize()`` failures are counted, escalate
-    warning→error once the threshold is hit, and reset to 0 on the next
-    success — instead of being swallowed as a silent warning stream that
-    lets the index dir grow until the disk fills.
+    warning→error once the threshold is hit, and reset to 0 when:
+    (a) a rebuild is triggered on sustained failures, or
+    (b) the next optimize succeeds — instead of being swallowed as a
+    silent warning stream that lets the index dir grow until the disk fills.
     """
     from everos.memory.cascade import worker as wmod
 
@@ -648,17 +684,53 @@ async def test_optimize_failures_counted_escalated_and_reset(
     w._optimizer_states["episode"] = wmod._KindOptimizerState()
 
     threshold = wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD
-    for _ in range(threshold):
+    # Run up to (threshold - 1) failures, then check state.
+    for _ in range(threshold - 1):
         await w._run_optimize_once("episode")
 
     state = w._optimizer_states["episode"]
-    assert state.optimize_failures == threshold
+    assert state.optimize_failures == threshold - 1
 
     fail_logs = [lvl for lvl, ev in calls if ev == "cascade_lancedb_optimize_failed"]
-    assert fail_logs[:-1] == ["warning"] * (threshold - 1)
-    assert fail_logs[-1] == "error"
+    assert fail_logs == ["warning"] * (threshold - 1)
 
-    # A subsequent success resets the streak.
+    # One more failure triggers rebuild and resets counter to 0.
+    await w._run_optimize_once("episode")
+    assert state.optimize_failures == 0
+    rebuild_logs = [
+        lvl for lvl, ev in calls if ev == "cascade_lancedb_optimize_fallback_rebuild"
+    ]
+    assert len(rebuild_logs) == 1
+
+    # A subsequent success keeps the counter at 0.
     repo.fail = False
     await w._run_optimize_once("episode")
     assert state.optimize_failures == 0
+
+
+async def test_optimize_fallback_rebuild_on_sustained_failure(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Consecutive optimize failures >= threshold trigger a fallback rebuild.
+
+    The rebuild drops + recreates indexes, bypassing the Rust panic path.
+    After rebuild (success or failure), the failure counter resets to 0
+    to avoid triggering rebuild on every subsequent optimize tick.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    repo = _OptimizeFailingRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.05,
+    )
+    w._optimizer_states["episode"] = wmod._KindOptimizerState()
+
+    threshold = wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD
+    for _i in range(threshold):
+        await w._run_optimize_once("episode")
+
+    state = w._optimizer_states["episode"]
+    assert state.optimize_failures == 0, "rebuild should reset failure counter"
+    assert len(repo.rebuild_calls) == 1, "exactly one fallback rebuild expected"
