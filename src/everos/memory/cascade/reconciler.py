@@ -21,13 +21,20 @@ Three categories per 12 doc §5.3:
 
 Paths whose prior state row is ``done`` AND the mtime matches are
 skipped on the add/modify side — the reconcile output stays tight on
-quiet sweeps.
+quiet sweeps. The same applies to ``failed`` rows whose ``retryable``
+flag is ``False`` (unrecoverable) and whose mtime is unchanged — those
+must not be auto-re-enqueued; the user has to edit the md (which
+changes mtime) to get another attempt. ``failed`` rows with
+``retryable=True`` (transient) are re-emitted on a stable mtime so the
+worker auto-retries on the next scanner sweep.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterable, Mapping
+
+from everos.infra.persistence.sqlite import MTIME_TOLERANCE_SECONDS
 
 from .types import ReconcileDecision, ScanInput
 
@@ -46,6 +53,11 @@ class PriorState:
     mtime: float
     status: str  # "pending" | "processing" | "done" | "failed"
     change_type: str  # "added" | "modified" | "deleted"
+    retryable: bool | None = None
+    """``failed`` eligibility flag: ``True`` transient, ``False``
+    unrecoverable, ``None`` for non-``failed`` rows."""
+    retry_count: int = 0
+    """Total retry attempts across scanner re-enqueue cycles."""
 
 
 def reconcile(
@@ -81,8 +93,14 @@ def reconcile(
                 )
             )
             continue
-        # Skip when the row is already done and mtime hasn't moved.
-        if prior.status == "done" and prior.mtime == item.mtime:
+        mtime_stable = abs(prior.mtime - item.mtime) < MTIME_TOLERANCE_SECONDS
+        if mtime_stable and prior.status in (
+            "done",
+            "pending",
+            "processing",
+        ):
+            continue
+        if mtime_stable and prior.status == "failed" and prior.retryable is False:
             continue
         decisions.append(
             ReconcileDecision(

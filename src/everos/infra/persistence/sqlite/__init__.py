@@ -31,6 +31,7 @@ not need to manage either.
 # ``SQLModel.metadata`` so ``SqliteLifespanProvider.startup`` can
 # ``create_all`` without callers having to import each model module.
 from . import tables as tables
+from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from .repos import DocumentListPage as DocumentListPage
 from .repos import DocumentUpsertPayload as DocumentUpsertPayload
 from .repos import QueueSummary as QueueSummary
@@ -58,6 +59,7 @@ from .tables import ReflectionReport as ReflectionReport
 from .tables import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
+    "MTIME_TOLERANCE_SECONDS",
     "Cluster",
     "ClusterMember",
     "ConversationStatus",

@@ -173,6 +173,8 @@ async def _load_state_snapshot() -> dict[str, PriorState]:
                 mtime=row.mtime,
                 status=row.status,
                 change_type=row.change_type,
+                retryable=row.retryable,
+                retry_count=row.retry_count,
             )
             for row in rows
         }

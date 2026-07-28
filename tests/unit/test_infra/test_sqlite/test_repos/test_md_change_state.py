@@ -96,6 +96,42 @@ async def test_upsert_same_path_bumps_lsn_and_resets_retry(
     assert row.mtime == 2.0
 
 
+async def test_upsert_preserves_retry_count_for_failed_stable_mtime(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Scanner re-enqueue of a failed row with unchanged mtime keeps retry_count."""
+    path = "users/u/episodes/ep.md"
+    await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
+    await repo.claim_one(path)
+    await repo.mark_failed(path, retryable=True, error="503", new_retry_count=6)
+
+    # Re-enqueue with same mtime (scanner auto-retry).
+    await repo.upsert(path, kind="episode", change_type="modified", mtime=1.0)
+    row = await repo.get_by_id(path)
+    assert row is not None
+    assert row.status == "pending"
+    assert row.retry_count == 6, "retry_count must survive scanner re-enqueue"
+    assert row.retryable is None
+    assert row.error is None
+
+
+async def test_upsert_resets_retry_count_on_mtime_change(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """User edited the md (mtime changed) — start fresh."""
+    path = "users/u/episodes/ep.md"
+    await repo.upsert(path, kind="episode", change_type="added", mtime=1.0)
+    await repo.claim_one(path)
+    await repo.mark_failed(path, retryable=True, error="503", new_retry_count=6)
+
+    # Re-enqueue with different mtime (user edit).
+    await repo.upsert(path, kind="episode", change_type="modified", mtime=2.0)
+    row = await repo.get_by_id(path)
+    assert row is not None
+    assert row.status == "pending"
+    assert row.retry_count == 0, "mtime change must reset retry_count"
+
+
 # ── force_enqueue ───────────────────────────────────────────────────────
 
 
