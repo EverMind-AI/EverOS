@@ -121,3 +121,155 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert extracted[0].owner_id == "u1"
     assert extracted[0].session_id == "s1"
     assert extracted[0].source == "pipeline"
+
+
+async def test_run_emits_extract_and_persist_spans() -> None:
+    """pipeline.run opens an everos.extract generation span (where LLM token
+    usage lands) and an everos.persist.markdown span around the md write."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    engine = _CapturingEngine()
+    episode_writer = MagicMock()
+    episode_writer.append_entry = AsyncMock(
+        return_value=EntryId(prefix="ep", date=_dt.date(2026, 5, 17), seq=1)
+    )
+    episode_writer.path_for = MagicMock(return_value="users/u1/episodes/x.md")
+    prompt_loader = MagicMock()
+    prompt_loader.load = MagicMock(return_value="<prompt>")
+    pipeline = UserMemoryPipeline(
+        episode_writer=episode_writer,
+        prompt_loader=prompt_loader,
+        llm_client=MagicMock(),
+        engine=engine,
+    )
+    cell = _sample_memcell()
+    ingested = IngestResult(
+        session_id="s1",
+        messages=[
+            CanonicalMessage(
+                message_id="m1",
+                session_id="s1",
+                sender_id="u1",
+                role="user",
+                timestamp=_dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.UTC),
+                text="hello",
+            )
+        ],
+    )
+    algo_ep = AlgoEpisode(
+        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
+    )
+
+    exporter = InMemorySpanExporter()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        with patch.object(
+            pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
+        ):
+            await pipeline.run(
+                ingested=ingested,
+                cells=[cell],
+                memcell_ids=["mc_a"],
+                per_cell_all_senders=[["u1"]],
+            )
+        force_flush()
+        spans = {s.name: s for s in exporter.get_finished_spans()}
+        assert "everos.extract" in spans
+        assert "everos.persist.markdown" in spans
+        assert spans["everos.extract"].attributes["langfuse.observation.type"] == (
+            "generation"
+        )
+    finally:
+        shutdown_tracing()
+
+
+async def test_extract_persist_capture_content_when_on() -> None:
+    """With capture_content on, everos.extract carries the episode text and
+    everos.persist.markdown carries the written .md path; off → neither."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        set_capture_content,
+        shutdown_tracing,
+    )
+
+    engine = _CapturingEngine()
+    episode_writer = MagicMock()
+    episode_writer.append_entry = AsyncMock(
+        return_value=EntryId(prefix="ep", date=_dt.date(2026, 5, 17), seq=1)
+    )
+    episode_writer.path_for = MagicMock(return_value="users/u1/episodes/x.md")
+    prompt_loader = MagicMock()
+    prompt_loader.load = MagicMock(return_value="<prompt>")
+    pipeline = UserMemoryPipeline(
+        episode_writer=episode_writer,
+        prompt_loader=prompt_loader,
+        llm_client=MagicMock(),
+        engine=engine,
+    )
+    cell = _sample_memcell()
+    ingested = IngestResult(
+        session_id="s1",
+        messages=[
+            CanonicalMessage(
+                message_id="m1",
+                session_id="s1",
+                sender_id="u1",
+                role="user",
+                timestamp=_dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.UTC),
+                text="hello",
+            )
+        ],
+    )
+    algo_ep = AlgoEpisode(
+        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
+    )
+
+    exporter = InMemorySpanExporter()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    set_capture_content(True)
+    try:
+        with patch.object(
+            pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
+        ):
+            await pipeline.run(
+                ingested=ingested,
+                cells=[cell],
+                memcell_ids=["mc_a"],
+                per_cell_all_senders=[["u1"]],
+            )
+        force_flush()
+    finally:
+        set_capture_content(False)
+        shutdown_tracing()
+
+    spans = {s.name: s for s in exporter.get_finished_spans()}
+    assert spans["everos.extract"].attributes["langfuse.observation.output"] == (
+        "they said hello"
+    )
+    assert (
+        spans["everos.persist.markdown"].attributes["langfuse.observation.output"]
+        == "users/u1/episodes/x.md"
+    )

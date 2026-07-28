@@ -2,7 +2,7 @@
 
 End-to-end orchestration:
 
-    POST /api/v1/memory/add { session_id, messages[] }
+    POST /api/v2/memory/add { session_id, messages[] }
         → ingest.process → IngestResult
         → _boundary.prepare_cells(mode=settings.memorize.mode) → cells
         → asyncio.gather(
@@ -30,7 +30,9 @@ from pydantic import BaseModel
 
 from everos.component.llm import get_llm_client
 from everos.config import load_settings
+from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
+from everos.core.observability.tracing import memory_span
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
@@ -170,14 +172,25 @@ async def memorize(
     boundary_cfg = settings.boundary_detection
     session_id = payload["session_id"]
 
-    async with asyncio.timeout(settings.memorize.session_lock_timeout_seconds):
-        async with get_session_lock(session_id):
-            return await _memorize_locked(
-                payload,
-                mode=mode,
-                boundary_cfg=boundary_cfg,
-                is_final=is_final,
-            )
+    span_name = "everos.memory.flush" if is_final else "everos.memory.add"
+    with memory_span(
+        span_name,
+        observation_type="span",
+        session_id=session_id,
+        metadata={
+            "mode": mode,
+            "is_final": is_final,
+            "request_id": resolve_request_id(),
+        },
+    ):
+        async with asyncio.timeout(settings.memorize.session_lock_timeout_seconds):
+            async with get_session_lock(session_id):
+                return await _memorize_locked(
+                    payload,
+                    mode=mode,
+                    boundary_cfg=boundary_cfg,
+                    is_final=is_final,
+                )
 
 
 async def _memorize_locked(
@@ -189,15 +202,19 @@ async def _memorize_locked(
 ) -> MemorizeResult:
     """Inner critical section — runs under the per-session lock."""
     ingested = await ingest_process(payload)
-    boundary = await prepare_cells(
-        ingested,
-        mode=mode,
-        is_final=is_final,
-        llm_client=get_llm_client(),
-        prompt_loader=_get_prompt_loader(),
-        hard_token_limit=boundary_cfg.hard_token_limit,
-        hard_msg_limit=boundary_cfg.hard_msg_limit,
-    )
+    # Boundary detection runs an LLM (everalgo detect_boundaries). Wrap it in a
+    # generation span so its token usage lands on a GENERATION observation
+    # (costed by Langfuse) instead of the SPAN-typed request root (dropped).
+    with memory_span("everos.memcell.boundary", observation_type="generation"):
+        boundary = await prepare_cells(
+            ingested,
+            mode=mode,
+            is_final=is_final,
+            llm_client=get_llm_client(),
+            prompt_loader=_get_prompt_loader(),
+            hard_token_limit=boundary_cfg.hard_token_limit,
+            hard_msg_limit=boundary_cfg.hard_msg_limit,
+        )
 
     if not boundary.cells:
         # Nothing went past the boundary stage — no pipelines to dispatch.

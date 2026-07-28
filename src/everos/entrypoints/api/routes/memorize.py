@@ -1,4 +1,4 @@
-"""POST /api/v1/memory/add and /api/v1/memory/flush.
+"""POST /api/v2/memory/add and /api/v2/memory/flush.
 
 DTOs follow the v1 API brief (01_v1_api_brief.md §2 / §3). Routes are
 thin adapters: validate the DTO, dump to dict, hand to service. No
@@ -19,7 +19,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from everos.entrypoints.api.utils import extract_request_id
 from everos.service import memorize
 
-router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 # ── Path-safe identifier ────────────────────────────────────────────────────

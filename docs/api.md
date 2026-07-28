@@ -1,4 +1,4 @@
-# EverOS HTTP API (v1)
+# EverOS HTTP API (v2)
 
 Human-readable reference for the EverOS HTTP API. Schema names, types
 and validation constraints mirror the OpenAPI spec served at
@@ -26,11 +26,11 @@ business semantics the raw spec does not carry.
   - [SearchMethod](#searchmethod)
   - [GetMemoryType](#getmemorytype)
 - [Endpoints](#endpoints)
-  - [POST /api/v1/memory/add](#post-apiv1memoryadd)
-  - [POST /api/v1/memory/flush](#post-apiv1memoryflush)
-  - [POST /api/v1/memory/search](#post-apiv1memorysearch)
-  - [POST /api/v1/memory/get](#post-apiv1memoryget)
-  - [POST /api/v1/ome/trigger](#post-apiv1ometrigger)
+  - [POST /api/v2/memory/add](#post-apiv1memoryadd)
+  - [POST /api/v2/memory/flush](#post-apiv1memoryflush)
+  - [POST /api/v2/memory/search](#post-apiv1memorysearch)
+  - [POST /api/v2/memory/get](#post-apiv1memoryget)
+  - [POST /api/v2/ome/trigger](#post-apiv1ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
 
@@ -42,14 +42,21 @@ business semantics the raw spec does not carry.
 |---|---|---|
 | Host | `127.0.0.1` (loopback only) | `EVEROS_API__HOST` env var or `--host` flag |
 | Port | `8000` | `EVEROS_API__PORT` env var or `--port` flag |
-| Version prefix | `/api/v1` | — |
+| Version prefix | `/api/v2` | — |
 
-Business endpoints live under `/api/v1/memory/`, `/api/v1/ome/`, and
-`/api/v1/knowledge/`. Knowledge endpoints have their own dedicated
+Business endpoints live under `/api/v2/memory/`, `/api/v2/ome/`, and
+`/api/v2/knowledge/`. Knowledge endpoints have their own dedicated
 reference at [docs/knowledge.md](knowledge.md) and are cross-referenced
 below. The operational endpoints `GET /health` and `GET /metrics` exist
 but are intentionally outside this reference — they are runtime probes
 for deployment, not part of the application contract.
+
+`/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
+business endpoint is **also** served under `/api/v1`, which is retained as a
+permanent, backward-compatible alias: the two prefixes resolve to the same
+handlers with identical request/response contracts. Existing `/api/v1`
+integrations keep working unchanged; new integrations should use `/api/v2`.
+Swap the prefix in any example below to reach the same endpoint under v1.
 
 ### Content type
 
@@ -133,7 +140,7 @@ storage. This is the same rule users see when reading rendered output:
   e.g. `alice_ep_20260528_00000001` for an episode, `alice_af_...`
   for an atomic fact. See
   [storage_layout.md §4](storage_layout.md) for the encoding.
-- **All endpoints are POST** for `/api/v1/memory/*` even when the
+- **All endpoints are POST** for `/api/v2/memory/*` even when the
   semantics look like a read (`/search`, `/get`) — the request bodies
   are too rich (filters, methods, paging) to encode in a query string.
 
@@ -173,7 +180,7 @@ the top level (mirroring the success envelope) alongside a nested
     "code": "NOT_FOUND",
     "message": "Document 'abc123' not found",
     "timestamp": "2026-06-01T12:24:46+00:00",
-    "path": "/api/v1/knowledge/documents/abc123"
+    "path": "/api/v2/knowledge/documents/abc123"
   }
 }
 ```
@@ -204,7 +211,7 @@ parsing the human-readable `message` field.
 | `code` | `string` | One of the `ErrorCode` values listed above |
 | `message` | `string` | Human-readable reason. For `INVALID_INPUT` from request validation, **only the first** validation error is surfaced, formatted `"<msg>: <dotted-loc>"` with the leading `body` segment stripped (e.g. `"Field required: messages"`); a model-level validator with no field location surfaces just `"<msg>"` (e.g. `"Value error, exactly one of user_id / agent_id must be provided"`) |
 | `timestamp` | `string` | ISO-8601 with timezone offset (display tz) |
-| `path` | `string` | Request path, e.g. `/api/v1/memory/add` |
+| `path` | `string` | Request path, e.g. `/api/v2/memory/add` |
 
 > Unlike FastAPI's default, the full per-field validation array is **not**
 > returned — only the first error's message. A client that needs the
@@ -478,7 +485,7 @@ require `agent_id`. The mismatching combinations are rejected with
 
 ## Endpoints
 
-### POST /api/v1/memory/add
+### POST /api/v2/memory/add
 
 Append a batch of messages to a session buffer. The server
 accumulates messages until the boundary detector decides the session
@@ -535,7 +542,7 @@ correlation.
 
 ```bash
 TS=$(( $(date +%s) * 1000 ))
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-002\",
@@ -561,7 +568,7 @@ Response (real capture):
 }
 ```
 
-### POST /api/v1/memory/flush
+### POST /api/v2/memory/flush
 
 Force the boundary detector to decide **now** for the given session
 buffer. The LLM runs extraction (one call) regardless of whether the
@@ -603,7 +610,7 @@ sync is still asynchronous — see
 #### cURL example
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-002","app_id":"default","project_id":"default"}'
 ```
@@ -620,7 +627,7 @@ extraction LLM call):
 }
 ```
 
-### POST /api/v1/memory/search
+### POST /api/v2/memory/search
 
 Hybrid retrieval over the memory store. Combines BM25, dense vector
 ANN, optional scalar filtering, optional cross-encoder rerank, and
@@ -823,7 +830,7 @@ attribution, so `session_id` is the only meaningful query dimension.
 #### cURL example
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
@@ -871,7 +878,7 @@ Response (real capture):
 }
 ```
 
-### POST /api/v1/memory/get
+### POST /api/v2/memory/get
 
 Paginated listing of memory records of a given kind for a single
 owner. No ranking — ordering is `sort_by` × `sort_order` only. Used
@@ -1003,7 +1010,7 @@ Same shape as [SearchAgentSkillItem](#searchagentskillitem) **minus**
 #### cURL example
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/get \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/get \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
@@ -1043,7 +1050,7 @@ Response (real capture):
 }
 ```
 
-### POST /api/v1/ome/trigger
+### POST /api/v2/ome/trigger
 
 Manually trigger a registered OME strategy.
 
@@ -1071,7 +1078,7 @@ Manually trigger a registered OME strategy.
 #### cURL example
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/ome/trigger \
+curl -X POST http://127.0.0.1:8000/api/v2/ome/trigger \
   -H 'Content-Type: application/json' \
   -d '{"name": "reflect_episodes", "force": true}'
 ```
@@ -1080,7 +1087,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/ome/trigger \
 
 ### Knowledge endpoints
 
-The knowledge base subsystem (`/api/v1/knowledge/*`) provides document
+The knowledge base subsystem (`/api/v2/knowledge/*`) provides document
 upload, CRUD, and hybrid search. These endpoints are fully documented
 in their own reference: **[docs/knowledge.md](knowledge.md)**.
 
@@ -1088,15 +1095,15 @@ Summary of available routes:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/knowledge/documents` | Upload and extract a document |
-| `GET` | `/api/v1/knowledge/documents` | List documents (paginated) |
-| `GET` | `/api/v1/knowledge/documents/{doc_id}` | Get a single document |
-| `PUT` | `/api/v1/knowledge/documents/{doc_id}` | Replace a document |
-| `PATCH` | `/api/v1/knowledge/documents/{doc_id}` | Partial update |
-| `DELETE` | `/api/v1/knowledge/documents/{doc_id}` | Delete a document |
-| `GET` | `/api/v1/knowledge/topics/{topic_id}` | Get a single topic |
-| `POST` | `/api/v1/knowledge/search` | Hybrid search over topics |
-| `GET` | `/api/v1/knowledge/categories` | List taxonomy categories |
+| `POST` | `/api/v2/knowledge/documents` | Upload and extract a document |
+| `GET` | `/api/v2/knowledge/documents` | List documents (paginated) |
+| `GET` | `/api/v2/knowledge/documents/{doc_id}` | Get a single document |
+| `PUT` | `/api/v2/knowledge/documents/{doc_id}` | Replace a document |
+| `PATCH` | `/api/v2/knowledge/documents/{doc_id}` | Partial update |
+| `DELETE` | `/api/v2/knowledge/documents/{doc_id}` | Delete a document |
+| `GET` | `/api/v2/knowledge/topics/{topic_id}` | Get a single topic |
+| `POST` | `/api/v2/knowledge/search` | Hybrid search over topics |
+| `GET` | `/api/v2/knowledge/categories` | List taxonomy categories |
 
 ---
 

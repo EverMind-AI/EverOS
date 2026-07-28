@@ -24,6 +24,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
+from everos.core.observability.tracing import current_traceparent
 from everos.infra.ome._background.config_reloader import ConfigReloader
 from everos.infra.ome._background.crash_recovery import scan_and_resume
 from everos.infra.ome._background.idle_scanner import IdleScanner
@@ -91,12 +92,15 @@ async def _runner_entry(
     event_topic: str,
     event_payload: str,
     max_retries_snapshot: int,
+    traceparent: str = "",
 ) -> None:
     """Module-level APS jobstore callback for a single run.
 
     Looks the engine up by id and hands off to
     :meth:`OfflineEngine.dispatch_run`. Pickle-safe (no closures, no
-    bound methods captured into APS jobstore args).
+    bound methods captured into APS jobstore args). ``traceparent`` defaults
+    to "" so crash-recovered jobs enqueued before this field existed still
+    unpack (they simply root their own trace).
     """
     engine = _ENGINES.get(engine_id)
     if engine is None:
@@ -112,6 +116,7 @@ async def _runner_entry(
         event_topic=event_topic,
         event_payload=event_payload,
         max_retries_snapshot=max_retries_snapshot,
+        traceparent=traceparent,
     )
 
 
@@ -644,6 +649,10 @@ class OfflineEngine:
             else self._config.max_retries
         )
         event_topic = type(event).topic()
+        # Capture the triggering request's trace context (if any) here — this
+        # runs synchronously in the caller's task, so its span is still active.
+        # Carried as a pickle-safe string across the APScheduler boundary.
+        traceparent = current_traceparent() or ""
         self._on_run_enqueued()
         try:
             self._scheduler.add_job(
@@ -657,6 +666,7 @@ class OfflineEngine:
                     event_topic,
                     event.model_dump_json(),
                     max_retries_snapshot,
+                    traceparent,
                 ],
                 id=run_id,
                 replace_existing=False,
@@ -700,6 +710,7 @@ class OfflineEngine:
         event_topic: str,
         event_payload: str,
         max_retries_snapshot: int,
+        traceparent: str | None = None,
     ) -> None:
         """APS jobstore callback target for one strategy run.
 
@@ -724,6 +735,7 @@ class OfflineEngine:
                 event,
                 run_id=run_id,
                 max_retries_snapshot=max_retries_snapshot,
+                traceparent=traceparent,
             )
         finally:
             self._on_run_completed()

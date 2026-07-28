@@ -228,3 +228,107 @@ async def test_runner_aborts_silently_when_mark_running_fails(
 
 async def _no_emit(event: BaseEvent) -> None:
     return None
+
+
+@pytest.mark.asyncio
+async def test_runner_emits_ome_agent_span(setup) -> None:
+    """Runner wraps the strategy body in an everos.ome.<name> agent span
+    (its own trace — runs in an APScheduler task, no request context)."""
+    rec_store, sem = setup
+
+    @offline_strategy(name="traced_strat", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, ctx: StrategyContext) -> None:
+        return None
+
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        runner = Runner(
+            run_record_store=rec_store,
+            engine_sem=sem,
+            emit_hook=_no_emit,
+            engine=MagicMock(),
+        )
+        await runner.run(s.meta, _E(), run_id="r_trace", max_retries_snapshot=1)
+        force_flush()
+    finally:
+        shutdown_tracing()
+
+    spans = {sp.name: sp for sp in exporter.get_finished_spans()}
+    assert "everos.ome.traced_strat" in spans
+    assert (
+        spans["everos.ome.traced_strat"].attributes["langfuse.observation.type"]
+        == "agent"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_ome_span_links_to_upstream_traceparent(setup) -> None:
+    """Given a traceparent (captured where a request span was active), the
+    everos.ome.<name> span nests under that upstream trace, not a new root."""
+    rec_store, sem = setup
+
+    @offline_strategy(name="linked_strat", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, ctx: StrategyContext) -> None:
+        return None
+
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        current_traceparent,
+        force_flush,
+        init_tracing,
+        memory_span,
+        shutdown_tracing,
+    )
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        # Simulate the triggering request: capture its traceparent, then close.
+        with memory_span("everos.memory.flush", observation_type="span") as parent:
+            tp = current_traceparent()
+            parent_tid = parent.get_span_context().trace_id
+
+        runner = Runner(
+            run_record_store=rec_store,
+            engine_sem=sem,
+            emit_hook=_no_emit,
+            engine=MagicMock(),
+        )
+        await runner.run(
+            s.meta, _E(), run_id="r_link", max_retries_snapshot=1, traceparent=tp
+        )
+        force_flush()
+    finally:
+        shutdown_tracing()
+
+    ome = {sp.name: sp for sp in exporter.get_finished_spans()}[
+        "everos.ome.linked_strat"
+    ]
+    assert ome.context.trace_id == parent_tid  # same trace as the request
+    assert ome.parent is not None  # child, not a fresh root

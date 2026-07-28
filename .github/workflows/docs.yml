@@ -1,29 +1,14 @@
 name: Docs
 
+# Runs on EVERY pull request / push to main — no `paths:` filter. When `links`
+# is a required status check, path-filtering it silently blocks code-only PRs:
+# the workflow is skipped, the required check never reports, and the merge box
+# waits forever. `make docs-check` validates the whole doc tree regardless of
+# what a PR touched and takes only seconds, so it is cheap to always report.
 on:
   pull_request:
-    paths:
-      - "**/*.md"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
-      - ".github/workflows/docs.yml"
-      - ".claude/skills/**/*.md"
-      - "CLAUDE.md"
-      - "CONTRIBUTING.md"
-      - "scripts/check_docs.py"
-      - "scripts/check_github_contributor_docs.py"
   push:
     branches: [main]
-    paths:
-      - "**/*.md"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
-      - ".github/workflows/docs.yml"
-      - ".claude/skills/**/*.md"
-      - "CLAUDE.md"
-      - "CONTRIBUTING.md"
-      - "scripts/check_docs.py"
-      - "scripts/check_github_contributor_docs.py"
 
 permissions:
   contents: read

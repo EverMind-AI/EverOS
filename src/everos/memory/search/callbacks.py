@@ -28,6 +28,7 @@ from everalgo.rank.protocols import RerankFn, RetrieveFn
 from everalgo.types import Candidate
 
 from everos.component.rerank import RerankProvider
+from everos.core.observability.tracing import memory_span
 
 if TYPE_CHECKING:
     from .recall import KindRecaller
@@ -64,7 +65,12 @@ def build_rerank_fn(
         if not items:
             return []
         passages = [str(c.metadata.get(text_field, "")) for c in items]
-        results = await provider.rerank(query, passages, instruction=instruction)
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": "cross_encoder"},
+        ):
+            results = await provider.rerank(query, passages, instruction=instruction)
         out: list[Candidate] = []
         for r in results:
             if not 0 <= r.index < len(items):
@@ -112,9 +118,14 @@ def build_skill_rerank_fn(provider: RerankProvider) -> RerankFn:
         if not items:
             return []
         passages = [_format_skill_passage(c) for c in items]
-        results = await provider.rerank(
-            query, passages, instruction=_SKILL_RERANK_INSTRUCTION
-        )
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": "cross_encoder_skill"},
+        ):
+            results = await provider.rerank(
+                query, passages, instruction=_SKILL_RERANK_INSTRUCTION
+            )
         out: list[Candidate] = []
         for r in results:
             if not 0 <= r.index < len(items):

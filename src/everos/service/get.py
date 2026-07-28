@@ -1,4 +1,4 @@
-"""Get use case — lazy singleton wiring for ``POST /api/v1/memory/get``.
+"""Get use case — lazy singleton wiring for ``POST /api/v2/memory/get``.
 
 Mirrors :mod:`everos.service.search`: the :class:`GetManager` and its
 LanceDB repo singletons are built on first call so the FastAPI module

@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.1.2"
+version = "1.2.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -70,6 +70,12 @@ dependencies = [
 
 [project.optional-dependencies]
 multimodal = ["everalgo-parser[svg]>=0.2.1"]  # [svg] bundles cairosvg → SVG works by default
+# Native OpenTelemetry tracing export. Optional — EverOS never imports these
+# unless [observability] is enabled. Install with: pip install everos[otel]
+otel = [
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+]
 
 [project.urls]
 Homepage = "https://evermind.ai"
@@ -255,4 +261,8 @@ dev = [
     "pre-commit>=4.0.0",
     "ipdb>=0.13.13",
     "pyinstrument>=5.0.0",
+    # Tracing tests must actually run (no skip-when-absent), so the optional
+    # [otel] stack is always present in the dev / CI environment.
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
 ]

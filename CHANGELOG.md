@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-24
+
+### Added
+
+- **`/api/v2` API prefix** — every business endpoint (`memory/*`, `ome/*`,
+  `knowledge/*`) is now served under `/api/v2`, aligning the open-source API
+  with the EverOS Cloud contract. `/api/v1` is retained as a permanent,
+  backward-compatible alias: both prefixes resolve to the same handlers with
+  identical request/response contracts, so existing integrations keep working
+  unchanged. Infrastructure endpoints (`/health`, `/metrics`) stay unversioned.
+- **Native OpenTelemetry tracing** — memory operations (add / flush, memcell
+  boundary, episode extraction, search, and OME reflection) export to any
+  OTLP backend (e.g. Langfuse) as nested traces carrying LLM/embedding token
+  usage, per-request correlation, and recall-quality scores. Off by default;
+  enabled via the `[observability]` config with the optional `otel` extra.
+  Content capture (query / extracted memory) is opt-in and redaction-aware.
+
+## [1.1.4] - 2026-07-20
+
+### Added
+
+- **Langfuse integration example** — added an OpenTelemetry-based wrapper for
+  tracing EverOS add, flush/extract, search, and reflection operations, with a
+  built-in mock and support for connecting to a real EverOS server.
+
+### Fixed
+
+- **Cascade delete/modify race** — when a file disappears after its modified
+  event is queued, the worker now processes it as a deletion instead of leaving
+  a stale indexed row and permanently failed queue item.
+- **Langfuse live-server traces use only real telemetry** — synthetic child
+  spans are now limited to responses that provide stage details, while real
+  servers emit accurate top-level latency, output, and recall-quality scores.
+
+## [1.1.3] - 2026-07-10
+
+### Fixed
+
+- **LanceDB FTS optimize crash and disk growth** — disabled unused positional
+  data in OR-mode BM25 indexes, automatically rebuilds affected indexes, and
+  escalates repeated optimize failures so cleanup cannot fail silently.
+
 ## [1.1.2] - 2026-07-07
 
 ### Fixed
@@ -226,7 +268,9 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/EverMind-AI/everos/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/EverMind-AI/everos/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/EverMind-AI/everos/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/EverMind-AI/everos/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/EverMind-AI/everos/compare/v1.0.1...v1.1.0

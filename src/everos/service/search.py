@@ -105,7 +105,8 @@ def _get_llm_client() -> LLMClient | None:
     from everos.component.llm import build_llm_provider
     from everos.config import load_settings
 
-    cfg = load_settings().llm
+    settings = load_settings()
+    cfg = settings.llm
     if not cfg.api_key or not cfg.api_key.get_secret_value() or not cfg.base_url:
         logger.warning(
             "llm_not_configured",
@@ -113,7 +114,15 @@ def _get_llm_client() -> LLMClient | None:
         )
         _llm_client = None
     else:
-        _llm_client = build_llm_provider(cfg)
+        client = build_llm_provider(cfg)
+        # Record token usage for the hybrid/agentic path, mirroring
+        # get_llm_client() — otherwise the heaviest LLM spend (query
+        # decomposition + rerank judge) is invisible in Langfuse.
+        if settings.observability.enabled:
+            from everos.component.llm._usage_client import UsageRecordingClient
+
+            client = UsageRecordingClient(client)
+        _llm_client = client
         logger.info("search_llm_built", model=cfg.model)
     _llm_resolved = True
     return _llm_client

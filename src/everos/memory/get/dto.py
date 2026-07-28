@@ -1,4 +1,4 @@
-"""Public DTOs for ``POST /api/v1/memory/get``.
+"""Public DTOs for ``POST /api/v2/memory/get``.
 
 Contract per the final design (mirrors :mod:`memory.search.dto` shape,
 minus ``score`` because /get is a paginated listing rather than a
@@ -54,7 +54,7 @@ class GetMemoryType(StrEnum):
 
 
 class GetRequest(BaseModel):
-    """Request body for ``POST /api/v1/memory/get``.
+    """Request body for ``POST /api/v2/memory/get``.
 
     Callers identify the memory owner via ``user_id`` XOR ``agent_id`` —
     exactly one must be set. Internally the manager keeps using

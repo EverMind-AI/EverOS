@@ -689,3 +689,68 @@ async def test_same_session_multi_add_concatenates(
     assert len(rows) == 1  # one cell from the flush
     ids = json.loads(rows[0]["message_ids_json"])
     assert len(ids) == 6  # all 6 messages folded in
+
+
+# ---------------------------------------------------------------------------
+# Tracing: the add/flush span nests extract + persist in one trace
+# ---------------------------------------------------------------------------
+
+
+async def test_flush_produces_nested_trace(
+    tmp_path: Path,
+    memorize_env: Callable[..., Any],
+) -> None:
+    """A real flush that extracts one Episode emits everos.memory.flush with
+    everos.extract + everos.persist.markdown as children of one trace."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    fake = _make_fake_llm(boundary_responses=[[]])
+    await memorize_env(mode="chat", fake_llm=fake)
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        payload = {
+            "session_id": "trace_sess",
+            "messages": [
+                _user("hello", 1_700_000_000_000),
+                _assistant("hi there", 1_700_000_001_000),
+            ],
+        }
+        result = await memorize(payload, is_final=True)
+        assert result.status == "extracted"
+        force_flush()
+    finally:
+        shutdown_tracing()
+
+    spans = {s.name: s for s in exporter.get_finished_spans()}
+    assert "everos.memory.flush" in spans
+    assert "everos.extract" in spans
+    assert "everos.persist.markdown" in spans
+
+    root = spans["everos.memory.flush"]
+    extract = spans["everos.extract"]
+    persist = spans["everos.persist.markdown"]
+
+    # One trace: all three share the flush span's trace id.
+    trace_id = root.context.trace_id
+    assert extract.context.trace_id == trace_id
+    assert persist.context.trace_id == trace_id
+    # flush is the root; extract / persist hang beneath it (not siblings).
+    assert root.parent is None
+    assert extract.parent is not None
+    assert persist.parent is not None

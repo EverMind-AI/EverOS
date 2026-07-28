@@ -1,4 +1,4 @@
-"""SearchManager — top-level orchestrator for ``POST /api/v1/memory/search``.
+"""SearchManager — top-level orchestrator for ``POST /api/v2/memory/search``.
 
 Hard partition by ``owner_type``:
 
@@ -37,8 +37,16 @@ from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate, RankInput
 
 from everos.component.utils.datetime import to_display_tz
+from everos.config import load_settings
+from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
-from everos.core.observability.tracing import gen_request_id
+from everos.core.observability.tracing import (
+    capture_input,
+    capture_output,
+    current_trace_ids,
+    emit_recall_scores,
+    memory_span,
+)
 from everos.infra.persistence.sqlite import (
     UnprocessedBuffer,
     unprocessed_buffer_repo,
@@ -123,6 +131,23 @@ _MAXSIM_FACT_POOL_CAP = 2000
 _UNPROCESSED_TRACK = "memorize"
 
 
+def _top_score(data: SearchData) -> float:
+    """Max relevance score across scored result items (0.0 when empty).
+
+    Profiles are excluded — they are a KV fetch with no query-relevance score.
+    """
+    items = [*data.episodes, *data.agent_cases, *data.agent_skills]
+    return max((item.score for item in items), default=0.0)
+
+
+# Methods whose top score is calibrated to a comparable [0, 1] scale
+# (HYBRID → LR sigmoid, AGENTIC → cross-encoder), so the recall_hit
+# threshold is meaningful. KEYWORD (unbounded BM25) and single-route
+# VECTOR are excluded — a fixed threshold there yields a misleading
+# near-constant "hit" that inflates cross-method dashboards.
+_CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
+
+
 class SearchManager:
     """Orchestrates per-kind recall, fusion, and shape into the public DTO."""
 
@@ -152,42 +177,97 @@ class SearchManager:
     # ── Public entry ────────────────────────────────────────────────
 
     async def search(self, req: SearchRequest) -> SearchResponse:
-        request_id = gen_request_id()
-        # Compile filters first: a malformed `filters` payload is a user
-        # input error (422) and should surface before the server-side
-        # component guard (500). The two steps are independent.
-        where = compile_filters(
-            req.filters,
-            owner_id=req.owner_id,
-            owner_type=req.owner_type,
-            app_id=req.app_id,
-            project_id=req.project_id,
-        )
-        self._validate_components(req)
+        request_id = resolve_request_id()
+        with memory_span(
+            "everos.memory.search",
+            observation_type="retriever",
+            session_id=_extract_top_level_session_id(req.filters),
+            user_id=req.user_id,
+            metadata={
+                "request_id": request_id,
+                "app_id": req.app_id,
+                "project_id": req.project_id,
+                "agent_id": req.agent_id,
+                "owner_type": req.owner_type,
+                "method": req.method.value,
+            },
+        ) as span:
+            # Content (query text) only when capture_content is on.
+            capture_input(
+                span,
+                {"query": req.query, "top_k": req.top_k, "method": req.method.value},
+            )
+            # Compile filters first: a malformed `filters` payload is a user
+            # input error (422) and should surface before the server-side
+            # component guard (500). The two steps are independent.
+            where = compile_filters(
+                req.filters,
+                owner_id=req.owner_id,
+                owner_type=req.owner_type,
+                app_id=req.app_id,
+                project_id=req.project_id,
+            )
+            self._validate_components(req)
 
-        if req.owner_type == "user":
-            episodes, profiles, unprocessed = await asyncio.gather(
-                self._search_episodes(req, where),
-                self._fetch_profile(req),
-                self._load_unprocessed(req),
-            )
-            data = SearchData(
-                episodes=episodes,
-                profiles=profiles,
-                unprocessed_messages=unprocessed,
-            )
-        else:  # "agent"
-            (cases, skills), unprocessed = await asyncio.gather(
-                self._search_cases_and_skills(req, where),
-                self._load_unprocessed(req),
-            )
-            data = SearchData(
-                agent_cases=cases,
-                agent_skills=skills,
-                unprocessed_messages=unprocessed,
+            if req.owner_type == "user":
+                episodes, profiles, unprocessed = await asyncio.gather(
+                    self._search_episodes(req, where),
+                    self._fetch_profile(req),
+                    self._load_unprocessed(req),
+                )
+                data = SearchData(
+                    episodes=episodes,
+                    profiles=profiles,
+                    unprocessed_messages=unprocessed,
+                )
+            else:  # "agent"
+                (cases, skills), unprocessed = await asyncio.gather(
+                    self._search_cases_and_skills(req, where),
+                    self._load_unprocessed(req),
+                )
+                data = SearchData(
+                    agent_cases=cases,
+                    agent_skills=skills,
+                    unprocessed_messages=unprocessed,
+                )
+
+            # Returned hits (ids only) — content, so only when capture_content
+            # is on. This is the point of a search trace: what came back.
+            capture_output(
+                span,
+                {
+                    "episodes": [e.id for e in data.episodes],
+                    "agent_cases": [c.id for c in data.agent_cases],
+                    "agent_skills": [s.id for s in data.agent_skills],
+                },
             )
 
-        return SearchResponse(request_id=request_id, data=data)
+            # Recall-quality signal on the span (always on; the Langfuse
+            # scores push is separate and gated on creds — see the score sink).
+            # `hit` is only meaningful for calibrated-score methods; leave it
+            # unset for KEYWORD/VECTOR so an unbounded score isn't forced
+            # through a fixed threshold into a misleading always-hit verdict.
+            top_score = _top_score(data)
+            span.set_attribute("everos.search.top_score", top_score)
+            hit: bool | None = None
+            if req.method in _CALIBRATED_METHODS:
+                threshold = load_settings().observability.recall_hit_threshold
+                hit = top_score >= threshold
+                span.set_attribute("everos.search.hit", hit)
+
+            # Push recall-quality scores to Langfuse out-of-band (no-op unless
+            # a score sink is configured); attach to this retriever span.
+            ids = current_trace_ids()
+            if ids is not None:
+                emit_recall_scores(
+                    trace_id=ids[0],
+                    observation_id=ids[1],
+                    top_score=top_score,
+                    hit=hit,
+                    method=req.method.value,
+                )
+
+            return SearchResponse(request_id=request_id, data=data)
 
     # ── Unprocessed buffer ──────────────────────────────────────────
 
@@ -267,12 +347,17 @@ class SearchManager:
 
         # ── KEYWORD / VECTOR: single-route recall ──
         if fusion_mode is None:
-            if req.method == SearchMethod.KEYWORD:
-                cands = await self._ep.sparse_recall(
-                    req.query, where, limit=self._recall_limit(req.top_k)
-                )
-            else:
-                cands = await self._maxsim_atomic_recall(req, where, top_k)
+            with memory_span(
+                "everos.search.recall",
+                observation_type="retriever",
+                metadata={"phase": "single_route", "method": req.method.value},
+            ):
+                if req.method == SearchMethod.KEYWORD:
+                    cands = await self._ep.sparse_recall(
+                        req.query, where, limit=self._recall_limit(req.top_k)
+                    )
+                else:
+                    cands = await self._maxsim_atomic_recall(req, where, top_k)
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
@@ -290,43 +375,53 @@ class SearchManager:
         )
 
         if fusion_mode == "hierarchy":
-            rrf_candidates = rrf(sparse, dense)
-            ep_to_parents = build_ep_to_fact_parents(rrf_candidates)
-            episode_to_facts = await self._fact.facts_for_episodes(
-                ep_to_parents,
-                where,
-                per_episode=max(top_k * 2, 20),
-                query_vector=query_vector,
-            )
-            scored = heap_expand(
-                sparse=sparse,
-                dense=dense,
-                episode_to_facts=episode_to_facts,
-                top_k=top_k,
-            )
-            episode_pool = {c.id: c for c in (*sparse, *dense)}
-            shaped = reshape_hybrid_output(scored, episode_pool=episode_pool)
-            if req.min_score is not None:
-                shaped = [s for s in shaped if s.score >= req.min_score]
-            return shaped
+            with memory_span(
+                "everos.search.rank",
+                observation_type="span",
+                metadata={"phase": "hierarchy"},
+            ):
+                rrf_candidates = rrf(sparse, dense)
+                ep_to_parents = build_ep_to_fact_parents(rrf_candidates)
+                episode_to_facts = await self._fact.facts_for_episodes(
+                    ep_to_parents,
+                    where,
+                    per_episode=max(top_k * 2, 20),
+                    query_vector=query_vector,
+                )
+                scored = heap_expand(
+                    sparse=sparse,
+                    dense=dense,
+                    episode_to_facts=episode_to_facts,
+                    top_k=top_k,
+                )
+                episode_pool = {c.id: c for c in (*sparse, *dense)}
+                shaped = reshape_hybrid_output(scored, episode_pool=episode_pool)
+                if req.min_score is not None:
+                    shaped = [s for s in shaped if s.score >= req.min_score]
+                return shaped
 
         # rrf / lr: standard everalgo fusion path (fallback).
-        output = await arank(
-            RankInput(
-                query=req.query,
-                memory_type=self._ep.everalgo_memory_type,  # type: ignore[arg-type]
-                sparse_candidates=sparse,
-                dense_candidates=dense,
-                top_k=top_k,
-                radius=_effective_radius(req),
-            ),
-            config=RankConfig(fusion_mode=fusion_mode)
-            if fusion_mode != "rrf"
-            else DEFAULT_RANK_CONFIG,
-            llm=self._llm,
-            enable_rerank=enable_rerank,
-            rerank_top_k=top_k,
-        )
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": fusion_mode},
+        ):
+            output = await arank(
+                RankInput(
+                    query=req.query,
+                    memory_type=self._ep.everalgo_memory_type,  # type: ignore[arg-type]
+                    sparse_candidates=sparse,
+                    dense_candidates=dense,
+                    top_k=top_k,
+                    radius=_effective_radius(req),
+                ),
+                config=RankConfig(fusion_mode=fusion_mode)
+                if fusion_mode != "rrf"
+                else DEFAULT_RANK_CONFIG,
+                llm=self._llm,
+                enable_rerank=enable_rerank,
+                rerank_top_k=top_k,
+            )
         ep_candidates = (_scored_as_candidate(s) for s in output.items)
         return [
             ep
@@ -363,22 +458,27 @@ class SearchManager:
         sparse, dense, _ = await self._recall_sparse_dense(
             self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
         )
-        output = await arank(
-            RankInput(
-                query=req.query,
-                memory_type=self._case.everalgo_memory_type,  # type: ignore[arg-type]
-                sparse_candidates=sparse,
-                dense_candidates=dense,
-                top_k=top_k,
-                radius=_effective_radius(req),
-            ),
-            config=RankConfig(fusion_mode=fusion_mode)
-            if fusion_mode != "rrf"
-            else DEFAULT_RANK_CONFIG,
-            llm=self._llm,
-            enable_rerank=enable_rerank,
-            rerank_top_k=top_k,
-        )
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": fusion_mode, "kind": "agent_case"},
+        ):
+            output = await arank(
+                RankInput(
+                    query=req.query,
+                    memory_type=self._case.everalgo_memory_type,  # type: ignore[arg-type]
+                    sparse_candidates=sparse,
+                    dense_candidates=dense,
+                    top_k=top_k,
+                    radius=_effective_radius(req),
+                ),
+                config=RankConfig(fusion_mode=fusion_mode)
+                if fusion_mode != "rrf"
+                else DEFAULT_RANK_CONFIG,
+                llm=self._llm,
+                enable_rerank=enable_rerank,
+                rerank_top_k=top_k,
+            )
         case_candidates = (_scored_as_candidate(s) for s in output.items)
         shaped = (shape_agent_case_from_candidate(c) for c in case_candidates)
         return [item for item in shaped if item is not None]
@@ -432,25 +532,33 @@ class SearchManager:
             # to the skill facade (adds the skill-only 0.4 relevance gate).
             # Config is ``rrf`` — ``skill_hybrid`` is an everos routing
             # label, not an everalgo fusion mode.
-            output = await arank(
-                RankInput(
-                    query=req.query,
-                    memory_type=self._skill.everalgo_memory_type,  # type: ignore[arg-type]
-                    sparse_candidates=sparse,
-                    dense_candidates=dense,
-                    top_k=top_k,
-                    radius=_effective_radius(req),
-                ),
-                config=DEFAULT_RANK_CONFIG,
-                llm=self._llm,
-                enable_rerank=True,
-                rerank_top_k=top_k,
-            )
+            with memory_span(
+                "everos.search.rank",
+                observation_type="span",
+                metadata={"phase": "skill_llm", "kind": "agent_skill"},
+            ):
+                output = await arank(
+                    RankInput(
+                        query=req.query,
+                        memory_type=self._skill.everalgo_memory_type,  # type: ignore[arg-type]
+                        sparse_candidates=sparse,
+                        dense_candidates=dense,
+                        top_k=top_k,
+                        radius=_effective_radius(req),
+                    ),
+                    config=DEFAULT_RANK_CONFIG,
+                    llm=self._llm,
+                    enable_rerank=True,
+                    rerank_top_k=top_k,
+                )
             skill_candidates = (_scored_as_candidate(s) for s in output.items)
             shaped = (shape_agent_skill_from_candidate(c) for c in skill_candidates)
             return [item for item in shaped if item is not None]
 
         # Cross-encoder lane (default): rrf + skill-shaped cross-encoder rerank.
+        # The rank span is emitted inside build_skill_rerank_fn (callbacks),
+        # so the cross-encoder rerank is covered uniformly with the agentic
+        # path rather than double-wrapped here.
         return await search_agent_skills_hybrid(
             req.query,
             sparse=sparse,
@@ -477,15 +585,20 @@ class SearchManager:
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
     ) -> list[Candidate]:
-        if req.method == SearchMethod.KEYWORD:
-            return await recaller.sparse_recall(
-                req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
+        with memory_span(
+            "everos.search.recall",
+            observation_type="retriever",
+            metadata={"phase": "single_route", "method": req.method.value},
+        ):
+            if req.method == SearchMethod.KEYWORD:
+                return await recaller.sparse_recall(
+                    req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
+                )
+            vector = await self._embed_query(req.query)
+            cands = await recaller.dense_recall(
+                vector, where, limit=self._recall_limit(req.top_k, cap=cap)
             )
-        vector = await self._embed_query(req.query)
-        cands = await recaller.dense_recall(
-            vector, where, limit=self._recall_limit(req.top_k, cap=cap)
-        )
-        return self._apply_radius(cands, _effective_radius(req))
+            return self._apply_radius(cands, _effective_radius(req))
 
     async def _recall_sparse_dense(
         self,
@@ -504,16 +617,21 @@ class SearchManager:
         the query. Returns
         ``[]`` for ``vector`` when no embedding provider is configured.
         """
-        vector = await self._embed_query(req.query)
-        limit = self._recall_limit(req.top_k, cap=cap)
-        sparse, dense = await asyncio.gather(
-            recaller.sparse_recall(req.query, where, limit=limit),
-            recaller.dense_recall(vector, where, limit=limit)
-            if vector
-            else _empty_candidates(),
-        )
-        dense = self._apply_radius(dense, _effective_radius(req))
-        return sparse, dense, vector
+        with memory_span(
+            "everos.search.recall",
+            observation_type="retriever",
+            metadata={"phase": "sparse_dense", "method": req.method.value},
+        ):
+            vector = await self._embed_query(req.query)
+            limit = self._recall_limit(req.top_k, cap=cap)
+            sparse, dense = await asyncio.gather(
+                recaller.sparse_recall(req.query, where, limit=limit),
+                recaller.dense_recall(vector, where, limit=limit)
+                if vector
+                else _empty_candidates(),
+            )
+            dense = self._apply_radius(dense, _effective_radius(req))
+            return sparse, dense, vector
 
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: str, top_k: int

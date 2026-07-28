@@ -148,3 +148,21 @@ session_lock_timeout_seconds = 360.0
 threshold = 0.65
 time_window_days = 7.0
 
+
+[observability]
+# OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral
+# (Langfuse, an OTel Collector, or any OTLP backend). EverOS ships no vendor SDK.
+# Override via EVEROS_OBSERVABILITY__ENABLED, EVEROS_OBSERVABILITY__ENDPOINT, etc.
+enabled = false
+exporter = "otlp_http"          # "otlp_http" | "none"
+endpoint = ""                    # e.g. https://us.cloud.langfuse.com/api/public/otel/v1/traces
+service_name = "everos"
+sample_rate = 1.0                # 0.0 to 1.0
+# Privacy: false (default) = metadata only; true also emits query / extracted
+# memory / .md paths as span input/output (redacted + truncated).
+capture_content = false
+# Recall-quality scores pushed to Langfuse (Langfuse-specific REST, off the
+# OTLP stream). Only fires when langfuse_public_key/secret_key/host are set
+# (via everos.toml or EVEROS_OBSERVABILITY__LANGFUSE_* — secrets, not shipped here).
+emit_recall_scores = true
+recall_hit_threshold = 0.6       # only meaningful for calibrated methods

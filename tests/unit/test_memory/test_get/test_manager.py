@@ -220,6 +220,25 @@ async def test_episodic_memory_populates_episodes_and_counts(
     assert all(item.user_id == "u1" for item in resp.data.episodes)
 
 
+async def test_get_uses_propagated_request_id_when_bound(
+    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+) -> None:
+    """When a request id is bound upstream (middleware), ``get`` reuses it
+    instead of minting a fresh one, so the response id matches the trace."""
+    from everos.core.context import reset_request_id, set_request_id
+
+    mgr, ep, _, _ = manager
+    ep.rows = [_episode_row("ep_1")]
+    token = set_request_id("deadbeef" * 4)
+    try:
+        resp = await mgr.get(
+            GetRequest(user_id="u1", memory_type=GetMemoryType.EPISODE)
+        )
+        assert resp.request_id == "deadbeef" * 4
+    finally:
+        reset_request_id(token)
+
+
 async def test_episodic_memory_passes_where_and_sort_to_repo(
     manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
 ) -> None:

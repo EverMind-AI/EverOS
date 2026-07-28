@@ -19,9 +19,11 @@ External usage:
 from .base import LifespanProvider as LifespanProvider
 from .factory import build_lifespan as build_lifespan
 from .metrics_lifespan import MetricsLifespanProvider as MetricsLifespanProvider
+from .tracing_lifespan import TracingLifespanProvider as TracingLifespanProvider
 
 __all__ = [
     "LifespanProvider",
     "MetricsLifespanProvider",
+    "TracingLifespanProvider",
     "build_lifespan",
 ]
