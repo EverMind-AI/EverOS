@@ -1146,9 +1146,10 @@ async def test_search_top_score_zero_without_hit_for_keyword(
 async def test_search_enqueues_recall_scores(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When tracing is active, search hands recall_top_score to the score
-    sink with the retriever span's trace_id (032x) + observation_id (016x).
-    KEYWORD is uncalibrated so hit is None (no recall_hit is pushed)."""
+    """When tracing is active, search hands the top score to the score sink
+    with the retriever span's trace_id (032x) + observation_id (016x).
+    KEYWORD is uncalibrated so hit is None, which is what makes the sink
+    report it as recall_top_score_raw and push no recall_hit."""
     import everos.memory.search.manager as mgr_mod
 
     captured: dict[str, Any] = {}

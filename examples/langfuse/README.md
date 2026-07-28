@@ -50,10 +50,13 @@ zero tracing overhead.
 | query / recall embedding | embedding `everos.embedding` |
 | OME reflection strategies | agent `everos.ome.<strategy>` (linked to the triggering request's trace) |
 
-`langfuse.session.id` / `langfuse.user.id` group the traces; recall quality is
-pushed as Langfuse scores (`recall_top_score` always, and `recall_hit` for
-calibrated methods — HYBRID / AGENTIC). Query and memory text are captured only
-when `capture_content = true`.
+`langfuse.session.id` / `langfuse.user.id` group the traces. Recall quality is
+pushed as Langfuse scores, split by whether the method's score is calibrated:
+`recall_top_score` plus `recall_hit` for HYBRID / AGENTIC (comparable `[0, 1]`),
+and `recall_top_score_raw` for KEYWORD / single-route VECTOR, whose raw BM25 or
+cosine values are on a different scale and must not be averaged in with the
+calibrated ones. Query and memory text are captured only when
+`capture_content = true`.
 
 ## Try it
 

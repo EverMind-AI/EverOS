@@ -161,5 +161,8 @@ capture_content = false
 # Recall-quality scores pushed to Langfuse (Langfuse-specific REST, off the
 # OTLP stream). Only fires when langfuse_public_key/secret_key/host are set
 # (via everos.toml or EVEROS_OBSERVABILITY__LANGFUSE_* — secrets, not shipped here).
+# Score names: "recall_top_score" for the calibrated methods (HYBRID / AGENTIC,
+# [0, 1] and comparable), "recall_top_score_raw" for the uncalibrated ones
+# (KEYWORD BM25 / single-route VECTOR), plus "recall_hit" for calibrated only.
 emit_recall_scores = true
 recall_hit_threshold = 0.6       # only meaningful for calibrated methods
