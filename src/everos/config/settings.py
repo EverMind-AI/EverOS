@@ -176,6 +176,7 @@ class EmbeddingSettings(BaseModel):
         EVEROS_EMBEDDING__MODEL
         EVEROS_EMBEDDING__API_KEY
         EVEROS_EMBEDDING__BASE_URL
+        EVEROS_EMBEDDING__DIMENSIONS
         EVEROS_EMBEDDING__TIMEOUT_SECONDS
         EVEROS_EMBEDDING__MAX_RETRIES
         EVEROS_EMBEDDING__BATCH_SIZE
@@ -185,6 +186,12 @@ class EmbeddingSettings(BaseModel):
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
+    dimensions: int | None = None
+    """API-level ``dimensions`` parameter for MRL-capable models.
+    When set, passed to the embedding API so the server truncates
+    with proper re-normalization. When ``None`` (default), the
+    parameter is omitted and client-side truncation to ``dim``
+    handles dimension alignment."""
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)

@@ -49,6 +49,7 @@ def build_embedding_provider(
         api_key=settings.api_key.get_secret_value(),
         base_url=settings.base_url,
         dim=dim,
+        dimensions=settings.dimensions,
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
         batch_size=settings.batch_size,
