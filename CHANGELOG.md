@@ -26,20 +26,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.4] - 2026-07-20
 
-### Added
-
-- **Langfuse integration example** — added an OpenTelemetry-based wrapper for
-  tracing EverOS add, flush/extract, search, and reflection operations, with a
-  built-in mock and support for connecting to a real EverOS server.
+> The entries below reflect the code shipped as `everos==1.1.4` on PyPI.
+> The 1.1.4 sdist was built from the internal release lane and contains
+> fixes that were not represented in this file when 1.1.4 was tagged;
+> this section restores them so the changelog matches the wheel.
 
 ### Fixed
 
-- **Cascade delete/modify race** — when a file disappears after its modified
-  event is queued, the worker now processes it as a deletion instead of leaving
-  a stale indexed row and permanently failed queue item.
-- **Langfuse live-server traces use only real telemetry** — synthetic child
-  spans are now limited to responses that provide stage details, while real
-  servers emit accurate top-level latency, output, and recall-quality scores.
+- **Knowledge upload path traversal (CWE-22)** — the original-file write
+  path is now contained to the document directory; adversarial filenames
+  (`..`, absolute paths, symlink games) are rejected on
+  `POST /api/v1/knowledge/documents` and `POST /api/v2/knowledge/documents`.
+- **Cascade reliability — retry classification, budget, and races** — the
+  worker catches `ExternalServiceError` (embedding / LLM / rerank transient
+  failures) and retries inline up to 3 times before marking
+  `retryable=True`; a total retry budget of 12 attempts across scanner
+  cycles bounds retries on prolonged outages. The reconciler no longer
+  re-enqueues `pending` / `processing` rows on stable mtime (previously
+  overwrote the worker's `mark_done`); `failed` rows with
+  `retryable=False` on stable mtime skip auto-retry so users can edit and
+  re-save. SQLite `REAL` float precision loss in mtime comparisons is
+  now absorbed via a 10 ms tolerance. LanceDB `optimize()` failures
+  escalate to a `drop_index + create_index` rebuild after 5 consecutive
+  misses (workaround for `lance-format/lance#7653` panic path).
+- **Cascade delete/modify race** — when a file disappears after its
+  modified event is queued, the worker processes it as a deletion
+  instead of leaving a stale indexed row and permanently failed queue
+  item.
+- **Embedding provider raises on empty API data** — the provider now
+  raises `EmbeddingServiceError` when the API returns HTTP 200 with an
+  empty `data` array (previously silently returned zero-length vectors,
+  corrupting search).
+- **Episode extraction retries on malformed LLM output** — the `/flush`
+  synchronous path retries everalgo `ValueError` (typically OpenRouter
+  truncated responses) twice with 1 s / 2 s backoff before surfacing a
+  500.
+- **Langfuse live-server traces use only real telemetry** — synthetic
+  child spans are now limited to responses that provide stage details,
+  while real servers emit accurate top-level latency, output, and
+  recall-quality scores.
+
+### Added
+
+- **Optional `dimensions` parameter for MRL-capable embedding models** —
+  opt-in via `[embedding] dimensions = N` in `everos.toml`; forwarded to
+  the API for server-side truncation with re-normalization (OpenAI
+  text-embedding-3-\*, Qwen3-Embedding).
+- **LLM `finish_reason` diagnostic warnings** — logs `content_len` /
+  `content_tail` / `model` when the provider returns a non-`stop`
+  `finish_reason`, aiding OpenRouter truncation triage.
+- **Langfuse integration example** — added an OpenTelemetry-based
+  wrapper for tracing EverOS add, flush/extract, search, and reflection
+  operations, with a built-in mock and support for connecting to a real
+  EverOS server.
+
+### Changed
+
+- **`everalgo-user-memory` bumped 0.3.1 → 0.3.2**.
 
 ## [1.1.3] - 2026-07-10
 
