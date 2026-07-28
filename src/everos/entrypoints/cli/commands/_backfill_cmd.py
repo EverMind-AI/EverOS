@@ -431,13 +431,21 @@ async def run_backfill(*, phase: str, auto_yes: bool) -> int:
                     _print_summary(summary, exit_code=1)
                     return 1
                 continue
-    # ``click.exceptions.Abort`` fires when ``typer.confirm`` (== click.confirm)
-    # catches KeyboardInterrupt at the y/N prompt and re-raises it as
-    # ``Abort`` (a RuntimeError subclass, NOT a KeyboardInterrupt). Catching
-    # it alongside KeyboardInterrupt / CancelledError keeps Ctrl-C at the
-    # prompt on the interrupt path (exit 130 with resume hint) rather than
-    # falling through to the generic ``except Exception`` (exit 2).
-    except (KeyboardInterrupt, asyncio.CancelledError, click.exceptions.Abort):
+    # ``typer.Abort`` fires when ``typer.confirm`` catches KeyboardInterrupt
+    # or EOF at the y/N prompt and re-raises it as an ``Abort`` (a
+    # ``RuntimeError`` subclass, NOT a ``KeyboardInterrupt``). Typer 0.15+
+    # vendored click under ``typer._click`` — ``typer.Abort`` and the
+    # standalone ``click.exceptions.Abort`` are DISTINCT classes. Catching
+    # only ``click.exceptions.Abort`` would let the real typer-raised
+    # abort fall through to the generic ``except Exception`` branch (exit
+    # 2, rich traceback). Both are listed so the Ctrl-C-at-prompt path
+    # (exit 130 with resume hint) fires regardless of which one arrives.
+    except (
+        KeyboardInterrupt,
+        asyncio.CancelledError,
+        typer.Abort,
+        click.exceptions.Abort,
+    ):
         logger.warning(
             "cascade_backfill_interrupted",
             phase=current_phase.slug if current_phase else phase,

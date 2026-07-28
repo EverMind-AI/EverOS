@@ -50,6 +50,14 @@ dependencies = [
 
     # CLI + TUI
     "typer>=0.12.0",
+    # click is a transitive dep of uvicorn today, but our CLI raises
+    # ``click.exceptions.Abort`` directly (e.g. tests that inject aborts)
+    # and typer 0.15+ vendored a copy of click under ``typer._click`` — so
+    # the two classes are DIFFERENT even though users only ever see
+    # ``typer.Abort``. We depend on the standalone click package so
+    # ``click.exceptions.Abort`` stays importable and both classes are
+    # covered in the Ctrl-C catch (see backfill exit-130 path).
+    "click>=8.1",
     "textual>=8.2.7",
 
     # Tokenization (BM25 Chinese support)

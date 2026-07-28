@@ -672,3 +672,65 @@ async def test_run_backfill_ctrl_c_at_confirm_returns_130(
     assert "INTERRUPTED" in combined
     # Regression guard: must not have taken the generic-error path.
     assert "Backfill failed — see logs for details." not in combined
+
+
+async def test_run_backfill_typer_abort_at_confirm_returns_130(
+    _isolated_root: Path, monkeypatch, capsys
+) -> None:
+    """Same interrupt semantics as the click-Abort test above, but with
+    the real ``typer.Abort`` class typer 0.15+ actually raises.
+
+    Regression: typer vendored click under ``typer._click`` in 0.15+, so
+    ``typer.Abort`` and the standalone ``click.exceptions.Abort`` are
+    DISTINCT classes — a catch of only ``click.exceptions.Abort`` would
+    silently miss the real typer-raised abort (letting it fall through
+    to ``except Exception`` → exit 2 with rich traceback). This test
+    proves both classes are covered by the interrupt-branch tuple.
+    """
+    import typer as _typer
+
+    assert _typer.Abort is not click.exceptions.Abort, (
+        "typer.Abort must be distinct from click.exceptions.Abort "
+        "for this test to exercise the regression scenario"
+    )
+
+    monkeypatch.setattr(
+        _backfill, "get_embedding_capability", lambda: _FakeCapabilityAvailable()
+    )
+
+    async def _fake_scan():
+        from everos.memory.cascade._backfill import (
+            _TABLE_SPECS,
+            _NullVectorRow,
+            _TableBacklog,
+        )
+
+        return [
+            _TableBacklog(
+                spec=_TABLE_SPECS[0],
+                rows=[
+                    _NullVectorRow(
+                        id="row_1",
+                        text="hello",
+                        subject_text=None,
+                        tokens=5,
+                    )
+                ],
+            )
+        ], 0
+
+    monkeypatch.setattr(_backfill, "_scan_null_vector_backlog", _fake_scan)
+
+    def _raise_typer_abort(*args, **kwargs):
+        raise _typer.Abort()
+
+    monkeypatch.setattr(_backfill_cmd, "_confirm", _raise_typer_abort)
+
+    exit_code = await _backfill_cmd.run_backfill(phase="vectors", auto_yes=False)
+    assert exit_code == 130
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Interrupted — partial progress was written." in combined
+    assert "INTERRUPTED" in combined
+    assert "Backfill failed — see logs for details." not in combined

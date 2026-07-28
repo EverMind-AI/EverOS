@@ -928,9 +928,15 @@ async def _emit_synthetic_events(
     total = len(episodes) + len(cases)
     emitted = 0
     for raw in episodes:
+        # entry_id is only per-owner unique — scope the reverse lookup
+        # so a same-day, same-seq episode under a different owner does
+        # not falsely match this owner's cluster (or vice versa).
         existing = await cluster_repo.find_cluster_id_for_member(
             member_type="episode",
             member_id=raw["entry_id"],
+            app_id=raw["app_id"],
+            project_id=raw["project_id"],
+            owner_id=raw["owner_id"],
         )
         if existing is None:
             await engine.emit(_episode_row_to_event(raw))
@@ -940,6 +946,9 @@ async def _emit_synthetic_events(
         existing = await cluster_repo.find_cluster_id_for_member(
             member_type="case",
             member_id=raw["entry_id"],
+            app_id=raw["app_id"],
+            project_id=raw["project_id"],
+            owner_id=raw["owner_id"],
         )
         if existing is None:
             await engine.emit(_agent_case_row_to_event(raw))

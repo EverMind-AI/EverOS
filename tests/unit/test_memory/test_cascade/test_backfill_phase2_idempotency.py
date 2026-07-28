@@ -80,7 +80,13 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
 
     class _StubClusterRepo:
         async def find_cluster_id_for_member(
-            self, *, member_type: str, member_id: str
+            self,
+            member_type: str,
+            member_id: str,
+            *,
+            app_id: str,
+            project_id: str,
+            owner_id: str,
         ) -> str | None:
             lookups.append((member_type, member_id))
             return clustered.get((member_type, member_id))
@@ -131,7 +137,13 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings(
 
     class _StubClusterRepo:
         async def find_cluster_id_for_member(
-            self, *, member_type: str, member_id: str
+            self,
+            member_type: str,
+            member_id: str,
+            *,
+            app_id: str,
+            project_id: str,
+            owner_id: str,
         ) -> str | None:
             seen_member_types.add(member_type)
             return None
@@ -160,7 +172,13 @@ async def test_emit_synthetic_events_no_skip_when_no_prior_clusters(
 
     class _StubClusterRepo:
         async def find_cluster_id_for_member(
-            self, *, member_type: str, member_id: str
+            self,
+            member_type: str,
+            member_id: str,
+            *,
+            app_id: str,
+            project_id: str,
+            owner_id: str,
         ) -> str | None:
             return None
 

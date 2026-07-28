@@ -286,16 +286,130 @@ async def test_find_cluster_id_for_member_reverse_lookup(
     )
 
     assert (
-        await repo.find_cluster_id_for_member("memcell", "mc_one") == "cl_user0000001"
+        await repo.find_cluster_id_for_member(
+            "memcell",
+            "mc_one",
+            app_id="default",
+            project_id="default",
+            owner_id="u_alice",
+        )
+        == "cl_user0000001"
     )
     assert (
-        await repo.find_cluster_id_for_member("case", "ac_20260517_0001")
+        await repo.find_cluster_id_for_member(
+            "case",
+            "ac_20260517_0001",
+            app_id="default",
+            project_id="default",
+            owner_id="agent_42",
+        )
         == "cl_case0000001"
     )
     # Type-discriminated: same id under wrong type misses.
-    assert await repo.find_cluster_id_for_member("case", "mc_one") is None
-    assert await repo.find_cluster_id_for_member("memcell", "ac_20260517_0001") is None
-    assert await repo.find_cluster_id_for_member("memcell", "mc_missing") is None
+    assert (
+        await repo.find_cluster_id_for_member(
+            "case",
+            "mc_one",
+            app_id="default",
+            project_id="default",
+            owner_id="u_alice",
+        )
+        is None
+    )
+    assert (
+        await repo.find_cluster_id_for_member(
+            "memcell",
+            "ac_20260517_0001",
+            app_id="default",
+            project_id="default",
+            owner_id="agent_42",
+        )
+        is None
+    )
+    assert (
+        await repo.find_cluster_id_for_member(
+            "memcell",
+            "mc_missing",
+            app_id="default",
+            project_id="default",
+            owner_id="u_alice",
+        )
+        is None
+    )
+
+
+async def test_find_cluster_id_for_member_scoped_to_owner(
+    repo: _ClusterRepo,
+) -> None:
+    """Same ``member_id`` under two owners resolves to each owner's own cluster.
+
+    Regression: prior signature took only ``(member_type, member_id)`` and
+    would falsely resolve owner B's episode ``ep_20260517_00000001`` to
+    owner A's cluster (or vice versa) whenever ``entry_id`` collided —
+    which is by design for entry_id (see
+    ``core/persistence/markdown/entries.py``: entry_id is per-owner
+    unique, cross-owner uniqueness comes from the composite
+    ``<owner>_<entry_id>`` at the storage layer).
+    """
+    entry_id = "ep_20260517_00000001"
+    alice_cluster = _make_cluster(
+        cluster_id="cl_alice000001",
+        centroid_vals=[1.0, 0.0],
+        members=[entry_id],
+    )
+    bob_cluster = _make_cluster(
+        cluster_id="cl_bob00000001",
+        centroid_vals=[0.0, 1.0],
+        members=[entry_id],  # SAME entry_id, different owner
+    )
+    await repo.upsert_with_members(
+        alice_cluster,
+        owner_id="u_alice",
+        owner_type="user",
+        kind="user_memory",
+        member_type="episode",
+    )
+    await repo.upsert_with_members(
+        bob_cluster,
+        owner_id="u_bob",
+        owner_type="user",
+        kind="user_memory",
+        member_type="episode",
+    )
+
+    # Each owner resolves to their own cluster — no cross-owner bleed.
+    assert (
+        await repo.find_cluster_id_for_member(
+            "episode",
+            entry_id,
+            app_id="default",
+            project_id="default",
+            owner_id="u_alice",
+        )
+        == "cl_alice000001"
+    )
+    assert (
+        await repo.find_cluster_id_for_member(
+            "episode",
+            entry_id,
+            app_id="default",
+            project_id="default",
+            owner_id="u_bob",
+        )
+        == "cl_bob00000001"
+    )
+    # A third owner with no cluster attached returns None even though the
+    # entry_id exists under two other owners.
+    assert (
+        await repo.find_cluster_id_for_member(
+            "episode",
+            entry_id,
+            app_id="default",
+            project_id="default",
+            owner_id="u_carol",
+        )
+        is None
+    )
 
 
 # ── remove_members ─────────────────────────────────────────────────────

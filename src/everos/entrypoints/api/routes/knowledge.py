@@ -325,21 +325,35 @@ def _reject_oversized_upload(file: UploadFile) -> None:
 _PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(
     {"md", "txt", "rst", "markdown", "text"}
 )
+# Explicit mime allowlist. ``text/*`` prefix matching would let
+# ``text/html`` (and any future ``text/xml`` etc.) bypass the parser and
+# feed raw markup — script tags, HTML comments, style blocks — straight
+# into the knowledge-extraction LLM. everalgo's HTML parser runs
+# ``clean_html_for_llm`` (strips ``<script>/<style>/<nav>/<iframe>`` +
+# comments) and caps output at 1 MiB — semantics we must NOT skip.
+_PLAIN_TEXT_MIMES: frozenset[str] = frozenset(
+    {"text/plain", "text/markdown", "text/x-rst", "text/x-markdown"}
+)
 
 
 def _looks_like_utf8_text(file: UploadFile) -> bool:
     """Decide whether to skip the parser and go straight to UTF-8 decode.
 
-    A file is treated as plain UTF-8 text when its ``content_type`` starts
-    with ``text/`` (browsers set this for ``.md`` / ``.txt`` uploads), or
-    when the mime is missing / ``application/octet-stream`` (typical for
-    ``curl -F file=@x.md`` without an explicit ``type=`` hint) AND the
-    filename extension is on a small allowlist. This short-circuits the
-    parser path — which depends on ``[multimodal]`` being configured —
-    for the common case of uploading a markdown/plaintext knowledge doc.
+    A file is treated as plain UTF-8 text when its ``content_type`` is on
+    ``_PLAIN_TEXT_MIMES`` (browsers set ``text/markdown`` / ``text/plain``
+    for ``.md`` / ``.txt`` uploads), or when the mime is missing /
+    ``application/octet-stream`` (typical for ``curl -F file=@x.md``
+    without an explicit ``type=`` hint) AND the filename extension is on
+    the extension allowlist.
+
+    ``text/html`` is deliberately EXCLUDED — HTML uploads must go through
+    the parser so ``clean_html_for_llm`` can strip active markup and cap
+    the payload; the ``text/*`` prefix match this file used to carry
+    would have let raw HTML (including ``<script>`` bodies and
+    ``<!-- prompt injection -->`` comments) reach the LLM as-is.
     """
     mime = (file.content_type or "").lower()
-    if mime.startswith("text/"):
+    if mime in _PLAIN_TEXT_MIMES:
         return True
     if mime and mime != "application/octet-stream":
         return False

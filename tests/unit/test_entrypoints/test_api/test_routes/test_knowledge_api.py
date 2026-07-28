@@ -573,17 +573,28 @@ class _UploadStub:
 @pytest.mark.parametrize(
     "mime, filename, expected",
     [
+        # Explicit plain-text mimes: short-circuit
         ("text/markdown", "note.md", True),
         ("text/plain", "note.txt", True),
-        ("TEXT/HTML", "page.html", True),  # case-insensitive
-        ("application/octet-stream", "note.md", True),  # curl default + .md
-        (None, "note.md", True),  # missing mime + known extension
+        ("TEXT/MARKDOWN", "note.md", True),  # case-insensitive
+        ("text/x-rst", "readme.rst", True),
+        # HTML must NOT short-circuit — needs everalgo's clean_html_for_llm
+        # (strips <script>/<style>/<nav>/comments) + 1 MiB cap. Was a
+        # regression when the whitelist used ``startswith("text/")``.
+        ("text/html", "page.html", False),
+        ("TEXT/HTML", "page.html", False),
+        # Missing / octet-stream mime + known plaintext extension: OK
+        ("application/octet-stream", "note.md", True),
+        (None, "note.md", True),
         ("", "notes.rst", True),
-        ("application/octet-stream", "note.bin", False),  # unknown extension
+        # Unknown extension: fall through
+        ("application/octet-stream", "note.bin", False),
         (None, "note.bin", False),
+        # Non-text mimes always route to parser
         ("application/pdf", "doc.pdf", False),
         ("image/png", "img.png", False),
-        ("application/json", "data.json", False),  # explicit non-text mime
+        ("application/json", "data.json", False),
+        ("text/xml", "data.xml", False),  # future text/* additions default to safe
     ],
 )
 def test_looks_like_utf8_text_matrix(
