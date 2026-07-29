@@ -7,10 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-07-29
+
+### Added
+
+- **`[embedding]` and `[rerank]` are now soft runtime dependencies** — EverOS
+  boots and serves requests with only `[llm]` configured. Missing or
+  misconfigured embedding / rerank / multimodal providers no longer abort
+  startup; the corresponding accessor logs `<provider>_capability_build_failed`
+  and reports `available=False`. Features degrade gracefully into three tiers:
+  Tier 1 (`[llm]` only) → KEYWORD search + add/flush + md writes + cascade sync;
+  Tier 2 (`+ [embedding]`) → adds VECTOR/HYBRID search + reflection + skill
+  extraction + backfill; Tier 3 (`+ [rerank]`) → adds AGENTIC search + knowledge
+  write/search. Tier upgrades require a server restart. Downgrades are
+  read-safe: knowledge documents stay readable/renamable/deletable after
+  a Tier-3 → Tier-2 downgrade; only write / search endpoints return 422.
+- **`everos cascade backfill` CLI command** — three-phase interactive
+  backfill (`vectors` → `clusters` → `skills`, or `--phase all`) for
+  upgrading Tier-1 rows to Tier-2 after `[embedding]` is configured. Each
+  phase prints row/token estimates and blocks on `y/N`; `--yes`/`-y` for
+  CI. Exit codes: `0` success, `1` user declined, `2` phase preconditions
+  unmet, `3` server running, `4` completed-with-failures, `130` SIGINT.
+- **LanceDB schema v2** — the six business tables (`episode`, `atomic_fact`,
+  `foresight`, `agent_case`, `agent_skill`, `knowledge_topic`) now allow
+  `vector NULL`. Cascade writes rows without vectors when `[embedding]` is
+  unavailable; a later backfill fills them in. Migration runs once on first
+  startup under a cross-process `memory_root_lock` (`fcntl.flock`),
+  followed by `optimize(cleanup_older_than=timedelta(0))` per table to
+  physically prune older manifest versions.
+- **Startup unbackfilled-rows banner** — after LanceDB lifespan, an
+  unconditional sweep emits `unbackfilled_memory_rows` when rows with
+  `vector IS NULL` exist, pointing at `everos cascade backfill` in the
+  hint text.
+- **PyPI Trusted Publishing workflow** — tag-triggered `.github/workflows/release.yml`
+  builds, smoke-tests, and uploads via OIDC (no stored token) behind the
+  `release` environment's manual-approval gate. Version-tag mismatch
+  aborts publish. Companion `/release` skill lives under
+  `.claude/skills/release/`.
+
 ### Changed
 
-- **`MemoryRoot.default()` → `MemoryRoot.resolve()`** — the classmethod that
-  resolves the memory root from `--root` / `EVEROS_ROOT` / default was
+- **`ProviderNotConfiguredError` → HTTP 422 `CAPABILITY_UNAVAILABLE`** —
+  write / search endpoints that need embed or rerank now return 422 with
+  a section-aware hint (points at `everos.toml` section, never at
+  `EVEROS_*` env vars) instead of erroring at startup or 500-ing at
+  request time.
+- **`GET /health` returns a Pydantic `HealthResponse` model** — with typed
+  `capabilities` and `disabled_features` fields, so OpenAPI codegen
+  produces real shapes instead of `additionalProperties: true`.
+- **`MemoryRoot.default()` → `MemoryRoot.resolve()`** — the classmethod
+  that resolves the memory root from `--root` / `EVEROS_ROOT` / default was
   renamed to make its behavior explicit (`resolve` walks the precedence
   chain; `default` was ambiguous with "default location"). `MemoryRoot`
   is publicly exported from `everos.core.persistence`; callers outside
@@ -34,12 +80,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the same handlers, so nothing breaks; it is now described as a **legacy
   compatibility alias that may be removed in a future major release** rather
   than a permanent one. New integrations should target `/api/v2`.
+- **`cluster_repo.find_cluster_id_for_member` now requires
+  `(app_id, project_id, owner_id)`** — reverse-index lookups JOIN `Cluster`
+  for scope filtering. `entry_id` is per-owner unique by design; the
+  reverse index alone could collide across owners writing on the same day.
+- **All six cascade handlers register unconditionally** — Tier-3 → Tier-2/1
+  downgrade no longer strands DELETE / PATCH events. Embed-requiring
+  branches inside each handler body-guard on capability availability at
+  execution time.
+- **Interactive TTY log level defaults to WARNING** — avoids INFO log lines
+  drowning out backfill y/N prompts; non-interactive / CI stays at INFO.
+  `--verbose` / `-v` forces INFO.
+- **`click>=8.1` promoted to first-class dependency** — was previously
+  transitive via typer. `typer.Abort` and `click.exceptions.Abort` are
+  distinct classes under typer 0.15+ (typer vendored click); the interrupt
+  catch in `cascade backfill` covers both.
+- **Test harness pins `EVEROS_ROOT` to a temp path** — `conftest.py` scrubs
+  every `EVEROS_*` env var so a developer's `~/.everos/everos.toml` cannot
+  make tests accidentally green against a real provider.
 
 ### Fixed
 
+- **1.1.4 fixes backfilled into `main`** — the internal release lane's
+  fixes (knowledge upload path traversal / CWE-22, cascade retry
+  classification + total-retry budget, delete/modify race, embedding
+  empty-data guard, episode extraction retries) were merged back into
+  the public `main` branch so subsequent releases build on top of them.
+- **Filename validation on knowledge upload** — NUL byte and > 255-byte
+  UTF-8 filenames now fail fast with `InvalidInputError → HTTP 400`
+  instead of surfacing OS errors as 500 with a half-written md file.
+- **HTML upload no longer takes the UTF-8 fast-path** — knowledge
+  upload's plaintext short-circuit uses an explicit allowlist
+  (`text/plain`, `text/markdown`, `text/x-rst`, `text/x-markdown`) plus
+  known extensions; `text/html` is deliberately excluded so HTML still
+  goes through everalgo's `clean_html_for_llm`. Prevents 503 when a
+  Tier-3 user without `[multimodal]` uploads a markdown doc.
 - **Broken table-of-contents links in `docs/api.md`** — the endpoint anchors
   still pointed at the pre-1.2.0 `#post-apiv1…` slugs after the headings moved
   to `/api/v2`, so all five endpoint links in the TOC were dead.
+
+### Removed
+
+- **README "Star us" section** — cleanup.
 
 ## [1.2.0] - 2026-07-24
 

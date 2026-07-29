@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.2.0"
+    "version": "1.2.1"
   },
   "paths": {
     "/health": {
