@@ -27,6 +27,23 @@ _LONG_CONV_PATH = _FIXTURE_DIR / "long_conversation_locomo_caroline_melanie.json
 
 
 @pytest.fixture(autouse=True)
+def _isolate_everos_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Pin ``EVEROS_ROOT`` so no test reads the developer's own ``everos.toml``.
+
+    ``Settings`` resolves its TOML source through ``resolve_root()``, so any
+    field a test does not pass explicitly is filled from the real config file
+    on the machine running the suite. A developer who has, say, enabled
+    ``[observability]`` locally then sees failures in tests that assert the
+    default-off behaviour — green in CI, red on their machine, and unrelated to
+    whatever they were changing.
+
+    Tests that exercise root resolution itself override this: their own
+    ``setenv`` / ``delenv`` runs inside the test body, after this fixture.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     import structlog
 
