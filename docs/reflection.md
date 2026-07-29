@@ -221,7 +221,7 @@ dedicated CLI command).
 ### Triggering a run
 
 ```
-POST /api/v1/ome/trigger
+POST /api/v2/ome/trigger
 Content-Type: application/json
 ```
 
@@ -249,7 +249,7 @@ import httpx
 async def trigger_reflection() -> str:
     async with httpx.AsyncClient(base_url="http://localhost:8000") as client:
         resp = await client.post(
-            "/api/v1/ome/trigger",
+            "/api/v2/ome/trigger",
             json={"name": "reflect_episodes", "timeout": 120, "force": True},
         )
         resp.raise_for_status()
@@ -259,7 +259,7 @@ async def trigger_reflection() -> str:
 **Example — curl**:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/ome/trigger \
+curl -X POST http://localhost:8000/api/v2/ome/trigger \
   -H "Content-Type: application/json" \
   -d '{"name": "reflect_episodes", "timeout": 120, "force": true}'
 ```
@@ -327,7 +327,7 @@ real deployment, once enabled it runs automatically on schedule, so this step
 isn't needed.
 
 ```bash
-BASE=http://localhost:8000/api/v1
+BASE=http://localhost:8000/api/v2
 
 # 1. With Reflection enabled (set enabled = true in <root>/ome.toml),
 #    trigger a run by hand here (for the demo; in production it runs on schedule)

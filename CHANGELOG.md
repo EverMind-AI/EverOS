@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `metadata = {"method": ..., "calibrated": ...}` now, a structured field that
   can be split on, alongside the existing human-readable comment. Dashboards
   built on `recall_top_score` for keyword search need to switch to the new name.
+- **Docs and examples now use `/api/v2`** — README, QUICKSTART, the `docs/`
+  reference set, the Langfuse example, and `everos demo --live` all call the
+  canonical `/api/v2` prefix instead of `/api/v1`. `/api/v1` keeps resolving
+  to the same handlers, so nothing breaks; it is now described as a **legacy
+  compatibility alias that may be removed in a future major release** rather
+  than a permanent one. New integrations should target `/api/v2`.
+
+### Fixed
+
+- **Broken table-of-contents links in `docs/api.md`** — the endpoint anchors
+  still pointed at the pre-1.2.0 `#post-apiv1…` slugs after the headings moved
+  to `/api/v2`, so all five endpoint links in the TOC were dead.
 
 ## [1.2.0] - 2026-07-24
 
@@ -26,8 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`/api/v2` API prefix** — every business endpoint (`memory/*`, `ome/*`,
   `knowledge/*`) is now served under `/api/v2`, aligning the open-source API
-  with the EverOS Cloud contract. `/api/v1` is retained as a permanent,
-  backward-compatible alias: both prefixes resolve to the same handlers with
+  with the EverOS Cloud contract. `/api/v1` is retained as a legacy
+  compatibility alias: both prefixes resolve to the same handlers with
   identical request/response contracts, so existing integrations keep working
   unchanged. Infrastructure endpoints (`/health`, `/metrics`) stay unversioned.
 - **Native OpenTelemetry tracing** — memory operations (add / flush, memcell

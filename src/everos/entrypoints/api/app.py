@@ -125,13 +125,13 @@ def create_app(
     app.include_router(health.router)
     app.include_router(metrics.router)
 
-    # Business API — served under both /api/v2 (cloud-aligned name) and
-    # /api/v1 (retained as a permanent backward-compatible alias). The same
-    # router object is mounted twice, so both prefixes resolve to the exact
-    # same handlers; FastAPI's default operationId embeds the path, so the
-    # two copies get distinct OpenAPI ids automatically (no collision).
+    # Business API — served under both /api/v2 (canonical, cloud-aligned name)
+    # and /api/v1 (legacy compatibility alias, removable in a future major).
+    # The same router object is mounted twice, so both prefixes resolve to the
+    # exact same handlers; FastAPI's default operationId embeds the path, so
+    # the two copies get distinct OpenAPI ids automatically (no collision).
     # v1 and v2 stay identical by construction — see test_api_versioning.
-    # v1 first — retained alias, behavior identical.
+    # v1 first — legacy alias, behavior identical.
     app.include_router(memorize.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(get.router, prefix="/api/v1")

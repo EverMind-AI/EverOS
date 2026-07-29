@@ -123,11 +123,17 @@ Send messages to the server — one at a time or in batches. Each batch
 belongs to a `session_id`, which represents one conversation thread.
 Timestamps are Unix epoch in **milliseconds** (UTC).
 
+> [!NOTE]
+> Business endpoints live under `/api/v2`. The older `/api/v1` prefix still
+> resolves to the same handlers so existing integrations keep working, but it
+> is a legacy alias that may be removed in a future major release — write new
+> code against `/api/v2`.
+
 First, a chat about climbing:
 
 ```bash
 TS=$(($(date +%s)*1000))
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -143,7 +149,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
 Now the topic shifts to work:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -184,7 +190,7 @@ If you want to extract memory without waiting for a topic shift — for
 example at the end of a session — call `/flush`:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-001"}'
 ```
@@ -202,7 +208,7 @@ This forces extraction of whatever is still in the buffer.
 ## 6. Search
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
@@ -277,7 +283,7 @@ edit — no database driver needed.
   requests to partition memory spaces inside one server (defaults to
   `"default"` when omitted).
 - **Knowledge base** — upload documents via
-  `/api/v1/knowledge/documents` and search with hybrid retrieval. See
+  `/api/v2/knowledge/documents` and search with hybrid retrieval. See
   [docs/knowledge.md](docs/knowledge.md).
 - **Reflection** — offline memory consolidation; enable in `ome.toml`.
   See [docs/reflection.md](docs/reflection.md).

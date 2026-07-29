@@ -42,11 +42,11 @@ zero tracing overhead.
 
 | EverOS operation | Langfuse observation |
 | --- | --- |
-| `POST /api/v1/memory/add` · `flush` | span `everos.memory.add` / `everos.memory.flush` |
+| `POST /api/v2/memory/add` · `flush` | span `everos.memory.add` / `everos.memory.flush` |
 | memcell boundary detection (LLM) | generation `everos.memcell.boundary` (model + tokens) |
 | episode extraction (LLM) | generation `everos.extract` |
 | markdown persistence | span `everos.persist.markdown` |
-| `POST /api/v1/memory/search` | retriever `everos.memory.search` → `recall` / `rank` |
+| `POST /api/v2/memory/search` | retriever `everos.memory.search` → `recall` / `rank` |
 | query / recall embedding | embedding `everos.embedding` |
 | OME reflection strategies | agent `everos.ome.<strategy>` (linked to the triggering request's trace) |
 

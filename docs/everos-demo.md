@@ -38,9 +38,9 @@ Live mode keeps the same TUI, but the memory lifecycle is backed by real
 server calls:
 
 1. `GET /health`
-2. `POST /api/v1/memory/add`
-3. `POST /api/v1/memory/flush`
-4. `POST /api/v1/memory/search`
+2. `POST /api/v2/memory/add`
+3. `POST /api/v2/memory/flush`
+4. `POST /api/v2/memory/search`
 
 If your server is not running on `http://127.0.0.1:8000`, pass
 `--server-url <url>`.
