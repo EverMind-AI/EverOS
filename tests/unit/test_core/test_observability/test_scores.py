@@ -14,8 +14,12 @@ from pydantic import SecretStr
 
 from everos.config.settings import ObservabilitySettings
 from everos.core.observability.tracing.scores import (
+    SCORE_HIT,
+    SCORE_TOP_CALIBRATED,
+    SCORE_TOP_RAW,
     RecallScoreSink,
     ScoreRecord,
+    emit_recall_scores,
     init_score_sink,
     shutdown_score_sink,
 )
@@ -77,6 +81,93 @@ async def test_worker_sends_payload_in_langfuse_shape() -> None:
         "dataType": "NUMERIC",
         "comment": "method=hybrid",
     }
+
+
+async def test_worker_forwards_score_metadata() -> None:
+    """``metadata`` is a structured field Langfuse persists, so a dashboard can
+    split by method without parsing the free-text comment."""
+    sent: list[dict] = []
+    done = asyncio.Event()
+
+    async def sender(payload: dict) -> None:
+        sent.append(payload)
+        done.set()
+
+    sink = RecallScoreSink(sender=sender, max_queue=10)
+    sink.start()
+    sink.enqueue(
+        ScoreRecord("tid", "oid", "n", 0.5, "method=keyword", {"method": "keyword"})
+    )
+    await asyncio.wait_for(done.wait(), timeout=1.0)
+    await sink.stop()
+
+    assert sent[0]["metadata"] == {"method": "keyword"}
+
+
+async def _emitted(**kwargs: object) -> list[dict]:
+    """Install a capturing sink, run ``emit_recall_scores``, return the payloads."""
+    from everos.core.observability.tracing import scores as scores_mod
+
+    sent: list[dict] = []
+
+    async def sender(payload: dict) -> None:
+        sent.append(payload)
+
+    sink = RecallScoreSink(sender=sender, max_queue=10)
+    sink.start()
+    previous, scores_mod._sink = scores_mod._sink, sink
+    try:
+        emit_recall_scores(**kwargs)  # type: ignore[arg-type]
+        await sink.stop()  # drains before returning
+    finally:
+        scores_mod._sink = previous
+    return sent
+
+
+async def test_calibrated_method_reports_top_score_and_hit() -> None:
+    sent = await _emitted(
+        trace_id="tid",
+        observation_id="oid",
+        top_score=0.72,
+        hit=True,
+        method="hybrid",
+    )
+
+    assert [s["name"] for s in sent] == [SCORE_TOP_CALIBRATED, SCORE_HIT]
+    assert [s["value"] for s in sent] == [0.72, 1.0]
+    assert all(s["metadata"] == {"method": "hybrid", "calibrated": True} for s in sent)
+
+
+async def test_uncalibrated_method_reports_raw_name_and_no_hit() -> None:
+    """An unbounded BM25 top score must not land under the same score name as a
+    calibrated probability — a chart on that name would average both scales."""
+    sent = await _emitted(
+        trace_id="tid",
+        observation_id="oid",
+        top_score=8.4,
+        hit=None,
+        method="keyword",
+    )
+
+    assert [s["name"] for s in sent] == [SCORE_TOP_RAW]
+    assert sent[0]["value"] == 8.4
+    assert sent[0]["metadata"] == {"method": "keyword", "calibrated": False}
+
+
+async def test_emit_is_a_noop_without_a_sink() -> None:
+    from everos.core.observability.tracing import scores as scores_mod
+
+    previous, scores_mod._sink = scores_mod._sink, None
+    try:
+        emit_recall_scores(
+            trace_id="tid",
+            observation_id="oid",
+            top_score=1.0,
+            hit=True,
+            method="hybrid",
+        )
+    finally:
+        scores_mod._sink = previous
 
 
 async def test_enqueue_never_blocks_or_raises_when_full() -> None:

@@ -14,6 +14,9 @@ queue + a single background worker:
 Attaches to the originating span via ``traceId`` (OTel trace_id, 032x hex) +
 ``observationId`` (OTel span_id, 016x hex) — exactly the mapping Langfuse's
 OTLP ingestion uses.
+
+Calibrated and uncalibrated top scores go out under *different names* — see
+:data:`SCORE_TOP_CALIBRATED` / :data:`SCORE_TOP_RAW`.
 """
 
 from __future__ import annotations
@@ -34,6 +37,16 @@ logger = get_logger(__name__)
 
 Sender = Callable[[dict], Awaitable[None]]
 
+# A Langfuse chart aggregates scores by *name*, so a single name may only ever
+# carry values on one scale. HYBRID / AGENTIC top scores are calibrated to a
+# comparable [0, 1]; KEYWORD (unbounded BM25) and single-route VECTOR are not,
+# and averaging the two together would be meaningless. Hence two names: a
+# dashboard built on ``recall_top_score`` stays comparable across methods and
+# over time, and the raw scores remain available under their own name.
+SCORE_TOP_CALIBRATED = "recall_top_score"
+SCORE_TOP_RAW = "recall_top_score_raw"
+SCORE_HIT = "recall_hit"
+
 
 @dataclass(frozen=True)
 class ScoreRecord:
@@ -44,6 +57,7 @@ class ScoreRecord:
     name: str
     value: float
     comment: str | None
+    metadata: dict[str, object] | None = None
 
 
 def _to_payload(record: ScoreRecord) -> dict:
@@ -57,6 +71,8 @@ def _to_payload(record: ScoreRecord) -> dict:
         payload["observationId"] = record.observation_id
     if record.comment:
         payload["comment"] = record.comment
+    if record.metadata:
+        payload["metadata"] = record.metadata
     return payload
 
 
@@ -165,24 +181,41 @@ def emit_recall_scores(
     hit: bool | None,
     method: str,
 ) -> None:
-    """Enqueue recall_top_score (always) + recall_hit (only when ``hit`` is
-    a verdict); no-op when the sink is off.
+    """Enqueue a top score (always) + recall_hit (only when ``hit`` is a
+    verdict); no-op when the sink is off.
 
-    ``hit=None`` means the method's score is uncalibrated (KEYWORD/VECTOR),
-    so no hit verdict is pushed — only the raw top score.
+    ``hit=None`` means the method's score is uncalibrated (KEYWORD /
+    single-route VECTOR): no hit verdict is pushed, and the top score is
+    reported as :data:`SCORE_TOP_RAW` instead of :data:`SCORE_TOP_CALIBRATED`
+    so the two scales never land under one score name.
+
+    ``method`` rides along as score metadata (a structured field Langfuse
+    persists) as well as in the human-readable comment.
     """
     if _sink is None:
         return
+    calibrated = hit is not None
     comment = f"method={method}"
+    metadata: dict[str, object] = {"method": method, "calibrated": calibrated}
     _sink.enqueue(
         ScoreRecord(
-            trace_id, observation_id, "recall_top_score", float(top_score), comment
+            trace_id,
+            observation_id,
+            SCORE_TOP_CALIBRATED if calibrated else SCORE_TOP_RAW,
+            float(top_score),
+            comment,
+            metadata,
         )
     )
     if hit is not None:
         _sink.enqueue(
             ScoreRecord(
-                trace_id, observation_id, "recall_hit", 1.0 if hit else 0.0, comment
+                trace_id,
+                observation_id,
+                SCORE_HIT,
+                1.0 if hit else 0.0,
+                comment,
+                metadata,
             )
         )
 
