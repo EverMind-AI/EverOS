@@ -49,9 +49,16 @@ def _get_writer() -> ForesightWriter:
     max_retries=2,
 )
 async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
-    # 1. List the user senders in this memcell.
+    # 1. List the user senders in this memcell. A memcell cut from an agent
+    #    trajectory also holds ToolCallRequest / ToolCallResult items, which
+    #    carry no ``role`` — bare attribute access raised AttributeError and
+    #    took the strategy down for any session containing a tool call. Guarded
+    #    the same way as the sibling scans in ``extract/pipeline/user_memory``
+    #    and ``service/_boundary``.
     memcell = event.memcell
-    sender_ids = sorted({m.sender_id for m in memcell.items if m.role == "user"})
+    sender_ids = sorted(
+        {m.sender_id for m in memcell.items if getattr(m, "role", None) == "user"}
+    )
     extractor = ForesightExtractor(llm=get_llm_client()) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).

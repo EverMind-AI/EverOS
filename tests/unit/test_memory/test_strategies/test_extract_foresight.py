@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import structlog.testing
-from everalgo.types import ChatMessage, Foresight, MemCell
+from everalgo.types import (
+    ChatMessage,
+    Foresight,
+    MemCell,
+    ToolCall,
+    ToolCallFunction,
+    ToolCallRequest,
+    ToolCallResult,
+)
 
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory.events import UserPipelineStarted
@@ -195,6 +203,69 @@ async def test_writes_md_for_each_foresight(
     assert inline1["start_time"] == "2023-11-15"
     assert inline1["duration_days"] == 7
     assert sections1 == {"Foresight": "buy tickets", "Evidence": "confirmed"}
+
+
+async def test_survives_tool_call_items_in_the_memcell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An agent trajectory puts ToolCallRequest / ToolCallResult items on the
+    memcell. Those carry no ``role``, so reading it unguarded took the whole
+    strategy down for any session containing a tool call."""
+    memcell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1",
+                role="user",
+                content="why is the proof not rising",
+                timestamp=1_700_000_000_000,
+                sender_id="u_alice",
+            ),
+            ToolCallRequest(
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        function=ToolCallFunction(
+                            name="get_room_temperature", arguments="{}"
+                        ),
+                    )
+                ],
+                content="checking the kitchen",
+                timestamp=1_700_000_001_000,
+                sender_id="kitchen-helper",
+            ),
+            ToolCallResult(
+                tool_call_id="c1",
+                content='{"avg_c": 16.2}',
+                timestamp=1_700_000_002_000,
+            ),
+        ],
+        timestamp=1_700_000_002_000,
+    )
+    event = UserPipelineStarted(memcell_id="mc_tools", session_id="s1", memcell=memcell)
+
+    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    with (
+        patch(
+            "everos.memory.strategies.extract_foresight.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_foresight.ForesightExtractor"
+        ) as mock_cls,
+        patch(
+            "everos.memory.strategies.extract_foresight.ForesightWriter"
+        ) as mock_wcls,
+    ):
+        mock_cls.return_value.aextract = AsyncMock(
+            return_value=[_foresight("u_alice", "will bake again")]
+        )
+        mock_wcls.return_value.append_entries = AsyncMock(return_value=["fs_1"])
+        ctx = FakeStrategyContext()
+        await extract_foresight(event, ctx)
+
+    # The one user ChatMessage is still found; the tool items are ignored.
+    mock_cls.return_value.aextract.assert_awaited_once()
+    assert mock_cls.return_value.aextract.await_args.kwargs["sender_id"] == "u_alice"
 
 
 async def test_skips_when_memcell_has_no_messages(
