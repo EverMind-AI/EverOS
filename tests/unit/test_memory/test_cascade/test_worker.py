@@ -282,12 +282,17 @@ def test_worker_handler_deps_construct_with_real_classes() -> None:
 
 
 class _FakeLanceRepo:
-    """Records every optimize() / rebuild_indexes() call.
+    """Records every optimize() / prune() / rebuild_indexes() call.
 
-    ``optimize_delay`` / ``rebuild_delay`` simulate slow operations.
-    ``rebuild_raises`` makes ``rebuild_indexes`` raise (for crash-safety tests).
-    Each ``optimize`` call's ``cleanup_older_than`` is preserved so
-    prune-cadence tests can assert which calls took the heavy path.
+    The optimize path is split: ``optimize()`` is the light lock-free
+    compaction (no args); ``prune(older_than)`` is the heavy write-locked
+    reclaim. ``beats`` combines both in call order — most scheduler tests
+    only care that *a maintenance beat* ran, not which. The first beat per
+    kind is always a prune (``last_prune_at`` starts at 0).
+
+    ``optimize_delay`` / ``rebuild_delay`` simulate slow operations (the
+    delay applies to both maintenance beats). ``rebuild_raises`` makes
+    ``rebuild_indexes`` raise (crash-safety tests).
     """
 
     def __init__(
@@ -298,17 +303,28 @@ class _FakeLanceRepo:
         rebuild_raises: bool = False,
     ) -> None:
         self.optimize_calls: list[float] = []
-        self.optimize_cleanup_args: list[dt.timedelta | None] = []
+        self.prune_calls: list[float] = []
+        self.prune_args: list[dt.timedelta] = []
         self.rebuild_calls: list[float] = []
         self.optimize_delay = optimize_delay
         self.rebuild_delay = rebuild_delay
         self.rebuild_raises = rebuild_raises
 
-    async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
+    @property
+    def beats(self) -> list[float]:
+        """All maintenance beats (optimize + prune) in call order."""
+        return sorted(self.optimize_calls + self.prune_calls)
+
+    async def optimize(self) -> None:
         if self.optimize_delay > 0:
             await asyncio.sleep(self.optimize_delay)
         self.optimize_calls.append(time.monotonic())
-        self.optimize_cleanup_args.append(cleanup_older_than)
+
+    async def prune(self, older_than: dt.timedelta) -> None:
+        if self.optimize_delay > 0:
+            await asyncio.sleep(self.optimize_delay)
+        self.prune_calls.append(time.monotonic())
+        self.prune_args.append(older_than)
 
     async def rebuild_indexes(self) -> None:
         if self.rebuild_delay > 0:
@@ -358,10 +374,8 @@ async def test_schedule_optimize_collapses_burst_within_throttle_window(
     for _ in range(10):
         w._schedule_optimize("episode")
     await w._flush_optimizers()
-    assert fake.optimize_calls, "expected at least one optimize"
-    assert len(fake.optimize_calls) == 1, (
-        f"burst should collapse, got {len(fake.optimize_calls)} calls"
-    )
+    assert fake.beats, "expected at least one optimize"
+    assert len(fake.beats) == 1, f"burst should collapse, got {len(fake.beats)} calls"
 
 
 async def test_schedule_optimize_reruns_when_dirty_set_during_optimize(
@@ -383,7 +397,7 @@ async def test_schedule_optimize_reruns_when_dirty_set_during_optimize(
     await asyncio.sleep(0.01)  # ensure first task is mid-optimize
     w._schedule_optimize("episode")
     await w._flush_optimizers()
-    assert len(fake.optimize_calls) == 2
+    assert len(fake.beats) == 2
 
 
 async def test_concurrent_schedules_keep_one_task_per_kind(
@@ -419,7 +433,7 @@ async def test_flush_optimizers_awaits_pending_task(
     w._schedule_optimize("episode")
     assert w._optimizer_states["episode"].task is not None
     await w._flush_optimizers()
-    assert fake.optimize_calls, "flush should not return before optimize ran"
+    assert fake.beats, "flush should not return before optimize ran"
     assert w._optimizer_states["episode"].task is None
 
 
@@ -436,7 +450,7 @@ async def test_drain_until_empty_flushes_optimizers_before_returning(
     )
     await w.drain_until_empty()
     assert patched_repo.done == ["a.md"]
-    assert len(fake.optimize_calls) == 1
+    assert len(fake.beats) == 1
     assert w._optimizer_states["episode"].task is None
 
 
@@ -456,9 +470,9 @@ async def test_drain_once_does_not_block_on_optimize(
     drain_elapsed = time.monotonic() - started
     # drain returned long before the 0.2s optimize would finish
     assert drain_elapsed < 0.1, f"drain blocked on optimize: {drain_elapsed:.3f}s"
-    assert not fake.optimize_calls, "optimize should still be in flight"
+    assert not fake.beats, "optimize should still be in flight"
     await w._flush_optimizers()
-    assert len(fake.optimize_calls) == 1
+    assert len(fake.beats) == 1
 
 
 async def test_stop_waits_for_in_flight_optimize(
@@ -483,7 +497,7 @@ async def test_stop_waits_for_in_flight_optimize(
     w._schedule_optimize("episode")
     await asyncio.sleep(0.01)  # let optimize start
     await w.stop()
-    assert len(fake.optimize_calls) == 1
+    assert len(fake.beats) == 1
 
 
 async def test_optimize_failure_does_not_crash_drain_loop(
@@ -493,6 +507,9 @@ async def test_optimize_failure_does_not_crash_drain_loop(
 
     class _FailingRepo:
         async def optimize(self) -> None:
+            raise RuntimeError("simulated lancedb manifest conflict")
+
+        async def prune(self, older_than: dt.timedelta) -> None:
             raise RuntimeError("simulated lancedb manifest conflict")
 
     class _HandlerWithFailingRepo(_OkHandler):
@@ -535,46 +552,45 @@ async def test_heartbeat_schedules_every_handler_kind(
     # Let at least one heartbeat tick happen.
     await asyncio.sleep(0.12)
     await w.stop()
-    assert fake_a.optimize_calls, "heartbeat should have scheduled episode"
-    assert fake_b.optimize_calls, "heartbeat should have scheduled atomic_fact"
+    assert fake_a.beats, "heartbeat should have scheduled episode"
+    assert fake_b.beats, "heartbeat should have scheduled atomic_fact"
 
 
 async def test_optimize_prunes_on_first_call_then_throttles(
     patched_repo: _FakeRepo,
 ) -> None:
-    """First optimize() per kind passes ``cleanup_older_than``; subsequent
-    calls within ``optimize_prune_interval_seconds`` do not.
+    """First maintenance beat per kind is a heavy ``prune()``; subsequent
+    beats within ``optimize_prune_interval_seconds`` take the light
+    lock-free ``optimize()`` path.
 
     Rationale lives in ``DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS``:
-    LanceDB ``optimize()`` without ``cleanup_older_than`` leaves stale
-    physical files on disk; passing it on every 1-second optimize tick
-    is wasteful, but never passing it leaks files until FDs exhaust.
-    A separate cadence — prune ≪ optimize — balances the two.
+    ``prune`` (write-locked, ``delete_unverified``) physically reclaims
+    stale files but briefly stalls writes; running it on every 1-second
+    tick is wasteful, but never pruning leaks files until FDs / disk
+    exhaust. A separate cadence — prune ≪ optimize — balances the two.
     """
     fake = _FakeLanceRepo()
     w = CascadeWorker(
         {"episode": _OkHandlerWithRepo(fake)},
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
-        optimize_prune_interval_seconds=10.0,  # long — second call should NOT prune
+        optimize_prune_interval_seconds=10.0,  # cadence: long — 2nd beat is light
+        optimize_prune_retention_seconds=45.0,  # retention: decoupled from cadence
     )
-    # First call: state has never pruned, must include cleanup_older_than.
+    # First beat: state has never pruned, must take the heavy prune path.
     w._schedule_optimize("episode")
     await w._flush_optimizers()
-    assert len(fake.optimize_calls) == 1
-    assert fake.optimize_cleanup_args[0] is not None, (
-        "first optimize must prune to catch up from prior session"
-    )
-    assert fake.optimize_cleanup_args[0] == dt.timedelta(seconds=10.0)
+    assert len(fake.prune_calls) == 1, "first beat must prune to catch up"
+    assert not fake.optimize_calls
+    # prune is passed the RETENTION window, not the cadence.
+    assert fake.prune_args[0] == dt.timedelta(seconds=45.0)
 
-    # Second call within the prune window: light path (no cleanup).
+    # Second beat within the prune window: light lock-free optimize.
     await asyncio.sleep(0.02)  # exceed optimize throttle (0.01), not prune (10)
     w._schedule_optimize("episode")
     await w._flush_optimizers()
-    assert len(fake.optimize_calls) == 2
-    assert fake.optimize_cleanup_args[1] is None, (
-        "second optimize within prune window should skip cleanup_older_than"
-    )
+    assert len(fake.prune_calls) == 1, "second beat within window must not re-prune"
+    assert len(fake.optimize_calls) == 1, "second beat is the light path"
 
 
 # ── Rebuild scheduler tests ────────────────────────────────────────────────
@@ -646,23 +662,33 @@ async def test_rebuild_failure_does_not_crash_daemon(
     # Give startup rebuild a chance to throw, then heartbeat to keep optimizing.
     await asyncio.sleep(0.12)
     # Optimize should still progress despite rebuild errors.
-    assert fake.optimize_calls, "heartbeat optimize should run even when rebuild fails"
+    assert fake.beats, "heartbeat optimize should run even when rebuild fails"
     await w.stop()
     # Worker is still alive (stop() returned cleanly).
     assert w._task is None
 
 
 class _OptimizeFailingRepo(_FakeLanceRepo):
-    """Fake repo whose ``optimize()`` raises until ``fail`` is cleared."""
+    """Fake repo whose ``optimize()`` AND ``prune()`` raise until ``fail``
+    is cleared. ``error`` selects the exception so a test can distinguish a
+    genuine failure from a benign commit conflict."""
 
-    def __init__(self, **kw) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, *, error: Exception | None = None, **kw) -> None:  # type: ignore[no-untyped-def]
         super().__init__(**kw)
         self.fail = True
+        self._error = error or RuntimeError(
+            "Max offset of 9 exceeds length of values 3"
+        )
 
-    async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
+    async def optimize(self) -> None:
         if self.fail:
-            raise RuntimeError("Max offset of 9 exceeds length of values 3")
-        await super().optimize(cleanup_older_than=cleanup_older_than)
+            raise self._error
+        await super().optimize()
+
+    async def prune(self, older_than: dt.timedelta) -> None:
+        if self.fail:
+            raise self._error
+        await super().prune(older_than)
 
 
 async def test_optimize_failures_counted_escalated_and_reset(
@@ -749,3 +775,108 @@ async def test_optimize_fallback_rebuild_on_sustained_failure(
     state = w._optimizer_states["episode"]
     assert state.optimize_failures == 0, "rebuild should reset failure counter"
     assert len(repo.rebuild_calls) == 1, "exactly one fallback rebuild expected"
+
+
+# ── health signals ───────────────────────────────────────────────────────────
+
+
+def test_worker_health_dataclass_thresholds() -> None:
+    """reasons() fires exactly on each threshold, one entry per crossed signal."""
+    from everos.memory.cascade import worker as wmod
+
+    mk = wmod.CascadeWorkerHealth
+    assert mk(0, 0, 0, 0.0).reasons() == []
+    assert mk(wmod._DRAIN_FAILURE_ALERT_THRESHOLD, 0, 0, 0.0).reasons()
+    assert mk(0, 0, wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD, 0.0).reasons()
+    assert mk(0, 0, 0, wmod._PRUNE_STALE_SECONDS_ALERT).reasons()
+
+    reasons = mk(
+        wmod._DRAIN_FAILURE_ALERT_THRESHOLD, 0, 0, wmod._PRUNE_STALE_SECONDS_ALERT
+    ).reasons()
+    assert len(reasons) == 2  # drain + prune, not the sub-threshold optimize
+
+
+def test_worker_health_idle_is_not_stale() -> None:
+    """A worker with no optimize activity is never prune-stale (nothing to
+    reclaim), even if it started long ago."""
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandlerWithRepo(_FakeLanceRepo())})
+    w._started_at = time.monotonic() - (wmod._PRUNE_STALE_SECONDS_ALERT + 1000)
+    h = w.health()
+    assert h.prune_stale_seconds == 0.0
+    assert h.reasons() == []
+
+
+def test_worker_health_reports_prune_staleness() -> None:
+    """An active kind that has never successfully pruned since start goes
+    stale once past the alert threshold."""
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandlerWithRepo(_FakeLanceRepo())})
+    w._started_at = time.monotonic() - (wmod._PRUNE_STALE_SECONDS_ALERT + 100)
+    w._optimizer_states["episode"] = wmod._KindOptimizerState()  # last_prune_at=0
+    h = w.health()
+    assert h.prune_stale_seconds >= wmod._PRUNE_STALE_SECONDS_ALERT
+    assert any("cleanup stalled" in r for r in h.reasons())
+
+
+def test_worker_health_forwards_counters() -> None:
+    """drain / unrecoverable / optimize-streak counters surface verbatim."""
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandlerWithRepo(_FakeLanceRepo())})
+    w._drain_consecutive_failures = 2
+    w._unrecoverable_total = 7
+    st = wmod._KindOptimizerState()
+    st.optimize_failures = 4
+    w._optimizer_states["episode"] = st
+    h = w.health()
+    assert h.drain_consecutive_failures == 2
+    assert h.unrecoverable_total == 7
+    assert h.optimize_failure_streak == 4
+
+
+async def test_light_beat_commit_conflict_is_debug_and_uncounted(
+    patched_repo: _FakeRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A benign light-beat commit conflict must not pollute the signal.
+
+    The lock-free compaction can lose the optimistic-concurrency race
+    against a live writer; that is expected under churn and self-heals
+    next beat. It is logged at ``debug``, does NOT increment the failure
+    streak, and does NOT trigger a fallback rebuild.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    calls: list[tuple[str, str]] = []
+
+    class _SpyLogger:
+        def __getattr__(self, level: str):  # type: ignore[no-untyped-def]
+            def rec(event: str, **_kw) -> None:  # type: ignore[no-untyped-def]
+                calls.append((level, event))
+
+            return rec
+
+    monkeypatch.setattr(wmod, "logger", _SpyLogger())
+
+    repo = _OptimizeFailingRepo(error=RuntimeError("Retryable commit conflict"))
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+    )
+    state = wmod._KindOptimizerState()
+    # Force the LIGHT beat: pretend we pruned just now so should_prune=False.
+    state.last_prune_at = time.monotonic()
+    w._optimizer_states["episode"] = state
+
+    await w._run_optimize_once("episode")
+
+    assert state.optimize_failures == 0, "benign conflict must not count"
+    events = [ev for _, ev in calls]
+    levels = {lvl for lvl, _ in calls}
+    assert "cascade_lancedb_optimize_conflict" in events
+    assert "cascade_lancedb_optimize_failed" not in events
+    assert "cascade_lancedb_optimize_fallback_rebuild" not in events
+    assert "error" not in levels and "warning" not in levels

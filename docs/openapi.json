@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness probe with capabilities and disabled features.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -1805,6 +1805,63 @@
         ],
         "title": "Body_replace_document_route_api_v2_knowledge_documents__doc_id__put"
       },
+      "CascadeHealthBlock": {
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent"
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable"
+          },
+          "drain_consecutive_failures": {
+            "type": "integer",
+            "title": "Drain Consecutive Failures"
+          },
+          "unrecoverable_total": {
+            "type": "integer",
+            "title": "Unrecoverable Total"
+          },
+          "optimize_failure_streak": {
+            "type": "integer",
+            "title": "Optimize Failure Streak"
+          },
+          "prune_stale_seconds": {
+            "type": "number",
+            "title": "Prune Stale Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "reasons",
+          "pending",
+          "failed_permanent",
+          "failed_retryable",
+          "drain_consecutive_failures",
+          "unrecoverable_total",
+          "optimize_failure_streak",
+          "prune_stale_seconds"
+        ],
+        "title": "CascadeHealthBlock",
+        "description": "Readiness of the md → LanceDB projection (cascade) subsystem.\n\n``healthy`` reflects **operational** health only — drain loop alive,\noptimize not stuck, version cleanup (prune) not stalled — and is what\nalerting should watch. ``failed_permanent`` (md files awaiting\n``cascade fix``) is a normal data-quality backlog reported as an\ninformational count; it does **not** flip ``healthy``, otherwise the\nsignal would sit red forever."
+      },
       "CategoryDTO": {
         "properties": {
           "category_id": {
@@ -2768,6 +2825,16 @@
             },
             "type": "array",
             "title": "Disabled Features"
+          },
+          "cascade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CascadeHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -2778,7 +2845,7 @@
           "disabled_features"
         ],
         "title": "HealthResponse",
-        "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities`` and\n``disabled_features`` are typed. A bare ``-> dict`` return type\ndegrades the OpenAPI response to ``additionalProperties: true``,\nwhich robs clients (and codegen) of any structure to lean on."
+        "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities``,\n``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``\nreturn type degrades the OpenAPI response to\n``additionalProperties: true``, which robs clients (and codegen) of\nany structure to lean on."
       },
       "KnowledgeSearchRequest": {
         "properties": {

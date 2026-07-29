@@ -32,6 +32,37 @@ logger = get_logger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
+class CascadeHealth:
+    """Cascade health verdict for ``/health``.
+
+    ``healthy`` reflects **operational** health only — is the md →
+    LanceDB projection pipeline itself working: drain loop alive,
+    optimize not stuck, version cleanup (prune) not stalled. It is the
+    boolean ops/alerting acts on.
+
+    ``failed_permanent`` is deliberately **not** part of that verdict:
+    a handful of md files failing to index is a normal data-quality
+    backlog (almost always non-zero in a real deployment), so folding
+    it into ``healthy`` would pin the signal red forever. It is reported
+    as an informational count; per-file triage lives in the
+    ``cascade status`` / ``cascade fix`` CLI. ``reasons`` is the
+    operational "why not" list (empty when healthy).
+    """
+
+    healthy: bool
+    reasons: list[str]
+    pending: int
+    failed_permanent: int
+    """Informational: md files awaiting ``cascade fix``. Does NOT affect
+    :attr:`healthy` (see class docstring)."""
+    failed_retryable: int
+    drain_consecutive_failures: int
+    unrecoverable_total: int
+    optimize_failure_streak: int
+    prune_stale_seconds: float
+
+
+@dataclasses.dataclass(frozen=True)
 class CascadeConfig:
     """Construction-time knobs for the orchestrator.
 
@@ -145,3 +176,29 @@ class CascadeOrchestrator:
     async def queue_summary(self) -> QueueSummary:
         """Forward to the repo so callers don't reach past this class."""
         return await md_change_state_repo.queue_summary()
+
+    async def health(self) -> CascadeHealth:
+        """Verdict for ``/health``: operational health + informational counts.
+
+        One query (:meth:`queue_summary`) plus the worker's in-memory
+        counters. ``healthy`` is driven **only** by operational signals
+        (:meth:`CascadeWorkerHealth.reasons` — drain / optimize / prune),
+        never by ``failed_permanent``: a per-file triage backlog is normal
+        steady state and must not pin the health signal red (see
+        :class:`CascadeHealth`). ``failed_permanent`` is still reported as
+        an informational count.
+        """
+        wh = self._worker.health()
+        summary = await self.queue_summary()
+        reasons = wh.reasons()  # operational only
+        return CascadeHealth(
+            healthy=not reasons,
+            reasons=reasons,
+            pending=summary.pending,
+            failed_permanent=summary.failed_permanent,
+            failed_retryable=summary.failed_retryable,
+            drain_consecutive_failures=wh.drain_consecutive_failures,
+            unrecoverable_total=wh.unrecoverable_total,
+            optimize_failure_streak=wh.optimize_failure_streak,
+            prune_stale_seconds=wh.prune_stale_seconds,
+        )

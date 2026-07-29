@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from everos import __version__
@@ -11,6 +11,7 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.multimodal import get_multimodal_llm_capability
 from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
+from everos.entrypoints.api.utils import cascade_orchestrator
 
 router = APIRouter(tags=["health"])
 
@@ -29,25 +30,62 @@ class HealthCapabilities(BaseModel):
     parser: bool
 
 
+class CascadeHealthBlock(BaseModel):
+    """Readiness of the md → LanceDB projection (cascade) subsystem.
+
+    ``healthy`` reflects **operational** health only — drain loop alive,
+    optimize not stuck, version cleanup (prune) not stalled — and is what
+    alerting should watch. ``failed_permanent`` (md files awaiting
+    ``cascade fix``) is a normal data-quality backlog reported as an
+    informational count; it does **not** flip ``healthy``, otherwise the
+    signal would sit red forever.
+    """
+
+    healthy: bool
+    reasons: list[str]
+    pending: int
+    failed_permanent: int
+    failed_retryable: int
+    drain_consecutive_failures: int
+    unrecoverable_total: int
+    optimize_failure_streak: int
+    prune_stale_seconds: float
+
+
 class HealthResponse(BaseModel):
     """Response schema for ``GET /health``.
 
     Declared as a Pydantic model (not ``dict``) so the generated
-    OpenAPI schema carries the full field shape — ``capabilities`` and
-    ``disabled_features`` are typed. A bare ``-> dict`` return type
-    degrades the OpenAPI response to ``additionalProperties: true``,
-    which robs clients (and codegen) of any structure to lean on.
+    OpenAPI schema carries the full field shape — ``capabilities``,
+    ``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``
+    return type degrades the OpenAPI response to
+    ``additionalProperties: true``, which robs clients (and codegen) of
+    any structure to lean on.
     """
 
     status: str
     version: str
     capabilities: HealthCapabilities
     disabled_features: list[str]
+    cascade: CascadeHealthBlock | None = None
+    """Present when the cascade lifespan is running; ``None`` for a
+    minimal app built without it."""
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    """Liveness probe with capabilities and disabled features."""
+async def health(request: Request) -> HealthResponse:
+    """Liveness + capabilities + cascade readiness probe.
+
+    ``status`` stays ``"ok"`` whenever the process is up — the HTTP code
+    is a *liveness* signal and a degraded cascade must not trigger a
+    restart (a crash-loop fixes neither a bad md file nor disk bloat).
+    The ``cascade`` block is the *readiness* signal: ``healthy=false``
+    with human-readable ``reasons`` **only** when the projection pipeline
+    itself is stuck (drain failing, optimize stuck, version cleanup
+    stalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is
+    a data-quality backlog reported as an informational count that does
+    not flip ``healthy``. Alert on ``cascade.healthy``.
+    """
     # ``llm`` is hardcoded ``True`` — kept for symmetry with the caps
     # dict rather than probed live. Rationale: LLM is a Tier-1 hard
     # requirement enforced at startup by ``LLMLifespanProvider``
@@ -65,9 +103,25 @@ async def health() -> HealthResponse:
         multimodal_llm=get_multimodal_llm_capability().available,
         parser=parser_available(),
     )
+    cascade: CascadeHealthBlock | None = None
+    orch = cascade_orchestrator(request)
+    if orch is not None:
+        ch = await orch.health()
+        cascade = CascadeHealthBlock(
+            healthy=ch.healthy,
+            reasons=ch.reasons,
+            pending=ch.pending,
+            failed_permanent=ch.failed_permanent,
+            failed_retryable=ch.failed_retryable,
+            drain_consecutive_failures=ch.drain_consecutive_failures,
+            unrecoverable_total=ch.unrecoverable_total,
+            optimize_failure_streak=ch.optimize_failure_streak,
+            prune_stale_seconds=round(ch.prune_stale_seconds, 1),
+        )
     return HealthResponse(
         status="ok",
         version=__version__,
         capabilities=caps,
         disabled_features=compute_disabled_features(caps.model_dump()),
+        cascade=cascade,
     )

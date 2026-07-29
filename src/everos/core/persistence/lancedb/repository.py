@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, ClassVar
 
 from lancedb import AsyncTable
@@ -22,6 +23,43 @@ from everos.core.observability.logging import get_logger
 from .base import BaseLanceTable
 
 logger = get_logger(__name__)
+
+
+def _remove_empty_index_dirs(table_uri: str) -> int:
+    """Delete empty ``_indices/<uuid>/`` husks under a table dir; return count.
+
+    ``optimize(cleanup_older_than=…)`` deletes the *files* belonging to
+    superseded index versions but leaves the now-empty per-UUID
+    directory behind. Over a long-lived churned table these husks
+    accumulate into tens of thousands of empty dirs (soak: 13061 dirs,
+    98% empty), which bloats inode usage and slows directory scans even
+    though they hold no data.
+
+    Pure filesystem bookkeeping, no LanceDB manifest involvement — an
+    empty ``_indices/<uuid>/`` means its files were already cleaned
+    because no live manifest references that index version, so removing
+    the directory cannot orphan live data. Must only run while the
+    table's write lock is held (no concurrent index build could be
+    mid-populating a freshly-created, still-empty UUID dir). Best-effort:
+    a dir that becomes non-empty or vanishes between the scan and the
+    ``rmdir`` is skipped, not an error.
+    """
+    indices = Path(table_uri) / "_indices"
+    if not indices.is_dir():
+        return 0
+    removed = 0
+    for child in indices.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            next(child.iterdir())  # has an entry → not empty, keep
+        except StopIteration:
+            try:
+                child.rmdir()
+                removed += 1
+            except OSError:
+                pass  # raced (repopulated / already gone) — skip
+    return removed
 
 
 def _q(value: str) -> str:
@@ -173,7 +211,7 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     # ── Maintenance ────────────────────────────────────────────────────────
 
-    async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
+    async def optimize(self) -> None:
         """Compact fragments + merge new data into the FTS / vector indexes.
 
         ``optimize()`` is a **performance + storage-hygiene** operation,
@@ -198,9 +236,9 @@ class LanceRepoBase[T: BaseLanceTable]:
         - **Query speed** — the unindexed tail is flat-scanned on every
           query; merging it into the index keeps that scan bounded as
           ingest accumulates.
-        - **Storage hygiene** — with ``cleanup_older_than`` it prunes
-          replaced fragments / stale manifests / dead index files,
-          bounding the on-disk file count (and FD usage at scan time).
+        - **Storage hygiene** is *not* done here — physical reclamation
+          of replaced fragments / stale manifests / dead index files is
+          :meth:`prune`, a separate write-locked call.
 
         Cascade triggers this through a per-kind throttle + trailing
         edge scheduler (``CascadeWorker._schedule_optimize``): at most
@@ -210,22 +248,61 @@ class LanceRepoBase[T: BaseLanceTable]:
         we cap it under sustained write pressure. Because visibility no
         longer depends on it, the throttle window can be generous.
 
-        Args:
-            cleanup_older_than: When set, also prune (physically delete)
-                files belonging to dataset versions older than this
-                interval. ``None`` (default) compacts only — historical
-                manifests, replaced data fragments, and stale index
-                UUID files are kept on disk forever, which inflates the
-                file count (and FD usage at scan time) without bound.
-                Cascade passes a non-None value on a slower beat
-                (``CascadeWorker._optimize_prune_interval``) so the
-                hot drain path stays cheap. Note: this does *not*
-                shrink **active** index internals (FTS ``part_N`` count
-                or vector index UUID count) — those only collapse via
-                ``drop_index + create_index``, which is not done here.
+        This is **compaction only** — physical reclamation of superseded
+        files is :meth:`prune`, a separate write-locked call. Kept lock-free
+        on purpose: a ``Retryable commit conflict`` against a concurrent
+        writer is benign here (compaction is not urgent — the next scheduled
+        beat retries), so it must not stall writers.
         """
         table = await self._table()
-        await table.optimize(cleanup_older_than=cleanup_older_than)
+        await table.optimize()
+
+    async def prune(self, older_than: dt.timedelta) -> None:
+        """Physically reclaim files from versions older than ``older_than``.
+
+        LanceDB's ``AsyncTable`` cannot clean up independently of compaction —
+        the only handle is ``optimize(cleanup_older_than=..., delete_unverified=...)``,
+        which bundles compact + cleanup into one manifest commit. Under
+        sustained churn that commit is a Rewrite that concurrent Delete /
+        Update writes preempt, so the bundled cleanup loses the race and
+        never runs (observed in the storage soak: 16 successes / 547 conflicts
+        over 21h → the index dir grew unbounded to the disk guardrail).
+
+        Fix: run it **under the per-table write lock** so no write is in
+        flight for its duration. That does two things at once:
+
+        1. **No commit conflict** — the Rewrite has the manifest to itself,
+           so cleanup actually completes every beat.
+        2. **``delete_unverified=True`` is safe** — with no concurrent
+           writer, every unreferenced file is a dead orphan from a past
+           transaction (not a file a concurrent commit is about to
+           reference), so aggressive deletion cannot corrupt anything. This
+           is what lets cleanup reclaim *during* active load instead of only
+           when writes quiesce.
+
+        After the cleanup commit, the now-empty ``_indices/<uuid>/`` husks
+        that ``cleanup_older_than`` leaves behind are removed (still under
+        the lock, so no index build can be mid-populating one); the sweep is
+        offloaded to a thread so a large dir count does not block the loop.
+
+        The trade-off is a brief write stall (~seconds on a churned table,
+        dominated by the cleanup's file scan/delete — flat, not proportional
+        to the backlog). Cascade runs it on a slow beat
+        (``CascadeWorker._optimize_prune_interval``, default 300s), so the
+        stall is rare. Does *not* shrink **active** index internals (FTS
+        ``part_N`` / index UUID count) — that is ``rebuild_indexes``'s job.
+        """
+        table = await self._table()
+        async with self._write_lock(self.table_name):
+            await table.optimize(cleanup_older_than=older_than, delete_unverified=True)
+            table_uri = await table.uri()
+            removed = await asyncio.to_thread(_remove_empty_index_dirs, table_uri)
+        if removed:
+            logger.debug(
+                "lancedb_pruned_empty_index_dirs",
+                table=self.table_name,
+                removed=removed,
+            )
 
     async def rebuild_indexes(self) -> None:
         """Drop and re-create every index on this table.

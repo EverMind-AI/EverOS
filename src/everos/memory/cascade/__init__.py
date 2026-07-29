@@ -22,6 +22,7 @@ from ._backfill import BackfillPhase as BackfillPhase
 from ._backfill import BackfillPresenter as BackfillPresenter
 from ._backfill import NullBackfillPresenter as NullBackfillPresenter
 from .orchestrator import CascadeConfig as CascadeConfig
+from .orchestrator import CascadeHealth as CascadeHealth
 from .orchestrator import CascadeOrchestrator as CascadeOrchestrator
 from .registry import KIND_REGISTRY as KIND_REGISTRY
 from .registry import KindSpec as KindSpec
@@ -32,6 +33,7 @@ __all__ = [
     "BackfillPhase",
     "BackfillPresenter",
     "CascadeConfig",
+    "CascadeHealth",
     "CascadeOrchestrator",
     "KindSpec",
     "NullBackfillPresenter",

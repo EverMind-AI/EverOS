@@ -16,6 +16,7 @@ specific business schema (episode / atomic_fact / …).
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from pathlib import Path
 from typing import ClassVar
 
@@ -703,3 +704,74 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         assert not list(await table.list_indices())
     finally:
         await dispose_connection()
+
+
+async def test_prune_holds_write_lock_and_deletes_unverified(tmp_path: Path) -> None:
+    """``prune`` runs the underlying optimize **under the per-table write
+    lock** (so concurrent churn can't preempt its Rewrite) and passes
+    ``delete_unverified=True`` — safe precisely because the lock guarantees no
+    in-flight writer, so every unreferenced file is a dead orphan.
+
+    Fix for the bundled optimize+prune starving cleanup under churn (soak:
+    16 prune successes / 547 commit conflicts over 21h → unbounded index dir).
+    """
+    captured: dict = {}
+    state = {"held": False}
+
+    class _MockTable:
+        async def optimize(self, *, cleanup_older_than=None, delete_unverified=False):
+            state["held"] = repo._write_lock(repo.table_name).locked()
+            captured["cleanup_older_than"] = cleanup_older_than
+            captured["delete_unverified"] = delete_unverified
+
+        async def uri(self) -> str:
+            return str(tmp_path)
+
+    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    await repo.prune(dt.timedelta(seconds=42))
+
+    assert state["held"], "prune must hold the write lock while optimizing"
+    assert captured["delete_unverified"] is True
+    assert captured["cleanup_older_than"] == dt.timedelta(seconds=42)
+
+
+async def test_prune_removes_empty_index_dir_husks(tmp_path: Path) -> None:
+    """After cleanup, ``prune`` removes the empty ``_indices/<uuid>/`` dirs
+    that ``cleanup_older_than`` leaves behind, but keeps non-empty ones."""
+    indices = tmp_path / "_indices"
+    (indices / "empty_uuid").mkdir(parents=True)
+    populated = indices / "live_uuid"
+    populated.mkdir()
+    (populated / "index.idx").write_text("data")
+
+    class _MockTable:
+        async def optimize(self, **_kw):
+            return None
+
+        async def uri(self) -> str:
+            return str(tmp_path)
+
+    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    await repo.prune(dt.timedelta(seconds=1))
+
+    assert not (indices / "empty_uuid").exists(), "empty husk must be removed"
+    assert populated.exists(), "non-empty index dir must be kept"
+
+
+async def test_optimize_is_lock_free_compaction_only() -> None:
+    """The light beat ``optimize`` compacts only — no ``delete_unverified`` —
+    and must NOT hold the write lock, so it never stalls writers (a commit
+    conflict against a concurrent write is benign and retried next beat)."""
+    captured: dict = {}
+    state = {"held": True}
+
+    class _MockTable:
+        async def optimize(self, **kwargs):
+            state["held"] = repo._write_lock(repo.table_name).locked()
+            captured.update(kwargs)
+
+    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    await repo.optimize()
+
+    assert state["held"] is False, "light optimize must be lock-free"
+    assert captured == {}, "light optimize passes no cleanup/delete_unverified args"

@@ -92,3 +92,66 @@ async def test_drain_once_returns_zero_on_empty_queue(
 ) -> None:
     orch = _make_orchestrator(runtime)
     assert await orch.drain_once() == 0
+
+
+async def test_health_is_healthy_on_fresh_runtime(runtime: MemoryRoot) -> None:
+    """A quiet, freshly-booted cascade reports healthy with no reasons."""
+    orch = _make_orchestrator(runtime)
+    health = await orch.health()
+    assert health.healthy is True
+    assert health.reasons == []
+    assert health.failed_permanent == 0
+    assert health.prune_stale_seconds == 0.0
+
+
+async def test_permanent_failures_are_informational_not_unhealthy(
+    runtime: MemoryRoot,
+) -> None:
+    """A permanently-failed md row is reported but must NOT flip ``healthy``.
+
+    A per-file triage backlog is normal steady state; folding it into the
+    verdict would pin the signal red forever. ``failed_permanent`` is
+    surfaced as an informational count while ``healthy`` stays true so
+    long as the pipeline itself (drain / optimize / prune) is fine.
+    """
+    from everos.component.utils.datetime import get_utc_now
+    from everos.infra.persistence.sqlite import md_change_state_repo
+
+    orch = _make_orchestrator(runtime)
+    await md_change_state_repo.upsert(
+        "users/u1/episodes/ep_1.md",
+        kind="episode",
+        change_type="added",
+        mtime=get_utc_now().timestamp(),
+    )
+    await md_change_state_repo.claim_pending_batch(10)
+    await md_change_state_repo.mark_failed(
+        "users/u1/episodes/ep_1.md",
+        retryable=False,
+        error="boom",
+        new_retry_count=0,
+    )
+
+    health = await orch.health()
+    assert health.failed_permanent == 1  # reported…
+    assert health.healthy is True  # …but pipeline is operationally fine
+    assert health.reasons == []
+
+
+async def test_operational_signal_flips_healthy(runtime: MemoryRoot) -> None:
+    """An operational reason (prune stalled) — not a data-quality backlog —
+    is what flips ``healthy`` false."""
+    import time
+
+    import everos.memory.cascade.worker as wmod
+
+    orch = _make_orchestrator(runtime)
+    # simulate a running worker whose version cleanup has gone stale
+    orch._worker._started_at = time.monotonic() - (
+        wmod._PRUNE_STALE_SECONDS_ALERT + 100
+    )
+    orch._worker._optimizer_states["episode"] = wmod._KindOptimizerState()
+
+    health = await orch.health()
+    assert health.healthy is False
+    assert any("cleanup stalled" in r for r in health.reasons)
