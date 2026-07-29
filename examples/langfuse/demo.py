@@ -39,7 +39,7 @@ def main() -> None:
     ts = int(time.time() * 1000)
 
     add = _post(
-        "/api/v1/memory/add",
+        "/api/v2/memory/add",
         {
             "session_id": SESSION,
             "messages": [
@@ -62,7 +62,7 @@ def main() -> None:
     )
     print("add   ->", add["data"])
 
-    flush = _post("/api/v1/memory/flush", {"session_id": SESSION, "messages": []})
+    flush = _post("/api/v2/memory/flush", {"session_id": SESSION, "messages": []})
     print("flush ->", flush["data"])
 
     print("waiting for async index sync ...")
@@ -70,7 +70,7 @@ def main() -> None:
 
     for method in ("keyword", "hybrid", "agentic"):
         resp = _post(
-            "/api/v1/memory/search",
+            "/api/v2/memory/search",
             {
                 "user_id": USER,
                 "query": "which vector database did we move to and why",

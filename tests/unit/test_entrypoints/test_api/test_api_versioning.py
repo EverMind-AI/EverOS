@@ -1,10 +1,10 @@
 """API version aliasing — every business route is served under v1 and v2.
 
-The ``/api/v2`` prefix is the cloud-aligned name; ``/api/v1`` is retained as a
-permanent backward-compatible alias pointing to the *same* endpoint. These
-tests are the completeness guard: they fail if any versioned route is exposed
-under one prefix but not the other, or if the two prefixes ever diverge to
-different handlers. Infrastructure endpoints (``/health``, ``/metrics``) are
+The ``/api/v2`` prefix is the canonical, cloud-aligned name; ``/api/v1`` is a
+legacy compatibility alias pointing to the *same* endpoint. These tests are
+the completeness guard: they fail if any versioned route is exposed under one
+prefix but not the other, or if the two prefixes ever diverge to different
+handlers. Infrastructure endpoints (``/health``, ``/metrics``) are
 deliberately unversioned and must NOT be mirrored.
 
 Assertions run against ``app.openapi()["paths"]`` — the authoritative,

@@ -212,18 +212,23 @@ everos demo --live
 ```
 
 Live demo mode 会连接正在运行的 server，并在打开同一个 memory sphere UI
-之前真实执行 `/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
-`/api/v1/memory/search`。如果 server 不在 `http://127.0.0.1:8000`，可以使用
+之前真实执行 `/health` -> `/api/v2/memory/add` -> `/api/v2/memory/flush` ->
+`/api/v2/memory/search`。如果 server 不在 `http://127.0.0.1:8000`，可以使用
 `--server-url <url>`。
 
 ### 5. 试写第一条记忆
+
+> [!NOTE]
+> 业务接口位于 `/api/v2`。旧的 `/api/v1` 前缀仍然指向同一批 handler，已有集成
+> 不会受影响；但它只是兼容用的 legacy alias，未来的大版本可能移除 —— 新代码请
+> 直接使用 `/api/v2`。
 
 添加一个很小的 conversation：
 
 ```bash
 TS=$(($(date +%s)*1000))
 
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -239,7 +244,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
 为了本地 demo，手动触发一次 extraction：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
 ```
@@ -247,7 +252,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
 再把这条记忆搜索回来：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
@@ -271,7 +276,7 @@ Markdown 会同步写入，本地索引会在后台追上。
 
 ### 可选：摄取多模态文件
 
-如果要通过 `/api/v1/memory/add` 的 `content` items 摄取非文本内容
+如果要通过 `/api/v2/memory/add` 的 `content` items 摄取非文本内容
 （image / pdf / audio / office documents），安装可选 extra：
 
 ```bash

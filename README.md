@@ -195,18 +195,24 @@ everos demo --live
 ```
 
 Live demo mode connects to the running server and performs the real
-`/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
-`/api/v1/memory/search` flow before opening the same memory sphere UI. Use
+`/health` -> `/api/v2/memory/add` -> `/api/v2/memory/flush` ->
+`/api/v2/memory/search` flow before opening the same memory sphere UI. Use
 `--server-url <url>` if your server is not on `http://127.0.0.1:8000`.
 
 ### 5. Try Your First Memory
+
+> [!NOTE]
+> Business endpoints live under `/api/v2`. The older `/api/v1` prefix still
+> resolves to the same handlers so existing integrations keep working, but it
+> is a legacy alias that may be removed in a future major release — write new
+> code against `/api/v2`.
 
 Add a tiny conversation:
 
 ```bash
 TS=$(($(date +%s)*1000))
 
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -222,7 +228,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
 Force extraction for the local demo:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
 ```
@@ -230,7 +236,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
 Search it back:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
@@ -258,7 +264,7 @@ For annotated responses and the Markdown files EverOS creates, see
 ### Optional: Ingest Multimodal Files
 
 To ingest non-text content (image / pdf / audio / office documents)
-through `/api/v1/memory/add` `content` items, install the optional
+through `/api/v2/memory/add` `content` items, install the optional
 extra:
 
 ```bash

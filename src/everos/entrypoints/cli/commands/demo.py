@@ -168,7 +168,7 @@ def _run_live_demo_flow(
     timestamp_ms = int(get_utc_now().timestamp() * 1000)
     request(
         "POST",
-        "/api/v1/memory/add",
+        "/api/v2/memory/add",
         base_url=base_url,
         json_body={
             "session_id": LIVE_DEMO_SESSION_ID,
@@ -187,7 +187,7 @@ def _run_live_demo_flow(
     )
     request(
         "POST",
-        "/api/v1/memory/flush",
+        "/api/v2/memory/flush",
         base_url=base_url,
         json_body={
             "session_id": LIVE_DEMO_SESSION_ID,
@@ -207,7 +207,7 @@ def _run_live_demo_flow(
     for attempt in range(search_attempts):
         search = request(
             "POST",
-            "/api/v1/memory/search",
+            "/api/v2/memory/search",
             base_url=base_url,
             json_body=search_payload,
             timeout_seconds=timeout_seconds,

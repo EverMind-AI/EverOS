@@ -302,7 +302,7 @@ The CLI ([cli.md](cli.md)) is intentionally small:
       `rm -rf <memory-root>/.index/lancedb`, restart — the cascade
       rebuilds from markdown. For an incremental catch-up, use
       `everos cascade sync`.
-    - **Flush** is an HTTP endpoint (`POST /api/v1/memory/flush`), not a
+    - **Flush** is an HTTP endpoint (`POST /api/v2/memory/flush`), not a
       CLI command — it forces *extraction* of the session buffer, which is
       a different thing from forcing *index sync* (`cascade sync`).
 

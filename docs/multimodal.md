@@ -29,7 +29,7 @@ result is fully retrievable with the same `/search` stack.
 ## How it works
 
 ```
-POST /api/v1/memory/add
+POST /api/v2/memory/add
   messages[].content = [ ContentItem, ContentItem, ... ]
         │
         │  text items      → used verbatim
@@ -157,7 +157,7 @@ way — only the parsed text is.
 
 ```bash
 TS=$(($(date +%s) * 1000))     # v1 contract: timestamp in ms
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"mm-001\",
@@ -244,7 +244,7 @@ HTTP library:
 import httpx
 
 httpx.post(
-    "http://127.0.0.1:8000/api/v1/memory/add",
+    "http://127.0.0.1:8000/api/v2/memory/add",
     json={
         "session_id": "mm-001",
         "messages": [
@@ -319,7 +319,7 @@ episodes and memory cells as text turns, every retrieval method works
 across multimodal-derived memory unchanged:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",

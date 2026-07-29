@@ -13,14 +13,14 @@ and keeps the original file for reference.
 
 ```bash
 # Upload a document
-curl -s -X POST http://localhost:8000/api/v1/knowledge/documents \
+curl -s -X POST http://localhost:8000/api/v2/knowledge/documents \
   -F "file=@my-report.pdf" \
   -F "title=Q1 Engineering Report" \
   | jq .data
 # → { "doc_id": "d_a1b2c3d4e5f6", "category_id": "Technology", "topic_count": 8, ... }
 
 # Search
-curl -s -X POST http://localhost:8000/api/v1/knowledge/search \
+curl -s -X POST http://localhost:8000/api/v2/knowledge/search \
   -H "Content-Type: application/json" \
   -d '{"query": "performance bottleneck", "method": "hybrid"}' \
   | jq '.data.hits[:3] | .[] | {topic_name, score}'
@@ -206,7 +206,7 @@ request to bypass LLM classification.
 
 ## API reference
 
-All endpoints are under `/api/v1/knowledge`. Responses use the envelope
+All endpoints are under `/api/v2/knowledge`. Responses use the envelope
 format `{"request_id": "...", "data": {...}}`. The `request_id` field is
 omitted from examples below for brevity.
 
@@ -256,7 +256,7 @@ async def upload_document(file_path: str, title: str) -> dict:
     async with httpx.AsyncClient(base_url="http://localhost:8000") as client:
         with open(file_path, "rb") as f:
             resp = await client.post(
-                "/api/v1/knowledge/documents",
+                "/api/v2/knowledge/documents",
                 files={"file": (Path(file_path).name, f)},
                 data={"title": title},
             )
@@ -267,7 +267,7 @@ async def upload_document(file_path: str, title: str) -> dict:
 **Example — curl**:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/documents \
+curl -X POST http://localhost:8000/api/v2/knowledge/documents \
   -F "file=@report.pdf" \
   -F "title=Quarterly Report" \
   -F "category_id=Finance"
@@ -605,7 +605,7 @@ Storage paths, SQLite rows, and LanceDB indexes are all scoped by
 A complete workflow from upload to search:
 
 ```bash
-BASE=http://localhost:8000/api/v1/knowledge
+BASE=http://localhost:8000/api/v2/knowledge
 
 # 1. List available categories
 curl -s "$BASE/categories" | jq '[.data.categories[] | .category_id]'

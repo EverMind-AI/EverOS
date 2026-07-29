@@ -26,11 +26,11 @@ business semantics the raw spec does not carry.
   - [SearchMethod](#searchmethod)
   - [GetMemoryType](#getmemorytype)
 - [Endpoints](#endpoints)
-  - [POST /api/v2/memory/add](#post-apiv1memoryadd)
-  - [POST /api/v2/memory/flush](#post-apiv1memoryflush)
-  - [POST /api/v2/memory/search](#post-apiv1memorysearch)
-  - [POST /api/v2/memory/get](#post-apiv1memoryget)
-  - [POST /api/v2/ome/trigger](#post-apiv1ometrigger)
+  - [POST /api/v2/memory/add](#post-apiv2memoryadd)
+  - [POST /api/v2/memory/flush](#post-apiv2memoryflush)
+  - [POST /api/v2/memory/search](#post-apiv2memorysearch)
+  - [POST /api/v2/memory/get](#post-apiv2memoryget)
+  - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
 
@@ -52,11 +52,13 @@ but are intentionally outside this reference — they are runtime probes
 for deployment, not part of the application contract.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
-business endpoint is **also** served under `/api/v1`, which is retained as a
-permanent, backward-compatible alias: the two prefixes resolve to the same
-handlers with identical request/response contracts. Existing `/api/v1`
-integrations keep working unchanged; new integrations should use `/api/v2`.
-Swap the prefix in any example below to reach the same endpoint under v1.
+business endpoint is **also** served under `/api/v1`, kept as a legacy
+compatibility alias: the two prefixes resolve to the same handlers with
+identical request/response contracts, so existing `/api/v1` integrations keep
+working today. The alias carries no long-term guarantee — it may be removed in
+a future major release, and it will be announced in the changelog with a
+deprecation window before that happens. Write new integrations against
+`/api/v2`, and migrate existing ones when convenient.
 
 ### Content type
 

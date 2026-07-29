@@ -134,11 +134,11 @@ def test_live_demo_flow_calls_server_and_builds_story() -> None:
         assert timeout_seconds == 3.0
         if path == "/health":
             return {"status": "ok"}
-        if path == "/api/v1/memory/add":
+        if path == "/api/v2/memory/add":
             return {"message_count": 1, "status": "accumulated"}
-        if path == "/api/v1/memory/flush":
+        if path == "/api/v2/memory/flush":
             return {"message_count": 1, "status": "extracted"}
-        if path == "/api/v1/memory/search":
+        if path == "/api/v2/memory/search":
             return {
                 "data": {
                     "episodes": [
@@ -172,9 +172,9 @@ def test_live_demo_flow_calls_server_and_builds_story() -> None:
 
     assert [path for _, path, _ in calls] == [
         "/health",
-        "/api/v1/memory/add",
-        "/api/v1/memory/flush",
-        "/api/v1/memory/search",
+        "/api/v2/memory/add",
+        "/api/v2/memory/flush",
+        "/api/v2/memory/search",
     ]
     add_body = calls[1][2]
     assert add_body is not None
