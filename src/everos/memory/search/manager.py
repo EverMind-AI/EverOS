@@ -144,7 +144,8 @@ def _top_score(data: SearchData) -> float:
 # (HYBRID → LR sigmoid, AGENTIC → cross-encoder), so the recall_hit
 # threshold is meaningful. KEYWORD (unbounded BM25) and single-route
 # VECTOR are excluded — a fixed threshold there yields a misleading
-# near-constant "hit" that inflates cross-method dashboards.
+# near-constant "hit" that inflates cross-method dashboards. Their top
+# score is also reported under a separate score name (see ``scores``).
 _CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
 
 

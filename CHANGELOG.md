@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Uncalibrated recall scores moved to their own name** — `KEYWORD` and
+  single-route `VECTOR` searches now report their top score as
+  `recall_top_score_raw`; `recall_top_score` is reserved for the calibrated
+  methods (`HYBRID` LR sigmoid, `AGENTIC` cross-encoder), whose values share a
+  comparable `[0, 1]` scale. Langfuse aggregates scores by name, so the previous
+  single name meant a chart could average an unbounded BM25 score together with
+  a probability. Every recall score also carries
+  `metadata = {"method": ..., "calibrated": ...}` now, a structured field that
+  can be split on, alongside the existing human-readable comment. Dashboards
+  built on `recall_top_score` for keyword search need to switch to the new name.
+
 ## [1.2.0] - 2026-07-24
 
 ### Added
