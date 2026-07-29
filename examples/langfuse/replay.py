@@ -51,6 +51,9 @@ from opentelemetry.trace import (
 
 DEFAULT_HOST = "https://cloud.langfuse.com"
 REPLAY_TAG = "replay"
+SCORE_MAX_ATTEMPTS = 5
+# Small gap between scores; cheaper than discovering the limiter one 429 at a time.
+SCORE_PACE_SECONDS = 0.15
 
 
 def _credentials() -> tuple[str, str]:
@@ -65,6 +68,37 @@ def _credentials() -> tuple[str, str]:
         )
     token = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
     return host, f"Basic {token}"
+
+
+def _check_credentials(host: str, auth: str) -> None:
+    """Fail fast, and say why, before pushing a few hundred spans.
+
+    Langfuse keys are region-scoped, and the OTLP exporter only reports a
+    rejected export through the SDK's own logging, so a wrong host otherwise
+    looks like a successful run into an empty project.
+    """
+    request = urllib.request.Request(
+        f"{host}/api/public/projects", headers={"Authorization": auth}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {401, 403}:
+            # Only auth is under test; any other response is the replay's problem.
+            return
+        other = (
+            "https://cloud.langfuse.com"
+            if "us." in host
+            else "https://us.cloud.langfuse.com"
+        )
+        sys.exit(
+            f"{host} rejected these keys ({exc.code}). Langfuse projects are "
+            f"region-scoped, so if the project lives in the other region set "
+            f"LANGFUSE_HOST={other} and try again."
+        )
+    except OSError:
+        return  # unreachable host surfaces on the real export a moment later
 
 
 def _span_kind(name: str) -> SpanKind:
@@ -82,14 +116,29 @@ def _status(record: dict[str, Any]) -> Status | None:
 
 
 def _post_score(host: str, auth: str, payload: dict[str, Any]) -> None:
+    """POST one score, backing off when Langfuse rate-limits the endpoint.
+
+    Scores go one per request, so replaying a whole recording sends dozens in a
+    row and reliably trips the limiter without this.
+    """
     request = urllib.request.Request(
         f"{host}/api/public/scores",
         data=json.dumps(payload).encode(),
         headers={"content-type": "application/json", "Authorization": auth},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        response.read()
+    for attempt in range(SCORE_MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                response.read()
+            return
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            if not retryable or attempt == SCORE_MAX_ATTEMPTS - 1:
+                raise
+            after = exc.headers.get("retry-after") if exc.headers else None
+            delay = float(after) if after and after.isdigit() else 2.0**attempt
+            time.sleep(delay)
 
 
 def main() -> None:
@@ -98,6 +147,7 @@ def main() -> None:
     args = parser.parse_args()
 
     host, auth = _credentials()
+    _check_credentials(host, auth)
     try:
         with open(args.fixture, encoding="utf-8") as handle:
             fixture = json.load(handle)
@@ -200,6 +250,7 @@ def main() -> None:
             sent += 1
         except urllib.error.HTTPError as exc:
             print(f"  ! score {score.get('name')} rejected: {exc}", file=sys.stderr)
+        time.sleep(SCORE_PACE_SECONDS)
     if sent or skipped:
         note = f", {skipped} unmapped" if skipped else ""
         print(f"Pushed {sent} recall score(s){note}")
