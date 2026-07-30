@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-EverOS is released and at v1.0.0 (stable). Security fixes are applied to the
-latest release line only.
+Security fixes are applied to the latest release line only; older minor lines do
+not receive backports.
 
 | Version | Supported |
 |---------|-----------|
-| 1.x     | ✅        |
-| < 1.0   | ❌        |
+| `1.2.x` (current) | ✅ |
+| `1.1.x` and older | ❌ — upgrade to the current line |
 
 ## Reporting a Vulnerability
 
@@ -24,8 +24,18 @@ Instead, email **evermind@shanda.com** with:
 
 We will acknowledge your report within **5 business days**, keep you informed of
 progress, and aim to ship a fix or mitigation before any public disclosure.
-Reporters are credited in the release notes unless you prefer to remain
-anonymous.
+Reporters are credited in the advisory and the release notes unless you prefer
+to remain anonymous.
+
+## Published Advisories
+
+Confirmed issues are published as GitHub Security Advisories, each carrying the
+affected version ranges and the release that fixes them:
+
+<https://github.com/EverMind-AI/EverOS/security/advisories>
+
+To check whether an installation is affected by a past issue, read the version
+range on the advisory itself — the range is authoritative.
 
 ## Scope & Threat Model
 
@@ -39,6 +49,10 @@ following in mind:
   is loopback-only. Only set the bind to `0.0.0.0` (or any routable interface)
   after you have placed your own gateway / auth layer in front;
   `everos server start` will log a warning when you bind to `0.0.0.0`.
+- **Documents you ingest are untrusted input.** Filenames, metadata, and
+  content that originate outside your control are parsed, indexed, and written
+  to disk. An instance that ingests third-party documents is processing
+  untrusted data even when the API itself is reachable only from loopback.
 - Secrets (LLM / embedding API keys) live in your local `.env`; protect that
   file as you would any credential. EverOS never transmits them anywhere except
   the providers you configure.
