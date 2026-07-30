@@ -12,6 +12,7 @@ before wiring it into a real workflow.
 | Doc | Purpose |
 |---|---|
 | [everos-demo.md](everos-demo.md) | `everos demo` — local educational TUI to feel the memory lifecycle before configuring keys |
+| [hermes-integration.md](hermes-integration.md) | Wire Hermes Agent to EverOS as a long-term memory backend — install, config, lifecycle, tools |
 
 ## Reference
 

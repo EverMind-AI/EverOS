@@ -1,0 +1,5 @@
+name: everos
+version: 0.1.0
+description: "EverOS memory provider for Hermes Agent. Supports both vendor-hosted EverOS servers and local self-hosted instances with user-supplied LLM / embedding / rerank endpoints."
+pip_dependencies:
+  - httpx
