@@ -744,7 +744,14 @@ async def _backfill_table(
     # path (see ``lancedb/__init__.py:140``).
     if result.rows_processed > 0:
         try:
-            await backlog.spec.repo.optimize(cleanup_older_than=dt.timedelta(0))
+            # optimize() compacts the per-row-update fragments; prune()
+            # physically reclaims the superseded manifest versions. Split
+            # after the repo API separated them (compact is lock-free, prune
+            # runs under the write lock). prune(0) reclaims everything now;
+            # it is cross-process safe (delete_unverified=False), so running
+            # ``backfill`` alongside a live daemon cannot corrupt the table.
+            await backlog.spec.repo.optimize()
+            await backlog.spec.repo.prune(dt.timedelta(0))
             logger.info(
                 "cascade_backfill_table_optimized",
                 table=backlog.table_name,

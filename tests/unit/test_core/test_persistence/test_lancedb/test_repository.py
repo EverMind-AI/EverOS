@@ -706,14 +706,23 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         await dispose_connection()
 
 
-async def test_prune_holds_write_lock_and_deletes_unverified(tmp_path: Path) -> None:
+async def test_prune_holds_write_lock_and_is_cross_process_safe(
+    tmp_path: Path,
+) -> None:
     """``prune`` runs the underlying optimize **under the per-table write
-    lock** (so concurrent churn can't preempt its Rewrite) and passes
-    ``delete_unverified=True`` — safe precisely because the lock guarantees no
-    in-flight writer, so every unreferenced file is a dead orphan.
+    lock** (so concurrent churn in this process can't preempt its Rewrite)
+    and passes ``delete_unverified=False``.
 
-    Fix for the bundled optimize+prune starving cleanup under churn (soak:
-    16 prune successes / 547 commit conflicts over 21h → unbounded index dir).
+    The write lock is the fix for the bundled optimize+prune starving
+    cleanup under churn (soak: 16 prune successes / 547 commit conflicts
+    over 21h → unbounded index dir). ``delete_unverified=False`` is the
+    cross-process guard: the in-process lock cannot fence a *second* process
+    (a CLI ``cascade sync`` / ``backfill``), and lance warns that
+    ``delete_unverified=True`` can corrupt the dataset if any other process
+    is writing. ``False`` reclaims identically on churned tables (both
+    collapse superseded versions ~97% — measured) because ordinary orphans
+    are version-referenced and thus verifiable; ``True`` only additionally
+    deletes in-flight/dangling files — exactly the corruption vector.
     """
     captured: dict = {}
     state = {"held": False}
@@ -731,7 +740,7 @@ async def test_prune_holds_write_lock_and_deletes_unverified(tmp_path: Path) -> 
     await repo.prune(dt.timedelta(seconds=42))
 
     assert state["held"], "prune must hold the write lock while optimizing"
-    assert captured["delete_unverified"] is True
+    assert captured["delete_unverified"] is False
     assert captured["cleanup_older_than"] == dt.timedelta(seconds=42)
 
 

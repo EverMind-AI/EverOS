@@ -79,8 +79,11 @@ everos cascade sync users/u1/episodes/X.md    # re-enqueue + drain
 ```
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
-calls `sync_once` / `drain_once` — no watcher / scanner background
-task. So it's safe to run in parallel with a live `everos server`.
+calls `sync_once` / `drain_once` — no watcher / scanner background task.
+Its drain still runs the same compaction + version-cleanup (`prune`) as
+the daemon, but `prune` uses `delete_unverified=False`, so it never
+deletes a file another process may be mid-commit on. Safe to run in
+parallel with a live `everos server`.
 
 ## Rebuild the index: `everos cascade rebuild`
 
@@ -91,6 +94,12 @@ the whole index from markdown (the source of truth) in one shot:
 everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
+
+> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
+> **drops and recreates** the LanceDB tables. A running daemon holds
+> cached table handles that would keep pointing at (and writing to) the
+> dropped dataset, corrupting the rebuild. This is the one cascade
+> command that is **not** safe to run alongside a live server.
 
 What it does, in order:
 

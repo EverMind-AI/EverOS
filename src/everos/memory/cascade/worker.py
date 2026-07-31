@@ -265,9 +265,14 @@ def _is_benign_commit_conflict(exc: BaseException) -> bool:
     class to catch. On the lock-free light beat this is expected under
     concurrent writes and benign (the next beat retries), so it is
     logged at ``debug`` and does not count toward the failure streak.
+
+    Match only the specific ``commit conflict`` phrase (a substring of the
+    Rust message), not a bare ``retryable`` — the latter appears in the
+    repr of unrelated recoverable errors (e.g. ``ExternalServiceError``
+    carrying ``retryable=True``) and would silently swallow real failures
+    (review P2).
     """
-    text = str(exc).lower()
-    return "commit conflict" in text or "retryable" in text
+    return "commit conflict" in str(exc).lower()
 
 
 class CascadeWorker:
@@ -442,12 +447,14 @@ class CascadeWorker:
         )
 
     def _prune_stale_seconds(self) -> float:
-        """Seconds since the most recent successful prune across kinds.
+        """Seconds since the most recent successful prune across kinds,
+        measured from worker start when nothing has pruned yet.
 
-        Measured from worker start when nothing has pruned yet. Returns
-        ``0`` when there has been no optimize activity at all (no writes
-        → nothing to reclaim → not stale), which keeps an idle worker
-        from ever looking degraded.
+        Returns ``0`` before the worker has started (``_started_at == 0``)
+        or before any kind has registered an optimizer state — no prune
+        beat has run yet, so there is nothing to be stale about. Once a
+        beat registers state, staleness is the time since the newest
+        ``last_prune_at`` (or since start, whichever is later).
         """
         states = list(self._optimizer_states.values())
         if not states or self._started_at == 0.0:
@@ -698,10 +705,12 @@ class CascadeWorker:
             if should_prune:
                 # Heavy beat: physically reclaim old versions under the
                 # per-table write lock (inside ``repo.prune``) so churn
-                # can't preempt it and ``delete_unverified`` is safe. The
-                # retention window is short + decoupled from the cadence
-                # (see DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS) so
-                # superseded full-table copies don't pile up between beats.
+                # can't preempt the cleanup commit. ``prune`` uses
+                # ``delete_unverified=False`` so it stays safe even against a
+                # second process (CLI ``cascade sync``). The retention window
+                # is short + decoupled from the cadence (see
+                # DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS) so superseded
+                # full-table copies don't pile up between beats.
                 await repo.prune(dt.timedelta(seconds=self._optimize_prune_retention))
                 if state is not None:
                     state.last_prune_at = now

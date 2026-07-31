@@ -28,6 +28,7 @@ This file pins:
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 import pytest
@@ -58,8 +59,15 @@ class _FakeSchema:
 
 
 class _FakeRepo:
-    """Records ``update`` and ``optimize`` calls; can be told to fail
-    either operation to model poison writes / failing optimize.
+    """Records ``update`` / ``optimize`` / ``prune`` calls; can be told to
+    fail an operation to model poison writes / failing maintenance.
+
+    The ``optimize`` / ``prune`` signatures MUST mirror the real
+    ``LanceRepoBase`` exactly. A stale double here previously kept a removed
+    ``optimize(cleanup_older_than=…)`` kwarg after the repo API split
+    compact (``optimize()``) from reclaim (``prune()``); the fake happily
+    accepted the old call while the real ``optimize`` raised ``TypeError``,
+    hiding a silent backfill regression from CI (review P0-1).
     """
 
     def __init__(
@@ -67,26 +75,31 @@ class _FakeRepo:
         *,
         update_fails: bool = False,
         optimize_fails: bool = False,
+        prune_fails: bool = False,
     ) -> None:
         self.update_fails = update_fails
         self.optimize_fails = optimize_fails
+        self.prune_fails = prune_fails
         self.update_calls: list[tuple[dict[str, Any], str]] = []
         self.optimize_calls = 0
+        self.prune_calls = 0
+        self.last_prune_older_than: dt.timedelta | None = None
 
     async def update(self, values: dict[str, Any], *, where: str) -> None:
         self.update_calls.append((values, where))
         if self.update_fails:
             raise RuntimeError("simulated per-row write failure")
 
-    async def optimize(self, *, cleanup_older_than=None) -> None:
-        # ``cleanup_older_than`` mirrors the real ``LanceRepoBase.optimize``
-        # signature — round-4 review M2 added the kwarg at the backfill
-        # call site to physically prune old manifest versions, and this
-        # test double must accept it without breaking prior coverage.
+    async def optimize(self) -> None:
         self.optimize_calls += 1
-        self.last_cleanup_older_than = cleanup_older_than
         if self.optimize_fails:
             raise RuntimeError("simulated optimize failure (e.g. lock contention)")
+
+    async def prune(self, older_than: dt.timedelta) -> None:
+        self.prune_calls += 1
+        self.last_prune_older_than = older_than
+        if self.prune_fails:
+            raise RuntimeError("simulated prune failure (e.g. lock contention)")
 
 
 class _HappyProvider:
@@ -154,6 +167,11 @@ async def test_backfill_table_calls_optimize_when_rows_processed(
     assert result.rows_failed == 0
     assert len(repo.update_calls) == 3
     assert repo.optimize_calls == 1
+    # Compact then reclaim: prune fires once with a zero retention (reclaim
+    # everything now) — this is what the removed ``cleanup_older_than`` kwarg
+    # used to do inline (review P0-1).
+    assert repo.prune_calls == 1
+    assert repo.last_prune_older_than == dt.timedelta(0)
     # Happy path must not fire the failure log.
     assert "cascade_backfill_table_optimize_failed" not in caplog.text
 
@@ -172,6 +190,7 @@ async def test_backfill_table_skips_optimize_when_no_rows_written() -> None:
     assert result.rows_failed == 2
     assert len(repo.update_calls) == 0
     assert repo.optimize_calls == 0
+    assert repo.prune_calls == 0
 
 
 async def test_backfill_table_skips_optimize_when_backlog_is_empty() -> None:
@@ -187,6 +206,7 @@ async def test_backfill_table_skips_optimize_when_backlog_is_empty() -> None:
 
     assert result.rows_processed == 0
     assert repo.optimize_calls == 0
+    assert repo.prune_calls == 0
 
 
 async def test_backfill_table_optimize_failure_does_not_abort(
@@ -209,5 +229,30 @@ async def test_backfill_table_optimize_failure_does_not_abort(
     assert len(repo.update_calls) == 3
     # Optimize was attempted and raised — the failure log names the table.
     assert repo.optimize_calls == 1
+    # optimize() raised before prune() could run.
+    assert repo.prune_calls == 0
+    assert "cascade_backfill_table_optimize_failed" in caplog.text
+    assert "fake_table" in caplog.text
+
+
+async def test_backfill_table_prune_failure_does_not_abort(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """prune() is best-effort maintenance too — a raising ``prune`` (after a
+    clean ``optimize``) must not invalidate the writes or lose the counters;
+    it logs the same failure warning naming the table."""
+    repo = _FakeRepo(prune_fails=True)
+    backlog = _backlog(repo, [_row(f"r{i}", f"text {i}") for i in range(3)])
+
+    with caplog.at_level("WARNING", logger="everos.memory.cascade._backfill"):
+        result = await _backfill_table(  # type: ignore[arg-type]
+            backlog, _HappyProvider(), presenter=NullBackfillPresenter()
+        )
+
+    assert result.rows_processed == 3
+    assert result.rows_failed == 0
+    assert len(repo.update_calls) == 3
+    assert repo.optimize_calls == 1
+    assert repo.prune_calls == 1
     assert "cascade_backfill_table_optimize_failed" in caplog.text
     assert "fake_table" in caplog.text

@@ -11,7 +11,10 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.multimodal import get_multimodal_llm_capability
 from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
+from everos.core.observability.logging import get_logger
 from everos.entrypoints.api.utils import cascade_orchestrator
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -106,18 +109,38 @@ async def health(request: Request) -> HealthResponse:
     cascade: CascadeHealthBlock | None = None
     orch = cascade_orchestrator(request)
     if orch is not None:
-        ch = await orch.health()
-        cascade = CascadeHealthBlock(
-            healthy=ch.healthy,
-            reasons=ch.reasons,
-            pending=ch.pending,
-            failed_permanent=ch.failed_permanent,
-            failed_retryable=ch.failed_retryable,
-            drain_consecutive_failures=ch.drain_consecutive_failures,
-            unrecoverable_total=ch.unrecoverable_total,
-            optimize_failure_streak=ch.optimize_failure_streak,
-            prune_stale_seconds=round(ch.prune_stale_seconds, 1),
-        )
+        try:
+            ch = await orch.health()
+            cascade = CascadeHealthBlock(
+                healthy=ch.healthy,
+                reasons=ch.reasons,
+                pending=ch.pending,
+                failed_permanent=ch.failed_permanent,
+                failed_retryable=ch.failed_retryable,
+                drain_consecutive_failures=ch.drain_consecutive_failures,
+                unrecoverable_total=ch.unrecoverable_total,
+                optimize_failure_streak=ch.optimize_failure_streak,
+                prune_stale_seconds=round(ch.prune_stale_seconds, 1),
+            )
+        except Exception as exc:
+            # The probe reads SQLite (queue_summary runs aggregate counts).
+            # A locked / full / mid-migration DB must NOT turn /health into a
+            # 500 — that flips the liveness signal and makes k8s restart the
+            # container, which fixes neither a stuck DB nor disk bloat (see
+            # the handler docstring). Surface it as unhealthy *readiness*
+            # with a reason and keep HTTP 200.
+            logger.warning("cascade_health_probe_failed", error=repr(exc))
+            cascade = CascadeHealthBlock(
+                healthy=False,
+                reasons=[f"cascade health probe failed: {exc!r}"],
+                pending=0,
+                failed_permanent=0,
+                failed_retryable=0,
+                drain_consecutive_failures=0,
+                unrecoverable_total=0,
+                optimize_failure_streak=0,
+                prune_stale_seconds=0.0,
+            )
     return HealthResponse(
         status="ok",
         version=__version__,

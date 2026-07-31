@@ -94,3 +94,20 @@ async def test_health_degraded_stays_200_but_flags_cascade() -> None:
     assert body["cascade"]["failed_permanent"] == 3
     assert body["cascade"]["prune_stale_seconds"] == 1200.0
     assert any("cleanup stalled" in r for r in body["cascade"]["reasons"])
+
+
+async def test_health_probe_exception_stays_200_and_flags_unhealthy() -> None:
+    """The probe reads SQLite; a locked / full / mid-migration DB makes
+    ``orch.health()`` raise. That must NOT turn /health into a 500 (which
+    would flip liveness and restart the container) — the endpoint reports
+    unhealthy readiness with a reason and keeps HTTP 200 (review P1-3)."""
+    orch = mock.create_autospec(CascadeOrchestrator, instance=True)
+    orch.health.side_effect = RuntimeError("database is locked")
+    async with _client(orch) as c:
+        resp = await c.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["cascade"]["healthy"] is False
+    assert any("probe failed" in r for r in body["cascade"]["reasons"])
+    assert any("database is locked" in r for r in body["cascade"]["reasons"])

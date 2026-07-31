@@ -24,6 +24,13 @@ from .base import BaseLanceTable
 
 logger = get_logger(__name__)
 
+# Safety cap on a single prune's ``optimize(cleanup_older_than=…)`` call. Cleanup
+# only deletes files already unreferenced by the current manifest, so a timeout
+# that cancels it mid-scan just reclaims less this beat — it cannot corrupt the
+# table — but it releases the per-table write lock instead of wedging every
+# writer behind a hung lance cleanup (review P2).
+_PRUNE_TIMEOUT_SECONDS = 300.0
+
 
 def _remove_empty_index_dirs(table_uri: str) -> int:
     """Delete empty ``_indices/<uuid>/`` husks under a table dir; return count.
@@ -273,12 +280,19 @@ class LanceRepoBase[T: BaseLanceTable]:
 
         1. **No commit conflict** — the Rewrite has the manifest to itself,
            so cleanup actually completes every beat.
-        2. **``delete_unverified=True`` is safe** — with no concurrent
-           writer, every unreferenced file is a dead orphan from a past
-           transaction (not a file a concurrent commit is about to
-           reference), so aggressive deletion cannot corrupt anything. This
-           is what lets cleanup reclaim *during* active load instead of only
-           when writes quiesce.
+        2. **Cross-process safe** — ``delete_unverified=False`` keeps lance
+           from deleting any file it cannot tie to a removed version, i.e. a
+           file a writer in *another process* (a CLI ``cascade sync`` /
+           ``backfill``) may be mid-commit on. The per-table write lock is
+           in-process only, so it cannot fence a second process; the flag is
+           what makes concurrent processes safe. Measured to reclaim
+           identically to ``delete_unverified=True`` on churned tables (both
+           collapse superseded versions ~97%), because ordinary churn
+           orphans are all version-referenced and therefore verifiable —
+           ``True`` only additionally deletes in-flight / dangling files,
+           which is exactly the corruption vector. Reclaiming *during* active
+           load comes from running under the write lock so the cleanup commit
+           never loses the manifest race, not from the flag.
 
         After the cleanup commit, the now-empty ``_indices/<uuid>/`` husks
         that ``cleanup_older_than`` leaves behind are removed (still under
@@ -294,7 +308,10 @@ class LanceRepoBase[T: BaseLanceTable]:
         """
         table = await self._table()
         async with self._write_lock(self.table_name):
-            await table.optimize(cleanup_older_than=older_than, delete_unverified=True)
+            async with asyncio.timeout(_PRUNE_TIMEOUT_SECONDS):
+                await table.optimize(
+                    cleanup_older_than=older_than, delete_unverified=False
+                )
             table_uri = await table.uri()
             removed = await asyncio.to_thread(_remove_empty_index_dirs, table_uri)
         if removed:
