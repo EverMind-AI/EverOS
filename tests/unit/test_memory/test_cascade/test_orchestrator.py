@@ -138,18 +138,20 @@ async def test_permanent_failures_are_informational_not_unhealthy(
     assert health.reasons == []
 
 
-async def test_operational_signal_flips_healthy(runtime: MemoryRoot) -> None:
+async def test_operational_signal_flips_healthy(
+    runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An operational reason (prune stalled) — not a data-quality backlog —
     is what flips ``healthy`` false."""
-    import time
-
     import everos.memory.cascade.worker as wmod
 
     orch = _make_orchestrator(runtime)
+    # Freeze the monotonic clock so staleness is deterministic regardless of
+    # the runner's boot uptime (see test_worker prune-staleness test).
+    now = 10_000.0
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
     # simulate a running worker whose version cleanup has gone stale
-    orch._worker._started_at = time.monotonic() - (
-        wmod._PRUNE_STALE_SECONDS_ALERT + 100
-    )
+    orch._worker._started_at = now - (wmod._PRUNE_STALE_SECONDS_ALERT + 100)
     orch._worker._optimizer_states["episode"] = wmod._KindOptimizerState()
 
     health = await orch.health()

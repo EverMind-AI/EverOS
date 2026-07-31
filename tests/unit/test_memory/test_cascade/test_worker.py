@@ -808,13 +808,19 @@ def test_worker_health_idle_is_not_stale() -> None:
     assert h.reasons() == []
 
 
-def test_worker_health_reports_prune_staleness() -> None:
+def test_worker_health_reports_prune_staleness(monkeypatch: pytest.MonkeyPatch) -> None:
     """An active kind that has never successfully pruned since start goes
     stale once past the alert threshold."""
     from everos.memory.cascade import worker as wmod
 
+    # Freeze the monotonic clock so staleness is deterministic. Real
+    # ``time.monotonic()`` returns process/boot uptime, which is huge on a
+    # long-lived dev box but only ~100s on a fresh CI runner — a bare
+    # ``monotonic() - 1000`` would go negative there and read as not-stale.
+    now = 10_000.0
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
     w = CascadeWorker({"episode": _OkHandlerWithRepo(_FakeLanceRepo())})
-    w._started_at = time.monotonic() - (wmod._PRUNE_STALE_SECONDS_ALERT + 100)
+    w._started_at = now - (wmod._PRUNE_STALE_SECONDS_ALERT + 100)
     w._optimizer_states["episode"] = wmod._KindOptimizerState()  # last_prune_at=0
     h = w.health()
     assert h.prune_stale_seconds >= wmod._PRUNE_STALE_SECONDS_ALERT
