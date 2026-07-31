@@ -44,7 +44,7 @@ async def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 async def _create_episode_table_on_disk(arrow_schema: pa.Schema) -> None:
     """Create the ``episode`` table straight on disk, then drop the
     connection so the manager reopens it from disk on next use."""
-    root = MemoryRoot.default()
+    root = MemoryRoot.resolve()
     root.ensure()
     conn = await lancedb.connect_async(str(root.lancedb_dir))
     await conn.create_table("episode", schema=arrow_schema)

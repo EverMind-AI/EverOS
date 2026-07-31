@@ -181,11 +181,10 @@ def _fake_orchestrator_factory():  # type: ignore[no-untyped-def]
     from everos.memory.cascade import CascadeOrchestrator
 
     def _build() -> CascadeOrchestrator:
-        root = MemoryRoot.default()
+        root = MemoryRoot.resolve()
         root.ensure()
         return CascadeOrchestrator(
             memory_root=root,
-            embedder=_StubEmbedder(),
             tokenizer=build_tokenizer(),
         )
 
@@ -214,7 +213,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     from everos.infra.persistence.lancedb.tables.episode import Episode
     from everos.infra.persistence.markdown import AtomicFactWriter
 
-    root = MemoryRoot.default()
+    root = MemoryRoot.resolve()
     root.ensure()
     owner_id = "u_rebuild"
     bucket = _dt.date(2026, 5, 18)
