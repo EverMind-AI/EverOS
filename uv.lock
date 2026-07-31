@@ -443,16 +443,17 @@ wheels = [
 
 [[package]]
 name = "everalgo-agent-memory"
-version = "0.3.1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "asgiref" },
     { name = "everalgo-boundary" },
     { name = "everalgo-clustering" },
     { name = "everalgo-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/94/6eead80b95d0c26e750563e18b097c710ae29467d14f719efb2d72ed12df/everalgo_agent_memory-0.3.1.tar.gz", hash = "sha256:ff89fd0608530440bb21123eb76b9b5ade4d171c9c04f6407cf038b84eb6df15", size = 71944, upload-time = "2026-06-15T07:09:24.532Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/d1/c8f4eba92d3d9fbdcbfae9eccf887650a22ae92b16a5b791b0feaf07f8dc/everalgo_agent_memory-0.4.0.tar.gz", hash = "sha256:58364d4c78b39b91d1eb93489c7d37fa9343e696987ac0c21631a8bb1099ec57", size = 86143, upload-time = "2026-07-30T07:10:30.002Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/2e/3d892f31ecfbac8f127f4664877bed6a5ad74bd8c101e106ab583a5e5ca2/everalgo_agent_memory-0.3.1-py3-none-any.whl", hash = "sha256:4e8c2cf06ec4699199de5c769aa7c5ac30fdf61086526edbbd0b68bee5ec9219", size = 54895, upload-time = "2026-06-15T07:09:23.401Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/7c/98632538a43a1b9a14310e95dd3400c1768b0a15b89072a49ce87e06ba46/everalgo_agent_memory-0.4.0-py3-none-any.whl", hash = "sha256:9b11d066a620df8cc3e6d2fa6cd088c44d9aa32eef30bc55b3c8e792efee6b4b", size = 62380, upload-time = "2026-07-30T07:10:29.105Z" },
 ]
 
 [[package]]
@@ -546,16 +547,17 @@ wheels = [
 
 [[package]]
 name = "everalgo-user-memory"
-version = "0.3.2"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-boundary" },
     { name = "everalgo-core" },
+    { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/1f/f3f3f264083f8253b1ffdd87f9f3edc4c8f22790112fe2fae93f5c01457a/everalgo_user_memory-0.3.2.tar.gz", hash = "sha256:9aa66a29dbd53176fe99a6482ca4d428158e085d146e14830e44cdd7a67840d6", size = 56591, upload-time = "2026-07-21T09:17:09.018Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/dc/e28a9901c13b5399ebba2033fca4e152206528d20b1b8168d53ccf6a6da0/everalgo_user_memory-0.4.0.tar.gz", hash = "sha256:68dca5d49a8586caa734f862ae64ad63178f32c6b9d10341ba69c0a2f58b43b9", size = 74997, upload-time = "2026-07-30T07:02:34.204Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/55/e22d6dff61fb766b33677ff68a64cd2edd78502f5feb2a3eb19ed82f7588/everalgo_user_memory-0.3.2-py3-none-any.whl", hash = "sha256:958fef976dff6961ff62858b73c867131ca3f511b5f515b1610e4818bdf2d024", size = 54128, upload-time = "2026-07-21T09:17:07.952Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/ba/5c7e65281efae449b01b92f37181c39445f763a31b32f798da740413f17a/everalgo_user_memory-0.4.0-py3-none-any.whl", hash = "sha256:a40cc3ba8aa8062942572ed50e3434887fbb9e73e31d31885124506534d9dc3e", size = 65307, upload-time = "2026-07-30T07:02:33.263Z" },
 ]
 
 [[package]]
@@ -623,11 +625,11 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "apscheduler", specifier = ">=3.10.4,<4.0" },
     { name = "click", specifier = ">=8.1" },
-    { name = "everalgo-agent-memory", specifier = "==0.3.1" },
+    { name = "everalgo-agent-memory", specifier = "==0.4.0" },
     { name = "everalgo-knowledge", specifier = "==0.1.1" },
     { name = "everalgo-parser", extras = ["svg"], marker = "extra == 'multimodal'", specifier = ">=0.2.1" },
     { name = "everalgo-rank", specifier = "==0.4.1" },
-    { name = "everalgo-user-memory", specifier = "==0.3.2" },
+    { name = "everalgo-user-memory", specifier = "==0.4.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "jieba", specifier = ">=0.42.1,<1.0" },

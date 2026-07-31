@@ -101,11 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **1.1.4 fixes backfilled into `main`** — the internal release lane's
-  fixes (knowledge upload path traversal / CWE-22, cascade retry
-  classification + total-retry budget, delete/modify race, embedding
-  empty-data guard, episode extraction retries) were merged back into
-  the public `main` branch so subsequent releases build on top of them.
+- **Fixes present in `1.1.4` but missing from `1.2.0`** — cascade retry
+  classification + total-retry budget, the delete/modify race, the
+  embedding empty-data guard, and episode extraction retries (each
+  detailed under 1.1.4) were absent from the branch `1.2.0` was built
+  from, so `1.2.0` regressed to pre-1.1.4 behaviour on all of them. See
+  Security below for the path traversal.
 - **Filename validation on knowledge upload** — NUL byte and > 255-byte
   UTF-8 filenames now fail fast with `InvalidInputError → HTTP 400`
   instead of surfacing OS errors as 500 with a half-written md file.
@@ -123,7 +124,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README "Star us" section** — cleanup.
 
+### Security
+
+- **Knowledge upload path traversal (CWE-22)** — see the 1.1.4 entry for
+  the fix description. **Affected:** every release before `1.1.4`, and
+  `1.2.0`. **Not affected:** `1.1.4`. **Fixed in:** `1.2.1`. The fix
+  shipped in `1.1.4` but was not present on the branch `1.2.0` was built
+  from, so upgrading `1.1.4` → `1.2.0` reintroduced it.
+
 ## [1.2.0] - 2026-07-24
+
+> This release is missing fixes that shipped in `1.1.4`, including a
+> knowledge-upload path traversal (CWE-22). See the Security section
+> under 1.2.1 for the affected-version range.
 
 ### Added
 
