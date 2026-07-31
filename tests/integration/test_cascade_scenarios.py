@@ -132,32 +132,33 @@ def _build_orchestrator(
 
 
 async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
-    """Wait until ``md_path`` lands in state AND reaches ``status='done'``.
+    """Wait until ``md_path`` lands in state AND *stably* reaches a terminal
+    status (``done``/``failed``).
 
-    Bare ``_wait_drain`` returns immediately when the queue is empty,
-    which is exactly the case right after a single ``append_entries``
-    fires once but the watcher hasn't yet enqueued anything. This helper
-    polls for the row first (i.e. watcher has noticed), then waits for
-    terminal state, then re-checks after a short settle to absorb any
-    last-second re-enqueue (e.g. atomic-replace echo).
+    Bare ``_wait_drain`` returns immediately when the queue is empty, which
+    is exactly the case right after a single ``append_entries`` fires once
+    but the watcher hasn't yet enqueued anything. This helper polls for the
+    row first (i.e. watcher has noticed), then waits for a terminal state
+    that *survives* a short settle window: a last-second re-enqueue (an
+    atomic-replace echo, or a rename's delete event) flips the row back to
+    ``processing``, so we absorb it by waiting for terminal again rather
+    than treating the transient flip as a failure. Bounded by ``deadline``,
+    so a row that never settles still surfaces as a timeout.
     """
     async with asyncio.timeout(deadline):
         while True:
-            row = await md_change_state_repo.get_by_id(md_path)
-            if row is not None:
+            if await md_change_state_repo.get_by_id(md_path) is not None:
                 break
             await asyncio.sleep(0.05)
         while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
-                break
+                await asyncio.sleep(0.1)  # settle
+                row = await md_change_state_repo.get_by_id(md_path)
+                if row is not None and row.status in ("done", "failed"):
+                    return  # stably terminal
+                # flipped back to processing (re-enqueue) — keep waiting
             await asyncio.sleep(0.05)
-        await asyncio.sleep(0.1)
-        row = await md_change_state_repo.get_by_id(md_path)
-        assert row is not None and row.status in ("done", "failed"), (
-            f"path {md_path} flipped back to {row.status if row else 'NONE'} "
-            f"after reaching done"
-        )
 
 
 async def _wait_paths_done(*md_paths: str, deadline: float = 15.0) -> None:
