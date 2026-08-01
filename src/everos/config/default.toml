@@ -54,6 +54,9 @@ cache_size_kb = 2048
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
 # Or set the field directly in this file (<root>/everos.toml).
+# OrcaRouter uses the same vendor/model slugs, so switching gateways is a
+# base_url + api_key change:
+#   base_url = "https://api.orcarouter.ai/v1"
 model = "openai/gpt-4.1-mini"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
