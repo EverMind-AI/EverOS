@@ -1,6 +1,6 @@
 """LanceDB ``foresight`` table schema.
 
-Field set per 17_lancedb_tables_design.md §3.3. Each row carries a
+Field set for the foresight LanceDB row. Each row carries a
 forward-looking inference about the user (intent window, planned
 action, projected need); ``start_time`` / ``end_time`` describe the
 window the foresight applies to.

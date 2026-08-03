@@ -21,7 +21,7 @@ External usage::
 
 Three index kinds: scalar / BM25 / vector. Tables are created lazily on
 first access; row population is the cascade daemon's job (see
-``12_cascade_design.md``).
+``docs/cascade_runbook.md``).
 """
 
 import contextlib
@@ -299,8 +299,11 @@ async def verify_business_schemas() -> None:
     LanceDB doesn't migrate columns automatically; an older index dir
     would fail unpredictably on upsert. Checking the schema up-front
     turns that into a clean startup error pointing the user at the
-    recovery path (``rm -rf ~/.everos/.index/lancedb`` — the index is
-    rebuildable from md, see ``12_cascade_design.md``).
+    recovery path (``everos cascade rebuild`` — re-indexes from md,
+    preserving un-extracted buffered messages; see
+    ``docs/cascade_runbook.md``). A bare ``rm -rf`` of the index dir is
+    *not* the recovery — it leaves the cascade queue marked ``done`` so
+    nothing re-indexes and the index comes back empty.
 
     Both dimensions are checked against ``schema.to_arrow_schema()`` —
     the exact schema ``get_table`` builds the table from, so a healthy

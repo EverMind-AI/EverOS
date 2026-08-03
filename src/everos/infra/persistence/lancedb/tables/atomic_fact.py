@@ -1,6 +1,6 @@
 """LanceDB ``atomic_fact`` table schema.
 
-Field set per 17_lancedb_tables_design.md §3.2. Each row carries one
+Field set for the atomic-fact LanceDB row. Each row carries one
 atomic fact extracted by the algo layer; the parent is always the source
 MemCell — recorded via ``parent_type`` / ``parent_id``.
 """

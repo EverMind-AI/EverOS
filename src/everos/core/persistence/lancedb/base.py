@@ -68,8 +68,7 @@ class BaseLanceTable(LanceModel):
     is OFF. FTS *does* keep lightweight English-aware normalisation
     (``lower_case`` / ``stem`` / ``ascii_folding``) as a belt-and-
     braces layer on the same English tokens that survive jieba.
-    See ``17_lancedb_tables_design.md`` §2.4.1 and
-    :meth:`ensure_fts_indexes` below for the exact knobs."""
+    See :meth:`ensure_fts_indexes` below for the exact knobs."""
 
     created_at: dt.datetime = Field(default_factory=get_utc_now)
     updated_at: dt.datetime = Field(default_factory=get_utc_now)

@@ -8,7 +8,7 @@ from everos.config import EmbeddingSettings
 from .openai_provider import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
-# Vector dim for the LanceDB index column — see ``17_lancedb_tables_design.md``.
+# Vector dim for the LanceDB index column.
 _DEFAULT_DIM = 1024
 
 

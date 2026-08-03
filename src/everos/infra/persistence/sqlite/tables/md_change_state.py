@@ -6,9 +6,8 @@ scanner (periodic sweep) UPSERT into this table; the worker consumes
 internal ``processing`` claim state, and lands them in ``done`` or
 ``failed`` (with a ``retryable`` flag).
 
-Schema sourced from ``12_cascade_design.md`` §4.1 + decisions DD-3 …
-DD-12; the four indexes below are required by ``13_cascade_design.md``
-§7 status / fix queries.
+The schema + the four indexes below back the cascade queue and its
+status / fix queries (see ``docs/cascade_runbook.md``).
 """
 
 from __future__ import annotations

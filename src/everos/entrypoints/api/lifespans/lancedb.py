@@ -91,7 +91,7 @@ class LanceDBLifespanProvider(LifespanProvider):
     2. ``verify_business_schemas`` — fail loud if an on-disk table's
        columns drift from the current Pydantic schema. LanceDB has no
        online migration; cascade is rebuildable from md so the recovery
-       is documented as ``rm -rf ~/.everos/.index/lancedb``.
+       is ``everos cascade rebuild`` (see ``docs/cascade_runbook.md``).
     3. ``ensure_business_indexes`` — idempotent FTS index creation.
     4. ``_log_unbackfilled_hint`` — warn if unbackfilled rows exist.
     """

@@ -1,6 +1,6 @@
 """LanceDB ``agent_skill`` table schema.
 
-Field set per 17_lancedb_tables_design.md §3.5. AgentSkill is a *named
+Field set for the agent-skill LanceDB row. AgentSkill is a *named
 entity* rather than a daily-log entry — PK is ``<owner_id>_<skill_name>``
 (no date / seq), and same agent + same name is the same row (upsert).
 

@@ -9,8 +9,7 @@ same path — :func:`match_kind` returns the first match.
 
 Path matching uses :class:`pathlib.PurePosixPath.match` (not bare
 ``fnmatch``) so that ``*`` matches a single path component, never the
-``/`` separator — see ``17_lancedb_tables_design.md`` §2.4.2 and
-``12_cascade_design.md`` §5.1 (path filter is a single whitelist layer).
+``/`` separator (the path filter is a single whitelist layer).
 """
 
 from __future__ import annotations
