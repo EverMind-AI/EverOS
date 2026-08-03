@@ -19,6 +19,8 @@ pivot cannot change what the memory asserts at any volume, and a single
 trusted correction can still supersede a single trusted claim.
 """
 
+from .keying import BeliefKeyer as BeliefKeyer
+from .keying import signature as signature
 from .models import PIVOT as PIVOT
 from .models import TIER_CEILING as TIER_CEILING
 from .models import UNKNOWN as UNKNOWN
@@ -40,6 +42,7 @@ __all__ = [
     "PIVOT",
     "TIER_CEILING",
     "UNKNOWN",
+    "BeliefKeyer",
     "BeliefResolver",
     "BeliefRevision",
     "BeliefState",
@@ -52,5 +55,6 @@ __all__ = [
     "kl_bits",
     "likelihood_ratio",
     "posterior",
+    "signature",
     "total_variation",
 ]

@@ -145,22 +145,63 @@ Read the rows, not the cells.
   correction on a low-trust channel stops a good one identically. There is
   no setting that gets both; this row is the price of the other three.
 
+## Deriving `belief_key`
+
+The resolver arbitrates between facts sharing a key, and nothing in EverOS
+produces one — an atomic fact is an undecomposed sentence with no
+`(subject, attribute)` to group on.
+
+`keying.BeliefKeyer` groups on the observation that competing facts are
+*about the same thing while differing in the value*. The signature drops
+value-bearing tokens and keeps the topic, so "pre-approved for $350,000
+from Wells Fargo" and "pre-approved for $400,000 from Wells Fargo" collapse
+to the same signature. Terms are IDF-weighted against what the scope has
+already said; without that, "really" and "looking" count as much as
+"pre-approved", and the false-link rate is roughly ten times worse.
+
+**The errors are not symmetric, and that sets the threshold.** A missed
+link leaves two contradicting facts unarbitrated — exactly today's
+behaviour, so nothing is lost. A false link declares two unrelated facts
+mutually exclusive and lets one suppress the other. Partial arbitration is
+worth having; wrong arbitration is not.
+
+`benchmarks/belief_key.py` takes its labels from KU pair membership: the
+two evidence spans of an instance are two readings of one attribute by
+construction, and spans from different instances are not.
+
+| threshold | true pairs linked | unrelated pairs linked |
+|---|---|---|
+| 0.15 | 90.0% | 6.03% |
+| 0.20 | 85.7% | 1.60% |
+| **0.25** (default) | **81.4%** | **0.45%** |
+| 0.30 | 68.6% | 0.12% |
+| 0.40 | 48.6% | 0.05% |
+
+Running the supersession benchmark again with *derived* keys — nothing
+telling the resolver what competes — gives **78.6% clean and 78.6% under
+`poison-5`**. An instance counts as correct only when the memory asserts
+the update *and* has stopped asserting the stale claim; both halves are
+needed, since a keyer that links nothing would otherwise score full marks
+while leaving every contradiction exactly where it found it.
+
+That figure coincides with the oracle-key run without being the same
+result. There the entire loss was hedged updates falling below the pivot;
+here the claim sentences are shorter and only 5.7% hedge, while 18.6% fail
+to link. The dominant error moved from extraction to keying.
+
+This is a lexical stand-in and should not survive contact with production.
+EverOS already embeds every fact, and matching on those embeddings is the
+better implementation — `BeliefKeyer` is written so that swap is a
+constructor argument. The lexical version exists to establish that the
+grouping problem is tractable at all before anyone spends embedding calls
+on it.
+
 ## What is not built
 
 **Persistence.** `BeliefState` and `BeliefRevision` are derived state and
 belong in SQLite (`~/.everos/.index/sqlite/system.db`), not in the LanceDB
 fact table — no index migration, and the states rebuild from the revision
 log. Needs a repo + an alembic revision.
-
-**`belief_key` derivation.** The resolver takes the key; nothing produces it
-yet. An atomic fact is an undecomposed sentence, so there is no
-`(subject, attribute)` to group on. Options, roughly in order of appetite:
-the algo layer emits an optional `subject` / `attribute` pair alongside the
-fact; or facts are grouped by embedding cluster within an owner scope, which
-is cheap but conflates "similar" with "mutually exclusive"; or callers
-supply it explicitly for the narrow slice they care about. This is the real
-open question and the reason this is a design note rather than a pull
-request.
 
 **Search integration.** `search/filters.py` already excludes
 `deprecated_by IS NOT NULL`; the analogous move is to rank or filter by

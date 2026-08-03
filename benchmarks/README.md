@@ -377,10 +377,40 @@ one — are constructed on top of the benchmark and are **not** part of
 LongMemEval. See [docs/belief-layer.md](../docs/belief-layer.md) for what
 each row means and what the 21.4% gap on `clean` is.
 
+## Belief-key derivation
+
+`belief_key.py` measures the step before arbitration: deciding *which* facts
+are competing for the same slot at all. Labels come free from KU pair
+membership. Same dataset, same offline constraints.
+
+```bash
+uv run python benchmarks/belief_key.py --data data/longmemeval_oracle.json
+```
+
+```
+ threshold    linked   false links
+----------------------------------
+      0.20     85.7%         1.60%
+      0.25     81.4%         0.45%  <- default
+      0.30     68.6%         0.12%
+
+Supersession with derived keys (nothing tells it what competes):
+  clean        78.6%
+  poison-5     78.6%
+```
+
+The two columns are not symmetric and the threshold is set from the right
+one — a missed link leaves a contradiction unarbitrated, which is today's
+behaviour, while a false link lets an unrelated fact suppress a true one.
+
 ## CLI reference
+
+`belief_ku.py`:
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--data` | `data/longmemeval_oracle.json` | Path to the oracle split |
 | `--repetitions` | `5` | How many times the attacker repeats its claim |
 | `--poison-tier` | `web_fetch` | Channel the attacker writes on |
+
+`belief_key.py` takes `--data` only.
