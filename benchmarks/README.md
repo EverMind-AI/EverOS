@@ -336,3 +336,51 @@ The `add` + `wait_ready` phase dominates wall-clock time; LLM calls
 | `Too many open files (os error 24)` | LanceDB FD exhaustion from concurrent searches | Lower `search_concurrency` in config.toml (agentic needs more FDs per query) or raise `ulimit -n` |
 | Low accuracy across all categories | Embedding/rerank not configured | Verify `everos.toml` has working embedding + rerank providers |
 | `conv<N>/error.log` exists | Unhandled exception in that conversation | Read the traceback; other conversations are unaffected |
+
+---
+
+# Belief-layer benchmark (offline)
+
+`belief_ku.py` measures one thing the LoCoMo pipeline above cannot isolate:
+**what the memory asserts when a stored fact is later contradicted.**
+
+It runs on the `knowledge-update` slice of
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) — 78 instances that
+are two-session supersessions, 70 of which carry turn-level gold evidence
+spans in both sessions. Those spans feed
+`everos.memory.belief.BeliefResolver` directly, with no extractor, no
+retriever and no LLM in between, so the resulting number is attributable to
+the update rule rather than to the pipeline around it.
+
+No server, no providers, no API key, ~2 seconds.
+
+```bash
+mkdir -p data && cd data
+wget https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json
+cd ..
+uv run python benchmarks/belief_ku.py --data data/longmemeval_oracle.json
+```
+
+```
+arm                        lww        belief
+--------------------------------------------
+clean                   100.0%         78.6%
+poison-5                  0.0%         78.6%
+novel-5                   0.0%         78.6%
+lowtrust-fix            100.0%          0.0%
+```
+
+`clean` is a pure recency test where last-write-wins is optimal by
+construction. The three overlay arms — a stale claim replayed on a low-trust
+channel, an unseen claim asserted on one, and the true update arriving on
+one — are constructed on top of the benchmark and are **not** part of
+LongMemEval. See [docs/belief-layer.md](../docs/belief-layer.md) for what
+each row means and what the 21.4% gap on `clean` is.
+
+## CLI reference
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--data` | `data/longmemeval_oracle.json` | Path to the oracle split |
+| `--repetitions` | `5` | How many times the attacker repeats its claim |
+| `--poison-tier` | `web_fetch` | Channel the attacker writes on |
