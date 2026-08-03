@@ -64,6 +64,9 @@ from everos.infra.persistence.lancedb import (
 )
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 from everos.infra.persistence.sqlite import cluster_repo, get_engine
+from everos.memory.cascade.worker import (
+    DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
+)
 from everos.memory.events import (
     AgentCaseExtracted,
     EpisodeExtracted,
@@ -747,11 +750,18 @@ async def _backfill_table(
             # optimize() compacts the per-row-update fragments; prune()
             # physically reclaims the superseded manifest versions. Split
             # after the repo API separated them (compact is lock-free, prune
-            # runs under the write lock). prune(0) reclaims everything now;
-            # it is cross-process safe (delete_unverified=False), so running
-            # ``backfill`` alongside a live daemon cannot corrupt the table.
+            # runs under the write lock) and cross-process safe because prune
+            # passes delete_unverified=False.
+            #
+            # Keep the daemon's retention window rather than reclaiming at
+            # zero age: the window's job is to outlive an in-flight read (a
+            # /search holding a version reference), and this runs in a
+            # separate process where the write lock cannot fence one. Files
+            # younger than the window are reclaimed by the next daemon prune.
             await backlog.spec.repo.optimize()
-            await backlog.spec.repo.prune(dt.timedelta(0))
+            await backlog.spec.repo.prune(
+                dt.timedelta(seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS)
+            )
             logger.info(
                 "cascade_backfill_table_optimized",
                 table=backlog.table_name,
@@ -1033,6 +1043,22 @@ async def _emit_synthetic_events(
         emitted += 1
         _report_emit_progress(presenter, emitted, total)
     return emitted
+
+
+def ome_lock_is_free() -> bool:
+    """Whether no other process holds the OME jobstore lock.
+
+    ``False`` means a live ``everos server`` (or another exclusive CLI
+    phase) is running against this memory root. Public entry point for
+    commands that must not run concurrently with the daemon — notably
+    ``cascade rebuild``, which drops and recreates the LanceDB tables
+    under any cached handles a running daemon still holds.
+
+    Same best-effort caveat as :func:`_probe_ome_lock_available`: the lock
+    can be taken between this probe and the destructive step, so it is a
+    guard against the common mistake, not a mutual-exclusion primitive.
+    """
+    return _probe_ome_lock_available()
 
 
 def _probe_ome_lock_available() -> bool:

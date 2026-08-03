@@ -286,6 +286,33 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     assert asyncio.run(_atomic_fact_row_count()) == 2
 
 
+def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``rebuild`` must refuse when a daemon is running on this memory root.
+
+    It drops and recreates the LanceDB tables; a live daemon holds cached
+    table handles and would keep writing to the dropped dataset, leaving a
+    corrupted rebuild plus a permanent-failure backlog. Detection reuses the
+    OME jobstore lock that ``backfill`` already gates on, and the exit code
+    matches backfill's ``3`` (SERVER_RUNNING).
+    """
+    monkeypatch.setattr(cascade_mod, "ome_lock_is_free", lambda: False)
+
+    result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
+
+    assert result.exit_code == 3, result.output
+    # The explanation goes to stderr (click 8.2 keeps the streams separate).
+    assert "server" in result.stderr.lower()
+    assert "stop `everos server`" in result.stderr.lower()
+    # And it must bail out BEFORE touching anything — none of the step
+    # progress lines may appear.
+    combined = result.output + result.stderr
+    assert "LanceDB table(s)" not in combined
+    assert "cascade queue row(s)" not in combined
+    assert "rebuild complete" not in combined
+
+
 # Reduce false negatives on date drift.
 def test_resolve_relative_via_command_arg(cli_runtime: Path) -> None:
     """An absolute path under the root works through ``cascade sync <path>``."""

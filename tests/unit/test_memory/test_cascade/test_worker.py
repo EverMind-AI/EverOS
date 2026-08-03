@@ -637,6 +637,48 @@ async def test_failed_prune_backs_off_a_cadence_and_keeps_health_signal(
     assert len(fake.optimize_calls) == 1, "second beat backs off to the light path"
 
 
+async def test_prune_recurs_once_per_cadence_across_light_beats(
+    patched_repo: _FakeRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A heavy (prune) beat must fire again after a full cadence, no matter
+    how many light beats ran in between.
+
+    The attempt clock advances only on the heavy path. If a light beat also
+    pushed it forward, frequent light beats would keep resetting the cadence
+    and prune would run exactly once per process lifetime — version cleanup
+    silently stops and the index dir grows unbounded, which is the incident
+    this whole change exists to prevent.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: clock["t"])
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.0,
+        optimize_prune_interval_seconds=10.0,
+    )
+
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.prune_calls) == 1, "first beat prunes (never pruned yet)"
+
+    # 11 light-ish beats, one simulated second apart — they cross the cadence.
+    for _ in range(11):
+        clock["t"] += 1.0
+        w._schedule_optimize("episode")
+        await w._flush_optimizers()
+
+    assert len(fake.prune_calls) == 2, (
+        "prune must recur one cadence after the last prune ATTEMPT; light "
+        "beats in between must not push the cadence forward"
+    )
+    assert len(fake.optimize_calls) == 10, "the other beats took the light path"
+
+
 # ── Rebuild scheduler tests ────────────────────────────────────────────────
 
 
@@ -840,16 +882,58 @@ def test_worker_health_dataclass_thresholds() -> None:
     assert len(reasons) == 2  # drain + prune, not the sub-threshold optimize
 
 
-def test_worker_health_idle_is_not_stale() -> None:
+def test_worker_health_idle_is_not_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker with no optimize activity is never prune-stale (nothing to
     reclaim), even if it started long ago."""
     from everos.memory.cascade import worker as wmod
 
+    # Freeze the clock: a bare `monotonic() - N` goes negative on a runner
+    # whose uptime is below N, making the "started long ago" premise fiction.
+    now = 10_000.0
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
     w = CascadeWorker({"episode": _OkHandlerWithRepo(_FakeLanceRepo())})
-    w._started_at = time.monotonic() - (wmod._PRUNE_STALE_SECONDS_ALERT + 1000)
+    w._started_at = now - (wmod._PRUNE_STALE_SECONDS_ALERT + 1000)
     h = w.health()
     assert h.prune_stale_seconds == 0.0
+    assert h.prune_stale_kind is None
     assert h.reasons() == []
+
+
+def test_worker_health_reports_worst_kind_not_newest_prune(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staleness is the WORST kind's, and ``reasons`` names it.
+
+    Production registers several lance-backed kinds. Reporting the newest
+    prune across kinds let one healthy kind mask a kind whose cleanup had
+    died — the dead kind's index dir grows unbounded while ``/health`` stays
+    green, which is the incident this signal exists to catch.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    now = 100_000.0
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
+    w = CascadeWorker(
+        {
+            "episode": _OkHandlerWithRepo(_FakeLanceRepo()),
+            "atomic_fact": _OkHandlerWithRepo(_FakeLanceRepo()),
+        }
+    )
+    w._started_at = now - 10_000.0
+    # atomic_fact pruned just now; episode has not pruned in 3x the threshold.
+    fresh = wmod._KindOptimizerState()
+    fresh.last_prune_at = now - 10.0
+    dead = wmod._KindOptimizerState()
+    dead.last_prune_at = now - 3 * wmod._PRUNE_STALE_SECONDS_ALERT
+    w._optimizer_states["atomic_fact"] = fresh
+    w._optimizer_states["episode"] = dead
+
+    h = w.health()
+    assert h.prune_stale_kind == "episode", "must report the worst kind"
+    assert h.prune_stale_seconds >= wmod._PRUNE_STALE_SECONDS_ALERT
+    reasons = h.reasons()
+    assert any("cleanup stalled" in r for r in reasons)
+    assert any("episode" in r for r in reasons), "operator needs the kind named"
 
 
 def test_worker_health_reports_prune_staleness(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -931,3 +1015,88 @@ async def test_light_beat_commit_conflict_is_debug_and_uncounted(
     assert "cascade_lancedb_optimize_failed" not in events
     assert "cascade_lancedb_optimize_fallback_rebuild" not in events
     assert "error" not in levels and "warning" not in levels
+
+
+async def test_heavy_beat_commit_conflict_is_also_benign(
+    patched_repo: _FakeRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A HEAVY-beat (prune) commit conflict is benign too.
+
+    The per-table write lock is in-process only, so a second process (a long
+    ``cascade backfill``, a ``cascade sync``) can preempt prune's Rewrite
+    commit. Counting those as real failures let sustained cross-process churn
+    reach the alert threshold and fire a spurious fallback rebuild, which
+    drops every index before recreating it — leaving the table without an FTS
+    index (and `/search` 500ing on that kind) if the rebuild lost the race
+    too. A prune that genuinely stops succeeding is caught by the per-kind
+    prune-staleness signal instead.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    class _ConflictRepo(_FakeLanceRepo):
+        """Records which beat was attempted, then loses the commit race."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts: list[str] = []
+
+        async def optimize(self) -> None:
+            self.attempts.append("optimize")
+            raise RuntimeError("Retryable commit conflict for version 215")
+
+        async def prune(self, older_than: dt.timedelta) -> None:
+            self.attempts.append("prune")
+            raise RuntimeError("Retryable commit conflict for version 215")
+
+    # Freeze the clock: which beat runs must not depend on the runner's uptime
+    # (`monotonic()` is boot-relative — a fresh CI runner reads ~100s).
+    now = 10_000.0
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
+    repo = _ConflictRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+        optimize_prune_interval_seconds=10.0,
+    )
+    state = wmod._KindOptimizerState()  # last_prune_attempt_at=0 → HEAVY beat
+    w._optimizer_states["episode"] = state
+
+    await w._run_optimize_once("episode")
+
+    assert repo.attempts == ["prune"], "must have taken the heavy (prune) path"
+    assert state.optimize_failures == 0, (
+        "a heavy-beat commit conflict is a lost cross-process race, not a "
+        "failure — counting it re-arms the spurious fallback rebuild"
+    )
+
+
+async def test_non_conflict_failure_counts_even_when_message_says_retryable(
+    patched_repo: _FakeRepo,
+) -> None:
+    """The benign filter must match ONLY ``commit conflict``.
+
+    Widening it to a bare ``retryable`` substring would swallow unrelated
+    recoverable errors — an ``ExternalServiceError`` repr carries
+    ``retryable=True`` — so a genuinely stuck optimize would log at debug
+    forever: no streak, no escalation, no fallback rebuild, health green.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    repo = _OptimizeFailingRepo(
+        error=RuntimeError("ExternalServiceError(provider='x', retryable=True): boom")
+    )
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+    )
+    state = wmod._KindOptimizerState()
+    state.last_prune_attempt_at = time.monotonic()  # light beat
+    w._optimizer_states["episode"] = state
+
+    await w._run_optimize_once("episode")
+
+    assert state.optimize_failures == 1, (
+        "an error whose message merely contains 'retryable' is NOT a commit "
+        "conflict and must count toward the streak"
+    )

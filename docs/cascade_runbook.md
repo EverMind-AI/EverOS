@@ -49,6 +49,42 @@ lsn:
   never auto-clear these — they represent malformed md the user must
   edit.
 
+### Machine-readable: the `cascade` block on `GET /health`
+
+`GET /health` carries a `cascade` block while the daemon runs (`null`
+for an app built without the cascade lifespan). **Alert on
+`cascade.healthy`** — it is the operational readiness verdict, and
+`reasons` explains a `false` in plain text:
+
+```json
+{"status": "ok", "cascade": {
+  "healthy": false,
+  "reasons": ["version cleanup stalled for kind 'episode' (1200s since its last prune — that table's index dir may grow)"],
+  "pending": 3, "failed_permanent": 1, "failed_retryable": 0,
+  "drain_consecutive_failures": 0, "unrecoverable_total": 4,
+  "optimize_failure_streak": 0, "prune_stale_seconds": 1200.0}}
+```
+
+What flips `healthy` false — and nothing else does:
+
+| Symptom | Signal | Threshold |
+|---|---|---|
+| Writes accepted but not projected to LanceDB | `drain_consecutive_failures` | ≥ 3 in a row |
+| Index maintenance wedged | `optimize_failure_streak` | ≥ 5 in a row (lost commit races excluded — they are expected under churn) |
+| Version cleanup stopped, that table's disk will grow | `prune_stale_seconds` (worst kind, named in `reasons`) | ≥ 900s (3 missed 300s beats) |
+
+`failed_permanent` is **informational only** — it is a data-quality
+backlog awaiting `cascade fix`, so it never flips `healthy` (otherwise
+the signal sits red until a human edits md). Watch it separately.
+
+The HTTP code is a *liveness* signal and stays 200 even when the block
+says `healthy: false` — a degraded projection must not trigger a
+container restart, which fixes neither a bad md file nor disk bloat. If
+the probe itself fails (locked / full SQLite), the block comes back
+`healthy: false` with a `cascade health probe failed: …` reason and the
+counters zeroed — treat zeros alongside that reason as "unknown", not
+as "clean".
+
 ## Recovering from failures: `everos cascade fix`
 
 `cascade fix` (no flag) lists every failed row. With `--apply`:
@@ -134,8 +170,11 @@ declare (or vice versa), the boot fails with:
 
 ```
 LanceDB table 'episode' schema drift: missing=[...], extra=[...],
-type_drift=[...]. The index is rebuildable from md — recover with
-`everos cascade rebuild`.
+type_drift=[...]. Recover with `everos cascade rebuild` (stop the server
+first): it drops and re-indexes from md, preserving un-extracted buffered
+messages. Restarting will not clear this — the startup migrations only
+alter column nullability, never a column's name or type, so a name/type
+drift never resolves on its own.
 ```
 
 `verify_business_schemas` compares both the column **names** and their

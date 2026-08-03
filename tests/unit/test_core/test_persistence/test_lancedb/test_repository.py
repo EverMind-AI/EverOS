@@ -744,6 +744,60 @@ async def test_prune_holds_write_lock_and_is_cross_process_safe(
     assert captured["cleanup_older_than"] == dt.timedelta(seconds=42)
 
 
+async def test_prune_times_out_and_releases_the_write_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung lance cleanup must not hold the per-table write lock forever.
+
+    ``prune`` wraps the cleanup in ``asyncio.timeout``: on expiry the call is
+    cancelled, the exception propagates (the worker counts it and backs off a
+    full cadence), and — critically — the write lock is released so writers on
+    that table are not wedged behind the hang. Without the timeout every
+    writer on that table blocks indefinitely.
+    """
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    monkeypatch.setattr(repo_mod, "_PRUNE_TIMEOUT_SECONDS", 0.05)
+
+    class _HangingTable:
+        async def optimize(self, **_kw):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(30)  # never returns within the timeout
+
+        async def uri(self) -> str:
+            return str(tmp_path)
+
+    repo = _NoteRepo(table=_HangingTable())  # type: ignore[arg-type]
+    with pytest.raises(TimeoutError):
+        await repo.prune(dt.timedelta(seconds=60))
+
+    assert not repo._write_lock(repo.table_name).locked(), (
+        "the write lock must be released after the timeout, otherwise a hung "
+        "cleanup wedges every writer on this table"
+    )
+    # And the lock is genuinely reusable afterwards.
+    async with repo._write_lock(repo.table_name):
+        pass
+
+
+def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
+    """The timeout is a hang-catcher, not a bound on normal runtime.
+
+    A real cleanup is milliseconds even on a heavily churned table, so the
+    value only matters when lance hangs — and then it must expire well before
+    the next heavy beat is due, or the lock is held for most of every cadence
+    (the ~97%-duty-cycle bug: timeout == cadence, so a hung prune was retried
+    ~immediately after each expiry).
+    """
+    from everos.core.persistence.lancedb.repository import _PRUNE_TIMEOUT_SECONDS
+    from everos.memory.cascade.worker import (
+        DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
+    )
+
+    assert _PRUNE_TIMEOUT_SECONDS < DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS / 2, (
+        "prune timeout must leave a real write window before the next beat"
+    )
+
+
 async def test_prune_removes_empty_index_dir_husks(tmp_path: Path) -> None:
     """After cleanup, ``prune`` removes the empty ``_indices/<uuid>/`` dirs
     that ``cleanup_older_than`` leaves behind, but keeps non-empty ones."""

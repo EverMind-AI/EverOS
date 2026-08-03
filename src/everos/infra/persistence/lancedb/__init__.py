@@ -209,8 +209,10 @@ async def migrate_table_schemas() -> None:
     continuing in a half-migrated state — cascade would otherwise write
     ``vector=None`` (soft-dependency embedding) into a still NOT-NULL
     column and every row would silently fail. Recovery escalates from
-    a plain restart (transient hiccup) to wiping the LanceDB index
-    directory (rebuildable from md, the SoT).
+    a plain restart (transient hiccup) to ``everos cascade rebuild``,
+    which re-indexes from md (the SoT) *and* re-enqueues every file —
+    unlike deleting the index dir, which leaves the queue ``done`` and
+    yields an empty index.
     """
     logger = get_logger(__name__)
     memory_root = MemoryRoot.resolve()
@@ -254,9 +256,12 @@ async def migrate_table_schemas() -> None:
                 f"corrupted index. Recovery, in order of least- to "
                 f"most-destructive: (1) restart the process; a transient "
                 f"filesystem or LanceDB-side hiccup may resolve. (2) If "
-                f"the error persists, wipe the index directory "
-                f"`{memory_root.lancedb_dir}` and restart — cascade will "
-                f"re-index from source markdown."
+                f"the error persists, run `everos cascade rebuild` (with "
+                f"the server stopped) — it re-indexes from source markdown "
+                f"and preserves un-extracted buffered messages. Do NOT "
+                f"just delete `{memory_root.lancedb_dir}`: that leaves the "
+                f"cascade queue marked done, so nothing re-indexes and the "
+                f"index comes back empty."
             )
 
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -341,13 +346,12 @@ async def verify_business_schemas() -> None:
                 f"LanceDB table {schema.TABLE_NAME!r} schema drift: "
                 f"missing={sorted(missing)}, extra={sorted(extra)}, "
                 f"type_drift={type_drift}.\n"
-                "Recovery, escalating:\n"
-                "  1. Restart the server — an in-flight migration may "
-                "still be finishing (harmless if this is your first "
-                "restart after upgrading EverOS).\n"
-                "  2. If restart doesn't clear it, recover with "
-                "`everos cascade rebuild` (drops + re-indexes from md, "
-                "preserving un-extracted buffered messages)."
+                "Recover with `everos cascade rebuild` (stop the server "
+                "first): it drops and re-indexes from md, preserving "
+                "un-extracted buffered messages. Restarting will not "
+                "clear this — the startup migrations only alter column "
+                "nullability, never a column's name or type, so a "
+                "name/type drift never resolves on its own."
             )
 
 

@@ -41,6 +41,9 @@ from everos.memory.cascade._backfill import (
     _TableBacklog,
     _TableSpec,
 )
+from everos.memory.cascade.worker import (
+    DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -167,11 +170,16 @@ async def test_backfill_table_calls_optimize_when_rows_processed(
     assert result.rows_failed == 0
     assert len(repo.update_calls) == 3
     assert repo.optimize_calls == 1
-    # Compact then reclaim: prune fires once with a zero retention (reclaim
-    # everything now) — this is what the removed ``cleanup_older_than`` kwarg
-    # used to do inline (review P0-1).
+    # Compact then reclaim: prune fires once — this is what the removed
+    # ``cleanup_older_than`` kwarg used to do inline (review P0-1).
     assert repo.prune_calls == 1
-    assert repo.last_prune_older_than == dt.timedelta(0)
+    # It must pass the daemon's retention window, NOT zero: backfill runs in a
+    # separate process, so the in-process write lock cannot fence a daemon
+    # /search that still holds a reference to a just-superseded version.
+    # Reclaiming at zero age can delete files out from under that read.
+    assert repo.last_prune_older_than == dt.timedelta(
+        seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+    )
     # Happy path must not fire the failure log.
     assert "cascade_backfill_table_optimize_failed" not in caplog.text
 

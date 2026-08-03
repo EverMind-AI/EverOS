@@ -194,7 +194,7 @@ async def test_migrate_table_schemas_still_raises_on_alter_failure(
 ) -> None:
     """Fail-loud regression: a genuine ``alter_columns`` failure still
     raises :class:`LanceDBMigrationError`, and the message lists the
-    escalating recovery steps in order (restart, then wipe)."""
+    escalating recovery steps in order (restart, then ``cascade rebuild``)."""
     lock = _TrackingLock()
     monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock)
 
@@ -217,13 +217,15 @@ async def test_migrate_table_schemas_still_raises_on_alter_failure(
     message = str(excinfo.value)
     assert Episode.TABLE_NAME in message
     restart_idx = message.find("restart the process")
-    wipe_idx = message.find("wipe the index directory")
-    # Both hints present and restart comes before wipe (escalating).
+    rebuild_idx = message.find("everos cascade rebuild")
+    # Both hints present, restart first (escalating least- to most-destructive).
     assert restart_idx != -1
-    assert wipe_idx != -1
-    assert restart_idx < wipe_idx
-    # Never mention destructive `rm -rf` before the softer step.
-    assert "restart" in message
+    assert rebuild_idx != -1
+    assert restart_idx < rebuild_idx
+    # The recovery must NOT be "delete the index dir": that leaves the cascade
+    # queue marked done, so nothing re-indexes and the index comes back empty.
+    assert "wipe the index directory" not in message
+    assert "Do NOT just delete" in message
 
     # Marker must not be written on failure.
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"

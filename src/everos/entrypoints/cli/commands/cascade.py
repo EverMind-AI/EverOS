@@ -58,7 +58,11 @@ from everos.infra.persistence.sqlite import (
     get_engine,
     md_change_state_repo,
 )
-from everos.memory.cascade import CascadeOrchestrator, match_kind
+from everos.memory.cascade import (
+    CascadeOrchestrator,
+    match_kind,
+    ome_lock_is_free,
+)
 
 logger = get_logger(__name__)
 
@@ -131,17 +135,30 @@ _VERBOSE_OPTION_HELP = (
 
 
 @asynccontextmanager
-async def _runtime(*, verify: bool = True):  # type: ignore[no-untyped-def]
+async def _runtime(  # type: ignore[no-untyped-def]
+    *, verify: bool = True, ensure: bool = True
+):
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
-    The CLI piggybacks on the same singletons as the running daemon
-    (lazy + process-wide), so if a server happens to be running on
-    the same memory root, both share state correctly.
+    The CLI uses the same lazy, process-wide singletons the API lifespan
+    does. They are **per-process**: a running daemon has its own
+    connection and table-handle cache, so read/write traffic interleaves
+    safely, but a change to the table *set* made here (drop / recreate)
+    is invisible to the daemon's cached handles — which is why
+    ``rebuild`` refuses to run while a server holds the OME lock.
 
     ``verify=False`` skips :func:`verify_business_schemas` — required by
     ``cascade rebuild``, whose whole purpose is to recover from a table
     whose schema *has* drifted; running the guard there would abort
     startup before the rebuild could fix it (chicken-and-egg).
+
+    ``ensure=False`` additionally skips :func:`ensure_business_indexes`.
+    That call runs the schema / FTS migrations against the **existing**
+    tables, and on the corruption classes rebuild exists to repair (a
+    missing column, an un-alterable type) it raises before the drop can
+    happen — the recovery path dying on the damage it was invoked to fix.
+    Rebuild recreates the tables and their indexes itself after dropping,
+    so skipping the pre-drop pass loses nothing.
     """
     engine = get_engine()
     async with engine.begin() as conn:
@@ -149,7 +166,8 @@ async def _runtime(*, verify: bool = True):  # type: ignore[no-untyped-def]
     await get_connection()
     if verify:
         await verify_business_schemas()
-    await ensure_business_indexes()
+    if ensure:
+        await ensure_business_indexes()
     try:
         yield
     finally:
@@ -435,9 +453,15 @@ def rebuild(
 ) -> None:
     """Rebuild the LanceDB index from markdown (recover from schema drift).
 
+    **Stop the ``everos server`` first** — this is the one cascade command
+    that is not safe alongside a live daemon. It drops and recreates the
+    tables, and the daemon's cached table handles would keep writing to
+    the dropped dataset; the command refuses to start while a server holds
+    the OME lock.
+
     Drops every business LanceDB table and re-indexes all md from
     scratch. Markdown is the source of truth, so no memory content is
-    lost, and this is the **safe** recovery from a drifted / corrupt
+    lost, and this is the safe recovery from a drifted / corrupt
     index (e.g. the ``verify_business_schemas`` startup failure):
 
     - unlike ``rm -rf ~/.everos/.index/lancedb``, it re-populates
@@ -448,16 +472,39 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
+    if not ome_lock_is_free():
+        typer.echo(
+            "error: a server (or another exclusive CLI phase) is running on "
+            "this memory root.\n"
+            "  cascade rebuild drops and recreates the LanceDB tables; a live "
+            "daemon holds cached\n"
+            "  table handles and would keep writing to the dropped dataset. "
+            "Stop `everos server`\n"
+            "  first, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
     if not yes:
         typer.confirm(
-            "Drop all LanceDB business tables and re-index from markdown?",
+            "Drop all LanceDB business tables and re-index from markdown? "
+            "(requires the server to be stopped)",
             abort=True,
         )
 
     async def _run() -> None:
         # verify=False: the on-disk schema may be exactly what we're here
         # to fix; the startup guard would abort before we could rebuild.
-        async with _runtime(verify=False):
+        # ensure=False: the pre-drop migration pass would raise on exactly
+        # the damage we are here to repair (see _runtime).
+        async with _runtime(verify=False, ensure=False):
+            # Reset the queue FIRST so every crash window converges on
+            # "queue pending → next scan re-indexes". Doing it after the
+            # drop leaves a window where a crash yields empty tables with
+            # a fully-`done` queue: nothing re-indexes, the schema guard
+            # passes, and the deployment comes up silently empty — the
+            # exact state this command exists to avoid.
+            cleared = await md_change_state_repo.reset_all()
+            typer.echo(f"reset {cleared} cascade queue row(s)")
             dropped = await drop_business_tables()
             typer.echo(
                 f"dropped {len(dropped)} LanceDB table(s): "
@@ -465,15 +512,21 @@ def rebuild(
             )
             # Recreate the tables (current schema) + FTS indexes.
             await ensure_business_indexes()
-            # Clear the work queue so every md file re-enqueues as `added`.
-            cleared = await md_change_state_repo.reset_all()
-            typer.echo(f"reset {cleared} cascade queue row(s)")
             # Re-scan + drain: re-embed and re-insert every md entry.
             orchestrator = _build_orchestrator()
             processed = await orchestrator.sync_once()
             typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        typer.echo(
+            "\ninterrupted — the cascade queue is reset, so re-running "
+            "`everos cascade rebuild` (or starting the server) resumes the "
+            "re-index from where it stopped.",
+            err=True,
+        )
+        raise typer.Exit(code=130) from None
 
 
 # ── helpers ──────────────────────────────────────────────────────────────

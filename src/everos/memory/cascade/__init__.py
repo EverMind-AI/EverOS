@@ -21,6 +21,7 @@ Public surface — what lifespan providers / CLI commands import:
 from ._backfill import BackfillPhase as BackfillPhase
 from ._backfill import BackfillPresenter as BackfillPresenter
 from ._backfill import NullBackfillPresenter as NullBackfillPresenter
+from ._backfill import ome_lock_is_free as ome_lock_is_free
 from .orchestrator import CascadeConfig as CascadeConfig
 from .orchestrator import CascadeHealth as CascadeHealth
 from .orchestrator import CascadeOrchestrator as CascadeOrchestrator
@@ -38,4 +39,5 @@ __all__ = [
     "KindSpec",
     "NullBackfillPresenter",
     "match_kind",
+    "ome_lock_is_free",
 ]

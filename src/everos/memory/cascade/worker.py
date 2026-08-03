@@ -78,10 +78,16 @@ _OPTIMIZE_FAILURE_ALERT_THRESHOLD = 5
 """Consecutive **non-benign** ``optimize()`` failures (per kind) before
 the log escalates ``warning``→``error``, a fallback rebuild is triggered
 (:meth:`_run_rebuild_once`), and :meth:`CascadeWorker.health` reports the
-kind degraded. A benign light-beat commit conflict (lost concurrency
-race) is expected under churn, logged at ``debug``, and does **not**
+kind degraded. A benign commit conflict (lost concurrency race, either
+beat) is expected under churn, logged at ``debug``, and does **not**
 count — otherwise the streak pins high on a busy table and drowns the
-real signal (the disk-bloat failure mode behind lance-format/lance#7653)."""
+real signal (the disk-bloat failure mode behind lance-format/lance#7653).
+
+Prune that stops succeeding is **not** detected here: a lost race is
+excluded by design, and an intervening light-beat success resets the
+streak anyway. That failure mode belongs to the per-kind prune-staleness
+signal (:data:`_PRUNE_STALE_FACTOR`), which fires on the symptom (nothing
+reclaimed for 3 cadences) rather than on a particular exception."""
 _DRAIN_FAILURE_ALERT_THRESHOLD = 3
 """Consecutive :meth:`drain_once` exceptions at or above which
 :meth:`CascadeWorker.health` reports degraded — the md → LanceDB
@@ -243,9 +249,20 @@ class CascadeWorkerHealth:
     kinds; benign light-beat commit conflicts do not count."""
 
     prune_stale_seconds: float
-    """Seconds since the most recent successful prune (version cleanup)
-    across all active kinds, measured from worker start if none has run
-    yet. ``0`` when there has been no write activity to prune."""
+    """Staleness of the **worst** kind — seconds since that kind's last
+    successful prune (version cleanup), measured from worker start if it
+    has never pruned. ``0`` when no kind has an optimizer state yet (no
+    write activity to prune).
+
+    Deliberately the worst kind, not the newest prune across kinds: a
+    per-kind cleanup that dies (hung lance cleanup, lost commit races)
+    grows *that table's* index dir unbounded, and every other kind
+    pruning normally must not mask it."""
+
+    prune_stale_kind: str | None = None
+    """The kind :attr:`prune_stale_seconds` belongs to; ``None`` when no
+    kind has state yet. Named in :meth:`reasons` so an operator knows
+    which table to look at."""
 
     def reasons(self) -> list[str]:
         """Operational degradation reasons; empty when healthy.
@@ -262,9 +279,11 @@ class CascadeWorkerHealth:
         if self.optimize_failure_streak >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD:
             out.append(f"optimize stuck ({self.optimize_failure_streak} in a row)")
         if self.prune_stale_seconds >= _PRUNE_STALE_SECONDS_ALERT:
+            kind = self.prune_stale_kind or "unknown"
             out.append(
-                f"version cleanup stalled ({int(self.prune_stale_seconds)}s "
-                "since last prune — disk may grow)"
+                f"version cleanup stalled for kind '{kind}' "
+                f"({int(self.prune_stale_seconds)}s since its last prune "
+                "— that table's index dir may grow)"
             )
         return out
 
@@ -274,9 +293,11 @@ def _is_benign_commit_conflict(exc: BaseException) -> bool:
 
     LanceDB surfaces the Rust ``Retryable commit conflict`` as a plain
     exception whose message carries the phrase — there is no dedicated
-    class to catch. On the lock-free light beat this is expected under
-    concurrent writes and benign (the next beat retries), so it is
-    logged at ``debug`` and does not count toward the failure streak.
+    class to catch. Either beat can lose the race: the light beat is
+    lock-free, and the heavy beat's write lock is in-process only, so a
+    second process (CLI ``cascade sync`` / ``backfill``) can preempt it.
+    Both are expected under churn and benign (the next beat retries), so
+    they log at ``debug`` and do not count toward the failure streak.
 
     Match only the specific ``commit conflict`` phrase (a substring of the
     Rust message), not a bare ``retryable`` — the latter appears in the
@@ -451,29 +472,42 @@ class CascadeWorker:
         """
         states = self._optimizer_states.values()
         optimize_failure_streak = max((s.optimize_failures for s in states), default=0)
+        stale_seconds, stale_kind = self._prune_staleness()
         return CascadeWorkerHealth(
             drain_consecutive_failures=self._drain_consecutive_failures,
             unrecoverable_total=self._unrecoverable_total,
             optimize_failure_streak=optimize_failure_streak,
-            prune_stale_seconds=self._prune_stale_seconds(),
+            prune_stale_seconds=stale_seconds,
+            prune_stale_kind=stale_kind,
         )
 
-    def _prune_stale_seconds(self) -> float:
-        """Seconds since the most recent successful prune across kinds,
-        measured from worker start when nothing has pruned yet.
+    def _prune_staleness(self) -> tuple[float, str | None]:
+        """Staleness of the **worst** kind: ``(seconds, kind)``.
 
-        Returns ``0`` before the worker has started (``_started_at == 0``)
-        or before any kind has registered an optimizer state — no prune
-        beat has run yet, so there is nothing to be stale about. Once a
-        beat registers state, staleness is the time since the newest
-        ``last_prune_at`` (or since start, whichever is later).
+        Per kind, staleness is the time since its own last successful
+        prune — or since worker start if it has never pruned — and the
+        worst (largest) one is reported. Taking the worst rather than the
+        newest prune across kinds is what makes the signal work on a
+        multi-kind deployment: one kind whose cleanup dies grows that
+        table's index dir unbounded, and the ~5 healthy kinds pruning on
+        schedule must not hide it (that masking was the pre-fix bug).
+
+        Returns ``(0.0, None)`` before the worker has started
+        (``_started_at == 0``) or before any kind has registered an
+        optimizer state — no prune beat has run, so nothing is stale yet.
         """
-        states = list(self._optimizer_states.values())
+        states = list(self._optimizer_states.items())
         if not states or self._started_at == 0.0:
-            return 0.0
-        latest_prune = max(s.last_prune_at for s in states)
-        baseline = max(latest_prune, self._started_at)
-        return max(0.0, time.monotonic() - baseline)
+            return 0.0, None
+        now = time.monotonic()
+        worst_seconds = -1.0
+        worst_kind: str | None = None
+        for kind, state in states:
+            baseline = max(state.last_prune_at, self._started_at)
+            stale = max(0.0, now - baseline)
+            if stale > worst_seconds:
+                worst_seconds, worst_kind = stale, kind
+        return max(0.0, worst_seconds), worst_kind
 
     # ── internals ──────────────────────────────────────────────────────────
 
@@ -714,6 +748,12 @@ class CascadeWorker:
         now = time.monotonic()
         should_prune = (
             state is None
+            # 0.0 means "never attempted" — always prune, don't compare clocks.
+            # ``monotonic()`` is boot-relative, so ``now - 0 >= interval`` is
+            # false for the first ~cadence of machine/container uptime and the
+            # catch-up prune would be skipped exactly when a fresh process most
+            # needs it.
+            or state.last_prune_attempt_at == 0.0
             or (now - state.last_prune_attempt_at) >= self._optimize_prune_interval
         )
         try:
@@ -754,9 +794,22 @@ class CascadeWorker:
             # lost the optimistic-concurrency race against a live writer.
             # Expected under churn, self-heals next beat — log at debug and
             # do NOT count it toward the streak (which would otherwise pin
-            # high on a busy table) or trigger a fallback rebuild. The heavy
-            # beat runs under the write lock, so it can't hit this benignly.
-            if not should_prune and _is_benign_commit_conflict(exc):
+            # high on a busy table) or trigger a fallback rebuild.
+            #
+            # This applies to the HEAVY beat too: the per-table write lock is
+            # in-process only (see LanceRepoBase.prune), so a second process
+            # — a long `cascade backfill`, a `cascade sync` — can still
+            # preempt prune's Rewrite commit. Counting those as real failures
+            # let ~25min of cross-process churn reach the threshold and fire a
+            # spurious fallback rebuild, which drops every index before
+            # recreating it; if the rebuild lost the race too, its failure was
+            # swallowed as a warning and the table sat with no FTS index (all
+            # `/search` on that kind 500s) until the next 12h sweep. A prune
+            # that genuinely stops succeeding is caught by the prune-staleness
+            # health signal instead (per-kind, see _prune_staleness) — that is
+            # the right detector for it, and unlike a rebuild it does not
+            # destroy indexes to "fix" a lost race.
+            if _is_benign_commit_conflict(exc):
                 logger.debug(
                     "cascade_lancedb_optimize_conflict",
                     kind=kind,

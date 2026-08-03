@@ -107,7 +107,8 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     """Any table's failing ``alter_columns`` must fail startup loudly:
     :class:`LanceDBMigrationError` is raised, the version marker stays
     unwritten, and the message names the failed table plus escalating
-    recovery hints (restart, then wipe). Cascade would otherwise write
+    recovery hints (restart, then ``cascade rebuild``). Cascade would
+    otherwise write
     NULL vectors into a still-NOT-NULL column and silently drop every
     row."""
     for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
@@ -127,11 +128,13 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     assert Episode.TABLE_NAME in message
     lancedb_dir = tmp_path / ".index" / "lancedb"
     assert str(lancedb_dir) in message
-    # Escalating recovery: restart first, wipe second.
+    # Escalating recovery: restart first, `cascade rebuild` second. Never
+    # "delete the index dir" — that leaves the queue done and the index empty.
     restart_idx = message.find("restart the process")
-    wipe_idx = message.find("wipe the index directory")
-    assert restart_idx != -1 and wipe_idx != -1
-    assert restart_idx < wipe_idx
+    rebuild_idx = message.find("everos cascade rebuild")
+    assert restart_idx != -1 and rebuild_idx != -1
+    assert restart_idx < rebuild_idx
+    assert "wipe the index directory" not in message
 
     marker = lancedb_dir / ".table_schema_version"
     assert not marker.exists()

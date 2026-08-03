@@ -195,3 +195,13 @@ async def test_health_reports_tier3_capabilities(tier3_runtime: AsyncClient) -> 
             "knowledge",
         }
     )
+
+    # Cascade readiness block is present on a real app that ran the cascade
+    # lifespan. This pins the wiring, which is stringly-typed on both ends
+    # (lifespan provider name → lifespan_data key); a rename would silently
+    # drop the block from production /health while the route's own unit tests,
+    # which hand-build lifespan_data, stayed green.
+    cascade = body["cascade"]
+    assert cascade is not None, "cascade block missing — lifespan_data wiring broke"
+    assert cascade["healthy"] is True
+    assert cascade["reasons"] == []

@@ -29,8 +29,10 @@ dependencies = [
     # Upper bound: 0.35.0 embeds lance-rust v9 (large storage/encoding jump, not
     # yet stable-released). 0.32-0.34 carry a compaction offset-overflow regression
     # (lance-format/lance#7653); we run 0.34.0 safely via the with_position=False
-    # FTS workaround. Do not float past 0.34.x until 0.35 is validated by the soak
-    # harness. Never widen this floor back below 0.34 (older lance can't read v8 data).
+    # FTS workaround. Do not float past 0.34.x until 0.35 has been validated under
+    # sustained churn (bounded + reclaimable index dir, no compaction crash) — see
+    # docs/cascade_runbook.md. Never widen this floor back below 0.34 (older lance
+    # cannot read v8 data).
     "lancedb>=0.34.0,<0.35.0",    # Vector + BM25 + scalar filter (Arrow-based)
     "aiosqlite>=0.20.0",          # Async SQLite driver (used by SA async engine)
     "sqlmodel>=0.0.22",           # ORM (Pydantic + SQLAlchemy 2.0 async)
