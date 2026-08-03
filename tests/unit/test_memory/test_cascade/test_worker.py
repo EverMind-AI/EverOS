@@ -593,6 +593,50 @@ async def test_optimize_prunes_on_first_call_then_throttles(
     assert len(fake.optimize_calls) == 1, "second beat is the light path"
 
 
+async def test_failed_prune_backs_off_a_cadence_and_keeps_health_signal(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A prune that fails (e.g. killed by the write-lock timeout on a hung
+    lance cleanup) advances the *attempt* clock but not the *success* clock:
+
+    - attempt clock advances → the next beat waits a full cadence and takes
+      the light lock-free path instead of immediately re-pruning, so a hung
+      prune can't pin the write lock ~97% of the time (review N1);
+    - success clock (``last_prune_at``) does NOT advance → the prune-staleness
+      health signal still climbs, so a persistently failing prune surfaces as
+      degraded rather than being masked.
+    """
+
+    class _PruneRaisesRepo(_FakeLanceRepo):
+        async def prune(self, older_than: dt.timedelta) -> None:
+            self.prune_calls.append(time.monotonic())
+            self.prune_args.append(older_than)
+            raise TimeoutError("simulated hung cleanup killed by write-lock timeout")
+
+    fake = _PruneRaisesRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_prune_interval_seconds=10.0,  # long cadence: 2nd beat is light
+        optimize_prune_retention_seconds=45.0,
+    )
+    # First beat: prune is attempted and raises.
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    st = w._optimizer_states["episode"]
+    assert len(fake.prune_calls) == 1, "first beat attempts a prune"
+    assert st.last_prune_attempt_at > 0, "attempt clock advances even on failure"
+    assert st.last_prune_at == 0.0, "success clock must NOT advance on a failed prune"
+
+    # Second beat within the cadence: must fall to the light path, not re-prune.
+    await asyncio.sleep(0.02)  # exceeds optimize throttle (0.01), not cadence (10)
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.prune_calls) == 1, "failed prune must not immediately retry (N1)"
+    assert len(fake.optimize_calls) == 1, "second beat backs off to the light path"
+
+
 # ── Rebuild scheduler tests ────────────────────────────────────────────────
 
 
@@ -873,8 +917,9 @@ async def test_light_beat_commit_conflict_is_debug_and_uncounted(
         retry_backoff_seconds=0,
     )
     state = wmod._KindOptimizerState()
-    # Force the LIGHT beat: pretend we pruned just now so should_prune=False.
-    state.last_prune_at = time.monotonic()
+    # Force the LIGHT beat: pretend we just attempted a prune so should_prune=False
+    # (scheduling reads the attempt clock, not the success clock — see N1 split).
+    state.last_prune_attempt_at = time.monotonic()
     w._optimizer_states["episode"] = state
 
     await w._run_optimize_once("episode")

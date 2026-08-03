@@ -183,14 +183,26 @@ class _KindOptimizerState:
     per kind so concurrent LanceDB writes never collide on the same
     table's manifest.
 
-    ``last_prune_at`` is the monotonic timestamp of the last
-    ``optimize()`` call that passed ``cleanup_older_than``; the runner
-    consults it to decide whether the next call should also prune. ``0``
-    means "never pruned" — the first run after worker startup always
-    prunes, which is what we want for catching up from a prior session.
+    Two prune clocks, deliberately split:
+
+    - ``last_prune_attempt_at`` gates **scheduling** — the monotonic time
+      of the last heavy (prune) beat *attempt*, advanced whether it
+      succeeds or times out. So a prune that hangs and is killed by the
+      write-lock timeout backs off a full cadence before the next attempt
+      instead of retrying every ~10s and holding the lock ~97% of the
+      time (review N1).
+    - ``last_prune_at`` records the last *successful* prune, advanced only
+      after the call returns. It drives the prune-staleness **health**
+      signal (:meth:`CascadeWorker._prune_stale_seconds`), so a
+      persistently failing/hanging prune still surfaces as degraded
+      instead of being masked by advancing the schedule clock.
+
+    Both default ``0`` ("never") — the first run after worker startup
+    always prunes, catching up from a prior session.
     """
 
     last_run_at: float = 0.0
+    last_prune_attempt_at: float = 0.0
     last_prune_at: float = 0.0
     dirty: bool = False
     optimize_failures: int = 0
@@ -702,7 +714,7 @@ class CascadeWorker:
         now = time.monotonic()
         should_prune = (
             state is None
-            or (now - state.last_prune_at) >= self._optimize_prune_interval
+            or (now - state.last_prune_attempt_at) >= self._optimize_prune_interval
         )
         try:
             if should_prune:
@@ -714,6 +726,15 @@ class CascadeWorker:
                 # is short + decoupled from the cadence (see
                 # DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS) so superseded
                 # full-table copies don't pile up between beats.
+                #
+                # Advance the *attempt* clock before the call: if prune hangs
+                # and the write-lock timeout kills it, the next beat still
+                # waits a full cadence instead of retrying immediately and
+                # pinning the write lock (review N1). The *success* clock
+                # (last_prune_at, for the staleness health signal) advances
+                # only after the call returns.
+                if state is not None:
+                    state.last_prune_attempt_at = now
                 await repo.prune(dt.timedelta(seconds=self._optimize_prune_retention))
                 if state is not None:
                     state.last_prune_at = now

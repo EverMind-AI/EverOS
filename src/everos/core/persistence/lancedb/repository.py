@@ -24,12 +24,17 @@ from .base import BaseLanceTable
 
 logger = get_logger(__name__)
 
-# Safety cap on a single prune's ``optimize(cleanup_older_than=…)`` call. Cleanup
-# only deletes files already unreferenced by the current manifest, so a timeout
-# that cancels it mid-scan just reclaims less this beat — it cannot corrupt the
-# table — but it releases the per-table write lock instead of wedging every
-# writer behind a hung lance cleanup (review P2).
-_PRUNE_TIMEOUT_SECONDS = 300.0
+# Safety cap on a single prune's ``optimize(cleanup_older_than=…)`` call — a
+# pure hang-catcher, not a bound on normal runtime. A real cleanup is
+# milliseconds even on a heavily churned table (measured ~40ms at 320k writes /
+# 100 versions), so 60s is ~1500× headroom and never fires in normal operation.
+# Cleanup only deletes files already unreferenced by the current manifest, so a
+# timeout that cancels it mid-scan just reclaims less this beat — it cannot
+# corrupt the table — but it releases the per-table write lock instead of
+# wedging every writer behind a hung lance cleanup. Kept well below the prune
+# cadence (worker ``DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS``) so a hung beat
+# leaves a real write window before the next attempt (review P2 / N1).
+_PRUNE_TIMEOUT_SECONDS = 60.0
 
 
 def _remove_empty_index_dirs(table_uri: str) -> int:
