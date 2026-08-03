@@ -91,6 +91,11 @@ def _restore_shaper_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     The shaper reads ``timestamp`` as a ``datetime``; the bridged ms-epoch
     int must be reverted. The injected ``episode`` dict is inert for the
     agent shapers (they read case/skill fields), so it is simply dropped.
+
+    Deliberately wider than an exact inverse of the bridge: a row whose
+    ``timestamp`` was *natively* numeric (agent tables store datetimes
+    today, so this does not occur) would also be converted — correct
+    either way, because the shaper contract requires a ``datetime``.
     """
     reverted = dict(metadata)
     timestamp = metadata.get("timestamp")

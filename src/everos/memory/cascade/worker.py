@@ -680,11 +680,14 @@ class CascadeWorker:
     async def _run_optimize_once(self, kind: str) -> None:
         """Run one ``optimize()`` for ``kind``, opportunistically pruning.
 
-        Most calls take the **light** path — pure compaction + index
-        merge, fast. Every ``_optimize_prune_interval`` seconds the
-        next call takes the **heavy** path: same work plus
-        ``cleanup_older_than`` so the storage layer physically deletes
-        files belonging to versions older than one cadence.
+        Most calls take the **light** path — lock-free ``optimize()``,
+        pure compaction + index merge, fast. Every
+        ``_optimize_prune_interval`` seconds the next call takes the
+        **heavy** path — ``prune()`` under the per-table write lock,
+        which compacts *and* physically deletes files belonging to
+        versions older than ``_optimize_prune_retention`` (a short
+        window decoupled from the beat cadence; see
+        :data:`DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS`).
 
         Pruning is opt-in per call rather than a separate task so the
         existing per-kind serialisation (one in-flight runner per kind)
