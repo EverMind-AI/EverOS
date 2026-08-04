@@ -7,6 +7,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /health` now carries a `cascade` readiness block** — `healthy`,
+  human-readable `reasons`, and the counters behind them (`pending`,
+  `failed_permanent`, `failed_retryable`, `drain_consecutive_failures`,
+  `unrecoverable_total`, `optimize_failure_streak`, `prune_stale_seconds`).
+  `null` when the app runs without the cascade lifespan. **Alert on
+  `cascade.healthy`**: it flips false only on operational faults — drain loop
+  failing (≥3 in a row), index maintenance wedged (≥5), or version cleanup
+  stalled on some table (≥3 missed 300s beats, and `reasons` names the table).
+  `failed_permanent` is a data-quality backlog awaiting `cascade fix` and
+  deliberately does **not** flip `healthy`, otherwise the signal sits red until
+  a human edits markdown. The HTTP status stays 200 even when the block says
+  unhealthy — it is a liveness signal, and a degraded projection must not
+  trigger a container restart. If the probe itself fails (locked / full
+  SQLite), the block returns `healthy=false` with a `cascade health probe
+  failed: …` reason and zeroed counters — read zeros next to that reason as
+  "unknown", not "clean".
+- **`everos cascade rebuild` CLI command** — drops every business LanceDB table,
+  clears the cascade queue, and re-indexes all markdown from scratch. The
+  supported recovery from a drifted or corrupt index: unlike deleting the index
+  directory, it re-enqueues every file (a bare `rm -rf` leaves the queue marked
+  `done`, so nothing re-indexes and the index comes back empty), and unlike
+  deleting `.index/` it preserves SQLite state that markdown cannot rebuild —
+  notably `unprocessed_buffer`. **Requires the server to be stopped**: it
+  refuses to start (exit code `3`) while a server holds the OME lock, because a
+  live daemon keeps writing through cached table handles to the dropped
+  dataset. `--yes/-y` for non-interactive use; `Ctrl-C` exits `130` and the
+  re-index resumes on the next run or server start.
+- **Startup schema verification now detects column *type* drift**, not just
+  missing / extra columns. Catches the class of corruption behind #337 — an
+  `episode.subject_vector` left as `string` by an older build while the schema
+  declares a 1024-d `fixed_size_list` — which a name-only check waved through
+  and which then failed deep inside `merge_insert` with an opaque
+  `LanceError(IO)`. The error now points at `everos cascade rebuild`.
+
+### Changed
+
+- **LanceDB maintenance is split into compaction and reclamation.**
+  `optimize()` is lock-free compaction; the new `prune()` runs
+  `cleanup_older_than` under the per-table write lock. Fixes unbounded index
+  growth: the previous bundled call issued a Rewrite that concurrent writes
+  kept preempting, so version cleanup lost the race indefinitely (a soak run
+  measured 16 successes against 547 conflicts over 21h, with the index
+  directory growing to the disk guardrail). Reclamation now completes on every
+  beat, at the cost of a brief same-table write stall (measured ~40ms).
+  Retention is decoupled from cadence: files older than 60s are eligible,
+  reclaimed on a 300s beat.
+- **Every write-lock critical section is now bounded.** All seven operations
+  (`add` / `upsert` / `update` / `delete` / `delete_by_md_path` / `prune` /
+  `rebuild_indexes`) run under a deadline that covers **lock acquisition as
+  well as the body**, so no code path can wait for the lock — or hold it —
+  indefinitely. Budgets are sized from measured durations (row writes are
+  2–25ms, worst observed 63ms → 15s; index rebuild → 300s; prune → 60s).
+  Expiry raises the retryable `VectorStoreBusyError`, so the cascade worker
+  retries the row instead of marking it permanently failed. Without this, one
+  operation stuck outside the old narrow timeout wedged a table permanently:
+  every writer blocked on acquire, and the maintenance scheduler skipped a kind
+  whose task never finished, so that table stopped reclaiming versions
+  altogether (observed: 150 versions retained, disk 11x live size, with nothing
+  logged because nothing failed).
+- **Benign LanceDB commit conflicts no longer count as failures.** A lost
+  optimistic-concurrency race logs at `debug` on either maintenance beat. The
+  heavy beat needs this too: its write lock is in-process only, so a second
+  process (`cascade sync`, `cascade backfill`) can preempt its commit. Counting
+  those triggered spurious fallback index rebuilds, which drop every index
+  before recreating them — and if the rebuild also lost the race, the table sat
+  without an FTS index and every search on that kind returned 500 until the
+  next 12h sweep.
+- **A query vector whose width disagrees with the embedding provider's declared
+  `dim` now fails immediately** with `CONFIGURATION_ERROR` instead of reaching
+  LanceDB. It previously surfaced as an opaque `ValueError` after the query was
+  built — 13–14s per request, as an unhandled 500.
+- **Exception logging no longer renders frame locals.** structlog's default
+  traceback formatter (`show_locals=True`, up to 100 frames) rendered one
+  unhandled exception on an async stack into 6423 log lines — 85MB of logs
+  across 11 exceptions in one soak run — at ~290ms of synchronous CPU each, and
+  risked printing request payloads into logs. Now locals-off and capped at 15
+  frames: the same traceback is 103 lines.
+- **`cascade backfill` reclaims through the daemon's retention window** rather
+  than at zero age, so it cannot delete files out from under an in-flight
+  `/search` in the server process.
+- **`lancedb` pinned to `>=0.34.0,<0.35.0`.** 0.35 embeds lance-rust v9; 0.34.0
+  is the version validated under sustained churn. Environments installing from
+  `uv.lock` are unaffected (already 0.34.0). Never widen the floor below 0.34 —
+  older lance cannot read v8 data.
+
+### Fixed
+
+- **AGENTIC search crashed on agent memory** (`agent_case` / `agent_skill`) —
+  candidate metadata now satisfies the everalgo `_format_docs` contract,
+  removing a `TypeError` in the sufficiency / multi-query steps.
+- **Per-kind version-cleanup staleness is no longer masked.** The health signal
+  reported time since the newest successful prune across all kinds, so on a
+  multi-kind deployment one kind whose cleanup died was hidden by the others
+  pruning on schedule. It now reports the worst kind and names it.
+- **`cascade backfill` silently skipped compaction and reclamation** — it still
+  called the removed `optimize(cleanup_older_than=…)` signature, and the
+  resulting `TypeError` was swallowed by a best-effort `except`, so the disk
+  growth this release fixes came back after every backfill.
+- **Empty `_indices/<uuid>/` husks are removed after cleanup** (a soak run
+  accumulated 13061 directories, 98% of them empty), which bloated inode usage
+  and slowed directory scans.
+
+### Docs
+
+- Rewrote the cascade runbook's recovery paths: the `/health` cascade block and
+  its alert thresholds, `cascade rebuild` (including the stop-the-server
+  requirement), why `rm -rf .index/lancedb` yields an empty index, and why
+  `rm -rf .index` loses un-extracted buffered messages.
+
 ## [1.2.1] - 2026-07-29
 
 ### Added
