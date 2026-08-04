@@ -129,6 +129,18 @@ class ExternalServiceError(InfrastructureError):
     """An external service (LLM, embedding, rerank) returned an error or timed out."""
 
 
+class VectorStoreBusyError(ExternalServiceError):
+    """A LanceDB table's write lock could not be taken, or the critical
+    section it guards overran its deadline.
+
+    Deliberately under :class:`ExternalServiceError` rather than
+    :class:`VectorStoreError`: the cascade worker retries that branch, and a
+    contended or slow table is exactly the transient condition retrying is
+    for. Under :class:`VectorStoreError` the row would be marked permanently
+    failed and need a manual ``cascade fix``.
+    """
+
+
 class LLMServiceError(ExternalServiceError):
     """The configured LLM provider returned an error or timed out."""
 

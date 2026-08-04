@@ -12,17 +12,32 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
 from lancedb import AsyncTable
 
+from everos.core.errors import VectorStoreBusyError
 from everos.core.observability.logging import get_logger
 
 from .base import BaseLanceTable
 
 logger = get_logger(__name__)
+
+# Write-lock deadlines, per operation class. Every critical section on a
+# table's write lock runs under one of these (see ``LanceRepoBase._locked``):
+# acquisition included, so neither waiting for the lock nor holding it can be
+# unbounded. Values are generous — they are hang-catchers, not throughput
+# limits; a normal cascade batch write is milliseconds.
+_WRITE_TIMEOUT_SECONDS = 120.0
+"""Row writes: add / upsert / update / delete."""
+
+_REBUILD_TIMEOUT_SECONDS = 600.0
+"""Index rebuild (drop + recreate every index) — the slowest critical
+section, measured at ~0.3s per 50k rows per indexed column, so 10 minutes
+covers a multi-million-row table with wide headroom."""
 
 # Safety cap on a single prune's ``optimize(cleanup_older_than=…)`` call — a
 # pure hang-catcher, not a bound on normal runtime. A real cleanup is
@@ -152,6 +167,41 @@ class LanceRepoBase[T: BaseLanceTable]:
         """
         return cls._table_locks.setdefault(table_name, asyncio.Lock())
 
+    @asynccontextmanager
+    async def _locked(self, budget: float, op: str) -> AsyncIterator[None]:
+        """Hold the table write lock for at most ``budget`` seconds.
+
+        **The deadline covers acquisition *and* the body.** That is the whole
+        point: every critical section on this lock is bounded, so no code path
+        can wait for it — or hold it — indefinitely. A single stuck operation
+        would otherwise wedge the table forever, because a stuck holder blocks
+        every writer *and* the maintenance scheduler skips a kind whose task
+        never finishes (observed in a soak run: one table stopped reclaiming
+        versions permanently, 150 versions retained, disk 11x live size, with
+        no error logged anywhere because nothing failed — it simply never
+        returned).
+
+        On expiry the body is cancelled, the lock is released, and the timeout
+        is re-raised as :class:`VectorStoreBusyError` so the cascade worker
+        treats it as transient and retries instead of marking the row
+        permanently failed.
+        """
+        try:
+            async with asyncio.timeout(budget):
+                async with self._write_lock(self.table_name):
+                    yield
+        except TimeoutError as exc:
+            logger.warning(
+                "lancedb_write_lock_deadline_exceeded",
+                table=self.table_name,
+                op=op,
+                budget_seconds=budget,
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} exceeded its "
+                f"{budget:g}s write-lock deadline"
+            ) from exc
+
     @classmethod
     def _reset_locks_for_tests(cls) -> None:
         """Test-only: drop the write-lock pool.
@@ -191,7 +241,7 @@ class LanceRepoBase[T: BaseLanceTable]:
     async def add(self, records: Sequence[T]) -> None:
         """Insert one or more records."""
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_WRITE_TIMEOUT_SECONDS, "add"):
             await table.add(list(records))
 
     # ── Upsert ─────────────────────────────────────────────────────────────
@@ -213,7 +263,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         updates its existing row.
         """
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
             await (
                 table.merge_insert(by)
                 .when_matched_update_all()
@@ -312,11 +362,8 @@ class LanceRepoBase[T: BaseLanceTable]:
         ``part_N`` / index UUID count) — that is ``rebuild_indexes``'s job.
         """
         table = await self._table()
-        async with self._write_lock(self.table_name):
-            async with asyncio.timeout(_PRUNE_TIMEOUT_SECONDS):
-                await table.optimize(
-                    cleanup_older_than=older_than, delete_unverified=False
-                )
+        async with self._locked(_PRUNE_TIMEOUT_SECONDS, "prune"):
+            await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
             table_uri = await table.uri()
             removed = await asyncio.to_thread(_remove_empty_index_dirs, table_uri)
         if removed:
@@ -379,7 +426,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         - https://docs.rs/lancedb/latest/lancedb/table/struct.OptimizeOptions.html
         """
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_REBUILD_TIMEOUT_SECONDS, "rebuild_indexes"):
             for idx in await table.list_indices():
                 await table.drop_index(idx.name)
             await self.schema.ensure_fts_indexes(table)
@@ -560,7 +607,7 @@ class LanceRepoBase[T: BaseLanceTable]:
             where: SQL-like predicate scoping the update.
         """
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_WRITE_TIMEOUT_SECONDS, "update"):
             await table.update(updates, where=where)
 
     # ── Delete ─────────────────────────────────────────────────────────────
@@ -568,7 +615,7 @@ class LanceRepoBase[T: BaseLanceTable]:
     async def delete(self, predicate: str) -> None:
         """Delete rows matching a SQL-like predicate."""
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete"):
             await table.delete(predicate)
 
     async def delete_by_md_path(self, md_path: str) -> int:
@@ -579,7 +626,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         Single quotes in ``md_path`` are doubled defensively.
         """
         table = await self._table()
-        async with self._write_lock(self.table_name):
+        async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete_by_md_path"):
             result = await table.delete(f"md_path = '{_q(md_path)}'")
         return int(result.num_deleted_rows)
 

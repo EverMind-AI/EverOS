@@ -749,12 +749,12 @@ async def test_prune_times_out_and_releases_the_write_lock(
 ) -> None:
     """A hung lance cleanup must not hold the per-table write lock forever.
 
-    ``prune`` wraps the cleanup in ``asyncio.timeout``: on expiry the call is
-    cancelled, the exception propagates (the worker counts it and backs off a
-    full cadence), and — critically — the write lock is released so writers on
-    that table are not wedged behind the hang. Without the timeout every
-    writer on that table blocks indefinitely.
+    On expiry the body is cancelled, the lock is released so writers on that
+    table are not wedged, and the timeout surfaces as
+    :class:`VectorStoreBusyError` — deliberately a *retryable* error, so the
+    cascade worker retries the row instead of marking it permanently failed.
     """
+    from everos.core.errors import ExternalServiceError, VectorStoreBusyError
     from everos.core.persistence.lancedb import repository as repo_mod
 
     monkeypatch.setattr(repo_mod, "_PRUNE_TIMEOUT_SECONDS", 0.05)
@@ -767,9 +767,13 @@ async def test_prune_times_out_and_releases_the_write_lock(
             return str(tmp_path)
 
     repo = _NoteRepo(table=_HangingTable())  # type: ignore[arg-type]
-    with pytest.raises(TimeoutError):
+    with pytest.raises(VectorStoreBusyError) as excinfo:
         await repo.prune(dt.timedelta(seconds=60))
 
+    assert isinstance(excinfo.value, ExternalServiceError), (
+        "must be retryable — under VectorStoreError the worker would mark the "
+        "row permanently failed and need a manual `cascade fix`"
+    )
     assert not repo._write_lock(repo.table_name).locked(), (
         "the write lock must be released after the timeout, otherwise a hung "
         "cleanup wedges every writer on this table"
@@ -777,6 +781,44 @@ async def test_prune_times_out_and_releases_the_write_lock(
     # And the lock is genuinely reusable afterwards.
     async with repo._write_lock(repo.table_name):
         pass
+
+
+async def test_waiting_for_a_stuck_holder_also_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**No path may wait for this lock indefinitely.**
+
+    The deadline covers acquisition, not just the body. Without that, one
+    operation that hangs while holding the lock wedges the table for good:
+    every writer blocks on acquire, and the maintenance scheduler skips a kind
+    whose task never finishes, so that table stops reclaiming versions forever
+    (observed in a soak run — 150 versions retained, disk 11x live size, and
+    *no* error logged anywhere, because nothing failed; it simply never
+    returned).
+    """
+    from everos.core.errors import VectorStoreBusyError
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    monkeypatch.setattr(repo_mod, "_WRITE_TIMEOUT_SECONDS", 0.05)
+
+    class _NoopTable:
+        async def add(self, _records):  # type: ignore[no-untyped-def]
+            return None
+
+    repo = _NoteRepo(table=_NoopTable())  # type: ignore[arg-type]
+
+    # Simulate a holder that never gives the lock back.
+    lock = repo._write_lock(repo.table_name)
+    await lock.acquire()
+    try:
+        with pytest.raises(VectorStoreBusyError):
+            await repo.add([_row(owner="u1", entry="n1")])
+    finally:
+        lock.release()
+
+    # Once the stuck holder is gone, the table works again — the timeout
+    # bounded the wait without breaking anything.
+    await repo.add([_row(owner="u1", entry="n2")])
 
 
 def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
