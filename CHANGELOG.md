@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-04
+
 ### Added
 
 - **`GET /health` now carries a `cascade` readiness block** — `healthy`,
@@ -96,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Maintenance deadlines now cover the whole call, not just the critical
+  section.** Resolving a table handle sat outside the timeout, so a hang there
+  never returned — and because the scheduler runs one maintenance task per kind
+  and skips a kind whose task is in flight, that table stopped being maintained
+  permanently and silently (a soak run caught one table 13 minutes without a
+  reclaim, retained versions climbing, while its siblings reclaimed normally and
+  nothing was logged because nothing failed). Handle resolution moved inside the
+  deadline for all seven locked operations, the lock-free compaction beat got
+  its own deadline, and the scheduler adds a last-resort 180s bound on the whole
+  call. The per-kind staleness alert added in this release is what surfaced it.
 - **AGENTIC search crashed on agent memory** (`agent_case` / `agent_skill`) —
   candidate metadata now satisfies the everalgo `_format_docs` contract,
   removing a `TypeError` in the sufficiency / multi-query steps.
