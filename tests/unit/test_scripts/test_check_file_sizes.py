@@ -189,6 +189,35 @@ def test_unresolvable_base_is_a_hard_failure(repo: Path) -> None:
         checker.changed_paths(repo, "origin/does-not-exist")
 
 
+def test_exempt_directory_may_exceed_the_ceiling(tmp_path: Path) -> None:
+    checker = _load_checker()
+    exempt = _write(tmp_path, "tests/fixtures/search_seed/episode.json", 9 * 1024)
+    nearby = _write(tmp_path, "tests/fixtures/other_seed.json", 9 * 1024)
+
+    violations = checker.find_violations([exempt, nearby], root=tmp_path, max_kb=8)
+
+    assert [violation.path for violation in violations] == [
+        "tests/fixtures/other_seed.json"
+    ], "the exemption must cover exactly its directory, not siblings"
+
+
+def test_exemption_list_is_pinned() -> None:
+    """Every entry is a place the ceiling stops protecting — keep it visible."""
+    checker = _load_checker()
+
+    assert checker.EXEMPT_PREFIXES == ("tests/fixtures/search_seed/",)
+
+
+def test_exempt_prefixes_point_at_real_directories() -> None:
+    checker = _load_checker()
+
+    for prefix in checker.EXEMPT_PREFIXES:
+        assert (_REPO_ROOT / prefix).is_dir(), (
+            f"exempt prefix {prefix!r} does not exist; drop it rather than "
+            "leaving a hole for a path that may come back"
+        )
+
+
 def test_ceiling_matches_the_pre_commit_hook() -> None:
     checker = _load_checker()
     config = _PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
