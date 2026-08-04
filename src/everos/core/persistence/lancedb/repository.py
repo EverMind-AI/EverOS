@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -65,6 +66,14 @@ minutes covers a multi-million-row table with wide headroom."""
 # cadence (worker ``DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS``) so a hung beat
 # leaves a real write window before the next attempt (review P2 / N1).
 _PRUNE_TIMEOUT_SECONDS = 60.0
+
+_SLOW_HOLD_LOG_SECONDS = 1.0
+"""Log a completed critical section that held the write lock at least this
+long. Normal writes are 2-25ms and a normal prune ~40ms, so anything past a
+second means writers were queued behind it — without this, a section that is
+slow but under its deadline is invisible (the maintenance beat only logs at
+``debug``), and a soak run left no way to tell whether a 16s stall was a slow
+prune or a deep write queue."""
 
 
 def _remove_empty_index_dirs(table_uri: str) -> int:
@@ -201,21 +210,42 @@ class LanceRepoBase[T: BaseLanceTable]:
         treats it as transient and retries instead of marking the row
         permanently failed.
         """
+        started = time.monotonic()
+        acquired_at: float | None = None
         try:
             async with asyncio.timeout(budget):
                 async with self._write_lock(self.table_name):
+                    acquired_at = time.monotonic()
                     yield
         except TimeoutError as exc:
+            # ``acquired`` is the load-bearing field: it separates "never got
+            # the lock" (a holder is slow or stuck) from "got it and overran"
+            # (this operation itself is slow), which is exactly what a soak
+            # investigation cannot otherwise tell apart.
+            now = time.monotonic()
             logger.warning(
                 "lancedb_write_lock_deadline_exceeded",
                 table=self.table_name,
                 op=op,
                 budget_seconds=budget,
+                acquired=acquired_at is not None,
+                waited_seconds=round((acquired_at or now) - started, 3),
+                held_seconds=round(now - acquired_at, 3) if acquired_at else 0.0,
             )
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its "
                 f"{budget:g}s write-lock deadline"
             ) from exc
+        else:
+            held = time.monotonic() - (acquired_at or started)
+            if held >= _SLOW_HOLD_LOG_SECONDS:
+                logger.info(
+                    "lancedb_write_lock_slow_hold",
+                    table=self.table_name,
+                    op=op,
+                    held_seconds=round(held, 3),
+                    waited_seconds=round((acquired_at or started) - started, 3),
+                )
 
     @classmethod
     def _reset_locks_for_tests(cls) -> None:
