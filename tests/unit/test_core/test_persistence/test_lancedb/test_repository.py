@@ -821,6 +821,33 @@ async def test_waiting_for_a_stuck_holder_also_times_out(
     await repo.add([_row(owner="u1", entry="n2")])
 
 
+def test_write_budgets_are_sized_from_measurements_not_guesses() -> None:
+    """Write budgets must stay in the tens of seconds, not hundreds.
+
+    The budget doubles as the detection latency for a wedged table: a stuck
+    holder is invisible until its deadline expires. Measured write durations
+    are 2-25ms (worst observed 63ms across 10k-100k row tables and 50-500 row
+    batches), so tens of seconds is already ~10^3 headroom. A budget in the
+    hundreds of seconds would mean minutes of blocked writers before anything
+    is reported, which is what this whole change exists to prevent.
+    """
+    from everos.core.persistence.lancedb.repository import (
+        _PRUNE_TIMEOUT_SECONDS,
+        _REBUILD_TIMEOUT_SECONDS,
+        _WRITE_TIMEOUT_SECONDS,
+    )
+
+    assert 5.0 <= _WRITE_TIMEOUT_SECONDS <= 30.0, (
+        "row writes are millisecond operations; a budget outside this range is "
+        "either too tight to survive a contended lock or too slack to detect a "
+        "wedged table promptly"
+    )
+    # Rebuild is the one legitimately slow section, so it gets more — but the
+    # ordering must hold: a rebuild budget below prune's would make the slowest
+    # operation the most eagerly killed.
+    assert _REBUILD_TIMEOUT_SECONDS > _PRUNE_TIMEOUT_SECONDS > _WRITE_TIMEOUT_SECONDS
+
+
 def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
     """The timeout is a hang-catcher, not a bound on normal runtime.
 

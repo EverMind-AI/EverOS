@@ -29,15 +29,30 @@ logger = get_logger(__name__)
 # Write-lock deadlines, per operation class. Every critical section on a
 # table's write lock runs under one of these (see ``LanceRepoBase._locked``):
 # acquisition included, so neither waiting for the lock nor holding it can be
-# unbounded. Values are generous — they are hang-catchers, not throughput
-# limits; a normal cascade batch write is milliseconds.
-_WRITE_TIMEOUT_SECONDS = 120.0
-"""Row writes: add / upsert / update / delete."""
+# unbounded. They are hang-catchers, not throughput limits — but they are sized
+# from measured durations, not guessed, because the budget is also how long a
+# wedged table stays invisible.
+_WRITE_TIMEOUT_SECONDS = 15.0
+"""Row writes: add / upsert / update / delete.
 
-_REBUILD_TIMEOUT_SECONDS = 600.0
-"""Index rebuild (drop + recreate every index) — the slowest critical
-section, measured at ~0.3s per 50k rows per indexed column, so 10 minutes
-covers a multi-million-row table with wide headroom."""
+Measured on a local SSD across table sizes and batch sizes (10k–100k rows,
+50–500 rows per call): median 2–25ms, worst observed 63ms — flat in both
+dimensions, because these are append-and-commit operations, not scans.
+``merge_insert`` (upsert) is the read-modify-write one and still lands at
+5–25ms.
+
+15s is ~240x the worst observation, which covers a slow/contended disk and
+several operations queued ahead on the same lock (the deadline includes
+acquisition, and ``asyncio.Lock`` is FIFO so no waiter starves). Reaching it
+means the table is not merely busy — it is stuck, and failing fast into the
+worker's retry is better than blocking writers for minutes. Deliberately not
+sized in the hundreds of seconds: the budget doubles as the detection latency
+for a wedged table."""
+
+_REBUILD_TIMEOUT_SECONDS = 300.0
+"""Index rebuild (drop + recreate every index) — the one genuinely slow
+critical section, measured at ~0.3s per 50k rows per indexed column, so 5
+minutes covers a multi-million-row table with wide headroom."""
 
 # Safety cap on a single prune's ``optimize(cleanup_older_than=…)`` call — a
 # pure hang-catcher, not a bound on normal runtime. A real cleanup is
