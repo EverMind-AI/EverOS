@@ -84,7 +84,21 @@ def configure_logging(level: str = "INFO") -> None:
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer(),
+            structlog.dev.ConsoleRenderer(
+                # structlog's default exception formatter is
+                # ``RichTracebackFormatter(show_locals=True, max_frames=100,
+                # extra_lines=3)``. On an async stack that is brutal: one
+                # unhandled exception in a soak run rendered 82 frames into
+                # **6423 log lines** (85MB of server.log across 11 such
+                # exceptions), and each render costs ~290ms of synchronous CPU
+                # inside the event loop. Locals also risk printing request
+                # payloads into logs. Keep the frames, drop the locals.
+                exception_formatter=structlog.dev.RichTracebackFormatter(
+                    show_locals=False,
+                    max_frames=15,
+                    extra_lines=1,
+                ),
+            ),
         ],
     )
 

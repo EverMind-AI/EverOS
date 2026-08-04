@@ -41,7 +41,7 @@ from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.context import resolve_request_id
-from everos.core.errors import ProviderNotConfiguredError
+from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
     capture_input,
@@ -716,7 +716,26 @@ class SearchManager:
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
-        return await self._embedding.embed(query)
+        vector = await self._embedding.embed(query)
+        expected = getattr(self._embedding, "dim", None)
+        if expected and len(vector) != expected:
+            # Fail here, not inside LanceDB. A mismatched query vector reaches
+            # the engine as an opaque `ValueError: Invalid input, No vector
+            # column found to match...` after the query has already been set
+            # up — measured at 13-14s per request in a soak run, versus
+            # microseconds here, and it surfaces as an unhandled 500 with a
+            # ~6k-line traceback instead of a named error.
+            #
+            # ConfigurationError (not InvalidInputError): the caller only ever
+            # sends query *text*; the vector is produced by our own provider,
+            # so a width that disagrees with the provider's declared ``dim``
+            # is a server-side configuration or provider-implementation fault.
+            raise ConfigurationError(
+                f"embedding provider returned a {len(vector)}-dimension query "
+                f"vector but declares dim={expected}; the vector index cannot "
+                f"be searched with a mismatched width"
+            )
+        return vector
 
     # ── Limits / filters ────────────────────────────────────────────
 

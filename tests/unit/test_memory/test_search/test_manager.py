@@ -418,6 +418,34 @@ def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
 # ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
 
 
+async def test_embed_query_rejects_a_width_that_disagrees_with_dim() -> None:
+    """A provider returning a width other than its declared ``dim`` must fail
+    at the embed step, not inside LanceDB.
+
+    Sending a mismatched query vector into the engine surfaces as an opaque
+    ``ValueError: Invalid input, No vector column found to match…`` only after
+    the query has been set up — 13-14s per request in a soak run, as an
+    unhandled 500 with a ~6k-line traceback. Here it is microseconds and a
+    named error. ``ConfigurationError`` (server-side) rather than
+    ``InvalidInputError``: callers only ever send query *text*, so the width is
+    entirely our provider's doing.
+    """
+    from everos.core.errors import ConfigurationError
+
+    class _LyingEmbedding(_StubEmbedding):
+        async def embed(self, text: str) -> list[float]:
+            return [0.0] * (self.dim // 2)  # declares dim, returns half of it
+
+    mgr = _build_manager(embedding=_LyingEmbedding(dim=8))
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        await mgr._embed_query("anything")
+
+    msg = str(excinfo.value)
+    assert "4-dimension" in msg, msg
+    assert "dim=8" in msg, msg
+
+
 async def test_vector_method_requires_embedding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
