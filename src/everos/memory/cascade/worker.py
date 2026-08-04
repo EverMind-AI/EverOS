@@ -109,6 +109,19 @@ Once exhausted, ``mark_failed(retryable=False)`` so the reconciler
 stops re-enqueuing. Recover via ``cascade fix --apply`` (resets
 retry_count) or editing the md (mtime change resets retry_count)."""
 
+_MAINTENANCE_TASK_TIMEOUT_SECONDS = 180.0
+"""Last-resort deadline on one whole maintenance call (compact or prune).
+
+The repo bounds its own critical sections, but this scheduler is the thing that
+breaks if a call never returns at all: it runs one task per kind and skips a
+kind whose task is still in flight, so a single non-returning await parks that
+kind's maintenance forever — silently, since nothing failed. A soak run hit
+exactly that (one table stopped pruning for 13 minutes with zero failure logs
+while its siblings pruned normally), through an await that sat outside the
+repo's deadline. Generous enough never to fire on a healthy beat (prune's own
+budget is 60s), tight enough that a hang costs one cadence, not forever.
+"""
+
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
 
@@ -775,13 +788,17 @@ class CascadeWorker:
                 # only after the call returns.
                 if state is not None:
                     state.last_prune_attempt_at = now
-                await repo.prune(dt.timedelta(seconds=self._optimize_prune_retention))
+                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                    await repo.prune(
+                        dt.timedelta(seconds=self._optimize_prune_retention)
+                    )
                 if state is not None:
                     state.last_prune_at = now
             else:
                 # Light beat: lock-free compaction. A commit conflict here
                 # is benign — handled below.
-                await repo.optimize()
+                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                    await repo.optimize()
             if state is not None:
                 state.optimize_failures = 0
             logger.debug(

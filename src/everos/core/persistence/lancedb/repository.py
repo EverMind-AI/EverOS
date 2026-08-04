@@ -67,6 +67,13 @@ minutes covers a multi-million-row table with wide headroom."""
 # leaves a real write window before the next attempt (review P2 / N1).
 _PRUNE_TIMEOUT_SECONDS = 60.0
 
+_COMPACT_TIMEOUT_SECONDS = 60.0
+"""Deadline on the lock-free compaction beat. It takes no lock, so it cannot
+block writers — but it still must not hang: the scheduler runs one maintenance
+task per kind and skips a kind whose task is in flight, so a compaction that
+never returns parks that kind's maintenance permanently. Measured at ~460ms on
+a table with 77 retained versions."""
+
 _SLOW_HOLD_LOG_SECONDS = 1.0
 """Log a completed critical section that held the write lock at least this
 long. Normal writes are 2-25ms and a normal prune ~40ms, so anything past a
@@ -192,6 +199,29 @@ class LanceRepoBase[T: BaseLanceTable]:
         return cls._table_locks.setdefault(table_name, asyncio.Lock())
 
     @asynccontextmanager
+    async def _deadline(self, budget: float, op: str) -> AsyncIterator[None]:
+        """Bound an operation that does **not** take the write lock.
+
+        Same last-resort guarantee as :meth:`_locked` minus the lock: the
+        maintenance scheduler runs one task per kind and skips a kind whose
+        task has not finished, so any await in that path which can hang must
+        have a deadline or that kind stops being maintained for good.
+        """
+        try:
+            async with asyncio.timeout(budget):
+                yield
+        except TimeoutError as exc:
+            logger.warning(
+                "lancedb_operation_deadline_exceeded",
+                table=self.table_name,
+                op=op,
+                budget_seconds=budget,
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} exceeded its {budget:g}s deadline"
+            ) from exc
+
+    @asynccontextmanager
     async def _locked(self, budget: float, op: str) -> AsyncIterator[None]:
         """Hold the table write lock for at most ``budget`` seconds.
 
@@ -209,6 +239,13 @@ class LanceRepoBase[T: BaseLanceTable]:
         is re-raised as :class:`VectorStoreBusyError` so the cascade worker
         treats it as transient and retries instead of marking the row
         permanently failed.
+
+        Callers resolve the table handle **inside** this block, not before it.
+        Resolving it outside leaves an unbounded await ahead of the deadline,
+        and a maintenance task that hangs there never returns — which silently
+        parks that kind forever, because the scheduler skips a kind whose task
+        is still in flight (observed in a soak run: one table stopped pruning
+        for 13 minutes with zero failure logs while its siblings pruned fine).
         """
         started = time.monotonic()
         acquired_at: float | None = None
@@ -285,8 +322,8 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     async def add(self, records: Sequence[T]) -> None:
         """Insert one or more records."""
-        table = await self._table()
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "add"):
+            table = await self._table()
             await table.add(list(records))
 
     # ── Upsert ─────────────────────────────────────────────────────────────
@@ -307,8 +344,8 @@ class LanceRepoBase[T: BaseLanceTable]:
         for the first time inserts; an entry that was edited in md
         updates its existing row.
         """
-        table = await self._table()
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
+            table = await self._table()
             await (
                 table.merge_insert(by)
                 .when_matched_update_all()
@@ -361,8 +398,9 @@ class LanceRepoBase[T: BaseLanceTable]:
         writer is benign here (compaction is not urgent — the next scheduled
         beat retries), so it must not stall writers.
         """
-        table = await self._table()
-        await table.optimize()
+        async with self._deadline(_COMPACT_TIMEOUT_SECONDS, "optimize"):
+            table = await self._table()
+            await table.optimize()
 
     async def prune(self, older_than: dt.timedelta) -> None:
         """Physically reclaim files from versions older than ``older_than``.
@@ -406,8 +444,8 @@ class LanceRepoBase[T: BaseLanceTable]:
         stall is rare. Does *not* shrink **active** index internals (FTS
         ``part_N`` / index UUID count) — that is ``rebuild_indexes``'s job.
         """
-        table = await self._table()
         async with self._locked(_PRUNE_TIMEOUT_SECONDS, "prune"):
+            table = await self._table()
             await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
             table_uri = await table.uri()
             removed = await asyncio.to_thread(_remove_empty_index_dirs, table_uri)
@@ -470,8 +508,8 @@ class LanceRepoBase[T: BaseLanceTable]:
           in lance v7.0.0)
         - https://docs.rs/lancedb/latest/lancedb/table/struct.OptimizeOptions.html
         """
-        table = await self._table()
         async with self._locked(_REBUILD_TIMEOUT_SECONDS, "rebuild_indexes"):
+            table = await self._table()
             for idx in await table.list_indices():
                 await table.drop_index(idx.name)
             await self.schema.ensure_fts_indexes(table)
@@ -651,16 +689,16 @@ class LanceRepoBase[T: BaseLanceTable]:
             updates: Column-name to new-value mapping.
             where: SQL-like predicate scoping the update.
         """
-        table = await self._table()
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "update"):
+            table = await self._table()
             await table.update(updates, where=where)
 
     # ── Delete ─────────────────────────────────────────────────────────────
 
     async def delete(self, predicate: str) -> None:
         """Delete rows matching a SQL-like predicate."""
-        table = await self._table()
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete"):
+            table = await self._table()
             await table.delete(predicate)
 
     async def delete_by_md_path(self, md_path: str) -> int:
@@ -670,8 +708,8 @@ class LanceRepoBase[T: BaseLanceTable]:
         (or when reverse-reconcile discovers an orphaned LanceDB row).
         Single quotes in ``md_path`` are doubled defensively.
         """
-        table = await self._table()
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete_by_md_path"):
+            table = await self._table()
             result = await table.delete(f"md_path = '{_q(md_path)}'")
         return int(result.num_deleted_rows)
 

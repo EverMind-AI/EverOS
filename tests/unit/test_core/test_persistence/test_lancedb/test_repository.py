@@ -821,6 +821,42 @@ async def test_waiting_for_a_stuck_holder_also_times_out(
     await repo.add([_row(owner="u1", entry="n2")])
 
 
+async def test_a_hanging_table_handle_still_hits_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolving the table handle must happen **inside** the deadline.
+
+    With it outside, a hang there never returns, and the maintenance scheduler
+    runs one task per kind and skips a kind whose task is still in flight — so
+    that kind silently stops being maintained. A soak run hit exactly this: one
+    table went 13 minutes without a prune, zero failure logs, while its two
+    siblings pruned on schedule.
+    """
+    from everos.core.errors import VectorStoreBusyError
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    monkeypatch.setattr(repo_mod, "_PRUNE_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(repo_mod, "_COMPACT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(repo_mod, "_WRITE_TIMEOUT_SECONDS", 0.05)
+
+    class _HangingLookupRepo(_NoteRepo):
+        async def _table_lookup(self):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(30)  # never resolves within the deadline
+
+    repo = _HangingLookupRepo()
+
+    # Every maintenance/write entry point must give up rather than park.
+    with pytest.raises(VectorStoreBusyError):
+        await repo.prune(dt.timedelta(seconds=60))
+    with pytest.raises(VectorStoreBusyError):
+        await repo.optimize()
+    with pytest.raises(VectorStoreBusyError):
+        await repo.add([_row(owner="u1", entry="e1")])
+
+    # And the lock was never left held.
+    assert not repo._write_lock(repo.table_name).locked()
+
+
 def test_write_budgets_are_sized_from_measurements_not_guesses() -> None:
     """Write budgets must stay in the tens of seconds, not hundreds.
 
