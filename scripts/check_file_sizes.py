@@ -1,0 +1,168 @@
+"""Block oversized files entering the repository through a pull request.
+
+Scope is the change under review, not the whole tree: paths added, modified,
+renamed or copied since the merge base. Files already committed above the
+ceiling are left alone, so the gate never fails a pull request for something
+it did not introduce.
+
+The same ceiling is enforced locally by the ``check-added-large-files``
+pre-commit hook. Keep ``MAX_KB`` and ``--maxkb`` in ``.pre-commit-config.yaml``
+in lockstep — a unit test pins them together, because a hook that only runs
+locally is not a gate. Note the local hook is weaker by construction: it only
+looks at files being *added*, so it cannot catch an existing file that grows.
+That is the case this script covers on every pull request.
+
+On a push to the base branch itself the merge base is ``HEAD``, the diff is
+empty, and the check is a no-op. This is a pull-request gate.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+# Kilobytes, matching the pre-commit hook's ``--maxkb`` semantics exactly:
+# a file is oversized when ``size_bytes > MAX_KB * 1024``.
+MAX_KB = 640
+
+DEFAULT_BASE = "origin/main"
+
+
+class BaseRefError(RuntimeError):
+    """The comparison base could not be resolved."""
+
+
+@dataclass(frozen=True)
+class Violation:
+    path: str
+    size_bytes: int
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def find_violations(
+    paths: Iterable[str],
+    *,
+    root: Path,
+    max_kb: int = MAX_KB,
+) -> list[Violation]:
+    """Return oversized entries among ``paths``, resolved against ``root``.
+
+    Entries that are not regular files are skipped: a diff can name a path
+    that no longer exists in the working tree, and a symlink would be
+    measured by its target rather than itself.
+    """
+    limit_bytes = max_kb * 1024
+    violations: list[Violation] = []
+    for path in paths:
+        candidate = root / path
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        size_bytes = candidate.stat().st_size
+        if size_bytes > limit_bytes:
+            violations.append(Violation(path=path, size_bytes=size_bytes))
+    return violations
+
+
+def default_base_ref() -> str:
+    """Resolve the base ref to diff against.
+
+    ``GITHUB_BASE_REF`` is set by GitHub Actions on ``pull_request`` events
+    and names the target branch; everywhere else fall back to the default
+    branch's remote tracking ref.
+    """
+    github_base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    if github_base:
+        return f"origin/{github_base}"
+    return DEFAULT_BASE
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise BaseRefError(
+            f"`git {' '.join(args)}` failed: {result.stderr.strip() or 'unknown error'}"
+        )
+    return result.stdout
+
+
+def changed_paths(root: Path, base_ref: str) -> list[str]:
+    """Paths added/copied/modified/renamed between ``base_ref`` and the tree.
+
+    Deletions are excluded. The working tree is included (no second revision
+    is passed to ``git diff``), so a local run covers uncommitted edits too.
+    Raises :class:`BaseRefError` when ``base_ref`` cannot be resolved — a
+    gate that silently passes on a shallow clone is worse than no gate.
+    """
+    merge_base = _git(root, "merge-base", base_ref, "HEAD").strip()
+    if not merge_base:
+        raise BaseRefError(f"no merge base between {base_ref} and HEAD")
+    raw = _git(
+        root,
+        "diff",
+        "--name-only",
+        "-z",
+        "--diff-filter=ACMR",
+        merge_base,
+    )
+    return [entry for entry in raw.split("\0") if entry]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base",
+        default=None,
+        help=f"ref to diff against (default: $GITHUB_BASE_REF, else {DEFAULT_BASE})",
+    )
+    args = parser.parse_args(argv)
+
+    root = _repo_root()
+    base_ref = args.base or default_base_ref()
+    try:
+        paths = changed_paths(root, base_ref)
+    except BaseRefError as exc:
+        print(
+            f"Repository file size check could not run: {exc}\n"
+            "The gate diffs against the base branch, so it needs that ref and "
+            "enough history to find a merge base. In CI, set "
+            "`fetch-depth: 0` on actions/checkout; locally, run "
+            "`git fetch origin main`."
+        )
+        return 1
+
+    violations = find_violations(paths, root=root)
+    if not violations:
+        print(
+            f"Repository file size check passed "
+            f"({len(paths)} changed file(s) vs {base_ref}, ceiling {MAX_KB} KB)."
+        )
+        return 0
+
+    print(
+        f"Repository file size check failed: this change adds or grows files "
+        f"above {MAX_KB} KB.\n"
+        "Large payloads belong in release artifacts, external hosting, or "
+        "another approved storage location, then linked from docs. If a "
+        "fixture genuinely has to grow past the ceiling, raise it here and "
+        "in .pre-commit-config.yaml together, in a dedicated commit.\n"
+    )
+    for violation in sorted(violations, key=lambda item: -item.size_bytes):
+        size_kb = violation.size_bytes / 1024
+        print(f"- {violation.path}: {size_kb:.1f} KB")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

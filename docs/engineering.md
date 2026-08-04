@@ -56,12 +56,28 @@ Each stage can independently fail a change; there is no `--no-verify` bypass.
 ```
 1. Editor      ruff (lint + format) on save
 2. pre-commit  ruff, trailing-whitespace / EOF, yaml & toml checks,
-               large-file & private-key guards, merge-conflict check,
+               file-size & private-key guards, merge-conflict check,
                and gitlint (commit-msg stage) — see "Commits" below
 3. make ci     lint + unit + integration — run before pushing
 4. GitHub CI   re-runs the same make targets on every pull request
 5. Review      1 approval + all conversations resolved + all checks green
 ```
+
+Stage 2 runs only on machines that ran `make install`, so CI cannot rely on it.
+Where a pre-commit guard must hold for every pull request it has a `make`
+counterpart re-run by CI.
+
+**File-size ceiling — 640 KB.** Enforced locally by `check-added-large-files`
+and on every pull request by
+[`scripts/check_file_sizes.py`](../scripts/check_file_sizes.py)
+(`make check-file-sizes`, wired into `make lint`). The two limits are pinned
+equal by a unit test; change them in the same commit. The CI gate is the
+stronger of the two in scope: the local hook only inspects files being
+*added*, so it cannot catch an existing file that grows, while the gate diffs
+against the base branch and covers additions, modifications and renames
+alike. Files already committed above the ceiling are out of scope — the gate
+never fails a pull request for something it did not touch. Because it needs a
+merge base, the `lint` job checks out with `fetch-depth: 0`.
 
 ## Continuous integration
 
@@ -70,7 +86,7 @@ pull request into `main` must pass:
 
 | Check | Command | Guards |
 |---|---|---|
-| lint | `make lint` | ruff style, DDD layer direction (import-linter), datetime discipline, asset & deprecated-name guards |
+| lint | `make lint` | ruff style, DDD layer direction (import-linter), datetime discipline, asset, file-size & deprecated-name guards |
 | unit tests | `make test` | `tests/unit` |
 | integration tests | `make integration` | `tests/integration` |
 | package build | `make package` | the wheel builds and imports cleanly |
