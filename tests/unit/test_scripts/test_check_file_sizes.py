@@ -146,6 +146,31 @@ def test_scope_includes_uncommitted_working_tree_edits(repo: Path) -> None:
     assert "staged-only.bin" in paths
 
 
+def test_scope_includes_untracked_files(repo: Path) -> None:
+    """`git diff` cannot see a new file before it is staged; the gate must."""
+    checker = _load_checker()
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, "never-staged.bin", 9 * 1024)
+
+    violations = checker.find_violations(
+        checker.changed_paths(repo, "main"), root=repo, max_kb=8
+    )
+
+    assert [violation.path for violation in violations] == ["never-staged.bin"]
+
+
+def test_scope_respects_gitignore(repo: Path) -> None:
+    checker = _load_checker()
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _write(repo, ".gitignore", 0)
+    (repo / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+    _write(repo, "scratch/huge.bin", 9 * 1024)
+
+    paths = checker.changed_paths(repo, "main")
+
+    assert "scratch/huge.bin" not in paths
+
+
 def test_deletions_are_not_reported(repo: Path) -> None:
     checker = _load_checker()
     _git(repo, "checkout", "-q", "-b", "feature")

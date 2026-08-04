@@ -98,17 +98,26 @@ def _git(root: Path, *args: str) -> str:
 
 
 def changed_paths(root: Path, base_ref: str) -> list[str]:
-    """Paths added/copied/modified/renamed between ``base_ref`` and the tree.
+    """Paths this change adds or grows, relative to ``base_ref``.
 
-    Deletions are excluded. The working tree is included (no second revision
-    is passed to ``git diff``), so a local run covers uncommitted edits too.
+    Two sources, unioned:
+
+    * ``git diff`` from the merge base to the working tree (no second
+      revision), covering committed and uncommitted edits to tracked files.
+      ``--diff-filter=ACMR`` keeps additions, copies, modifications and
+      renames; deletions are excluded.
+    * untracked, non-ignored files. ``git diff`` cannot see a newly created
+      file until it is staged, so a local pre-push run would otherwise pass a
+      brand-new oversized file. In CI the checkout is clean and this source
+      is empty.
+
     Raises :class:`BaseRefError` when ``base_ref`` cannot be resolved — a
     gate that silently passes on a shallow clone is worse than no gate.
     """
     merge_base = _git(root, "merge-base", base_ref, "HEAD").strip()
     if not merge_base:
         raise BaseRefError(f"no merge base between {base_ref} and HEAD")
-    raw = _git(
+    tracked = _git(
         root,
         "diff",
         "--name-only",
@@ -116,7 +125,10 @@ def changed_paths(root: Path, base_ref: str) -> list[str]:
         "--diff-filter=ACMR",
         merge_base,
     )
-    return [entry for entry in raw.split("\0") if entry]
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
+    entries = {entry for entry in tracked.split("\0") if entry}
+    entries.update(entry for entry in untracked.split("\0") if entry)
+    return sorted(entries)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
