@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /
+  `find_where_paginated` / `search`). The write-side deadline work skipped them
+  on the reasoning that a read takes no lock and so blocks no writer — true, but
+  the cascade drain loop reads on every batch and advances strictly one batch at
+  a time, so a read that never returns stops the **whole md → LanceDB
+  projection**: claimed rows stay `processing` forever, nothing new is indexed,
+  and `/health` still reports healthy because a hang raises nothing. Budget 60s
+  (~1000x the measured 62ms flat scan over 117k rows); expiry raises the
+  retryable `VectorStoreBusyError`.
+- **Background loops are supervised.** The drain / heartbeat / rebuild loops were
+  plain `create_task` coroutines: one uncaught exception ended that loop
+  permanently, and because the worker holds a strong reference to the task the
+  interpreter never printed "Task exception was never retrieved" either — the
+  loop's job simply stopped happening with zero output. Each now runs under a
+  supervisor that logs and restarts with escalating backoff (5s / 15s / 45s),
+  then asks the process to exit via `SIGTERM` so a restarting supervisor
+  (systemd, Docker, k8s) can recover it. A done-callback covers the case the
+  supervisor itself ends unexpectedly.
+- **The optimize-failure alert is reachable again.** The fallback rebuild reset
+  the same counter the health verdict reads, so a table failing 100% of the time
+  cycled `1..5 → 0 → 1..` and the threshold value existed only during the
+  sub-second rebuild — roughly 1% observable against a 30s scrape, so
+  `cascade.healthy` stayed green while the table never reclaimed a version. The
+  rate limiter now lives in its own counter (`failures_since_fallback`); only a
+  successful optimize clears the alert streak. Same shape as the cross-kind
+  `max()` masking bug: a remediation path refreshing the signal meant to report
+  it.
+- **The empty-index-dir sweep no longer depends on the write lock.** It runs in a
+  worker thread, and a deadline cancels the *future*, not the thread — so an
+  orphan sweep outlived the critical section that nominally protected it and
+  could `rmdir` a directory a concurrent `create_index` had just created,
+  leaving the table with no FTS index. Safety now comes from an age filter
+  (skip dirs younger than 300s), which holds regardless of lock ownership, and
+  the sweep moved out of the critical section so a slow filesystem walk can no
+  longer overrun the prune budget.
+- **The index-rebuild sweep can no longer park forever** waiting on the
+  optimize runner. That wait had no deadline, and the runner's loop condition is
+  "keep going while there is unindexed data" — which under sustained writes is
+  never, since the drain loop re-raises the flag every second against a 10s
+  cooldown. Now bounded at 180s, logging
+  `cascade_lancedb_rebuild_skipped_optimize_unfinished` and skipping the sweep
+  rather than dropping indices under a live optimize. **This makes the stall
+  visible, not absent**: under sustained ingest every sweep still times out, so
+  active index-UUID / FTS `part_N` growth stays unbounded there. The functional
+  fix requires the optimize runner to yield when a rebuild is pending, which
+  changes the optimize/rebuild mutual-exclusion contract and needs its own
+  validation — the rebuild cadence is 12h, longer than any soak run so far, so
+  the periodic sweep has never been exercised under load.
+- **The memory-root lock wait is bounded and visible.** Acquisition polls with
+  `LOCK_NB` instead of blocking inside a worker thread: a blocking `flock` could
+  not be bounded or cancelled — cancelling the awaiting coroutine left the
+  thread to acquire the lock later with nobody to release it. The wait itself is
+  by design (the second process is supposed to wait, then find the migration
+  already done), but it now logs `memory_root_lock_waiting` and gives up after
+  `timeout_seconds` (default 300s) instead of leaving a server startup looking
+  like a hang whose last message is `lifespan_provider_startup name=lancedb`.
+
 ### Changed
 
 - **`cascade_lancedb_optimize_conflict` now records `pruned`** — which
