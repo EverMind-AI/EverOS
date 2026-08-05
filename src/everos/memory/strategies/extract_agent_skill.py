@@ -3,26 +3,46 @@
 Triggered by :class:`SkillClusterUpdated` after ``trigger_skill_clustering``
 has assigned the fresh case to its cluster. The strategy:
 
-1. Selects the ``existing_relevant_skills`` slice for this cluster:
+1. Reconstructs the target case directly from the event payload
+   (:func:`_to_algo_case_from_event`) — no LanceDB read. This is the
+   cascade-lag rescue: the previous implementation probed
+   ``agent_case_repo.find_by_owner_entry`` for the freshly-written case
+   and raised a retry-class error when cascade hadn't indexed it yet,
+   which under sustained cascade lag meant the run died after
+   ``max_retries`` and OME dead-lettered it — the case was never
+   distilled into a skill. The case body now travels on the event bus,
+   so the strategy never races cascade indexing.
+2. Selects the ``existing_relevant_skills`` slice for this cluster,
+   **md-first** (:func:`_select_existing_skills`):
 
-   * cluster size ``≤ MAX_SKILLS_IN_PROMPT`` → scalar fetch (ranking
-     would be pointless on a fully-inclusive set);
-   * cluster size ``> MAX_SKILLS_IN_PROMPT`` and the target case has a
-     usable vector (either persisted on the row or re-embedded
-     on-the-fly from ``task_intent``) → cosine top-K against the
-     cluster;
-   * cluster size ``> MAX_SKILLS_IN_PROMPT`` but no vector signal is
-     obtainable → scalar fetch capped at K (logged warning so
-     truncation without ranking is observable).
-2. Hydrates ``supporting_cases`` from the chosen skills'
+   * ``AgentSkillReader.list_by_cluster`` is the source of truth for
+     "which skills exist in this cluster" — md is strongly consistent,
+     LanceDB is cascade-lagged and must not be used for existence
+     checks (a stale index previously made the LLM emit ``add()`` for a
+     skill that already existed in md, silently clobbering it on
+     write-back);
+   * cluster size ``≤ MAX_SKILLS_IN_PROMPT`` → every md skill is used
+     (ranking would be pointless on a fully-inclusive set);
+   * cluster size ``> MAX_SKILLS_IN_PROMPT`` and the event carries a
+     ``case_vector`` → LanceDB ranks by cosine relevance, md hydrates
+     the winning ids' content (LanceDB is a ranking index here, never
+     an existence check);
+   * cluster size ``> MAX_SKILLS_IN_PROMPT`` but no ``case_vector`` is
+     available (pre-1.2.3 event, or embedding was unavailable upstream)
+     → md ordering capped at K (logged warning so truncation without
+     ranking is observable).
+3. Hydrates ``supporting_cases`` from the chosen skills'
    ``source_case_ids`` lineage. The algo prompt joins each existing
    skill to its ``source_case_ids`` via the ``supporting_cases`` map;
    cases that do not back any of the chosen skills would just inflate
    the prompt without informing the LLM. Hydrated cases are then
    ranked ``(quality_score desc, timestamp desc)`` and capped at
    ``MAX_SUPPORTING_CASES`` to keep the prompt bounded as a cluster
-   grows.
-3. Feeds the target + existing + supporting trio to
+   grows. Unlike the target case and existing skills, this lineage read
+   stays LanceDB-backed: an un-indexed supporting case only means a
+   thinner prompt this run (non-corrupting; the next run catches up),
+   not a wrong write.
+4. Feeds the target + existing + supporting trio to
    :class:`everalgo.agent_memory.AgentSkillExtractor`, then writes the
    emitted skills back via :class:`AgentSkillWriter`.
 
@@ -38,12 +58,8 @@ from everalgo.agent_memory import AgentSkillExtractor
 from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
-from everos.component.embedding import (
-    EmbeddingServiceError,
-    get_embedding_capability,
-)
+from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
-from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
@@ -53,14 +69,12 @@ from everos.infra.persistence.lancedb import (
     AgentCase as LanceAgentCase,
 )
 from everos.infra.persistence.lancedb import (
-    AgentSkill as LanceAgentSkill,
-)
-from everos.infra.persistence.lancedb import (
     agent_case_repo,
     agent_skill_repo,
 )
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,
+    AgentSkillReader,
     AgentSkillWriter,
 )
 from everos.infra.persistence.sqlite import cluster_repo
@@ -74,8 +88,9 @@ MAX_SKILLS_IN_PROMPT = 10
 
 The algo library expects the caller to pre-filter
 ``existing_relevant_skills`` to a relevant subset (cosine top-K over
-the target case's ``task_intent`` embedding) so the prompt stays
-bounded as a cluster grows."""
+``SkillClusterUpdated.case_vector``, embedded upstream by
+``trigger_skill_clustering``) so the prompt stays bounded as a cluster
+grows."""
 
 MAX_SUPPORTING_CASES = 9
 """Upper bound on ``supporting_cases`` after lineage hydration.
@@ -92,11 +107,8 @@ class _ClusterMissingError(RuntimeError):
     """Race with the cluster strategy; OME retry will catch up."""
 
 
-class _CaseNotYetIndexedError(RuntimeError):
-    """The target case is in md but not yet in LanceDB; OME retry will catch up."""
-
-
 _writer: AgentSkillWriter | None = None
+_reader: AgentSkillReader | None = None
 
 
 def _get_writer() -> AgentSkillWriter:
@@ -104,6 +116,13 @@ def _get_writer() -> AgentSkillWriter:
     if _writer is None:
         _writer = AgentSkillWriter(root=MemoryRoot.resolve())
     return _writer
+
+
+def _get_reader() -> AgentSkillReader:
+    global _reader
+    if _reader is None:
+        _reader = AgentSkillReader(root=MemoryRoot.resolve())
+    return _reader
 
 
 @offline_strategy(
@@ -143,26 +162,24 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
         # 1. Check the cluster row exists.
         await _ensure_cluster_exists(event.cluster_id, event.case_entry_id)
 
-        # 2. Load the target AgentCase from LanceDB (scoped to space).
-        target_lance = await _load_target_case(
-            event.agent_id,
-            event.case_entry_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
+        # 2. Reconstruct the target AgentCase from the event payload — no
+        #    LanceDB probe, so the strategy never races cascade indexing.
+        target = _to_algo_case_from_event(event)
 
-        # 3. Pick the top-K relevant existing skills in this cluster.
+        # 3. Pick the top-K relevant existing skills in this cluster, md-first.
         #    (Cluster-scoped queries are implicitly space-scoped: cluster_id
         #    is globally unique to one (app, project, owner) cluster set.)
-        existing_lance = await _select_existing_skills(
+        existing_skills = await _select_existing_skills(
             agent_id=event.agent_id,
             cluster_id=event.cluster_id,
-            target=target_lance,
+            app_id=event.app_id,
+            project_id=event.project_id,
+            case_vector=event.case_vector,
         )
 
         # 4. Pull the supporting cases referenced by those skills.
         supporting_lance = await _select_supporting_cases(
-            existing_lance,
+            existing_skills,
             agent_id=event.agent_id,
             exclude_entry_id=event.case_entry_id,
             app_id=event.app_id,
@@ -172,8 +189,8 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
         # 5. Run the LLM extractor → add / update / retire skill operations.
         extractor = AgentSkillExtractor(llm=get_llm_client())
         emitted_skills = await extractor.aextract(
-            _to_algo_case(target_lance),
-            existing_relevant_skills=[_to_algo_skill(s) for s in existing_lance],
+            target,
+            existing_relevant_skills=existing_skills,
             supporting_cases=[_to_algo_case(c) for c in supporting_lance],
         )
 
@@ -210,104 +227,125 @@ async def _ensure_cluster_exists(cluster_id: str, case_entry_id: str) -> None:
         )
 
 
-async def _load_target_case(
-    agent_id: str,
-    case_entry_id: str,
-    *,
-    app_id: str,
-    project_id: str,
-) -> LanceAgentCase:
-    """Pull the target case row, raising a retry-class error on cascade lag."""
-    target = await agent_case_repo.find_by_owner_entry(
-        agent_id, case_entry_id, app_id=app_id, project_id=project_id
-    )
-    if target is None:
-        # Cascade hasn't indexed the freshly-written md yet.
-        raise _CaseNotYetIndexedError(
-            f"AgentCase entry_id={case_entry_id} not in LanceDB yet; retrying"
-        )
-    return target
-
-
 async def _select_existing_skills(
     *,
     agent_id: str,
     cluster_id: str,
-    target: LanceAgentCase,
-) -> list[LanceAgentSkill]:
+    app_id: str,
+    project_id: str,
+    case_vector: list[float] | None,
+) -> list[AlgoAgentSkill]:
     """Pick at most ``MAX_SKILLS_IN_PROMPT`` existing skills for the prompt.
 
-    See module docstring for the three-branch routing rationale.
+    md is the source of truth for existence — this avoids the
+    stale-index clobber where a skill was written last run but hadn't
+    been indexed into LanceDB yet, causing the LLM to see no existing
+    skill and emit ``add()`` for one that already exists. LanceDB is
+    only consulted for relevance ordering when the cluster's md skill
+    count exceeds ``MAX_SKILLS_IN_PROMPT`` and ``case_vector`` is
+    available; when it isn't (pre-1.2.3 event, or embedding was
+    unavailable upstream), fall back to md ordering.
     """
-    total = await agent_skill_repo.count_in_cluster(
-        owner_id=agent_id, cluster_id=cluster_id
+    reader = _get_reader()
+    md_skills = await reader.list_by_cluster(
+        agent_id, cluster_id, app_id=app_id, project_id=project_id
     )
-    if total <= MAX_SKILLS_IN_PROMPT:
-        return await agent_skill_repo.find_in_cluster(
-            owner_id=agent_id, cluster_id=cluster_id, limit=MAX_SKILLS_IN_PROMPT
-        )
+    if not md_skills:
+        return []
 
-    query_vector = await _resolve_query_vector(target)
-    if query_vector:
-        return await agent_skill_repo.find_topk_relevant_in_cluster(
-            owner_id=agent_id,
+    if len(md_skills) <= MAX_SKILLS_IN_PROMPT:
+        selected_fms = md_skills
+    elif case_vector is not None:
+        selected_fms = await _rank_skills_by_relevance(
+            md_skills,
+            agent_id=agent_id,
             cluster_id=cluster_id,
-            query_vector=query_vector,
-            top_k=MAX_SKILLS_IN_PROMPT,
+            case_vector=case_vector,
         )
-
-    logger.warning(
-        "agent_skill_topk_no_query_vector_scalar_fallback",
-        agent_id=agent_id,
-        cluster_id=cluster_id,
-        cluster_size=total,
-    )
-    return await agent_skill_repo.find_in_cluster(
-        owner_id=agent_id, cluster_id=cluster_id, limit=MAX_SKILLS_IN_PROMPT
-    )
-
-
-async def _resolve_query_vector(target: LanceAgentCase) -> list[float]:
-    """Return a usable query vector for cosine top-K, ``[]`` if unobtainable.
-
-    Order of preference:
-
-    1. ``target.vector`` if cascade has already populated the column —
-       this is the exact vector the recall path uses, so reusing it
-       keeps ranking semantics identical across reads.
-    2. Compute on the fly from ``target.task_intent`` via the configured
-       embedder — matches the cascade handler's own vectorisation
-       contract (``cascade/handlers/agent_case.py``), so the two paths
-       agree on what "the case embedding" means.
-
-    Returns ``[]`` only when both options are unavailable (no persisted
-    vector, no ``task_intent`` text, or the embedder is not configured /
-    fails). The caller decides the policy for that case.
-    """
-    if target.vector:
-        return list(target.vector)
-    if not target.task_intent:
-        return []
-    # ``.require()`` is defensive: the strategy body-guard checks
-    # ``.available`` before we reach this helper, so this branch will
-    # not raise ``ProviderNotConfiguredError`` in normal operation. The
-    # catch stays so a misconfiguration surfacing later (or a direct
-    # unit-test call to this helper without the guard) still degrades
-    # to ``[]`` instead of blowing up mid-strategy.
-    try:
-        embedder = get_embedding_capability().require()
-        return list(await embedder.embed(target.task_intent))
-    except (ProviderNotConfiguredError, EmbeddingServiceError) as exc:
+    else:
         logger.warning(
-            "agent_skill_query_embed_failed",
-            case_entry_id=target.entry_id,
-            error=str(exc),
+            "agent_skill_topk_no_query_vector_md_fallback",
+            agent_id=agent_id,
+            cluster_id=cluster_id,
+            md_count=len(md_skills),
         )
-        return []
+        selected_fms = md_skills[:MAX_SKILLS_IN_PROMPT]
+
+    return await _hydrate_algo_skills(
+        selected_fms, agent_id=agent_id, app_id=app_id, project_id=project_id
+    )
+
+
+async def _rank_skills_by_relevance(
+    md_skills: list[AgentSkillFrontmatter],
+    *,
+    agent_id: str,
+    cluster_id: str,
+    case_vector: list[float],
+) -> list[AgentSkillFrontmatter]:
+    """Ask LanceDB to rank the md skills by cosine relevance, capped at K.
+
+    LanceDB is used purely as a ranking index here, never as the
+    existence check — the candidate set is always the md list. A
+    LanceDB row with no matching md name is stale and skipped; any md
+    skill LanceDB didn't return (also stale index) is appended in
+    arbitrary order so no skill is silently dropped from the prompt.
+    """
+    md_by_name = {fm.name: fm for fm in md_skills}
+    ranked_lance = await agent_skill_repo.find_topk_relevant_in_cluster(
+        owner_id=agent_id,
+        cluster_id=cluster_id,
+        query_vector=case_vector,
+        top_k=MAX_SKILLS_IN_PROMPT,
+    )
+    selected: list[AgentSkillFrontmatter] = []
+    seen_names: set[str] = set()
+    for lance_row in ranked_lance:
+        fm = md_by_name.get(lance_row.name)
+        if fm is not None and fm.name not in seen_names:
+            selected.append(fm)
+            seen_names.add(fm.name)
+    for fm in md_skills:
+        if fm.name not in seen_names and len(selected) < MAX_SKILLS_IN_PROMPT:
+            selected.append(fm)
+            seen_names.add(fm.name)
+    return selected
+
+
+async def _hydrate_algo_skills(
+    frontmatters: list[AgentSkillFrontmatter],
+    *,
+    agent_id: str,
+    app_id: str,
+    project_id: str,
+) -> list[AlgoAgentSkill]:
+    """Re-read each selected skill's body and project it onto the algo type.
+
+    A second read (rather than reusing the frontmatter-only rows from
+    ``list_by_cluster``) is needed because ``content`` must carry the
+    real skill body — see :func:`_md_to_algo_skill`. A skill deleted
+    between the enumeration and this read is skipped rather than
+    raising; the next run will simply not see it.
+    """
+    reader = _get_reader()
+    algo_skills: list[AlgoAgentSkill] = []
+    for fm in frontmatters:
+        result = await reader.read_main(
+            agent_id,
+            fm.name,
+            schema=AgentSkillFrontmatter,
+            app_id=app_id,
+            project_id=project_id,
+        )
+        if result is None:
+            continue
+        fresh_fm, body = result
+        algo_skills.append(_md_to_algo_skill(fresh_fm, body))
+    return algo_skills
 
 
 async def _select_supporting_cases(
-    skills: list[LanceAgentSkill],
+    skills: list[AlgoAgentSkill],
     *,
     agent_id: str,
     exclude_entry_id: str,
@@ -341,7 +379,7 @@ async def _select_supporting_cases(
 
 
 def _collect_supporting_entry_ids(
-    skills: list[LanceAgentSkill], *, exclude: str
+    skills: list[AlgoAgentSkill], *, exclude: str
 ) -> list[str]:
     """Dedup ``source_case_ids`` across ``skills``, preserving first-seen order."""
     seen: list[str] = []
@@ -359,7 +397,11 @@ def _collect_supporting_entry_ids(
 
 
 def _to_algo_case(lance: LanceAgentCase) -> AlgoAgentCase:
-    """Project the LanceDB row onto the algo-side AgentCase type."""
+    """Project the LanceDB row onto the algo-side AgentCase type.
+
+    Used only for ``supporting_cases`` — that lineage read stays
+    LanceDB-backed (see module docstring, point 3).
+    """
     return AlgoAgentCase(
         id=lance.entry_id,
         timestamp=int(lance.timestamp.timestamp() * 1000),
@@ -370,21 +412,41 @@ def _to_algo_case(lance: LanceAgentCase) -> AlgoAgentCase:
     )
 
 
-def _to_algo_skill(lance: LanceAgentSkill) -> AlgoAgentSkill:
-    """Project the LanceDB row onto the algo-side AgentSkill type.
+def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
+    """Reconstruct the target case from event fields.
 
-    ``cluster_id`` rides along even though algo doesn't read it on input —
-    keeps the model fully populated for any consumer that introspects.
+    Strong-consistency: the case body travels on the event bus, so the
+    strategy never races cascade indexing. Pre-1.2.3 events default
+    missing fields to empty — those runs won't have useful data but also
+    won't crash.
+    """
+    return AlgoAgentCase(
+        id=event.case_entry_id,
+        timestamp=event.case_timestamp_ms,
+        task_intent=event.task_intent,
+        approach=event.approach,
+        quality_score=event.quality_score,
+        key_insight=event.key_insight or "",
+    )
+
+
+def _md_to_algo_skill(fm: AgentSkillFrontmatter, body: str) -> AlgoAgentSkill:
+    """Project a SKILL.md frontmatter + body onto everalgo's AgentSkill type.
+
+    ``body`` populates ``AlgoAgentSkill.content`` so the extractor prompt's
+    existing-skills block (``everalgo.agent_memory.skill_ops._format_existing_skills``)
+    carries the real skill definition, not an empty placeholder — without it
+    the LLM cannot distinguish "add new" from "update existing".
     """
     return AlgoAgentSkill(
-        id=lance.id,
-        cluster_id=lance.cluster_id or "",
-        name=lance.name,
-        description=lance.description,
-        content=lance.content,
-        confidence=lance.confidence,
-        maturity_score=lance.maturity_score,
-        source_case_ids=list(lance.source_case_ids),
+        id=fm.id,
+        cluster_id=fm.cluster_id or "",
+        name=fm.name,
+        description=fm.description,
+        content=body,
+        confidence=fm.confidence,
+        maturity_score=fm.maturity_score,
+        source_case_ids=list(fm.source_case_ids),
     )
 
 
