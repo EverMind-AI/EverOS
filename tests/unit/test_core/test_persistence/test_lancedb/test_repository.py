@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import os
+import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -903,27 +905,164 @@ def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
     )
 
 
+def _backdate(path: Path, seconds: float) -> None:
+    """Age ``path`` by ``seconds`` so the husk sweep's age filter accepts it."""
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+class _UriTable:
+    """Minimal table double for the prune path: no-op optimize + a uri()."""
+
+    def __init__(self, uri: str) -> None:
+        self._uri = uri
+
+    async def optimize(self, **_kw):  # type: ignore[no-untyped-def]
+        return None
+
+    async def uri(self) -> str:
+        return self._uri
+
+
 async def test_prune_removes_empty_index_dir_husks(tmp_path: Path) -> None:
     """After cleanup, ``prune`` removes the empty ``_indices/<uuid>/`` dirs
     that ``cleanup_older_than`` leaves behind, but keeps non-empty ones."""
+    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
+
     indices = tmp_path / "_indices"
-    (indices / "empty_uuid").mkdir(parents=True)
+    husk = indices / "empty_uuid"
+    husk.mkdir(parents=True)
     populated = indices / "live_uuid"
     populated.mkdir()
     (populated / "index.idx").write_text("data")
+    for d in (husk, populated):
+        _backdate(d, _HUSK_MIN_AGE_SECONDS * 2)
 
-    class _MockTable:
-        async def optimize(self, **_kw):
-            return None
-
-        async def uri(self) -> str:
-            return str(tmp_path)
-
-    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
     await repo.prune(dt.timedelta(seconds=1))
 
-    assert not (indices / "empty_uuid").exists(), "empty husk must be removed"
+    assert not husk.exists(), "empty husk must be removed"
     assert populated.exists(), "non-empty index dir must be kept"
+
+
+async def test_husk_sweep_spares_fresh_dirs_so_it_is_safe_without_the_lock(
+    tmp_path: Path,
+) -> None:
+    """A just-created empty index dir must survive the sweep.
+
+    This age filter — not the write lock — is what makes the sweep safe. The
+    sweep runs via ``asyncio.to_thread``, and a deadline cancels the *future*,
+    not the thread, so an orphan sweep outlives whatever critical section
+    nominally protected it (``Path.iterdir`` is a lazy ``os.scandir``, so it can
+    even yield a dir created after the scan began). Without the filter, that
+    orphan can ``rmdir`` a directory a concurrent ``create_index`` just created
+    and is about to populate — which leaves the table with no FTS index, and
+    every search on that kind 500s.
+    """
+    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
+
+    indices = tmp_path / "_indices"
+    fresh = indices / "being_built_right_now"
+    fresh.mkdir(parents=True)  # mtime = now: a live index build could own this
+    stale = indices / "real_husk"
+    stale.mkdir()
+    _backdate(stale, _HUSK_MIN_AGE_SECONDS * 2)
+
+    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
+    await repo.prune(dt.timedelta(seconds=1))
+
+    assert fresh.exists(), (
+        "a freshly created empty index dir must be spared — a concurrent "
+        "create_index may be mid-populating it"
+    )
+    assert not stale.exists(), "an aged husk must still be reclaimed"
+
+
+async def test_husk_sweep_runs_outside_the_write_lock(tmp_path: Path) -> None:
+    """The sweep must not sit in the write-lock critical section.
+
+    It is offloaded to a thread precisely because it can be slow over tens of
+    thousands of dirs — so inside the lock it becomes the thing most likely to
+    overrun prune's budget and release the lock mid-sweep. Outside, a slow walk
+    costs nothing but its own deadline.
+    """
+    indices = tmp_path / "_indices"
+    indices.mkdir(parents=True)
+    observed: list[bool] = []
+
+    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
+
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    real_sweep = repo_mod._remove_empty_index_dirs
+
+    def _spy(table_uri: str, *, min_age_seconds: float) -> int:
+        observed.append(repo._write_lock(repo.table_name).locked())
+        return real_sweep(table_uri, min_age_seconds=min_age_seconds)
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(repo_mod, "_remove_empty_index_dirs", _spy)
+    try:
+        await repo.prune(dt.timedelta(seconds=1))
+    finally:
+        monkeypatched.undo()
+
+    assert observed == [False], (
+        "husk sweep must run with the write lock released; holding it makes a "
+        "slow filesystem walk able to blow the prune deadline"
+    )
+
+
+async def test_hanging_reads_also_hit_a_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reads need a deadline too, for a different reason than writes.
+
+    A read takes no lock, so a hung read blocks no writer — which is why the
+    write-side deadline work skipped them. But the cascade drain loop reads on
+    every batch (``handlers/_daily_log_base.py`` calls ``find_where``) and
+    advances strictly one batch at a time, so a read that never returns stops
+    the whole md -> LanceDB projection: claimed rows stay ``processing``
+    forever, nothing new is indexed, and ``/health`` still reports healthy
+    because a hang raises nothing and the drain-failure counter only counts
+    exceptions.
+    """
+    from everos.core.errors import VectorStoreBusyError
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    monkeypatch.setattr(repo_mod, "_READ_TIMEOUT_SECONDS", 0.05)
+
+    class _HangingLookupRepo(_NoteRepo):
+        async def _table_lookup(self):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(30)
+
+    repo = _HangingLookupRepo()
+
+    with pytest.raises(VectorStoreBusyError):
+        await repo.count()
+    with pytest.raises(VectorStoreBusyError):
+        await repo.get_by_id("u1_n1")
+    with pytest.raises(VectorStoreBusyError):
+        await repo.find_where("owner_id = 'u1'")
+    with pytest.raises(VectorStoreBusyError):
+        await repo.find_where_paginated("owner_id = 'u1'", sort_by="entry_id")
+    with pytest.raises(VectorStoreBusyError):
+        await repo.search(vector=None, where=None, limit=1)
+
+
+def test_read_budget_is_generous_enough_never_to_fire_on_a_healthy_read() -> None:
+    """The read deadline is a hang-catcher, not a latency SLO.
+
+    everos builds no vector ANN index, so every read is a flat scan — measured
+    ~62ms over 117k rows. The budget must stay far above any real scan so it
+    cannot turn a large-but-working table into a stream of failures.
+    """
+    from everos.core.persistence.lancedb.repository import _READ_TIMEOUT_SECONDS
+
+    measured_seconds_per_117k_rows = 0.062
+    assert measured_seconds_per_117k_rows * 500 <= _READ_TIMEOUT_SECONDS, (
+        "read budget must leave ~500x headroom over the measured flat scan"
+    )
 
 
 async def test_optimize_is_lock_free_compaction_only() -> None:

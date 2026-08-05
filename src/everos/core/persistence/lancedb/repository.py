@@ -20,6 +20,7 @@ from typing import Any, ClassVar
 
 from lancedb import AsyncTable
 
+from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import VectorStoreBusyError
 from everos.core.observability.logging import get_logger
 
@@ -74,6 +75,42 @@ task per kind and skips a kind whose task is in flight, so a compaction that
 never returns parks that kind's maintenance permanently. Measured at ~460ms on
 a table with 77 retained versions."""
 
+_HUSK_MIN_AGE_SECONDS = 300.0
+"""Minimum age of an empty ``_indices/<uuid>/`` dir before the sweep removes it.
+
+This is what makes the sweep safe to run without the write lock, which it must
+be: it runs in a worker thread, and a deadline cancels the future rather than
+the thread, so the sweep can outlive any critical section that nominally
+protects it. The only harmful interleaving is deleting a dir a concurrent
+``create_index`` just created and has not populated yet — such a dir is seconds
+old, so any age filter well above index-creation latency excludes it.
+
+Sized to the cascade prune cadence (``DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS``,
+300s): a husk's mtime is set when its files were unlinked, so husks created by
+the *current* beat are skipped and reclaimed by the next one. The sweep is
+idempotent, so a one-cadence delay costs nothing.
+"""
+
+_HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
+"""Deadline on the (lock-free) husk sweep. Same last-resort role as
+:data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
+task is in flight, so a sweep that never returns would park that kind's
+maintenance forever. Measured at ~460ms over 13061 dirs in the soak."""
+
+_READ_TIMEOUT_SECONDS = 60.0
+"""Deadline on every read. Reads take no lock, so a hung read blocks no writer
+— but it does park the caller, and the cascade drain loop reads on every batch
+while advancing strictly one batch at a time. A read that never returns
+therefore stops the whole md -> LanceDB projection, leaving claimed rows in
+``processing`` forever with nothing logged (a hang raises nothing, so the
+drain-failure counter stays at zero and ``/health`` keeps reporting healthy).
+Same last-resort shape as :data:`_COMPACT_TIMEOUT_SECONDS`, and generous by
+design: everos builds no vector ANN index, so reads are flat scans — measured
+~62ms over 117k rows, i.e. 60s is ~1000x headroom and never fires normally. On
+expiry the caller gets a retryable :class:`VectorStoreBusyError`, so a drain row
+is retried and a search request fails with a structured error rather than
+hanging the request."""
+
 _SLOW_HOLD_LOG_SECONDS = 1.0
 """Log a completed critical section that held the write lock at least this
 long. Normal writes are 2-25ms and a normal prune ~40ms, so anything past a
@@ -83,7 +120,7 @@ slow but under its deadline is invisible (the maintenance beat only logs at
 prune or a deep write queue."""
 
 
-def _remove_empty_index_dirs(table_uri: str) -> int:
+def _remove_empty_index_dirs(table_uri: str, *, min_age_seconds: float) -> int:
     """Delete empty ``_indices/<uuid>/`` husks under a table dir; return count.
 
     ``optimize(cleanup_older_than=…)`` deletes the *files* belonging to
@@ -96,20 +133,37 @@ def _remove_empty_index_dirs(table_uri: str) -> int:
     Pure filesystem bookkeeping, no LanceDB manifest involvement — an
     empty ``_indices/<uuid>/`` means its files were already cleaned
     because no live manifest references that index version, so removing
-    the directory cannot orphan live data. Must only run while the
-    table's write lock is held (no concurrent index build could be
-    mid-populating a freshly-created, still-empty UUID dir). Best-effort:
-    a dir that becomes non-empty or vanishes between the scan and the
-    ``rmdir`` is skipped, not an error.
+    the directory cannot orphan live data.
+
+    **Safe without the write lock**, by design. The one dangerous
+    interleaving is deleting a freshly created, still-empty UUID dir that a
+    concurrent ``create_index`` is about to populate — so this skips any dir
+    younger than ``min_age_seconds``. That cannot be enforced by holding the
+    lock instead: the caller runs this in a worker thread, and a deadline
+    expiring cancels the *future*, not the thread, so an orphan sweep can and
+    does outlive the lock (``Path.iterdir`` is a lazy ``os.scandir``, so it can
+    even yield a dir created after the scan began). An age filter holds
+    regardless of who owns the lock, which is why it is the guarantee rather
+    than a second line of defence.
+
+    A husk's mtime is set when its files were unlinked, i.e. by a previous
+    prune beat — so the filter costs at most one cadence of delayed reclaim on
+    husks created by the current beat, and the sweep is idempotent.
+
+    Best-effort: a dir that becomes non-empty or vanishes between the scan and
+    the ``rmdir`` is skipped, not an error.
     """
     indices = Path(table_uri) / "_indices"
     if not indices.is_dir():
         return 0
+    cutoff = get_utc_now().timestamp() - min_age_seconds
     removed = 0
     for child in indices.iterdir():
         if not child.is_dir():
             continue
         try:
+            if child.stat().st_mtime > cutoff:
+                continue  # too young → a live index build may be filling it
             next(child.iterdir())  # has an entry → not empty, keep
         except StopIteration:
             try:
@@ -117,6 +171,8 @@ def _remove_empty_index_dirs(table_uri: str) -> int:
                 removed += 1
             except OSError:
                 pass  # raced (repopulated / already gone) — skip
+        except OSError:
+            continue  # vanished or unreadable between listing and stat
     return removed
 
 
@@ -432,10 +488,16 @@ class LanceRepoBase[T: BaseLanceTable]:
            load comes from running under the write lock so the cleanup commit
            never loses the manifest race, not from the flag.
 
-        After the cleanup commit, the now-empty ``_indices/<uuid>/`` husks
-        that ``cleanup_older_than`` leaves behind are removed (still under
-        the lock, so no index build can be mid-populating one); the sweep is
-        offloaded to a thread so a large dir count does not block the loop.
+        After the cleanup commit — and **outside** the write lock — the
+        now-empty ``_indices/<uuid>/`` husks that ``cleanup_older_than`` leaves
+        behind are removed. The sweep is offloaded to a thread so a large dir
+        count does not block the loop, and that is exactly why it cannot be
+        protected by holding the lock: a deadline expiring cancels the future,
+        not the thread, so the sweep can outlive the critical section either
+        way. Its safety comes from an age filter instead — see
+        :func:`_remove_empty_index_dirs`. Keeping it out of the critical
+        section also means a slow filesystem walk can no longer be the thing
+        that overruns the prune budget.
 
         The trade-off is a brief write stall (~seconds on a churned table,
         dominated by the cleanup's file scan/delete — flat, not proportional
@@ -448,7 +510,12 @@ class LanceRepoBase[T: BaseLanceTable]:
             table = await self._table()
             await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
             table_uri = await table.uri()
-            removed = await asyncio.to_thread(_remove_empty_index_dirs, table_uri)
+        async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
+            removed = await asyncio.to_thread(
+                _remove_empty_index_dirs,
+                table_uri,
+                min_age_seconds=_HUSK_MIN_AGE_SECONDS,
+            )
         if removed:
             logger.debug(
                 "lancedb_pruned_empty_index_dirs",
@@ -518,8 +585,9 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     async def count(self) -> int:
         """Total row count."""
-        table = await self._table()
-        return await table.count_rows()
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "count"):
+            table = await self._table()
+            return await table.count_rows()
 
     async def get_by_id(
         self,
@@ -534,13 +602,14 @@ class LanceRepoBase[T: BaseLanceTable]:
         predicate; everos's PK convention is ``<owner_id>_<entry_id>``
         which never contains quotes, so the escape is defensive.
         """
-        table = await self._table()
-        rows = (
-            await table.query()
-            .where(f"{id_field} = '{_q(id_value)}'")
-            .limit(1)
-            .to_list()
-        )
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "get_by_id"):
+            table = await self._table()
+            rows = (
+                await table.query()
+                .where(f"{id_field} = '{_q(id_value)}'")
+                .limit(1)
+                .to_list()
+            )
         if not rows:
             return None
         return self.schema.model_validate(rows[0])
@@ -558,8 +627,9 @@ class LanceRepoBase[T: BaseLanceTable]:
         Use :meth:`search` when you need ``_distance`` or want to mix
         ANN with filters.
         """
-        table = await self._table()
-        rows = await table.query().where(where).limit(limit).to_list()
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
+            table = await self._table()
+            rows = await table.query().where(where).limit(limit).to_list()
         return [self.schema.model_validate(r) for r in rows]
 
     async def find_one_where(self, where: str) -> T | None:
@@ -606,19 +676,20 @@ class LanceRepoBase[T: BaseLanceTable]:
             ``total`` is ``count_rows(filter=where)`` (the predicate's
             true match count, regardless of ``max_fetch``).
         """
-        table = await self._table()
-        total = await table.count_rows(filter=where)
-        if total > max_fetch:
-            logger.warning(
-                "find_where_paginated truncated",
-                extra={
-                    "table": self.table_name,
-                    "where": where,
-                    "total": total,
-                    "max_fetch": max_fetch,
-                },
-            )
-        arrow_tbl = await table.query().where(where).limit(max_fetch).to_arrow()
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where_paginated"):
+            table = await self._table()
+            total = await table.count_rows(filter=where)
+            if total > max_fetch:
+                logger.warning(
+                    "find_where_paginated truncated",
+                    extra={
+                        "table": self.table_name,
+                        "where": where,
+                        "total": total,
+                        "max_fetch": max_fetch,
+                    },
+                )
+            arrow_tbl = await table.query().where(where).limit(max_fetch).to_arrow()
         order = "descending" if descending else "ascending"
         arrow_tbl = arrow_tbl.sort_by([(sort_by, order)])
         offset = (page - 1) * page_size
@@ -662,13 +733,14 @@ class LanceRepoBase[T: BaseLanceTable]:
             List of row dicts (LanceDB native shape — fields depend on
             ``schema``; ``_distance`` added when ``vector`` is given).
         """
-        table = await self._table()
-        q = table.query()
-        if vector is not None:
-            q = q.nearest_to(list(vector))
-        if where is not None:
-            q = q.where(where)
-        return await q.limit(limit).to_list()
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "search"):
+            table = await self._table()
+            q = table.query()
+            if vector is not None:
+                q = q.nearest_to(list(vector))
+            if where is not None:
+                q = q.where(where)
+            return await q.limit(limit).to_list()
 
     # ── Update ─────────────────────────────────────────────────────────────
 
