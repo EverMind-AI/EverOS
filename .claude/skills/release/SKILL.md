@@ -45,11 +45,25 @@ section fails the release job for the same reason.
 
 ## The release page
 
-The body comes from the CHANGELOG section verbatim (`### Added` demoted to
-`## Added`). What CI cannot write is the **lead summary**: the two or three
-sentences above the first heading that say what this release is for, in prose
-— see [1.2.1](https://github.com/EverMind-AI/EverOS/releases/tag/v1.2.1) for
-the shape. Write it before publishing.
+Every page has the same shape:
+
+```
+<lead summary>          prose — CI cannot write this
+## Added / ## Changed / ## Fixed / ...    from the CHANGELOG section, verbatim
+## Upgrade              pip line + compare link prefilled; migration notes by hand
+```
+
+Two parts are yours to write in the draft:
+
+- **The lead summary** — the two or three sentences above the first heading
+  saying what this release is for.
+- **Migration notes in `## Upgrade`**, when the release has any: what happens on
+  the first startup after upgrading, which command recovers a bad state, which
+  pins moved. Skip when a plain `pip install --upgrade` is genuinely all there
+  is; do not invent filler.
+
+See [1.2.1](https://github.com/EverMind-AI/EverOS/releases/tag/v1.2.1) for the
+shape of both.
 
 > While it is a draft, GitHub serves the release at
 > `releases/tag/untagged-<hash>`, and that URL keeps serving a stale page after
