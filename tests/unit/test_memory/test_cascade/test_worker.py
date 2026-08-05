@@ -783,11 +783,14 @@ async def test_optimize_failures_counted_escalated_and_reset(
 ) -> None:
     """Layer-2 stop-gap for lance-format/lance#7653.
 
-    Consecutive ``optimize()`` failures are counted, escalate
-    warning→error once the threshold is hit, and reset to 0 when:
-    (a) a rebuild is triggered on sustained failures, or
-    (b) the next optimize succeeds — instead of being swallowed as a
-    silent warning stream that lets the index dir grow until the disk fills.
+    Consecutive ``optimize()`` failures are counted, escalate warning→error once
+    the threshold is hit, and reset to 0 **only** when the next optimize
+    succeeds — not by the fallback rebuild the threshold triggers. Zeroing the
+    alert counter inside the branch that fires at the threshold made
+    ``optimize_failure_streak >= threshold`` effectively unobservable: the
+    counter cycled 1..threshold -> 0 -> 1.. and the only window where a poller
+    could see the threshold value was the sub-second rebuild itself. The rate
+    limiter lives in ``failures_since_fallback`` instead.
     """
     from everos.memory.cascade import worker as wmod
 
@@ -821,18 +824,24 @@ async def test_optimize_failures_counted_escalated_and_reset(
     fail_logs = [lvl for lvl, ev in calls if ev == "cascade_lancedb_optimize_failed"]
     assert fail_logs == ["warning"] * (threshold - 1)
 
-    # One more failure triggers rebuild and resets counter to 0.
+    # One more failure triggers the fallback rebuild. The alert counter must
+    # keep climbing across it — that is what the health verdict reads.
     await w._run_optimize_once("episode")
-    assert state.optimize_failures == 0
+    assert state.optimize_failures == threshold, (
+        "the fallback rebuild must not reset the alert counter — doing so is "
+        "what made the threshold unreachable"
+    )
+    assert state.failures_since_fallback == 0, "the rate limiter resets, not the alert"
     rebuild_logs = [
         lvl for lvl, ev in calls if ev == "cascade_lancedb_optimize_fallback_rebuild"
     ]
     assert len(rebuild_logs) == 1
 
-    # A subsequent success keeps the counter at 0.
+    # A success is the only thing that clears either counter.
     repo.fail = False
     await w._run_optimize_once("episode")
     assert state.optimize_failures == 0
+    assert state.failures_since_fallback == 0
 
 
 async def test_optimize_fallback_rebuild_on_sustained_failure(
@@ -840,9 +849,10 @@ async def test_optimize_fallback_rebuild_on_sustained_failure(
 ) -> None:
     """Consecutive optimize failures >= threshold trigger a fallback rebuild.
 
-    The rebuild drops + recreates indexes, bypassing the Rust panic path.
-    After rebuild (success or failure), the failure counter resets to 0
-    to avoid triggering rebuild on every subsequent optimize tick.
+    The rebuild drops + recreates indexes, bypassing the Rust panic path. The
+    rate limiter (``failures_since_fallback``) resets after the rebuild whether
+    it succeeded or not, so the fallback fires at most once per threshold
+    failures rather than on every subsequent tick.
     """
     from everos.memory.cascade import worker as wmod
 
@@ -859,8 +869,49 @@ async def test_optimize_fallback_rebuild_on_sustained_failure(
         await w._run_optimize_once("episode")
 
     state = w._optimizer_states["episode"]
-    assert state.optimize_failures == 0, "rebuild should reset failure counter"
+    assert state.failures_since_fallback == 0, "rebuild resets the rate limiter"
     assert len(repo.rebuild_calls) == 1, "exactly one fallback rebuild expected"
+
+
+async def test_persistent_optimize_failure_stays_visible_in_health(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A table failing 100% of the time must reach the health threshold.
+
+    Regression guard for a reachability bug, not a counting bug: the fallback
+    rebuild used to zero the same counter the health verdict reads, so the
+    threshold value existed only during the sub-second rebuild. Against a 30s
+    scrape that is ~1% observable, i.e. ``cascade.healthy`` — the field
+    operators are told to alert on — stayed green while the table never
+    reclaimed a version. Sibling of the run7 cross-kind ``max()`` masking bug:
+    a remediation path refreshing the very signal meant to report it.
+
+    Driven past the threshold on purpose: the point is that the streak survives
+    the remediation, so the check has to run *after* a fallback has fired.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    repo = _OptimizeFailingRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.05,
+    )
+    w._optimizer_states["episode"] = wmod._KindOptimizerState()
+
+    threshold = wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD
+    for _i in range(threshold * 2 + 1):
+        await w._run_optimize_once("episode")
+
+    assert len(repo.rebuild_calls) == 2, (
+        "fallback stays rate-limited to once per threshold failures"
+    )
+    health = w.health()
+    assert health.optimize_failure_streak >= threshold
+    reasons = health.reasons()
+    assert any("optimize" in r for r in reasons), (
+        f"health must name the stuck optimize; got {reasons}"
+    )
 
 
 # ── health signals ───────────────────────────────────────────────────────────
@@ -1165,3 +1216,119 @@ async def test_non_conflict_failure_counts_even_when_message_says_retryable(
         "an error whose message merely contains 'retryable' is NOT a commit "
         "conflict and must count toward the streak"
     )
+
+
+# ── background-loop supervision ──────────────────────────────────────────────
+
+
+async def test_a_crashed_loop_is_restarted_instead_of_dying_silently(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A background loop that raises must be restarted, not lost.
+
+    The three long-lived loops are plain ``create_task`` coroutines. Without
+    supervision one uncaught exception ends that loop permanently: nothing
+    restarts it, and because the worker keeps a strong reference to the task the
+    interpreter never prints "Task exception was never retrieved" either (that
+    fires on GC). The loop's job just stops happening, with zero output.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0, 0.0))
+
+    runs = 0
+
+    async def _body() -> None:
+        nonlocal runs
+        runs += 1
+        if runs < 3:
+            raise RuntimeError("boom")
+        w._stop.set()  # third run exits cleanly
+
+    try:
+        await w._supervise("test-loop", _body)
+    finally:
+        monkeypatched.undo()
+
+    assert runs == 3, "the loop must be restarted after each crash"
+
+
+async def test_a_permanently_crashing_loop_asks_the_process_to_exit(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Once the restart budget is spent, the worker asks the process to exit.
+
+    Deployments are expected to run under a restarting supervisor (systemd
+    ``Restart=always``, Docker ``restart: unless-stopped``, a k8s Deployment).
+    Continuing to serve with a dead projection pipeline is worse: searches
+    answer from a silently frozen index while ``/health`` shows nothing wrong.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+    exits: list[str] = []
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0))
+    monkeypatched.setattr(w, "_request_process_exit", exits.append)
+
+    attempts = 0
+
+    async def _always_raises() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("deterministic failure")
+
+    try:
+        await w._supervise("test-loop", _always_raises)
+    finally:
+        monkeypatched.undo()
+
+    assert attempts == 3, "initial run + one per backoff entry"
+    assert exits == ["test-loop"], "process exit must be requested exactly once"
+
+
+async def test_supervision_does_not_swallow_cancellation(
+    patched_repo: _FakeRepo,
+) -> None:
+    """``stop()`` cancels these tasks, so ``CancelledError`` must propagate.
+
+    Catching it as a "crash" would restart the loop during shutdown and make
+    ``stop()`` hang instead of returning.
+    """
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+
+    async def _body() -> None:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await w._supervise("test-loop", _body)
+
+
+async def test_all_three_loops_are_supervised(patched_repo: _FakeRepo) -> None:
+    """Supervision must cover every long-lived loop, not just the drain one.
+
+    ``_run_loop`` already had an inner ``try``; ``_heartbeat_loop`` and
+    ``_rebuild_loop`` did not, which is the asymmetry this guards.
+    """
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+    await w.start()
+    try:
+        names = {
+            t.get_name()
+            for t in (w._task, w._heartbeat_task, w._rebuild_task)
+            if t is not None
+        }
+        assert names == {
+            "cascade-worker",
+            "cascade-worker-heartbeat",
+            "cascade-worker-rebuild",
+        }
+        for task in (w._task, w._heartbeat_task, w._rebuild_task):
+            assert task is not None
+            assert task.get_coro().__qualname__.endswith("_supervise"), (
+                f"{task.get_name()} is not running under _supervise"
+            )
+    finally:
+        await w.stop()
