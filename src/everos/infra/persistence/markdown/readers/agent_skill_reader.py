@@ -5,13 +5,18 @@ Pairs with :class:`AgentSkillWriter`:
 - :meth:`read_main` reads ``SKILL.md`` and returns the caller's
   :class:`AgentSkillFrontmatter` subclass instance + the Tier-2 body, so
   the caller never deals with raw dicts.
+- :meth:`list_by_cluster` walks every ``skill_*/SKILL.md`` under an agent
+  and returns the ones whose parsed ``cluster_id`` matches. This is the
+  strong-consistency source of truth for cluster membership — LanceDB is
+  cascade-lagged and must not be used for that check.
 - :meth:`read_reference` / :meth:`read_script` are plain text reads;
   no frontmatter, no schema.
 
-All three return ``None`` when the target is missing — readers do not
-raise on absence, since "skill not yet created" is a normal state for
-the upsert-style workflow. Callers that need to distinguish "missing"
-from "empty body" check for ``None`` explicitly.
+``read_main``, ``read_reference``, and ``read_script`` return ``None`` when
+the target is missing — readers do not raise on absence, since "skill not
+yet created" is a normal state for the upsert-style workflow. Callers that
+need to distinguish "missing" from "empty body" check for ``None``
+explicitly.
 
 Path resolution mirrors :class:`AgentSkillWriter` and reads the same
 ClassVars off :class:`AgentSkillFrontmatter`.
@@ -70,6 +75,62 @@ class AgentSkillReader:
         body = parsed.body.rstrip("\n")
         return frontmatter, body
 
+    async def list_by_cluster(
+        self,
+        agent_id: str,
+        cluster_id: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list[AgentSkillFrontmatter]:
+        """Enumerate this agent's ``SKILL.md`` files whose ``cluster_id`` matches.
+
+        Walks ``skills/skill_*/SKILL.md`` under the agent's memory root and
+        returns fully-parsed frontmatter for each match. Skills whose
+        frontmatter has ``cluster_id is None`` (or a different cluster) are
+        filtered out.
+
+        This is the strong-consistency source of truth for "which skills
+        belong to this cluster" — LanceDB is cascade-lagged and must not be
+        used for existence checks.
+
+        Args:
+            agent_id: Owning agent.
+            cluster_id: Cluster to filter on.
+            app_id: App scope; defaults to ``"default"``.
+            project_id: Project scope; defaults to ``"default"``.
+
+        Returns:
+            ``AgentSkillFrontmatter`` list sorted by skill directory path.
+            Empty if the agent has no skill directory yet, or none match.
+        """
+        skills_dir = self._skills_root(agent_id, app_id, project_id)
+        if not await anyio.Path(skills_dir).is_dir():
+            return []
+        pattern = (
+            f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}*"
+            f"/{AgentSkillFrontmatter.SKILL_MAIN_FILENAME}"
+        )
+        paths = await anyio.to_thread.run_sync(lambda: sorted(skills_dir.glob(pattern)))
+        matches: list[AgentSkillFrontmatter] = []
+        for path in paths:
+            skill_name = path.parent.name.removeprefix(
+                AgentSkillFrontmatter.SKILL_DIR_PREFIX
+            )
+            parsed = await self.read_main(
+                agent_id,
+                skill_name,
+                schema=AgentSkillFrontmatter,
+                app_id=app_id,
+                project_id=project_id,
+            )
+            if parsed is None:
+                continue
+            frontmatter, _body = parsed
+            if frontmatter.cluster_id == cluster_id:
+                matches.append(frontmatter)
+        return matches
+
     async def read_reference(
         self,
         agent_id: str,
@@ -114,14 +175,18 @@ class AgentSkillReader:
 
     # ── Internals — same shape as AgentSkillWriter ────────────────────────────
 
-    def _skill_dir(
-        self, agent_id: str, skill_name: str, app_id: str, project_id: str
-    ) -> Path:
+    def _skills_root(self, agent_id: str, app_id: str, project_id: str) -> Path:
         return (
             self._root.agents_dir(app_id, project_id)
             / agent_id
             / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-            / f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
+        )
+
+    def _skill_dir(
+        self, agent_id: str, skill_name: str, app_id: str, project_id: str
+    ) -> Path:
+        return self._skills_root(agent_id, app_id, project_id) / (
+            f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
         )
 
     def _main_path(

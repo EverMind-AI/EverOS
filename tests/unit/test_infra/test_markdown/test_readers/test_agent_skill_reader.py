@@ -127,3 +127,74 @@ async def test_read_script_round_trip(
 
 async def test_read_script_returns_none_when_missing(reader: AgentSkillReader) -> None:
     assert await reader.read_script("agent_x", "alpha", "ghost.py") is None
+
+
+async def test_list_by_cluster_returns_matching_skills(
+    writer: AgentSkillWriter, reader: AgentSkillReader
+) -> None:
+    """Enumerates SKILL.md under the agent, filters by frontmatter cluster_id."""
+    await writer.write_main(
+        "a1",
+        "revive_replica",
+        frontmatter=_make_fm(
+            id="a1_revive_replica",
+            agent_id="a1",
+            name="revive_replica",
+            cluster_id="cl1",
+        ),
+        body="b",
+    )
+    await writer.write_main(
+        "a1",
+        "drain_queue",
+        frontmatter=_make_fm(
+            id="a1_drain_queue", agent_id="a1", name="drain_queue", cluster_id="cl1"
+        ),
+        body="b",
+    )
+    await writer.write_main(
+        "a1",
+        "rotate_secrets",
+        frontmatter=_make_fm(
+            id="a1_rotate_secrets",
+            agent_id="a1",
+            name="rotate_secrets",
+            cluster_id="cl2",
+        ),
+        body="b",
+    )
+
+    results = await reader.list_by_cluster("a1", "cl1")
+
+    names = sorted(r.name for r in results)
+    assert names == ["drain_queue", "revive_replica"]
+
+
+async def test_list_by_cluster_ignores_skills_without_cluster_id(
+    writer: AgentSkillWriter, reader: AgentSkillReader
+) -> None:
+    """Skills whose frontmatter cluster_id is None never leak into any bucket."""
+    await writer.write_main(
+        "a1",
+        "orphan",
+        frontmatter=_make_fm(id="a1_orphan", agent_id="a1", name="orphan"),
+        body="b",
+    )
+    await writer.write_main(
+        "a1",
+        "assigned",
+        frontmatter=_make_fm(
+            id="a1_assigned", agent_id="a1", name="assigned", cluster_id="cl1"
+        ),
+        body="b",
+    )
+
+    assert [r.name for r in await reader.list_by_cluster("a1", "cl1")] == ["assigned"]
+    assert await reader.list_by_cluster("a1", "cl_missing") == []
+
+
+async def test_list_by_cluster_missing_dir_returns_empty(
+    reader: AgentSkillReader,
+) -> None:
+    """New agent with no skill dir yet — returns [] without raising."""
+    assert await reader.list_by_cluster("a_new", "cl1") == []
