@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from everalgo.rank.agentic import aagentic_retrieve
 from everalgo.rank.hybrid import ahybrid_retrieve
@@ -30,7 +30,12 @@ from everalgo.types import Candidate
 
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.tracing import memory_span
-from everos.memory.search.callbacks import build_rerank_fn
+from everos.memory.search.callbacks import (
+    _format_case_passage_from_metadata,
+    _format_skill_passage_from_metadata,
+    build_case_rerank_fn,
+    build_skill_rerank_fn,
+)
 from everos.memory.search.shaper import (
     shape_agent_case_from_candidate,
     shape_agent_skill_from_candidate,
@@ -59,26 +64,29 @@ _REFINEMENT_STRATEGY: str = "multi_query"
 
 
 def _to_everalgo_doc_metadata(
-    metadata: dict[str, Any], *, text_field: str
+    metadata: dict[str, Any], *, format_passage: Callable[[dict[str, Any]], str]
 ) -> dict[str, Any]:
     """Bridge agent recall metadata to the everalgo ``_format_docs`` contract.
 
     ``aagentic_retrieve`` renders round-1 candidates into the sufficiency /
     multi-query LLM prompt via ``everalgo.rank.agentic._format_docs``, which
     reads ``metadata["episode"]`` as a dict with ``subject`` + ``content`` and
-    a ms-epoch ``metadata["timestamp"]``. Agent-kind rows carry their body in
-    ``text_field`` (``task_intent`` / ``skill``) and the time in ``timestamp``
-    (datetime); without this bridge ``_format_docs`` raises ``TypeError``.
-    Mirrors the episode path's bridge in ``agentic.py``.
+    a ms-epoch ``metadata["timestamp"]``. Agent-kind rows carry their body
+    across several fields (``name``/``description`` for skills,
+    ``task_intent``/``approach`` for cases), so ``format_passage`` is the
+    same kind-shaped formatter the reranker uses — this keeps the passage the
+    LLM sufficiency check sees identical to the passage the reranker scores,
+    and guarantees a non-empty ``content`` even for a name-only skill (a
+    single raw field can be empty; the formatter falls back to whichever
+    field is populated). An empty ``content`` makes ``_format_docs`` raise
+    ``ValueError``. Mirrors the episode path's bridge in ``agentic.py``.
     ``_restore_shaper_metadata`` reverts it before DTO shaping.
     """
     bridged = dict(metadata)
-    content = metadata.get(text_field)
-    if isinstance(content, str):
-        bridged["episode"] = {
-            "subject": metadata.get("subject", ""),
-            "content": content,
-        }
+    bridged["episode"] = {
+        "subject": metadata.get("subject", ""),
+        "content": format_passage(metadata),
+    }
     timestamp = metadata.get("timestamp")
     if isinstance(timestamp, _dt.datetime):
         bridged["timestamp"] = to_timestamp_ms(timestamp)
@@ -114,6 +122,7 @@ async def search_agent_cases_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentCaseItem]:
     """Agent-case AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -125,6 +134,9 @@ async def search_agent_cases_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum cases to return.
+        radius: Minimum fused hybrid score a candidate must clear to survive
+            Round 1 recall (``None`` disables the floor). Mirrors the HYBRID
+            lane's ``min_score`` behavior.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentCaseItem`` objects.
@@ -137,6 +149,8 @@ async def search_agent_cases_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
+        kind="case",
     )
     return [
         item
@@ -155,6 +169,7 @@ async def search_agent_skills_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentSkillItem]:
     """Agent-skill AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -166,6 +181,9 @@ async def search_agent_skills_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum skills to return.
+        radius: Minimum fused hybrid score a candidate must clear to survive
+            Round 1 recall (``None`` disables the floor). Mirrors the HYBRID
+            lane's ``min_score`` behavior.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentSkillItem`` objects.
@@ -178,6 +196,8 @@ async def search_agent_skills_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
+        kind="skill",
     )
     return [
         item
@@ -196,6 +216,8 @@ async def _run_agentic_retrieve(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None,
+    kind: Literal["case", "skill"],
 ) -> list[Candidate]:
     """Shared flat agentic retrieve pipeline for agent memory kinds.
 
@@ -203,7 +225,18 @@ async def _run_agentic_retrieve(
     hands it to ``aagentic_retrieve`` with hyperparameters aligned to the
     memsys_opensource ``AgenticConfig`` defaults.
     No cluster or MaxSim step: agent memory is small enough for a flat pass.
+
+    ``kind`` selects the passage formatter and the rerank fn together — the
+    passage the LLM sufficiency check sees and the passage the cross-encoder
+    scores must be the same shape, or the two stages silently disagree on
+    what "relevant" means.
     """
+    if kind == "case":
+        passage_formatter = _format_case_passage_from_metadata
+        rerank_fn = build_case_rerank_fn(reranker)
+    else:
+        passage_formatter = _format_skill_passage_from_metadata
+        rerank_fn = build_skill_rerank_fn(reranker)
 
     async def _dense(q: str, k: int) -> list[Candidate]:
         vec = await embed_query_fn(q)
@@ -228,6 +261,7 @@ async def _run_agentic_retrieve(
                 dense_candidates=_DENSE_CANDIDATES,
                 sparse_candidates=_SPARSE_CANDIDATES,
                 rrf_k=_HYBRID_RRF_K,
+                min_score=radius,
             )
         # Bridge to the everalgo doc contract so ``_format_docs`` (the LLM
         # sufficiency / multi-query prompt) sees an episode dict + ms
@@ -236,14 +270,12 @@ async def _run_agentic_retrieve(
             c.model_copy(
                 update={
                     "metadata": _to_everalgo_doc_metadata(
-                        c.metadata, text_field=recaller.text_field
+                        c.metadata, format_passage=passage_formatter
                     )
                 }
             )
             for c in hits
         ]
-
-    rerank_fn = build_rerank_fn(reranker, text_field=recaller.text_field)
 
     candidates, _decision = await aagentic_retrieve(
         query,

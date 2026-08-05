@@ -1,6 +1,6 @@
 """Callback factories handed to ``everalgo.rank.arank``.
 
-Three callbacks the rank pipeline expects:
+Four callbacks the rank pipeline expects:
 
 * :func:`build_rerank_fn` — cross-encoder scorer used by ``agentic``
   Round-1 + final rerank, and by ``rrf`` / ``lr`` when LLM rerank is
@@ -12,10 +12,20 @@ Three callbacks the rank pipeline expects:
   shape doesn't fit the single-``text_field`` contract above) and uses
   a skill-specific instruction. Mirrors memsys_opensource
   ``_rerank_skill_items``.
+* :func:`build_case_rerank_fn` — case-shaped variant, mirrors
+  :func:`build_skill_rerank_fn` for ``"Agent Case: {task_intent} -
+  {approach}"`` passages.
 * :func:`build_retrieve_fn` — Round-2 recall callback for ``agentic``.
   Re-runs the sparse + dense recall path for a refined query and fuses
   the two routes with RRF (``k=60``) before handing back to the agentic
   loop.
+
+``_format_skill_passage_from_metadata`` / ``_format_case_passage_from_metadata``
+take the raw ``Candidate.metadata`` dict rather than a ``Candidate`` so the
+metadata bridge in ``agentic_agent.py`` (which formats a passage before a
+``Candidate`` wrapping it exists) can reuse the exact same formatting logic
+the rerank step uses — one implementation, no drift between what the LLM
+sufficiency check sees and what the reranker sees.
 """
 
 from __future__ import annotations
@@ -90,11 +100,10 @@ _SKILL_RERANK_INSTRUCTION = (
 )
 
 
-def _format_skill_passage(candidate: Candidate) -> str:
+def _format_skill_passage_from_metadata(meta: dict[str, object]) -> str:
     """``"Agent Skill: {name}"`` + ``" - {description}"`` when present.
     Mirrors opensource ``extract_text_from_hit`` for AGENT_SKILL.
     """
-    meta = candidate.metadata
     name = str(meta.get("name", "") or "")
     description = str(meta.get("description", "") or "")
     if not name:
@@ -102,6 +111,11 @@ def _format_skill_passage(candidate: Candidate) -> str:
     if description:
         return f"Agent Skill: {name} - {description}"
     return f"Agent Skill: {name}"
+
+
+def _format_skill_passage(candidate: Candidate) -> str:
+    """``Candidate``-shaped wrapper over :func:`_format_skill_passage_from_metadata`."""
+    return _format_skill_passage_from_metadata(candidate.metadata)
 
 
 def build_skill_rerank_fn(provider: RerankProvider) -> RerankFn:
@@ -125,6 +139,66 @@ def build_skill_rerank_fn(provider: RerankProvider) -> RerankFn:
         ):
             results = await provider.rerank(
                 query, passages, instruction=_SKILL_RERANK_INSTRUCTION
+            )
+        out: list[Candidate] = []
+        for r in results:
+            if not 0 <= r.index < len(items):
+                continue
+            out.append(items[r.index].model_copy(update={"score": float(r.score)}))
+        return out
+
+    return _rerank
+
+
+# Mirrors _SKILL_RERANK_INSTRUCTION: biases the reranker toward methodology /
+# domain match for agent cases rather than generic Q-A relevance.
+_CASE_RERANK_INSTRUCTION = (
+    "Determine whether the case's task and approach are applicable to the "
+    "query, preferring same-domain cases with directly relevant methodology."
+)
+
+
+def _format_case_passage_from_metadata(meta: dict[str, object]) -> str:
+    """``"Agent Case: {task_intent}"`` + ``" - {approach}"`` when present.
+
+    Mirrors ``_format_skill_passage_from_metadata``. Falls back to
+    ``task_intent`` alone when ``approach`` is empty (which is legal per the
+    cascade handler — no non-empty guard on ``approach``).
+    """
+    task_intent = str(meta.get("task_intent", "") or "")
+    approach = str(meta.get("approach", "") or "")
+    if not task_intent:
+        return approach
+    if approach:
+        return f"Agent Case: {task_intent} - {approach}"
+    return f"Agent Case: {task_intent}"
+
+
+def _format_case_passage(candidate: Candidate) -> str:
+    """``Candidate``-shaped wrapper over :func:`_format_case_passage_from_metadata`."""
+    return _format_case_passage_from_metadata(candidate.metadata)
+
+
+def build_case_rerank_fn(provider: RerankProvider) -> RerankFn:
+    """Case-shaped ``RerankFn``: multi-field passage + :data:`_CASE_RERANK_INSTRUCTION`.
+    Mirrors :func:`build_skill_rerank_fn`.
+    """
+
+    async def _rerank(
+        query: str,
+        candidates: Sequence[Candidate],
+    ) -> list[Candidate]:
+        items = list(candidates)
+        if not items:
+            return []
+        passages = [_format_case_passage(c) for c in items]
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": "cross_encoder_case"},
+        ):
+            results = await provider.rerank(
+                query, passages, instruction=_CASE_RERANK_INSTRUCTION
             )
         out: list[Candidate] = []
         for r in results:
