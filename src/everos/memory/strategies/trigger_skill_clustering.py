@@ -134,6 +134,12 @@ async def trigger_skill_clustering(
                 agent_id=event.agent_id,
                 app_id=event.app_id,
                 project_id=event.project_id,
+                task_intent=event.task_intent,
+                approach=event.approach,
+                key_insight=event.key_insight,
+                quality_score=event.quality_score,
+                case_timestamp_ms=event.case_timestamp_ms,
+                case_vector=vector_list,
             )
         )
     logger.info(
