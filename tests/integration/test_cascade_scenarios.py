@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import shutil
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 import anyio
@@ -159,6 +159,52 @@ async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
                     return  # stably terminal
                 # flipped back to processing (re-enqueue) — keep waiting
             await asyncio.sleep(0.05)
+
+
+async def _wait_projection_quiescent(
+    md_path: str,
+    *,
+    counter: Callable[[str], Awaitable[int]],
+    deadline: float = 30.0,
+    samples: int = 3,
+    interval: float = 0.2,
+) -> int:
+    """Wait until ``md_path``'s projection has stopped moving; return the count.
+
+    Stronger than :func:`_wait_path_done`, and needed whenever the writer keeps
+    appending *while* the worker is mid-handler. There, a terminal row does not
+    mean the file is fully projected: the handler read the md at whatever length
+    it had, marked the row done, and the appends that landed during that call
+    are picked up by a *later* filesystem event. ``_wait_path_done``'s 0.1s
+    settle window is a bet that the re-enqueue has already been delivered —
+    which holds on macOS/fsevents and does not on a loaded Linux/inotify runner,
+    so the assertion fires against a half-projected table for a reason that has
+    nothing to do with the behaviour under test.
+
+    Quiescence instead of a fixed settle: terminal row + empty pending queue +
+    a projected count unchanged across ``samples`` consecutive polls. Real loss
+    still fails the caller's assertion — the count simply converges below the md
+    entry count and stays there.
+    """
+    async with asyncio.timeout(deadline):
+        await _wait_path_done(md_path, deadline=deadline)
+        stable = 0
+        last = await counter(md_path)
+        while True:
+            await asyncio.sleep(interval)
+            row = await md_change_state_repo.get_by_id(md_path)
+            summary = await md_change_state_repo.queue_summary()
+            current = await counter(md_path)
+            settled = (
+                row is not None
+                and row.status in ("done", "failed")
+                and summary.pending == 0
+                and current == last
+            )
+            stable = stable + 1 if settled else 0
+            last = current
+            if stable >= samples:
+                return current
 
 
 async def _wait_paths_done(*md_paths: str, deadline: float = 15.0) -> None:
@@ -564,10 +610,14 @@ async def test_lap_append_during_handler_no_loss(
 
         md_path = _atomic_fact_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
-        await _wait_path_done(md_path, deadline=30.0)
+        # Quiescence, not just a terminal row: the appends that landed during a
+        # handler invocation are projected by a *later* filesystem event, so a
+        # done row can coexist with a half-projected table.
+        lance_rows = await _wait_projection_quiescent(
+            md_path, counter=_count_lance_rows_md, deadline=30.0
+        )
 
         md_entries = await _count_md_entries(absolute)
-        lance_rows = await _count_lance_rows_md(md_path)
         assert md_entries == total, (
             f"writer self-check: expected {total} md entries, got {md_entries}"
         )
