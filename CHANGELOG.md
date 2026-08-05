@@ -7,25 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **`[cascade]` settings section** — the four maintenance cadences
-  (`optimize_heartbeat_seconds`, `optimize_prune_interval_seconds`,
-  `optimize_prune_retention_seconds`, `optimize_rebuild_interval_seconds`) are
-  now configurable. They were already constructor arguments on `CascadeWorker`,
-  but `CascadeConfig` did not carry them and no production path passed one, so
-  the defaults were unreachable — which is why the 12h rebuild sweep could not
-  be exercised by any soak run shorter than half a day. The deadlines that
-  bound a hung call are deliberately **not** exposed: they are hang-catchers
-  sized from measured durations, where too low manufactures failures on a
-  healthy table and too high leaves a wedged one invisible for longer. Note
-  `optimize_prune_retention_seconds` has a second effect worth reading before
-  tuning — it also decides how long index files keep a manifest naming them,
-  and below LanceDB's 7-day unverified window they then wait out the full 7
-  days.
+## [1.2.3] - 2026-08-07
 
 ### Fixed
 
+- **Agent skill extraction is no longer stuck in a retry-then-dead-letter
+  loop.** Target case data now travels on `SkillClusterUpdated` and existing
+  skills for the cluster are read from markdown (strong-consistency), so the
+  strategy never races cascade indexing. Prior to this fix, running a fresh
+  agent trajectory produced zero `SKILL.md` files — `.skills/` did not exist.
+- **`POST /api/v2/ome/trigger` no longer masks strategy state.** The `status`
+  field now distinguishes `not_dispatched` (all dispatch gates rejected the
+  strategy — usually a missing `"force": true`) from `ok` (dispatched and
+  settled). The new `runs` field surfaces dead-lettered strategy runs that
+  were previously invisible to the caller. **If your client matches
+  `status` exhaustively (Python `Literal`, TypeScript union), add a
+  `not_dispatched` branch.**
+- **Agentic search on agent memory now honors `radius` and uses the
+  skill-shaped rerank passage.** Both were silently no-ops before —
+  `SearchRequest.radius` never reached the recall filter, and the
+  cross-encoder saw only the raw `description` field instead of the
+  `name + description + skill instruction` triple that the HYBRID lane uses.
+  A skill with empty `description` (a legal everalgo output — see
+  `everalgo/agent_memory/skill_ops.py:294`) no longer causes HTTP 500 during
+  the LLM sufficiency check.
+- **OME strategy retries now back off between attempts.** A retry-class error
+  (e.g. waiting on eventually-consistent state) previously exhausted its
+  `max_retries` budget in milliseconds; the loop now sleeps
+  `min(base * 2**(attempt-1), cap)` plus up to `jitter` seconds
+  (defaults: `1s / 10s / 0.5s`, configurable via `[ome]` in `everos.toml`).
 - **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /
   `find_where_paginated` / `search`). The write-side deadline work skipped them
   on the reasoning that a read takes no lock and so blocks no writer — true, but
@@ -133,6 +143,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alive but wedged — giving up at 5 minutes buys nothing over 30, while a bound
   near the legitimate hold turns a slow migration into startup crashes for
   every waiting process.
+
+### Added
+
+- `TriggerResponse` gains `dispatched: int` and `runs: list[RunSummary]`.
+- `OMEConfig` gains `retry_backoff_base_seconds`, `retry_backoff_cap_seconds`,
+  and `retry_jitter_seconds` for the retry-loop sleep.
+- `AgentSkillReader.list_by_cluster()` enumerates the cluster's SKILL.md
+  files from markdown (strong-consistency existence check).
+- **`[cascade]` settings section** — the four maintenance cadences
+  (`optimize_heartbeat_seconds`, `optimize_prune_interval_seconds`,
+  `optimize_prune_retention_seconds`, `optimize_rebuild_interval_seconds`) are
+  now configurable. They were already constructor arguments on `CascadeWorker`,
+  but `CascadeConfig` did not carry them and no production path passed one, so
+  the defaults were unreachable — which is why the 12h rebuild sweep could not
+  be exercised by any soak run shorter than half a day. The deadlines that
+  bound a hung call are deliberately **not** exposed: they are hang-catchers
+  sized from measured durations, where too low manufactures failures on a
+  healthy table and too high leaves a wedged one invisible for longer. Note
+  `optimize_prune_retention_seconds` has a second effect worth reading before
+  tuning — it also decides how long index files keep a manifest naming them,
+  and below LanceDB's 7-day unverified window they then wait out the full 7
+  days.
+
 
 ### Changed
 
