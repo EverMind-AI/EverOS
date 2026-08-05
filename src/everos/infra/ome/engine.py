@@ -319,6 +319,7 @@ class OfflineEngine:
             run_record_store=self._run_record_store,
             engine_sem=self._engine_sem,
             emit_hook=self._dispatch_event,
+            config=self._config,
             on_dead_letter=self._on_dead_letter,
             engine=self,
         )

@@ -109,6 +109,38 @@ class OMEConfig(BaseModel):
             "0 disables retries.",
         ),
     ] = 1
+    retry_backoff_base_seconds: Annotated[
+        float,
+        Field(
+            default=1.0,
+            ge=0.0,
+            description=(
+                "Base seconds for exponential retry backoff (sleep between "
+                "attempts). attempt N waits base * 2**(N-1), capped at "
+                "retry_backoff_cap_seconds, plus up to retry_jitter_seconds "
+                "of random jitter. 0.0 disables backoff."
+            ),
+        ),
+    ]
+    retry_backoff_cap_seconds: Annotated[
+        float,
+        Field(
+            default=10.0,
+            ge=0.0,
+            description="Upper bound on the exponential backoff sleep before jitter.",
+        ),
+    ]
+    retry_jitter_seconds: Annotated[
+        float,
+        Field(
+            default=0.5,
+            ge=0.0,
+            description=(
+                "Uniform [0, retry_jitter_seconds] noise added to each "
+                "backoff sleep to spread retry storms."
+            ),
+        ),
+    ]
     max_records_per_strategy: Annotated[
         int,
         Field(
