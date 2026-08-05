@@ -71,6 +71,17 @@ shape of both.
 > concludes the release never went out. Link `releases/tag/vX.Y.Z` instead; the
 > job prints both URLs in its step summary.
 
+Publish with the **Publish release** button in the web UI. Publishing through
+the API by flipping `draft` alone drops the tag: GitHub rebinds the release to
+the `untagged-<hash>` placeholder and creates a git tag by that name against the
+default branch (observed on 1.2.2). Pass `tag_name` if you must do it from the
+CLI:
+
+```bash
+gh api -X PATCH "repos/EverMind-AI/EverOS/releases/<id>" \
+  -F draft=false -f tag_name=vX.Y.Z -f make_latest=true
+```
+
 Re-running the release job replaces its own draft and leaves an already-published
 release untouched, so a re-run is always safe.
 
