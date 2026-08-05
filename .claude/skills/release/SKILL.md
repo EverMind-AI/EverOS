@@ -8,7 +8,12 @@ description: Cut a versioned release and publish everos to PyPI via the tag-trig
 Publish a new version of `everos` to PyPI. Publishing is automated: pushing a
 `vX.Y.Z` tag triggers [.github/workflows/release.yml](../../../.github/workflows/release.yml),
 which builds, smoke-tests, and uploads via PyPI **Trusted Publishing** (OIDC —
-no stored token) behind the `release` environment's manual-approval gate.
+no stored token) behind the `release` environment's manual-approval gate, then
+drafts the GitHub Release page from the CHANGELOG.
+
+A release is not finished when PyPI accepts the upload: the GitHub Release page
+is drafted, never auto-published, and someone has to write its lead summary and
+click **Publish**.
 
 ## Preconditions
 
@@ -29,16 +34,66 @@ no stored token) behind the `release` environment's manual-approval gate.
 6. Approve             → the release.yml run pauses on the `release`
    environment; a reviewer approves in the Actions run
 7. Verify              → https://pypi.org/project/everos/X.Y.Z/
+8. Publish the page    → the run leaves a DRAFT GitHub Release titled
+   "EverOS X.Y.Z", body prefilled from the CHANGELOG section. Write the lead
+   summary at the top, then click Publish.
 ```
 
 The tag must equal the `pyproject.toml` version — the workflow refuses to
-publish on a mismatch.
+publish on a mismatch. A stable tag with no matching `## [X.Y.Z]` CHANGELOG
+section fails the release job for the same reason.
+
+## The release page
+
+Every page has the same shape:
+
+```
+<lead summary>          prose — CI cannot write this
+## Added / ## Changed / ## Fixed / ...    from the CHANGELOG section, verbatim
+## Upgrade              pip line + compare link prefilled; migration notes by hand
+```
+
+Two parts are yours to write in the draft:
+
+- **The lead summary** — the two or three sentences above the first heading
+  saying what this release is for.
+- **Migration notes in `## Upgrade`**, when the release has any: what happens on
+  the first startup after upgrading, which command recovers a bad state, which
+  pins moved. Skip when a plain `pip install --upgrade` is genuinely all there
+  is; do not invent filler.
+
+See [1.2.1](https://github.com/EverMind-AI/EverOS/releases/tag/v1.2.1) for the
+shape of both.
+
+> While it is a draft, GitHub serves the release at
+> `releases/tag/untagged-<hash>`, and that URL keeps serving a stale page after
+> publication with no redirect. Never share it — a reader who opens it later
+> concludes the release never went out. Link `releases/tag/vX.Y.Z` instead; the
+> job prints both URLs in its step summary.
+
+Publish with the **Publish release** button in the web UI. Publishing through
+the API by flipping `draft` alone drops the tag: GitHub rebinds the release to
+the `untagged-<hash>` placeholder and creates a git tag by that name against the
+default branch (observed on 1.2.2). Pass `tag_name` if you must do it from the
+CLI:
+
+```bash
+gh api -X PATCH "repos/EverMind-AI/EverOS/releases/<id>" \
+  -F draft=false -f tag_name=vX.Y.Z -f make_latest=true
+```
+
+Re-running the release job replaces its own draft and leaves an already-published
+release untouched, so a re-run is always safe.
 
 ## Pre-releases
 
 PEP 440 pre-release tags publish too (PyPI accepts them; `pip install everos`
 ignores them unless `--pre`): `vX.Y.ZrcN`, `vX.Y.ZaN`, `vX.Y.ZbN`. Set the same
 suffix in `pyproject.toml` version before tagging.
+
+Their release page is drafted as a **pre-release** and never becomes
+`/releases/latest`. A pre-release does not need its own CHANGELOG section — the
+draft falls back to a one-line placeholder body when there is none.
 
 ## One-time setup (project owner, not doable from CI)
 
