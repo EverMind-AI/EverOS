@@ -827,9 +827,21 @@ class CascadeWorker:
             # the right detector for it, and unlike a rebuild it does not
             # destroy indexes to "fix" a lost race.
             if _is_benign_commit_conflict(exc):
+                # ``pruned`` is the whole diagnostic value of this line. Lance
+                # labels both beats' commit the same way ("This Rewrite
+                # transaction was preempted by ..."), so the message alone
+                # cannot tell them apart — but the consequences differ:
+                # a lost LIGHT beat is free (compaction retries ~10s later),
+                # while a lost HEAVY beat means that table skipped a whole
+                # prune cadence and its index dir keeps the superseded files.
+                # Without the flag, reading a disk-growth incident off the
+                # logs means back-inferring which beats were heavy from the
+                # 300s cadence (done once during the storage soak — slow and
+                # fragile). Mirrors ``pruned`` on the sibling failure log.
                 logger.debug(
                     "cascade_lancedb_optimize_conflict",
                     kind=kind,
+                    pruned=should_prune,
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 return

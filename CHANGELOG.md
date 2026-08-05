@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`cascade_lancedb_optimize_conflict` now records `pruned`** — which
+  maintenance beat lost the commit race. Lance labels both beats' commit the
+  same way (`This Rewrite transaction was preempted by concurrent transaction
+  …`), so the message alone cannot separate a free loss from a costly one: a
+  lost **light** beat retries ~10s later, while a lost **heavy** beat means
+  that table skipped a whole prune cadence and its superseded files stay on
+  disk. Attributing index-dir growth previously meant back-inferring which
+  beats were heavy from the 300s cadence. Log level (`debug`) and the
+  benign-conflict semantics are unchanged — this adds one field.
+
 ## [1.2.2] - 2026-08-04
 
 ### Added

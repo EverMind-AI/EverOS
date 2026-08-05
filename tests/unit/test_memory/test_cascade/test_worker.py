@@ -1071,6 +1071,71 @@ async def test_heavy_beat_commit_conflict_is_also_benign(
     )
 
 
+async def test_conflict_log_names_the_lost_beat(
+    patched_repo: _FakeRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The conflict log must say WHICH beat lost the race.
+
+    Lance labels both beats' commit identically ("This Rewrite transaction
+    was preempted by concurrent transaction ..."), so the error message
+    cannot tell them apart — yet the cost differs sharply:
+
+    - a lost LIGHT beat is free (compaction retries ~10s later);
+    - a lost HEAVY beat means that table skipped a whole prune cadence, so
+      its superseded files stay on disk until the next one lands.
+
+    Without ``pruned`` on this line, attributing index-dir growth means
+    back-inferring which beats were heavy from the 300s cadence.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _SpyLogger:
+        def __getattr__(self, level: str):  # type: ignore[no-untyped-def]
+            def rec(event: str, **kw) -> None:  # type: ignore[no-untyped-def]
+                calls.append((event, kw))
+
+            return rec
+
+    monkeypatch.setattr(wmod, "logger", _SpyLogger())
+
+    class _ConflictRepo(_FakeLanceRepo):
+        """Loses the commit race on both beats."""
+
+        async def optimize(self) -> None:
+            raise RuntimeError("Retryable commit conflict for version 215")
+
+        async def prune(self, older_than: dt.timedelta) -> None:
+            raise RuntimeError("Retryable commit conflict for version 215")
+
+    # Freeze the clock: which beat runs must not depend on the runner's uptime
+    # (`monotonic()` is boot-relative — a fresh CI runner reads ~100s).
+    monkeypatch.setattr(wmod.time, "monotonic", lambda: 10_000.0)
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(_ConflictRepo())},
+        retry_backoff_seconds=0,
+        optimize_prune_interval_seconds=300.0,
+    )
+    state = wmod._KindOptimizerState()  # last_prune_attempt_at=0 → HEAVY first
+    w._optimizer_states["episode"] = state
+
+    await w._run_optimize_once("episode")  # heavy: prune loses the race
+    # The attempt clock advanced to the (frozen) now, so the cadence has not
+    # elapsed — the next beat is the light one.
+    await w._run_optimize_once("episode")
+
+    lost = [kw for ev, kw in calls if ev == "cascade_lancedb_optimize_conflict"]
+    assert len(lost) == 2, "both beats must have logged a conflict"
+    assert lost[0]["pruned"] is True, (
+        "the heavy beat lost — this is the one that costs a prune cadence"
+    )
+    assert lost[1]["pruned"] is False, (
+        "the light beat lost — free, the next beat retries it"
+    )
+
+
 async def test_non_conflict_failure_counts_even_when_message_says_retryable(
     patched_repo: _FakeRepo,
 ) -> None:
