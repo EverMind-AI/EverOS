@@ -35,15 +35,23 @@ from .memory_root import MemoryRoot
 
 logger = get_logger(__name__)
 
-DEFAULT_LOCK_TIMEOUT_SECONDS = 300.0
+DEFAULT_LOCK_TIMEOUT_SECONDS = 1800.0
 """Default upper bound on waiting for the memory-root lock.
 
-Generous on purpose: the legitimate holder is a one-shot FTS/schema migration
-whose runtime is O(rows), so a large memory-root can hold it for minutes and
-must not be cut off. What this bounds is the pathological case — a holder that
-is alive but stuck inside its own critical section, which no amount of waiting
-resolves. ``flock`` is released by the kernel on process exit, so a *dead*
-holder never needs this.
+Deliberately an order of magnitude above the legitimate hold, not near it:
+the legitimate holder is a one-shot FTS/schema migration whose runtime is
+O(rows), so a large memory-root on a slow disk can hold it for minutes — a
+bound *near* that (an earlier draft used 300s) turns the worst legitimate
+migration into a startup crash for every process waiting on it.
+
+Generosity costs almost nothing here, because this timeout's job is
+diagnosis, not recovery. The wait is already visible from the first poll
+(``memory_root_lock_waiting``), and when the holder is genuinely stuck —
+alive but wedged inside its critical section, the only case this bounds —
+giving up sooner does not un-stick it: the error and the operator's next
+move (inspect the holding process) are the same at 5 minutes or 30.
+``flock`` is released by the kernel on process exit, so a *dead* holder
+never needs this.
 """
 
 _LOCK_POLL_INTERVAL_SECONDS = 0.5
@@ -114,8 +122,10 @@ async def memory_root_lock(
                     raise LockError(
                         "timed out after "
                         f"{time.monotonic() - started:.1f}s waiting for the "
-                        f"memory-root lock at {lock_path}; another process "
-                        "still holds it"
+                        f"memory-root lock at {lock_path}. The holder is "
+                        "still alive (the kernel releases a dead process's "
+                        "flock automatically) — inspect the process holding "
+                        f"{lock_path} rather than retrying this one"
                     ) from exc
                 await anyio.sleep(_LOCK_POLL_INTERVAL_SECONDS)
     except BaseException:
