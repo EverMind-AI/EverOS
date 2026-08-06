@@ -42,8 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loop's job simply stopped happening with zero output. Each now runs under a
   supervisor that logs and restarts with escalating backoff (5s / 15s / 45s),
   then asks the process to exit via `SIGTERM` so a restarting supervisor
-  (systemd, Docker, k8s) can recover it. A done-callback covers the case the
-  supervisor itself ends unexpectedly.
+  (systemd, Docker, k8s) can recover it. The restart budget counts consecutive
+  *quick* crashes, not crashes over the process lifetime — a body that ran 60s+
+  before raising starts a fresh incident, so independent transients days apart
+  cannot pool into a process exit (same windowed counting as systemd's
+  `StartLimitIntervalSec`). A done-callback covers the case the supervisor
+  itself ends unexpectedly.
 - **The optimize-failure alert is reachable again.** The fallback rebuild reset
   the same counter the health verdict reads, so a table failing 100% of the time
   cycled `1..5 → 0 → 1..` and the threshold value existed only during the
@@ -75,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and anything else must outlive `UNVERIFIED_THRESHOLD_DAYS = 7` — lance's own
   bound for deciding an unreferenced index UUID is dead rather than mid-build.
   The previous 300s was our invention, which is what made it indefensible.
+  Two consequences worth knowing: the age gate reads the dir's mtime, which
+  POSIX bumps when lance's cleanup empties it, so the effective reclaim horizon
+  is up to ~14 days (file wait + age gate) and the ceiling-load steady state is
+  ~1.8M dirs / ~7GB; and a sweep that blows its 60s deadline is swallowed
+  inside `prune()` — the cleanup commit already succeeded, so escaping would
+  bill a prune "failure" (feeding the fallback-rebuild threshold) and stall the
+  prune-staleness clock for a cleanup stall that did not happen.
 - **A rebuild that loses a commit race is retried** instead of waiting out the
   full 12h cadence. Lance labels the conflict `Retryable` and it is: a
   concurrent writer in another process won the manifest, nothing is wrong with
@@ -102,8 +113,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread to acquire the lock later with nobody to release it. The wait itself is
   by design (the second process is supposed to wait, then find the migration
   already done), but it now logs `memory_root_lock_waiting` and gives up after
-  `timeout_seconds` (default 300s) instead of leaving a server startup looking
+  `timeout_seconds` (default 30min) instead of leaving a server startup looking
   like a hang whose last message is `lifespan_provider_startup name=lancedb`.
+  The default sits an order of magnitude above the worst legitimate hold (a
+  large migration is minutes) on purpose: the wait is already visible from the
+  first poll, and against the one case the bound exists for — a holder that is
+  alive but wedged — giving up at 5 minutes buys nothing over 30, while a bound
+  near the legitimate hold turns a slow migration into startup crashes for
+  every waiting process.
 
 ### Changed
 
