@@ -86,12 +86,18 @@ still in progress. Matching the threshold means this sweep can never be more
 aggressive than lance itself — the earlier 300s value was our invention, and
 that is precisely what made it unjustifiable.
 
-**The cost of the 7-day gate is accepted, with numbers.** Nothing reclaims an
-empty index dir before then, and each one costs an inode plus one 4KB block.
-Measured on a soak at ceiling load (see
-``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``): ~127k dirs/day, so a 7-day steady
-state is ~890k dirs = **~3.6GB of empty directories and 14% of a default 98GB
-ext4's inodes**. That is the worst case, not the expected one — it needs
+**The cost of the gate is accepted, with numbers — and the effective horizon
+is up to 14 days, not 7.** The gate reads ``st_mtime``, and POSIX bumps a
+directory's mtime whenever an entry is unlinked from it — so the clock
+restarts the moment lance's cleanup empties the husk, not when the dir was
+created. Under a short retention window the index *files* themselves first
+wait out lance's 7-day unverified window (see :meth:`LanceRepoBase.prune`),
+so a husk is reclaimed up to file-wait + 7 days after it appeared. Each one
+costs an inode plus one 4KB block. Measured on a soak at ceiling load (see
+``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``): ~127k dirs/day, so the ~14-day
+steady state is ~1.8M dirs = **~7GB of empty directories and ~28% of a
+default 98GB ext4's inodes**. That is the worst case, not the expected one —
+it needs
 sustained saturation, and a single-user deployment writing a few hundred times
 a day sits four orders of magnitude below it (tens of MB). Platform-wise only
 ext4 has a fixed inode budget at all; APFS and xfs allocate dynamically, and
@@ -103,7 +109,14 @@ _HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
 """Deadline on the (lock-free) husk sweep. Same last-resort role as
 :data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
 task is in flight, so a sweep that never returns would park that kind's
-maintenance forever. Measured at ~460ms over 13061 dirs in the soak."""
+maintenance forever. Measured at ~460ms over 13061 dirs in the soak (~35us
+per dir), which puts the ceiling-load steady state (~1.8M dirs, see
+:data:`_HUSK_MIN_AGE_SECONDS`) right at this budget. That is tolerated rather
+than sized around: a timeout is swallowed inside :meth:`LanceRepoBase.prune`
+(the cleanup commit already succeeded, and billing the sweep to the prune
+ledger is exactly the signal corruption this module works to avoid), and the
+orphaned worker thread — a cancelled ``to_thread`` future does not stop the
+thread — finishes the walk anyway, so the reclamation still happens."""
 
 _READ_TIMEOUT_SECONDS = 60.0
 """Deadline on every read. Reads take no lock, so a hung read blocks no writer
@@ -518,13 +531,27 @@ class LanceRepoBase[T: BaseLanceTable]:
         # non-empty directory, so it cannot lose data no matter who else is
         # writing. Keeping it out of the critical section also means a slow
         # filesystem walk cannot overrun the prune budget.
-        async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
-            removed = await asyncio.to_thread(
-                _remove_empty_index_dirs,
-                table_uri,
-                live_uuids=live_uuids,
-                min_age_seconds=_HUSK_MIN_AGE_SECONDS,
-            )
+        #
+        # Best-effort means best-effort: the cleanup commit above already
+        # succeeded, so a sweep timeout must not escape ``prune()``. Letting it
+        # escape bills the failure to the wrong account — the optimize
+        # scheduler counts a prune "failure" (feeding the fallback-rebuild
+        # threshold) and the prune-staleness clock stops advancing, both
+        # reporting a cleanup stall that did not happen. Same defect shape as
+        # the alert counter the fallback rebuild used to zero: an auxiliary
+        # path corrupting the main signal's ledger. The skipped husks are
+        # retried on the next heavy beat.
+        try:
+            async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
+                removed = await asyncio.to_thread(
+                    _remove_empty_index_dirs,
+                    table_uri,
+                    live_uuids=live_uuids,
+                    min_age_seconds=_HUSK_MIN_AGE_SECONDS,
+                )
+        except VectorStoreBusyError:
+            # _deadline already logged lancedb_operation_deadline_exceeded.
+            removed = 0
         if removed:
             logger.debug(
                 "lancedb_pruned_empty_index_dirs",

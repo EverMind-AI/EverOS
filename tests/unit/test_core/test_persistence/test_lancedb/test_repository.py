@@ -1131,3 +1131,32 @@ def test_husk_age_gate_matches_lance_own_threshold() -> None:
     from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
 
     assert _HUSK_MIN_AGE_SECONDS == 7 * 24 * 60 * 60.0
+
+
+async def test_husk_sweep_timeout_must_not_fail_the_prune(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sweep that blows its deadline is the sweep's problem, not prune's.
+
+    By the time the sweep runs, the cleanup commit — the thing prune exists
+    for — has already succeeded, and the sweep is best-effort by contract.
+    Letting its timeout escape ``prune()`` bills the failure to the wrong
+    account: the optimize scheduler counts a prune failure (feeding the
+    fallback-rebuild threshold) and the prune-staleness clock stops
+    advancing, so both alarms report a cleanup stall that did not happen.
+    Not a theoretical path either — sweep time is proportional to dir count
+    (~35us/dir measured), and the ceiling-load steady state sits right at
+    the sweep budget.
+    """
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    monkeypatch.setattr(repo_mod, "_HUSK_SWEEP_TIMEOUT_SECONDS", 0.05)
+
+    def _slow_sweep(table_uri, *, live_uuids, min_age_seconds):  # type: ignore[no-untyped-def]
+        time.sleep(0.5)  # to_thread cancellation cannot interrupt this
+        return 0
+
+    monkeypatch.setattr(repo_mod, "_remove_empty_index_dirs", _slow_sweep)
+
+    repo = _NoteRepo(table=_SweepTable(str(tmp_path)))  # type: ignore[arg-type]
+    await repo.prune(dt.timedelta(seconds=1))  # must not raise
