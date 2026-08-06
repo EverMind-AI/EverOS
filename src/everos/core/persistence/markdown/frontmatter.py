@@ -279,6 +279,19 @@ class SkillPathMixin:
         both sanitize to ``"कतब"``; the same holds for Thai tone marks,
         Hebrew niqqud, and Arabic harakat.
 
+        Case is *not* folded, which makes the collision above
+        filesystem-dependent rather than universal, and is the dimension an
+        LLM varies most freely: ``"Fix Django"`` → ``"Fix_Django"`` and
+        ``"fix django"`` → ``"fix_django"`` are two distinct sanitized
+        names, so they are two rows in LanceDB (a case-sensitive Python
+        string key) but one directory on a case-insensitive filesystem —
+        macOS APFS and Windows NTFS in their default configurations. That
+        splits the invariant this seam otherwise maintains: the surviving
+        ``SKILL.md`` carries one of the two names in its frontmatter while
+        the index still advertises both, so a search hit on the shadowed
+        name resolves to the other skill's content. On a case-sensitive
+        filesystem the same pair simply stays two independent skills.
+
         Because ``AgentSkillWriter.write_main`` is a full-file replace and
         the LanceDB primary key is ``f"{agent_id}_{sanitized_name}"``, a
         collision means the later skill silently overwrites the earlier
@@ -291,12 +304,19 @@ class SkillPathMixin:
         already-sanitized name in ``existing_relevant_skills``; when it
         then emits a raw name like ``"fix django"`` after having just been
         shown ``"fix_django"``, it has affirmatively treated them as two
-        different skills, and the write silently merges them anyway. The
-        decision to accept this is justified on two other grounds instead:
-        a disambiguating suffix on a collision would break the
-        ``frontmatter.name`` ≡ directory-suffix identity the reader/writer
-        seam relies on, and detecting a collision and raising would
-        reintroduce the dead-letter DoS this sanitizer was built to avoid.
+        different skills, and the write silently merges them anyway.
+
+        What justifies accepting it is narrower: the two alternatives are
+        both worse here. Detecting a collision and raising would
+        reintroduce the dead-letter DoS this sanitizer was built to avoid —
+        LLM output would again decide whether a run survives. Appending a
+        disambiguating suffix is the real candidate and is left for a
+        deliberate design pass, not dismissed: it does *not* break the
+        ``frontmatter.name`` ≡ directory-suffix identity (writing
+        ``"fix_django_2"`` into both keeps that intact), but it does need a
+        collision probe on a path that currently touches no other skill,
+        and a rule for the case-insensitive-filesystem variant above where
+        the probe must compare case-folded while the key stays exact.
         """
         return sanitize_dirname(skill_name, fallback="unnamed")
 

@@ -293,10 +293,14 @@ async def _rank_skills_by_relevance(
     """Ask LanceDB to rank the md skills by cosine relevance, capped at K.
 
     LanceDB is used purely as a ranking index here, never as the
-    existence check — the candidate set is always the md list. A
-    LanceDB row with no matching md name is stale and skipped; any md
-    skill LanceDB didn't return (also stale index) is appended in
-    arbitrary order so no skill is silently dropped from the prompt.
+    existence check — the candidate set is always the md list. A LanceDB
+    row with no matching md name is stale and skipped; md skills LanceDB
+    didn't return (also stale index) then backfill in md order until the
+    ``MAX_SKILLS_IN_PROMPT`` budget is full. That backfill keeps a lagging
+    index from *under*-filling the prompt; it does not make the selection
+    lossless — this function only runs when the cluster already holds more
+    skills than the budget admits, so skills beyond K are dropped by
+    design either way.
     """
     md_by_name = {fm.name: (fm, body) for fm, body in md_skills}
     ranked_lance = await agent_skill_repo.find_topk_relevant_in_cluster(
