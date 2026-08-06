@@ -1,6 +1,6 @@
 const DEFAULT_UPSTREAM = "https://api.evermind.ai";
 const DEFAULT_RATE_PER_MINUTE = 30;
-const DEFAULT_DAILY_QUOTA = 200;
+const DEFAULT_DAILY_ROUNDS = 3;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 
@@ -44,7 +44,7 @@ async function hashClientIp(ip) {
     .slice(0, 24);
 }
 
-async function checkQuota(ip, now = Date.now()) {
+async function checkQuota(ip, countRound, now = Date.now()) {
   const redisUrl = (process.env.UPSTASH_REDIS_REST_URL ?? "").replace(/\/$/, "");
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN ?? "";
   if (!redisUrl || !redisToken) {
@@ -54,12 +54,15 @@ async function checkQuota(ip, now = Date.now()) {
   const fingerprint = await hashClientIp(ip);
   const minute = Math.floor(now / 60_000);
   const day = new Date(now).toISOString().slice(0, 10);
+  const minuteKey = `everos-demo:minute:${fingerprint}:${minute}`;
   const commands = [
-    ["INCR", `everos-demo:minute:${fingerprint}:${minute}`],
-    ["EXPIRE", `everos-demo:minute:${fingerprint}:${minute}`, 120],
-    ["INCR", `everos-demo:day:${fingerprint}:${day}`],
-    ["EXPIRE", `everos-demo:day:${fingerprint}:${day}`, 172_800],
+    ["INCR", minuteKey],
+    ["EXPIRE", minuteKey, 120],
   ];
+  if (countRound) {
+    const dailyKey = `everos-demo:rounds:${fingerprint}:${day}`;
+    commands.push(["INCR", dailyKey], ["EXPIRE", dailyKey, 172_800]);
+  }
 
   const response = await fetch(`${redisUrl}/pipeline`, {
     method: "POST",
@@ -82,7 +85,7 @@ async function checkQuota(ip, now = Date.now()) {
   }
 
   const minuteCount = Number(results[0]?.result);
-  const dailyCount = Number(results[2]?.result);
+  const dailyCount = countRound ? Number(results[2]?.result) : 0;
   if (!Number.isFinite(minuteCount) || !Number.isFinite(dailyCount)) {
     throw new Error("quota store returned invalid counters");
   }
@@ -94,7 +97,10 @@ async function checkQuota(ip, now = Date.now()) {
       "RELAY_RATE_PER_MIN",
       DEFAULT_RATE_PER_MINUTE,
     ),
-    dailyLimit: readPositiveInteger("RELAY_DAILY_QUOTA", DEFAULT_DAILY_QUOTA),
+    dailyLimit: readPositiveInteger(
+      "RELAY_DAILY_ROUNDS",
+      DEFAULT_DAILY_ROUNDS,
+    ),
   };
 }
 
@@ -106,7 +112,8 @@ async function forwardRequest(request, path, context) {
 
   let quota;
   try {
-    quota = await checkQuota(clientIp(request, context));
+    const countRound = request.method === "POST" && path === "/api/v1/memories";
+    quota = await checkQuota(clientIp(request, context), countRound);
   } catch {
     return jsonResponse({ error: "relay quota service is unavailable" }, 503);
   }
@@ -115,7 +122,7 @@ async function forwardRequest(request, path, context) {
   }
   if (quota.dailyCount > quota.dailyLimit) {
     return jsonResponse(
-      { error: "daily demo quota reached, configure your own key" },
+      { error: "daily demo round limit reached, configure your own key" },
       429,
     );
   }

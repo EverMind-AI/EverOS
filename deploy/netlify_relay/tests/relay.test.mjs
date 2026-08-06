@@ -10,7 +10,7 @@ const ENV_NAMES = [
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
   "RELAY_RATE_PER_MIN",
-  "RELAY_DAILY_QUOTA",
+  "RELAY_DAILY_ROUNDS",
   "RELAY_UPSTREAM_TIMEOUT_MS",
   "RELAY_MAX_BODY_BYTES",
 ];
@@ -24,7 +24,7 @@ function configureEnvironment() {
   process.env.UPSTASH_REDIS_REST_URL = "https://redis.test";
   process.env.UPSTASH_REDIS_REST_TOKEN = "redis-secret";
   process.env.RELAY_RATE_PER_MIN = "30";
-  process.env.RELAY_DAILY_QUOTA = "200";
+  process.env.RELAY_DAILY_ROUNDS = "3";
 }
 
 function restoreEnvironment() {
@@ -126,23 +126,47 @@ test("enforces the distributed per-minute quota", async () => {
   globalThis.fetch = async () => quotaResponse(31, 31);
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/tasks/task-123"),
+    new Request("https://demo.test/api/v1/memories", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 429);
   assert.match((await response.json()).error, /rate limit/);
 });
 
-test("enforces the distributed daily quota", async () => {
+test("enforces three demo rounds per day", async () => {
   configureEnvironment();
-  globalThis.fetch = async () => quotaResponse(1, 201);
+  globalThis.fetch = async () => quotaResponse(1, 4);
+
+  const response = await relay(
+    new Request("https://demo.test/api/v1/memories", { method: "POST" }),
+    { ip: "192.0.2.1" },
+  );
+  assert.equal(response.status, 429);
+  assert.match((await response.json()).error, /daily demo round limit/);
+});
+
+test("task polling does not spend another demo round", async () => {
+  configureEnvironment();
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).startsWith("https://redis.test")) {
+      const commands = JSON.parse(options.body);
+      assert.equal(commands.length, 2);
+      return new Response(JSON.stringify([{ result: 1 }, { result: 1 }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ data: { status: "success" } }));
+  };
 
   const response = await relay(
     new Request("https://demo.test/api/v1/tasks/task-123"),
     { ip: "192.0.2.1" },
   );
-  assert.equal(response.status, 429);
-  assert.match((await response.json()).error, /daily demo quota/);
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 2);
 });
 
 test("fails closed when the server API key is missing", async () => {

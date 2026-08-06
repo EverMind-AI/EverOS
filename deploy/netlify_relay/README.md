@@ -17,13 +17,16 @@ put their values in this repository.
 | `UPSTASH_REDIS_REST_TOKEN` | yes | none |
 | `EVEROS_CLOUD_UPSTREAM` | no | `https://api.evermind.ai` |
 | `RELAY_RATE_PER_MIN` | no | `30` |
-| `RELAY_DAILY_QUOTA` | no | `200` |
+| `RELAY_DAILY_ROUNDS` | no | `3` |
 | `RELAY_UPSTREAM_TIMEOUT_MS` | no | `20000` |
 | `RELAY_MAX_BODY_BYTES` | no | `1000000` |
 
-The quota service fails closed: demo API requests return `503` when Redis is not
-configured or unavailable. `/healthz` remains available for diagnostics and
-reports only whether secrets are configured, never their values.
+The per-minute limit counts every relay request. The daily limit counts only
+`POST /api/v1/memories`, which starts a demo round; task polling, flush, and
+search requests do not spend additional rounds. The quota service fails closed:
+demo API requests return `503` when Redis is not configured or unavailable.
+`/healthz` remains available for diagnostics and reports only whether secrets
+are configured, never their values.
 
 ## Deploy from GitHub
 
