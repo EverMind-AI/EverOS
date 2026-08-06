@@ -1,13 +1,9 @@
 """Cloud-platform HTTP client for ``everos demo``.
 
-The interactive demo runs the *real* memory pipeline against the EverOS Cloud
-platform (``https://api.evermind.ai``). The platform holds all model keys and
-manages storage, so a user experiences genuine extraction and recall by passing
-a single platform API key — no server to deploy, no DNS, no model keys locally.
-
-Auth is ``Authorization: Bearer <api_key>``. The default demo uses a restricted
-demo key (env ``EVEROS_CLOUD_DEMO_KEY``); ``--live`` uses the user's own
-platform key (env ``EVEROS_CLOUD_API_KEY``).
+The interactive demo runs the *real* memory pipeline through the public EverOS
+demo relay. The relay holds the shared platform key server-side, so the default
+demo sends no credentials. ``--live`` bypasses the relay and talks directly to
+EverOS Cloud with the user's own key (env ``EVEROS_CLOUD_API_KEY``).
 
 One round is: ``add`` (async, returns a task) -> wait for the task -> ``flush``
 (force extraction) -> poll ``search``. Each run uses a fresh
@@ -39,13 +35,13 @@ LIVE_DEMO_SERVER_URL = "http://127.0.0.1:8000"
 LIVE_DEMO_SESSION_ID = "everos-demo-live"
 LIVE_DEMO_USER_ID = "everos_demo_user"
 
-CLOUD_API_BASE_URL = "https://api.evermind.ai"
+CLOUD_PLATFORM_API_BASE_URL = "https://api.evermind.ai"
+CLOUD_API_BASE_URL = "https://everos-demo.evermind.ai"
 CLOUD_DEMO_SERVER_URL_ENV = "EVEROS_CLOUD_DEMO_URL"
 CLOUD_DEMO_KEY_ENV = "EVEROS_CLOUD_DEMO_KEY"
 CLOUD_USER_KEY_ENV = "EVEROS_CLOUD_API_KEY"
-# Restricted, shippable demo key goes here once the platform issues one. Empty
-# means the demo reads the key from the env var instead (and otherwise reports
-# "not configured").
+# The public demo authenticates at the relay. Never ship its platform key in the
+# client. The environment override remains useful for testing a direct endpoint.
 DEFAULT_CLOUD_DEMO_KEY = ""
 
 TIMEOUT_SECONDS = 15.0
@@ -53,6 +49,21 @@ TASK_ATTEMPTS = 12
 TASK_INTERVAL_SECONDS = 1.0
 SEARCH_ATTEMPTS = 8
 SEARCH_INTERVAL_SECONDS = 1.5
+# How far ahead an episode must score to beat a concise profile answer. Profiles
+# read as a direct one-liner; episodes are verbose summaries. A small bias keeps
+# answers concise on ties and near-ties without hiding a clearly-better episode.
+PROFILE_SCORE_BIAS = 0.08
+# Relevance floor. The platform always returns its best candidate, even for an
+# unrelated query (short texts get ~0.4 similarity to everything), so without a
+# cutoff "am I a programmer?" would surface whatever single memory exists. Below
+# this score we report an honest miss instead of an absurd answer. Tuned from
+# observed scores: clearly-irrelevant queries top out ~0.48, real hits >= 0.50.
+MIN_RELEVANCE_SCORE = 0.5
+# The just-flushed memory needs a moment to land in the index. Searching
+# immediately returns a stale ranking (older memories that are already indexed),
+# which is why a "store X then recall X" round could come back with an unrelated
+# earlier memory. Let indexing settle before the first search.
+SEARCH_SETTLE_SECONDS = 2.0
 
 
 class CloudDemoError(Exception):
@@ -75,8 +86,16 @@ def resolve_cloud_base_url(server_url: str) -> str:
     return os.environ.get(CLOUD_DEMO_SERVER_URL_ENV, CLOUD_API_BASE_URL)
 
 
+def resolve_live_base_url(server_url: str) -> str:
+    """Use the platform for ``--live`` unless the user supplied an override."""
+
+    if server_url != LIVE_DEMO_SERVER_URL:
+        return server_url
+    return CLOUD_PLATFORM_API_BASE_URL
+
+
 def resolve_demo_key() -> str:
-    """The restricted demo key: env override, else the shipped default."""
+    """Return an optional direct-test key; the public relay needs no client key."""
 
     return os.environ.get(CLOUD_DEMO_KEY_ENV, DEFAULT_CLOUD_DEMO_KEY)
 
@@ -146,7 +165,10 @@ def wait_task(
     if not task_id:
         return
     request = request_json or _request_json
-    for attempt in range(attempts):
+    for _ in range(attempts):
+        # Wait before each poll: the async task takes ~1-2s to register, so
+        # polling immediately would just log a benign 404 on the platform side.
+        time.sleep(interval_seconds)
         status = ""
         try:
             resp = request(
@@ -166,8 +188,6 @@ def wait_task(
             return
         if status in {"failed", "error"}:
             raise CloudDemoError("memory processing failed")
-        if attempt < attempts - 1:
-            time.sleep(interval_seconds)
 
 
 def flush_memory(
@@ -202,12 +222,25 @@ def search_recall(
     request_json: Callable[..., dict[str, Any]] | None = None,
     search_attempts: int = SEARCH_ATTEMPTS,
     search_interval_seconds: float = SEARCH_INTERVAL_SECONDS,
+    settle_seconds: float = SEARCH_SETTLE_SECONDS,
+    min_relevance_score: float = MIN_RELEVANCE_SCORE,
     timeout_seconds: float = TIMEOUT_SECONDS,
 ) -> DemoStory | None:
     """Search the query, polling while indexing catches up.
 
     Returns a :class:`DemoStory` (with the real recall score) on a hit, or
-    ``None`` on a miss (the platform answered but returned nothing). Blocking.
+    ``None`` on a miss. A miss means either the platform returned nothing or the
+    best candidate scored below ``min_relevance_score`` — an honest "no match"
+    beats surfacing an unrelated memory for an off-topic question. Blocking.
+
+    The just-flushed memory takes a moment to index, so we settle first and then
+    keep the best-scored result across attempts rather than returning the first
+    (possibly stale) hit — otherwise "store X, recall X" can return an unrelated
+    older memory that was already indexed.
+
+    We pool the response's *profiles* and *episodes*: profiles are concise,
+    answer-shaped facts that score well on natural-language questions, while
+    episodes are the raw recalled memories. The highest-scored candidate wins.
     """
 
     request = request_json or _request_json
@@ -217,7 +250,10 @@ def search_recall(
         "method": "hybrid",
         "top_k": 5,
     }
+    best: DemoStory | None = None
     for attempt in range(search_attempts):
+        if attempt == 0 and settle_seconds:
+            time.sleep(settle_seconds)
         search = request(
             "POST",
             "/api/v1/memories/search",
@@ -226,11 +262,17 @@ def search_recall(
             json_body=payload,
             timeout_seconds=timeout_seconds,
         )
-        episode = _first_live_episode(search)
-        if episode is not None:
-            return _story_from_live_episode(memory, query, episode, user_id=user_id)
+        story = _best_recall_story(memory, query, search, user_id=user_id)
+        if story is not None and (best is None or story.score > best.score):
+            best = story
+        # Any positive score means indexing has produced a ranked result; stop
+        # polling. Whether it counts as a hit is decided by the relevance floor.
+        if best is not None and best.score > 0.0:
+            break
         if attempt < search_attempts - 1:
             time.sleep(search_interval_seconds)
+    if best is not None and best.score >= min_relevance_score:
+        return best
     return None
 
 
@@ -272,46 +314,138 @@ def _request_json(
     return parsed
 
 
-def _first_live_episode(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _best_recall_story(
+    memory: str,
+    query: str,
+    payload: dict[str, Any],
+    *,
+    user_id: str,
+) -> DemoStory | None:
+    """Pick the single highest-scored recall candidate from a search response.
+
+    Pools *profiles* (concise answer-shaped facts) and *episodes* (raw recalled
+    memories); the platform does not pre-sort them, so we score every candidate
+    and keep the best. Returns ``None`` when the response carries no candidates.
+    """
+
     data = payload.get("data")
     if not isinstance(data, dict):
         return None
-    episodes = data.get("episodes")
-    if not isinstance(episodes, list) or not episodes:
+
+    profile_score = -1.0
+    profile_answer = ""
+    profile_source = ""
+    for profile in _as_dicts(data.get("profiles")):
+        profile_data = profile.get("profile_data")
+        text = _string_field(
+            profile_data if isinstance(profile_data, dict) else None, "embed_text"
+        )
+        if not text:
+            continue
+        score = _float_field(profile, "score")
+        if score > profile_score:
+            profile_score = score
+            profile_answer = _clean_profile_text(text)
+            profile_source = f"profile:{_string_field(profile, 'id')[:12] or 'live'}"
+
+    episode_score = -1.0
+    episode_answer = ""
+    episode_source = ""
+    episode_fact = ""
+    for episode in _as_dicts(data.get("episodes")):
+        answer, episode_id, fact_id = _episode_answer(episode, memory)
+        score = _episode_score(episode)
+        if score > episode_score:
+            episode_score = score
+            episode_answer = answer
+            episode_source = f"episode:{episode_id}"
+            episode_fact = f"fact:{fact_id}"
+
+    # Prefer the concise profile answer unless an episode clearly out-scores it:
+    # profiles read as a direct one-line answer, episodes as a verbose summary.
+    use_profile = profile_answer and profile_score + PROFILE_SCORE_BIAS >= episode_score
+    if use_profile:
+        best_answer, best_source, best_fact = profile_answer, profile_source, ""
+    elif episode_answer:
+        best_answer, best_source, best_fact = (
+            episode_answer,
+            episode_source,
+            episode_fact,
+        )
+    else:
         return None
-    first = episodes[0]
-    return first if isinstance(first, dict) else None
+    # Report the strongest signal so the relevance floor never demotes a real hit
+    # to a miss just because we displayed the (near-tied) concise profile answer.
+    best_score = max(profile_score, episode_score, 0.0)
 
-
-def _story_from_live_episode(
-    memory: str,
-    query: str,
-    episode: dict[str, Any],
-    *,
-    user_id: str,
-) -> DemoStory:
-    facts = episode.get("atomic_facts")
-    first_fact = facts[0] if isinstance(facts, list) and facts else None
-    fact = first_fact if isinstance(first_fact, dict) else None
-    fact_id = _string_field(fact, "id")
-    # Cloud puts the recalled content in ``atomic_fact`` and the score on the
-    # fact (episode-level score is null).
-    answer = _string_field(fact, "atomic_fact") or (
-        _string_field(episode, "summary")
-        or _string_field(episode, "episode")
-        or memory
-    )
-    score = _float_field(fact, "score") or _float_field(episode, "score")
-    episode_id = _string_field(episode, "id") or "live"
     return DemoStory(
         owner=user_id,
         memory=memory,
         query=query,
-        answer=answer,
-        source_filename=f"episode:{episode_id}",
-        fact_filename=f"fact:{fact_id or 'live'}",
-        score=score,
+        answer=_humanize_answer(best_answer, user_id),
+        source_filename=best_source,
+        fact_filename=best_fact,
+        score=best_score,
     )
+
+
+def _as_dicts(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _episode_score(episode: dict[str, Any]) -> float:
+    """Relevance score for ranking: episode score, else its top fact's score."""
+
+    score = _float_field(episode, "score")
+    if score:
+        return score
+    facts = episode.get("atomic_facts")
+    first_fact = facts[0] if isinstance(facts, list) and facts else None
+    return _float_field(first_fact if isinstance(first_fact, dict) else None, "score")
+
+
+def _episode_answer(episode: dict[str, Any], memory: str) -> tuple[str, str, str]:
+    """Return ``(answer, episode_id, fact_id)`` for an episode candidate.
+
+    Cloud puts the recalled content in ``atomic_fact`` (concise) and falls back
+    to the episode summary; ``memory`` is the last resort.
+    """
+
+    facts = episode.get("atomic_facts")
+    first_fact = facts[0] if isinstance(facts, list) and facts else None
+    fact = first_fact if isinstance(first_fact, dict) else None
+    answer = _string_field(fact, "atomic_fact") or (
+        _string_field(episode, "summary") or _string_field(episode, "episode") or memory
+    )
+    episode_id = _string_field(episode, "id") or "live"
+    return answer, episode_id, _string_field(fact, "id") or "live"
+
+
+def _clean_profile_text(text: str) -> str:
+    """Tidy a profile ``embed_text`` for display.
+
+    Profiles arrive as ``"<category>: <value>"``. The category is metadata that
+    reads as noise next to the recalled value, so drop a short leading label
+    (half- or full-width colon) and keep the value.
+    """
+
+    for separator in (": ", "\uff1a"):
+        head, sep, tail = text.partition(separator)
+        if sep and tail.strip() and len(head.split()) <= 3:
+            return tail.strip()
+    return text.strip()
+
+
+def _humanize_answer(answer: str, user_id: str) -> str:
+    """Strip the synthetic demo user_id out of platform-generated summaries.
+
+    The platform phrases summaries like "everos_demo_ab12 said ...". The raw id
+    is noise in a demo, so swap it for "you".
+    """
+
+    return answer.replace(user_id, "you")
 
 
 def _string_field(payload: dict[str, Any] | None, key: str) -> str:

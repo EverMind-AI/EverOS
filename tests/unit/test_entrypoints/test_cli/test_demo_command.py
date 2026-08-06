@@ -88,7 +88,7 @@ def test_launch_interactive_defaults_to_cloud_with_unique_identity(monkeypatch) 
     assert captured["base_url"] == cloud.CLOUD_API_BASE_URL
     assert str(captured["session_id"]).startswith("everos-demo-")
     assert str(captured["user_id"]).startswith("everos_demo_")
-    assert captured["api_key"] == "demo-key"  # default mode uses the demo key
+    assert captured["api_key"] == "demo-key"  # optional direct-test override
 
 
 def test_launch_interactive_live_uses_own_cloud_key(monkeypatch) -> None:
@@ -106,8 +106,8 @@ def test_launch_interactive_live_uses_own_cloud_key(monkeypatch) -> None:
         live=True, server_url=cloud.LIVE_DEMO_SERVER_URL
     )
 
-    # --live still hits the cloud platform, just with the user's own key.
-    assert captured["base_url"] == cloud.CLOUD_API_BASE_URL
+    # --live bypasses the public relay and hits the platform with the user's key.
+    assert captured["base_url"] == cloud.CLOUD_PLATFORM_API_BASE_URL
     assert captured["api_key"] == "user-key"
     assert str(captured["session_id"]).startswith("everos-demo-")
 

@@ -78,12 +78,16 @@ def _launch_interactive_demo(
 ) -> None:
     """Launch the cloud-platform interactive TUI.
 
-    Both modes talk to EverOS Cloud; ``--live`` just uses the user's own
-    platform key instead of the restricted demo key.
+    The default mode talks to the credential-injecting public relay. ``--live``
+    bypasses the relay and uses the user's own platform key directly.
     """
 
     run_demo_tui = _load_run_demo_tui()
-    base_url = cloud.resolve_cloud_base_url(server_url)
+    base_url = (
+        cloud.resolve_live_base_url(server_url)
+        if live
+        else cloud.resolve_cloud_base_url(server_url)
+    )
     session_id, user_id = cloud.new_demo_identity()
     api_key = cloud.resolve_user_key() if live else cloud.resolve_demo_key()
 

@@ -125,8 +125,8 @@ everos demo
 ```
 
 全屏 terminal UI 里带有一个输入框：你直接在 UI 里输入一条记忆，再输入一个
-召回问题。每一轮都会对 [EverOS Cloud](https://everos.evermind.ai) 跑真实的
-memory pipeline（key 和存储都在平台侧，本地无需任何 API keys），各面板跟着
+召回问题。每一轮都会通过托管的 Demo 中转服务跑真实的
+memory pipeline（共享 key 仅保存在服务端，本地无需 API key），各面板跟着
 你自己的输入更新：
 conversation -> memory sphere -> recall -> source proof -> confetti。Demo
 范围和 TUI 代码结构见 [docs/everos-demo.md](docs/everos-demo.md)。

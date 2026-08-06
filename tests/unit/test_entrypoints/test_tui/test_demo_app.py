@@ -74,7 +74,7 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
     signal_rail = _css_block(css, "#signal-rail")
     conversation = _css_block(css, "#conversation")
 
-    assert "height: 2;" in command_strip
+    assert "height: 1;" in command_strip
     assert "border-left: thick" not in command_strip
     assert "background: #31302B" not in command_strip
     assert len(_hero_text().plain.splitlines()) == 1
@@ -85,8 +85,9 @@ def test_demo_tui_uses_balanced_panel_proportions() -> None:
     assert "height: 1fr;" in signal_rail
     assert "source route" in _signal_rail_text().plain
 
-    # The conversation log sits below the yellow line.
-    assert "border-top: hkey #F9B91C;" in conversation
+    # The conversation log is wrapped in a full rounded border, like the
+    # other panels (not just a top rule).
+    assert "border: round #F9B91C;" in conversation
 
 
 def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
@@ -181,8 +182,15 @@ def test_conversation_log_accumulates_turns() -> None:
     empty = _conversation_text([]).plain
     assert "will appear here" in empty
 
-    filled = _conversation_text([("where do I climb?", "Yosemite")]).plain
+    filled = _conversation_text(
+        [
+            ("you", "I climb in Yosemite"),
+            ("ask", "where do I climb?"),
+            ("everos", "Yosemite"),
+        ]
+    ).plain
     assert "you" in filled
+    assert "ask" in filled
     assert "where do I climb?" in filled
     assert "everos" in filled
     assert "Yosemite" in filled
@@ -221,6 +229,38 @@ def test_query_answer_bar_keeps_both_labels() -> None:
 
     assert "Query" in rendered
     assert "Answer" in rendered
+
+
+async def test_sphere_tracks_furthest_lit_rail_stage() -> None:
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sphere = app.query_one(DotSphereWidget)
+        # Nothing stored yet -> the sphere free-runs its idle loop.
+        assert sphere._driven_state is None
+
+        # Storing walks the sphere up the pipeline and then HOLDS at indexing —
+        # recall is not reached just by storing.
+        app._set_light("conversation", "captured")
+        assert sphere._driven_state == "ingesting"
+        app._set_light("facts", "live")
+        assert sphere._driven_state == "extracting"
+        app._set_light("index", "synced")
+        assert sphere._driven_state == "indexing"
+
+        # Clearing recall before a question keeps it at the furthest lit stage.
+        app._reset_recall_light()
+        assert sphere._driven_state == "indexing"
+
+        # Only an actual recall advances the sphere to "recalling".
+        app._set_light("recall", "hit")
+        assert sphere._driven_state == "recalling"
+
+        # Resetting the pipeline (next round's store) returns to the idle loop.
+        app._reset_round_lights()
+        assert sphere._driven_state is None
 
 
 def test_ctrl_c_is_a_priority_quit_binding() -> None:
@@ -264,7 +304,20 @@ async def test_slash_live_does_not_consume_a_turn() -> None:
         await pilot.pause()
 
         assert app._conversation_phase == "memory"
-        assert app._pending_memory == ""
+        assert app._round == 0
+
+
+async def test_typing_registers_keystrokes_in_the_input() -> None:
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        assert app.focused is not None and app.focused.id == "console-input"
+        await pilot.press("h", "i")
+        await pilot.pause()
+        assert app.query_one("#console-input", Input).value == "hi"
 
 
 async def test_slash_help_does_not_consume_a_turn() -> None:
@@ -281,7 +334,30 @@ async def test_slash_help_does_not_consume_a_turn() -> None:
 
         # /help is a command, not a memory: the conversation does not advance.
         assert app._conversation_phase == "memory"
-        assert app._pending_memory == ""
+        assert app._round == 0
+
+
+async def test_conversation_panel_scrolls_when_log_overflows() -> None:
+    # A bare Static clips but never scrolls (max_scroll_y == 0), leaving older
+    # turns unreachable. The panel must be a real scroll container so the user
+    # can read back through the history once it grows past the panel height.
+    from textual.containers import VerticalScroll
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        for i in range(8):
+            app._record_line("you", f"memory {i}")
+            app._record_line("everos", f"a long recalled answer for round {i}")
+        await pilot.pause()
+
+        panel = app.query_one("#conversation", VerticalScroll)
+        assert panel.max_scroll_y > 0  # content overflows and is scrollable
+        assert panel.scroll_y == panel.max_scroll_y  # newest line auto-pinned
+        panel.scroll_home(animate=False)
+        await pilot.pause()
+        assert panel.scroll_y == 0  # user can scroll back to the start
 
 
 async def test_slash_clear_wipes_the_conversation_log() -> None:
@@ -291,7 +367,7 @@ async def test_slash_clear_wipes_the_conversation_log() -> None:
         interactive=True, base_url="http://server.test", session_id="s", user_id="u"
     )
     async with app.run_test() as pilot:
-        app._record_turn("where do I climb?", "Yosemite")
+        app._record_line("you", "I climb in Yosemite")
         assert app._log
 
         console_input = app.query_one("#console-input", Input)
@@ -300,6 +376,24 @@ async def test_slash_clear_wipes_the_conversation_log() -> None:
         await pilot.pause()
 
         assert app._log == []
+
+
+async def test_empty_submission_is_ignored_no_canned_default() -> None:
+    # Pressing enter on an empty box must NOT substitute scripted Yosemite
+    # content; the conversation stays empty and the phase does not advance.
+    from textual.widgets import Input
+
+    app = EverOSDemoApp(
+        interactive=True, base_url="http://server.test", session_id="s", user_id="u"
+    )
+    async with app.run_test() as pilot:
+        console_input = app.query_one("#console-input", Input)
+        console_input.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app._log == []
+        assert app._conversation_phase == "memory"  # still waiting for a memory
 
 
 async def test_typing_quit_exits_the_app(monkeypatch) -> None:
@@ -330,10 +424,12 @@ def test_demo_tui_signal_rail_keeps_source_status_columns_separate() -> None:
     assert "..." in rail
 
 
-async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> None:
+async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -> None:
     from textual.widgets import Input
 
     from everos.entrypoints.tui.demo import cloud
+
+    searched: list[str] = []
 
     monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: "task-1")
     monkeypatch.setattr(cloud, "wait_task", lambda *_, **__: None)
@@ -343,13 +439,14 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
         memory: str, query: str, *, base_url: str, user_id: str, **_: object
     ) -> DemoStory:
         assert base_url == "http://server.test"
-        return _story(memory, query, f"recalled<{memory}>")
+        searched.append(query)
+        return _story(memory, query, f"recalled<{query}>")
 
     monkeypatch.setattr(cloud, "search_recall", fake_search)
 
     app = EverOSDemoApp(
         interactive=True,
-        max_rounds=2,
+        max_rounds=1,  # one full store->ask round
         base_url="http://server.test",
         session_id="everos-demo-x",
         user_id="everos_demo_x",
@@ -357,35 +454,36 @@ async def test_demo_tui_interactive_runs_cloud_round_per_input(monkeypatch) -> N
     async with app.run_test() as pilot:
         console_input = app.query_one("#console-input", Input)
 
-        # Round 1: a memory, then a recall query -> a real (faked) cloud round.
+        # Step 1: storing a memory must NOT trigger a recall or an answer.
         console_input.value = "我喜欢吃杨梅"
         await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._conversation_phase == "query"  # advanced to the ask step
+        assert searched == []  # no recall happened on store
+        assert app._log == [("you", "我喜欢吃杨梅")]  # only the memory, no answer
+        assert app._lights["core"] == "ready"  # the store pipeline lit up
+
+        # Step 2: the question is what produces the everos answer.
         console_input.value = "我喜欢吃什么"
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause()
-
-        # BUG 305: the panels follow the user's own input, never Yosemite.
-        assert app._story.memory == "我喜欢吃杨梅"
+        assert searched == ["我喜欢吃什么"]
         assert app._story.query == "我喜欢吃什么"
-        assert app._story.answer == "recalled<我喜欢吃杨梅>"
-        assert "Yosemite" not in app._story.answer
-        # Lights walked the full pipeline to a hit.
-        assert app._lights["core"] == "ready"
+        assert app._story.answer == "recalled<我喜欢吃什么>"
+        assert "Yosemite" not in app._story.answer  # BUG 305 stays fixed
         assert app._lights["recall"] == "hit"
-        # A per-round token-saving estimate was computed.
         assert app._saved_pct is not None
-
-        # Round 2 reaches the cap and locks the input behind the upgrade nudge.
-        console_input.value = "I bike to work"
-        await pilot.press("enter")
-        console_input.value = "How do I commute?"
-        await pilot.press("enter")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
+        # you (memory) -> ask (question) -> everos (answer), in order.
+        assert app._log == [
+            ("you", "我喜欢吃杨梅"),
+            ("ask", "我喜欢吃什么"),
+            ("everos", "recalled<我喜欢吃什么>"),
+        ]
+        # One round done = cap reached; input stays usable for /live, /quit.
         assert app._conversation_phase == "done"
-        assert console_input.disabled is True
+        assert console_input.disabled is False
 
 
 async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
@@ -415,7 +513,7 @@ async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
         await pilot.pause()
 
         assert app._conversation_phase == "done"
-        assert console_input.disabled is True
+        assert console_input.disabled is False
 
     assert "everos init" in _quota_guidance_text().plain
 
