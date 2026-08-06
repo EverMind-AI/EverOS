@@ -157,3 +157,64 @@ async def test_operational_signal_flips_healthy(
     health = await orch.health()
     assert health.healthy is False
     assert any("cleanup stalled" in r for r in health.reasons)
+
+
+async def test_maintenance_cadences_reach_the_worker_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[cascade]`` settings must actually land on the worker.
+
+    These four were constructor-only for long enough that the 12h rebuild sweep
+    could not be exercised by any soak run shorter than half a day — the gap was
+    not a missing parameter but a config layer that dropped it. Asserting on the
+    worker's own attributes rather than on ``CascadeConfig`` is the point: a
+    field that stops being forwarded still passes a config-level check.
+    """
+    from everos.config import load_settings
+    from everos.memory.cascade.orchestrator import CascadeConfig, CascadeOrchestrator
+
+    monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_HEARTBEAT_SECONDS", "11")
+    monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_INTERVAL_SECONDS", "22")
+    monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_RETENTION_SECONDS", "33")
+    monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_REBUILD_INTERVAL_SECONDS", "44")
+    load_settings.cache_clear()  # type: ignore[attr-defined]
+    try:
+        cfg = CascadeConfig.from_settings()
+        assert (
+            cfg.optimize_heartbeat_seconds,
+            cfg.optimize_prune_interval_seconds,
+            cfg.optimize_prune_retention_seconds,
+            cfg.optimize_rebuild_interval_seconds,
+        ) == (11.0, 22.0, 33.0, 44.0)
+
+        orch = CascadeOrchestrator(
+            memory_root=MemoryRoot.resolve(), tokenizer=build_tokenizer(), config=cfg
+        )
+        worker = orch._worker
+        assert worker._optimize_heartbeat == 11.0
+        assert worker._optimize_prune_interval == 22.0
+        assert worker._optimize_prune_retention == 33.0
+        assert worker._optimize_rebuild_interval == 44.0
+    finally:
+        load_settings.cache_clear()  # type: ignore[attr-defined]
+
+
+def test_deadlines_are_deliberately_not_configurable() -> None:
+    """The hang-catchers must stay constants, not settings.
+
+    A read/write/prune deadline is sized from a measured duration: too low
+    manufactures failures on a healthy table, too high leaves a wedged one
+    invisible for longer. Neither end is a tuning preference, so exposing them
+    invites a change that can only make things worse. Cadences are the opposite
+    — they depend on write volume — which is why only those moved.
+    """
+    from everos.config import CascadeSettings
+
+    exposed = set(CascadeSettings.model_fields)
+    assert exposed == {
+        "optimize_heartbeat_seconds",
+        "optimize_prune_interval_seconds",
+        "optimize_prune_retention_seconds",
+        "optimize_rebuild_interval_seconds",
+    }
+    assert not any("timeout" in f or "deadline" in f for f in exposed)

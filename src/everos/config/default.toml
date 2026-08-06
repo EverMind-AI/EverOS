@@ -146,6 +146,18 @@ threshold = 0.65
 time_window_days = 7.0
 
 
+[cascade]
+# Maintenance cadences (seconds). Deadlines that bound a hung call are not
+# here on purpose — they live next to the code they guard and are sized from
+# measurement, not preference.
+optimize_heartbeat_seconds = 60.0
+optimize_prune_interval_seconds = 300.0
+# Passed to LanceDB as cleanup_older_than. Only has to outlive an in-flight
+# read, but it also decides how long index files keep a manifest naming them:
+# under LanceDB's 7-day unverified window they then wait out the full 7 days.
+optimize_prune_retention_seconds = 60.0
+optimize_rebuild_interval_seconds = 43200.0
+
 [observability]
 # OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral
 # (Langfuse, an OTel Collector, or any OTLP backend). EverOS ships no vendor SDK.

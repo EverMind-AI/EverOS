@@ -338,6 +338,43 @@ class LanceDBSettings(BaseModel):
     index_cache_size_bytes: int = 16 * 1024 * 1024
 
 
+class CascadeSettings(BaseModel):
+    """Cascade maintenance cadences.
+
+    These are *how often* each background job runs, not how long it is allowed
+    to take — the deadlines that bound a hung call stay as constants next to the
+    code they guard, sized from measurement, because a wrong value there either
+    masks a hang or manufactures failures.
+
+    ``optimize_heartbeat_seconds``:
+      Idle sweep that offers every kind to the optimizer, so an unindexed tail
+      left by a crash is merged even without new writes.
+
+    ``optimize_prune_interval_seconds``:
+      How often the heavy beat runs: reclaim the files of superseded dataset
+      versions. Raise it if the write-lock hold is disruptive, lower it if disk
+      transients are.
+
+    ``optimize_prune_retention_seconds``:
+      Passed straight to LanceDB as ``cleanup_older_than`` — versions replaced
+      longer ago than this become eligible for deletion. It only has to outlive
+      an in-flight read (sub-second). Shorter shrinks the transient footprint of
+      superseded data fragments, but note it also decides how long index files
+      keep a manifest that names them: below LanceDB's 7-day unverified window,
+      index files lose that reference and wait out the full 7 days.
+
+    ``optimize_rebuild_interval_seconds``:
+      Full index rebuild per kind, which collapses the active index fragment
+      count that every ``optimize()`` grows. Bounded by rebuild cost, not
+      correctness — a missed sweep only defers cleanup.
+    """
+
+    optimize_heartbeat_seconds: float = 60.0
+    optimize_prune_interval_seconds: float = 300.0
+    optimize_prune_retention_seconds: float = 60.0
+    optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
+
+
 class KnowledgeSearchSettings(BaseModel):
     """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
 
@@ -417,6 +454,7 @@ class Settings(BaseSettings):
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
     clustering: ClusteringSettings = ClusteringSettings()
+    cascade: CascadeSettings = CascadeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

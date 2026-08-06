@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[cascade]` settings section** — the four maintenance cadences
+  (`optimize_heartbeat_seconds`, `optimize_prune_interval_seconds`,
+  `optimize_prune_retention_seconds`, `optimize_rebuild_interval_seconds`) are
+  now configurable. They were already constructor arguments on `CascadeWorker`,
+  but `CascadeConfig` did not carry them and no production path passed one, so
+  the defaults were unreachable — which is why the 12h rebuild sweep could not
+  be exercised by any soak run shorter than half a day. The deadlines that
+  bound a hung call are deliberately **not** exposed: they are hang-catchers
+  sized from measured durations, where too low manufactures failures on a
+  healthy table and too high leaves a wedged one invisible for longer. Note
+  `optimize_prune_retention_seconds` has a second effect worth reading before
+  tuning — it also decides how long index files keep a manifest naming them,
+  and below LanceDB's 7-day unverified window they then wait out the full 7
+  days.
+
 ### Fixed
 
 - **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /

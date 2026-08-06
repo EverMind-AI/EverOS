@@ -18,6 +18,7 @@ import asyncio
 import dataclasses
 
 from everos.component.tokenizer import Tokenizer
+from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import QueueSummary, md_change_state_repo
@@ -26,7 +27,13 @@ from .handlers import HandlerDeps
 from .registry import build_handlers
 from .scanner import CascadeScanner
 from .watcher import CascadeWatcher
-from .worker import CascadeWorker
+from .worker import (
+    DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS,
+    DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
+    DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
+    DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
+    CascadeWorker,
+)
 
 logger = get_logger(__name__)
 
@@ -66,9 +73,17 @@ class CascadeHealth:
 class CascadeConfig:
     """Construction-time knobs for the orchestrator.
 
-    Defaults are sized for a lightweight (single-user / small-team) dev
-    box; production tuning can surface these into
-    :class:`everos.config.Settings` once the daemon has wall-clock data.
+    Defaults are sized for a lightweight (single-user / small-team) dev box.
+    The maintenance cadences come from :class:`everos.config.CascadeSettings`
+    via :meth:`from_settings`, which every production construction path uses —
+    they were constructor-only for long enough that the 12h rebuild sweep could
+    not be exercised by any soak run short of half a day.
+
+    Deliberately *not* configurable: the deadlines that bound a hung call
+    (read / write / prune / rebuild). Those are hang-catchers sized from
+    measured durations; too low manufactures failures, too high makes a wedged
+    table invisible for longer. They stay as constants beside the code they
+    guard, each with its measurement in the docstring.
     """
 
     scan_interval_seconds: float = 30.0
@@ -76,6 +91,23 @@ class CascadeConfig:
     worker_max_retry: int = 3
     worker_poll_interval_seconds: float = 1.0
     worker_retry_backoff_seconds: float = 2.0
+    optimize_heartbeat_seconds: float = DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS
+    optimize_prune_interval_seconds: float = DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS
+    optimize_prune_retention_seconds: float = DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+    optimize_rebuild_interval_seconds: float = DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS
+
+    @classmethod
+    def from_settings(cls) -> CascadeConfig:
+        """Build with maintenance cadences taken from ``[cascade]`` settings."""
+        cascade = load_settings().cascade
+        return cls(
+            optimize_heartbeat_seconds=cascade.optimize_heartbeat_seconds,
+            optimize_prune_interval_seconds=cascade.optimize_prune_interval_seconds,
+            optimize_prune_retention_seconds=(cascade.optimize_prune_retention_seconds),
+            optimize_rebuild_interval_seconds=(
+                cascade.optimize_rebuild_interval_seconds
+            ),
+        )
 
 
 class CascadeOrchestrator:
@@ -89,7 +121,7 @@ class CascadeOrchestrator:
         config: CascadeConfig | None = None,
     ) -> None:
         self._memory_root = memory_root
-        self._config = config or CascadeConfig()
+        self._config = config or CascadeConfig.from_settings()
         deps = HandlerDeps(
             memory_root=memory_root,
             tokenizer=tokenizer,
@@ -105,6 +137,16 @@ class CascadeOrchestrator:
             max_retry=self._config.worker_max_retry,
             poll_interval_seconds=self._config.worker_poll_interval_seconds,
             retry_backoff_seconds=self._config.worker_retry_backoff_seconds,
+            optimize_heartbeat_seconds=self._config.optimize_heartbeat_seconds,
+            optimize_prune_interval_seconds=(
+                self._config.optimize_prune_interval_seconds
+            ),
+            optimize_prune_retention_seconds=(
+                self._config.optimize_prune_retention_seconds
+            ),
+            optimize_rebuild_interval_seconds=(
+                self._config.optimize_rebuild_interval_seconds
+            ),
         )
         self._watcher: CascadeWatcher | None = None
         self._started = False
