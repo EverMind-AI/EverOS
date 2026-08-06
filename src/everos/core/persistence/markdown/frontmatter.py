@@ -267,6 +267,22 @@ class SkillPathMixin:
         through this *before* constructing the frontmatter, so
         ``frontmatter.name`` ends up byte-identical to the directory-derived
         name rather than merely idempotent-if-resanitized.
+
+        This is lossy: distinct raw names can collapse onto the same
+        sanitized name (``"fix django"`` and ``"fix_django"`` both become
+        ``"fix_django"``; ``"fix!django"`` and ``"fixdjango"`` both become
+        ``"fixdjango"``; two names differing only past the 50-character cap
+        also collide). Because ``AgentSkillWriter.write_main`` is a full-file
+        replace and the LanceDB primary key is
+        ``f"{agent_id}_{sanitized_name}"``, a collision means the later skill
+        silently overwrites the earlier one — its accumulated
+        ``source_case_ids``, ``maturity_score``, and body are lost, not
+        merged. This is deliberate, not an oversight: the LLM's add/update
+        decision for a skill is keyed on the name it sees, so a collision
+        usually reads as an intended update anyway; and disambiguating
+        colliding names (e.g. with a suffix) would break the
+        ``frontmatter.name`` ≡ directory-suffix identity the reader/writer
+        seam relies on.
         """
         return sanitize_dirname(skill_name, fallback="unnamed")
 

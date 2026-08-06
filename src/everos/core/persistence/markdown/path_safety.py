@@ -61,6 +61,12 @@ def sanitize_dirname(raw: str, fallback: str) -> str:
     can never escape ``some_dir`` and never silently collapses back onto it
     or its parent — unconditionally, including for a caller with no
     additional prefix (like ``skill_``) protecting the segment.
+
+    This function is lossy and not injective: distinct inputs can sanitize
+    to the same output (dropped characters, space/underscore collapse, and
+    truncation are all many-to-one). A caller that needs distinct outputs
+    for distinct inputs must disambiguate before or after calling this —
+    the function itself makes no such guarantee.
     """
     slug = unicodedata.normalize("NFC", raw)
     slug = slug.replace(" ", "_")

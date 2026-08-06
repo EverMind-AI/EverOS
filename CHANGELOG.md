@@ -67,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration: agent-skill extraction has never successfully produced a
   `SKILL.md` before this release (see the cascade-lag fix above), so
   there is no legacy skill corpus whose directory names would change
+  under the new sanitizer. Sanitizing is lossy: skills whose raw names
+  differ only in characters the sanitizer drops or replaces (e.g.
+  `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and the
+  later write wins — the earlier skill's `source_case_ids`,
+  `maturity_score`, and body are silently lost, not merged. This is
+  accepted, not mitigated: the LLM's add/update decision is keyed on the
+  name it sees, so a collision usually reads as an intended update
+  anyway.
   under the new sanitizer.
   `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()`, instead
   of two independently maintained copies. `AgentSkillFrontmatter.name`
