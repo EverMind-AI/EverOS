@@ -126,6 +126,26 @@ repo's deadline. Generous enough never to fire on a healthy beat (prune's own
 budget is 60s), tight enough that a hang costs one cadence, not forever.
 """
 
+_REBUILD_CONFLICT_BACKOFFS_SECONDS = (600.0, 1800.0, 10800.0)
+"""Delay before each re-attempt at a kind's index rebuild: 10min, 30min, 3h.
+
+Only a lost commit race is retried — lance marks it ``Retryable`` and the table
+is fine; a concurrent writer in another process simply won the manifest. Any
+other failure defers to the next sweep, because retrying a real error just
+burns the write lock.
+
+Scaled to the 12h rebuild cadence, not to the conflict. A seconds-long backoff
+would spend the whole budget inside one contention window and then leave the
+kind unindexed for a full cadence; spreading the attempts over hours means the
+retries land in genuinely different load conditions. The schedule is a
+*deadline recorded on the kind*, never a sleep: :meth:`_rebuild_loop` walks
+kinds sequentially, so sleeping here would park every later kind behind this
+one (7 kinds x 3h would outlast the cadence itself)."""
+
+_REBUILD_LOOP_TICK_SECONDS = 60.0
+"""How often the rebuild loop wakes to pick up due retries between sweeps.
+Cheap: a dict scan per tick, and only kinds with a due deadline do work."""
+
 _LOOP_RESTART_BACKOFF_SECONDS = (5.0, 15.0, 45.0)
 """Backoff before each restart of a background loop that raised.
 
@@ -273,6 +293,14 @@ class _KindOptimizerState:
     failure. This is the job the reset was originally there for; it just used
     to share a field with the alert signal.
     """
+    rebuild_retry_at: float = 0.0
+    """Monotonic deadline for re-attempting a rebuild that lost a commit race.
+    ``0`` means nothing pending. Set instead of sleeping so the rebuild loop
+    stays free to serve the other kinds — see
+    :data:`_REBUILD_CONFLICT_BACKOFFS_SECONDS`."""
+    rebuild_attempt: int = 0
+    """Consecutive lost commit races for this kind; indexes into the backoff
+    schedule and resets on any completed rebuild."""
     task: asyncio.Task[None] | None = None
     rebuild_task: asyncio.Task[None] | None = None
     """In-flight rebuild task slot, separate from ``task`` so ordinary
@@ -1058,10 +1086,30 @@ class CascadeWorker:
             if self._stop.is_set():
                 return
             await self._run_rebuild_once(kind)
+        last_sweep = time.monotonic()
+        # Never coarser than the configured cadence: the tick exists to give
+        # conflict retries a 60s granularity against a 12h sweep, and must not
+        # quantise a deployment (or a test) that sets a shorter interval.
+        tick = min(_REBUILD_LOOP_TICK_SECONDS, self._optimize_rebuild_interval)
         while not self._stop.is_set():
-            if await self._wait_or_stop(self._optimize_rebuild_interval):
+            if await self._wait_or_stop(tick):
                 return
+            now = time.monotonic()
+            if now - last_sweep >= self._optimize_rebuild_interval:
+                last_sweep = now
+                for kind in self._handlers:
+                    if self._stop.is_set():
+                        return
+                    await self._run_rebuild_once(kind)
+                continue
+            # Between sweeps, serve only kinds whose conflict backoff is due.
             for kind in self._handlers:
+                state = self._optimizer_states.get(kind)
+                if state is None or not state.rebuild_retry_at:
+                    continue
+                if now < state.rebuild_retry_at:
+                    continue
+                state.rebuild_retry_at = 0.0
                 if self._stop.is_set():
                     return
                 await self._run_rebuild_once(kind)
@@ -1112,6 +1160,13 @@ class CascadeWorker:
                 return
             except Exception:
                 pass  # the optimize runner already logged and counted it
+        # Retry a lost commit race in place. Lance labels it "Retryable" and
+        # means it: the rebuild transaction was preempted by a concurrent
+        # writer (another process, since the write lock is in-process only) and
+        # nothing about the table is wrong. Without a retry, a conflict costs a
+        # whole rebuild cadence — 12h in production — for what a second-scale
+        # backoff resolves. A soak run at 600s cadence hit 3 conflicts in 119
+        # attempts (2.5%), all while a concurrent CLI storm was running.
         rebuild_task = asyncio.create_task(
             repo.rebuild_indexes(), name=f"cascade-rebuild-{kind}-inner"
         )
@@ -1119,12 +1174,35 @@ class CascadeWorker:
         try:
             await rebuild_task
             logger.info("cascade_lancedb_rebuilt", kind=kind)
+            state.rebuild_attempt = 0
+            state.rebuild_retry_at = 0.0
         except Exception as exc:
-            logger.warning(
-                "cascade_lancedb_rebuild_failed",
-                kind=kind,
-                error=f"{type(exc).__name__}: {exc}",
-            )
+            attempt = state.rebuild_attempt
+            if _is_benign_commit_conflict(exc) and attempt < len(
+                _REBUILD_CONFLICT_BACKOFFS_SECONDS
+            ):
+                # Lost the manifest race to a concurrent writer; the table is
+                # fine. Record a deadline instead of sleeping so the other
+                # kinds in this sweep are not parked behind the backoff.
+                delay = _REBUILD_CONFLICT_BACKOFFS_SECONDS[attempt]
+                state.rebuild_attempt = attempt + 1
+                state.rebuild_retry_at = time.monotonic() + delay
+                logger.info(
+                    "cascade_lancedb_rebuild_conflict_retry_scheduled",
+                    kind=kind,
+                    attempt=attempt,
+                    retry_in_seconds=delay,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            else:
+                state.rebuild_attempt = 0
+                state.rebuild_retry_at = 0.0
+                logger.warning(
+                    "cascade_lancedb_rebuild_failed",
+                    kind=kind,
+                    attempt=attempt,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         finally:
             if state.rebuild_task is rebuild_task:
                 state.rebuild_task = None

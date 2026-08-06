@@ -15,12 +15,10 @@ import datetime as dt
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, ClassVar
 
 from lancedb import AsyncTable
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import VectorStoreBusyError
 from everos.core.observability.logging import get_logger
 
@@ -75,28 +73,6 @@ task per kind and skips a kind whose task is in flight, so a compaction that
 never returns parks that kind's maintenance permanently. Measured at ~460ms on
 a table with 77 retained versions."""
 
-_HUSK_MIN_AGE_SECONDS = 300.0
-"""Minimum age of an empty ``_indices/<uuid>/`` dir before the sweep removes it.
-
-This is what makes the sweep safe to run without the write lock, which it must
-be: it runs in a worker thread, and a deadline cancels the future rather than
-the thread, so the sweep can outlive any critical section that nominally
-protects it. The only harmful interleaving is deleting a dir a concurrent
-``create_index`` just created and has not populated yet — such a dir is seconds
-old, so any age filter well above index-creation latency excludes it.
-
-Sized to the cascade prune cadence (``DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS``,
-300s): a husk's mtime is set when its files were unlinked, so husks created by
-the *current* beat are skipped and reclaimed by the next one. The sweep is
-idempotent, so a one-cadence delay costs nothing.
-"""
-
-_HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
-"""Deadline on the (lock-free) husk sweep. Same last-resort role as
-:data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
-task is in flight, so a sweep that never returns would park that kind's
-maintenance forever. Measured at ~460ms over 13061 dirs in the soak."""
-
 _READ_TIMEOUT_SECONDS = 60.0
 """Deadline on every read. Reads take no lock, so a hung read blocks no writer
 — but it does park the caller, and the cascade drain loop reads on every batch
@@ -118,62 +94,6 @@ second means writers were queued behind it — without this, a section that is
 slow but under its deadline is invisible (the maintenance beat only logs at
 ``debug``), and a soak run left no way to tell whether a 16s stall was a slow
 prune or a deep write queue."""
-
-
-def _remove_empty_index_dirs(table_uri: str, *, min_age_seconds: float) -> int:
-    """Delete empty ``_indices/<uuid>/`` husks under a table dir; return count.
-
-    ``optimize(cleanup_older_than=…)`` deletes the *files* belonging to
-    superseded index versions but leaves the now-empty per-UUID
-    directory behind. Over a long-lived churned table these husks
-    accumulate into tens of thousands of empty dirs (soak: 13061 dirs,
-    98% empty), which bloats inode usage and slows directory scans even
-    though they hold no data.
-
-    Pure filesystem bookkeeping, no LanceDB manifest involvement — an
-    empty ``_indices/<uuid>/`` means its files were already cleaned
-    because no live manifest references that index version, so removing
-    the directory cannot orphan live data.
-
-    **Safe without the write lock**, by design. The one dangerous
-    interleaving is deleting a freshly created, still-empty UUID dir that a
-    concurrent ``create_index`` is about to populate — so this skips any dir
-    younger than ``min_age_seconds``. That cannot be enforced by holding the
-    lock instead: the caller runs this in a worker thread, and a deadline
-    expiring cancels the *future*, not the thread, so an orphan sweep can and
-    does outlive the lock (``Path.iterdir`` is a lazy ``os.scandir``, so it can
-    even yield a dir created after the scan began). An age filter holds
-    regardless of who owns the lock, which is why it is the guarantee rather
-    than a second line of defence.
-
-    A husk's mtime is set when its files were unlinked, i.e. by a previous
-    prune beat — so the filter costs at most one cadence of delayed reclaim on
-    husks created by the current beat, and the sweep is idempotent.
-
-    Best-effort: a dir that becomes non-empty or vanishes between the scan and
-    the ``rmdir`` is skipped, not an error.
-    """
-    indices = Path(table_uri) / "_indices"
-    if not indices.is_dir():
-        return 0
-    cutoff = get_utc_now().timestamp() - min_age_seconds
-    removed = 0
-    for child in indices.iterdir():
-        if not child.is_dir():
-            continue
-        try:
-            if child.stat().st_mtime > cutoff:
-                continue  # too young → a live index build may be filling it
-            next(child.iterdir())  # has an entry → not empty, keep
-        except StopIteration:
-            try:
-                child.rmdir()
-                removed += 1
-            except OSError:
-                pass  # raced (repopulated / already gone) — skip
-        except OSError:
-            continue  # vanished or unreadable between listing and stat
-    return removed
 
 
 def _q(value: str) -> str:
@@ -488,16 +408,17 @@ class LanceRepoBase[T: BaseLanceTable]:
            load comes from running under the write lock so the cleanup commit
            never loses the manifest race, not from the flag.
 
-        After the cleanup commit — and **outside** the write lock — the
-        now-empty ``_indices/<uuid>/`` husks that ``cleanup_older_than`` leaves
-        behind are removed. The sweep is offloaded to a thread so a large dir
-        count does not block the loop, and that is exactly why it cannot be
-        protected by holding the lock: a deadline expiring cancels the future,
-        not the thread, so the sweep can outlive the critical section either
-        way. Its safety comes from an age filter instead — see
-        :func:`_remove_empty_index_dirs`. Keeping it out of the critical
-        section also means a slow filesystem walk can no longer be the thing
-        that overruns the prune budget.
+        ``cleanup_older_than`` deletes the *files* under a superseded
+        ``_indices/<uuid>/`` but leaves the now-empty directory behind, so
+        those husks accumulate (a soak run reached 13061 dirs, 98% empty).
+        everos used to sweep them with its own ``rmdir``; that has been removed
+        because nothing in the LanceDB contract says an empty index dir is
+        garbage, and reaching into lance's internal layout to delete
+        directories is not a risk worth taking for inode pressure. The
+        behaviour is being raised upstream. Note this is a *separate* gap from
+        the files not being reclaimed at all under ``delete_unverified=False``
+        (measured: 260MB retained on a 19k-row soak table) — solving that one
+        still leaves the empty directories.
 
         The trade-off is a brief write stall (~seconds on a churned table,
         dominated by the cleanup's file scan/delete — flat, not proportional
@@ -509,19 +430,6 @@ class LanceRepoBase[T: BaseLanceTable]:
         async with self._locked(_PRUNE_TIMEOUT_SECONDS, "prune"):
             table = await self._table()
             await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
-            table_uri = await table.uri()
-        async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
-            removed = await asyncio.to_thread(
-                _remove_empty_index_dirs,
-                table_uri,
-                min_age_seconds=_HUSK_MIN_AGE_SECONDS,
-            )
-        if removed:
-            logger.debug(
-                "lancedb_pruned_empty_index_dirs",
-                table=self.table_name,
-                removed=removed,
-            )
 
     async def rebuild_indexes(self) -> None:
         """Drop and re-create every index on this table.
@@ -550,12 +458,20 @@ class LanceRepoBase[T: BaseLanceTable]:
         accumulating one new UUID (vector) / one new ``part_N`` (FTS)
         per call.
 
-        This method is the workaround: drop every existing index and
-        rebuild from the schema's ``ensure_fts_indexes`` contract. The
-        rebuild is **O(N) full retrain** but cheap in practice (~0.3s
-        for 50k rows × 2 FTS columns on local SSD), and during the
-        window LanceDB transparently falls back to brute-force scan so
-        queries and writes stay available.
+        This method is the workaround: rebuild every indexed column from the
+        schema's ``ensure_fts_indexes`` contract. Measured effect — the live
+        index goes from 7 files back to 4 after 25 ``optimize()`` beats, i.e.
+        the fragment set does collapse. The rebuild is an **O(N) full retrain**
+        but cheap in practice (~0.3s for 50k rows × 2 FTS columns on local SSD).
+
+        It rebuilds **in place** (``create_index(replace=True)``) rather than
+        dropping first. An earlier version dropped every index and recreated
+        them, on the assumption that LanceDB falls back to a brute-force scan
+        meanwhile. That is true for vector search and **false for FTS**: with no
+        inverted index a BM25 query raises ``Cannot perform full text search
+        unless an INVERTED index has been created`` (measured). Because the
+        recall legs are gathered without ``return_exceptions``, one failing leg
+        fails the whole search request, so the window was a source of 500s.
 
         **Cadence** — :class:`CascadeWorker` runs this on a slow loop
         (default 12h per kind). Frequency is bounded by the rebuild
@@ -577,9 +493,19 @@ class LanceRepoBase[T: BaseLanceTable]:
         """
         async with self._locked(_REBUILD_TIMEOUT_SECONDS, "rebuild_indexes"):
             table = await self._table()
+            # Replace in place rather than drop-then-create. The live columns
+            # must never be left without an index: FTS does not degrade when
+            # its index is missing the way vector search does — it raises
+            # ``Cannot perform full text search unless an INVERTED index has
+            # been created``, and the recall legs are gathered without
+            # ``return_exceptions``, so the whole search request 500s. Only
+            # indexes on columns that are no longer indexed at all get dropped;
+            # nothing queries those, so their drop opens no window.
+            wanted = set(self.schema.BM25_FIELDS or ())
             for idx in await table.list_indices():
-                await table.drop_index(idx.name)
-            await self.schema.ensure_fts_indexes(table)
+                if not wanted.intersection(idx.columns or ()):
+                    await table.drop_index(idx.name)
+            await self.schema.ensure_fts_indexes(table, replace=True)
 
     # ── Read ───────────────────────────────────────────────────────────────
 

@@ -36,14 +36,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successful optimize clears the alert streak. Same shape as the cross-kind
   `max()` masking bug: a remediation path refreshing the signal meant to report
   it.
-- **The empty-index-dir sweep no longer depends on the write lock.** It runs in a
-  worker thread, and a deadline cancels the *future*, not the thread — so an
-  orphan sweep outlived the critical section that nominally protected it and
-  could `rmdir` a directory a concurrent `create_index` had just created,
-  leaving the table with no FTS index. Safety now comes from an age filter
-  (skip dirs younger than 300s), which holds regardless of lock ownership, and
-  the sweep moved out of the critical section so a slow filesystem walk can no
-  longer overrun the prune budget.
+- **A rebuild no longer leaves the column without an FTS index.** `rebuild_indexes`
+  dropped every index and recreated it, on the assumption that LanceDB falls
+  back to a brute-force scan meanwhile. That holds for vector search and **not**
+  for FTS: with no inverted index a BM25 query raises `Cannot perform full text
+  search unless an INVERTED index has been created`, and since the recall legs
+  are gathered without `return_exceptions`, one failing leg 500s the whole
+  search request. Now uses `create_index(replace=True)`, which swaps atomically
+  — measured 0 failures across 49 queries spanning 3 replaces, versus 55
+  failures for the same test against drop-then-create — and collapses the live
+  index fragment set exactly as before (7 index files back to 4).
+- **A rebuild that loses a commit race is retried** instead of waiting out the
+  full 12h cadence. Lance labels the conflict `Retryable` and it is: a
+  concurrent writer in another process won the manifest, nothing is wrong with
+  the table. Retries are scheduled on the kind (10min / 30min / 3h) rather than
+  slept through, so the other kinds in the sweep are not parked behind the
+  backoff. A soak run at a 600s cadence hit 3 conflicts in 119 attempts, all
+  while a concurrent CLI storm was running.
+
+### Removed
+
+- **The empty-index-dir sweep.** `cleanup_older_than` deletes the files under a
+  superseded `_indices/<uuid>/` but leaves the directory, so husks accumulate
+  (a soak run reached 13061 dirs, 98% empty) and everos swept them with its own
+  `rmdir`. Nothing in the LanceDB contract says an empty index dir is garbage,
+  and reaching into lance's internal layout to delete directories is not worth
+  the risk for inode pressure; the behaviour is being raised upstream. This is
+  a *separate* gap from index files not being reclaimed at all under
+  `delete_unverified=False` (measured: 260MB retained on a 19k-row soak table)
+  — fixing that one still leaves the empty directories behind.
 - **The index-rebuild sweep can no longer park forever** waiting on the
   optimize runner. That wait had no deadline, and the runner's loop condition is
   "keep going while there is unindexed data" — which under sustained writes is

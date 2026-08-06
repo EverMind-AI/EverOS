@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import os
-import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -905,114 +903,6 @@ def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
     )
 
 
-def _backdate(path: Path, seconds: float) -> None:
-    """Age ``path`` by ``seconds`` so the husk sweep's age filter accepts it."""
-    old = time.time() - seconds
-    os.utime(path, (old, old))
-
-
-class _UriTable:
-    """Minimal table double for the prune path: no-op optimize + a uri()."""
-
-    def __init__(self, uri: str) -> None:
-        self._uri = uri
-
-    async def optimize(self, **_kw):  # type: ignore[no-untyped-def]
-        return None
-
-    async def uri(self) -> str:
-        return self._uri
-
-
-async def test_prune_removes_empty_index_dir_husks(tmp_path: Path) -> None:
-    """After cleanup, ``prune`` removes the empty ``_indices/<uuid>/`` dirs
-    that ``cleanup_older_than`` leaves behind, but keeps non-empty ones."""
-    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
-
-    indices = tmp_path / "_indices"
-    husk = indices / "empty_uuid"
-    husk.mkdir(parents=True)
-    populated = indices / "live_uuid"
-    populated.mkdir()
-    (populated / "index.idx").write_text("data")
-    for d in (husk, populated):
-        _backdate(d, _HUSK_MIN_AGE_SECONDS * 2)
-
-    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
-    await repo.prune(dt.timedelta(seconds=1))
-
-    assert not husk.exists(), "empty husk must be removed"
-    assert populated.exists(), "non-empty index dir must be kept"
-
-
-async def test_husk_sweep_spares_fresh_dirs_so_it_is_safe_without_the_lock(
-    tmp_path: Path,
-) -> None:
-    """A just-created empty index dir must survive the sweep.
-
-    This age filter — not the write lock — is what makes the sweep safe. The
-    sweep runs via ``asyncio.to_thread``, and a deadline cancels the *future*,
-    not the thread, so an orphan sweep outlives whatever critical section
-    nominally protected it (``Path.iterdir`` is a lazy ``os.scandir``, so it can
-    even yield a dir created after the scan began). Without the filter, that
-    orphan can ``rmdir`` a directory a concurrent ``create_index`` just created
-    and is about to populate — which leaves the table with no FTS index, and
-    every search on that kind 500s.
-    """
-    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
-
-    indices = tmp_path / "_indices"
-    fresh = indices / "being_built_right_now"
-    fresh.mkdir(parents=True)  # mtime = now: a live index build could own this
-    stale = indices / "real_husk"
-    stale.mkdir()
-    _backdate(stale, _HUSK_MIN_AGE_SECONDS * 2)
-
-    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
-    await repo.prune(dt.timedelta(seconds=1))
-
-    assert fresh.exists(), (
-        "a freshly created empty index dir must be spared — a concurrent "
-        "create_index may be mid-populating it"
-    )
-    assert not stale.exists(), "an aged husk must still be reclaimed"
-
-
-async def test_husk_sweep_runs_outside_the_write_lock(tmp_path: Path) -> None:
-    """The sweep must not sit in the write-lock critical section.
-
-    It is offloaded to a thread precisely because it can be slow over tens of
-    thousands of dirs — so inside the lock it becomes the thing most likely to
-    overrun prune's budget and release the lock mid-sweep. Outside, a slow walk
-    costs nothing but its own deadline.
-    """
-    indices = tmp_path / "_indices"
-    indices.mkdir(parents=True)
-    observed: list[bool] = []
-
-    repo = _NoteRepo(table=_UriTable(str(tmp_path)))  # type: ignore[arg-type]
-
-    from everos.core.persistence.lancedb import repository as repo_mod
-
-    real_sweep = repo_mod._remove_empty_index_dirs
-
-    def _spy(table_uri: str, *, min_age_seconds: float) -> int:
-        observed.append(repo._write_lock(repo.table_name).locked())
-        return real_sweep(table_uri, min_age_seconds=min_age_seconds)
-
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(repo_mod, "_remove_empty_index_dirs", _spy)
-    try:
-        await repo.prune(dt.timedelta(seconds=1))
-    finally:
-        monkeypatched.undo()
-
-    assert observed == [False], (
-        "husk sweep must run with the write lock released; holding it makes a "
-        "slow filesystem walk able to blow the prune deadline"
-    )
-
-
 async def test_hanging_reads_also_hit_a_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1082,3 +972,71 @@ async def test_optimize_is_lock_free_compaction_only() -> None:
 
     assert state["held"] is False, "light optimize must be lock-free"
     assert captured == {}, "light optimize passes no cleanup/delete_unverified args"
+
+
+async def test_rebuild_never_leaves_the_column_without_an_fts_index(
+    tmp_path: Path,
+) -> None:
+    """A BM25 query must survive a rebuild — the index is replaced, not dropped.
+
+    Vector search degrades to a flat scan when its index is missing; FTS does
+    not. With no inverted index lance raises ``Cannot perform full text search
+    unless an INVERTED index has been created``, and because the recall legs
+    are gathered without ``return_exceptions`` that one failing leg 500s the
+    whole search request. So the drop-then-create rebuild had a window where
+    every keyword search on that kind failed. Hammering the table across a
+    rebuild is the only way to catch a regression here — a unit double cannot
+    reproduce it.
+    """
+
+    class _SearchRepo(LanceRepoBase[_SearchNote]):
+        schema = _SearchNote
+
+    mr = MemoryRoot(tmp_path)
+    mr.ensure()
+    conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
+    table = await conn.create_table("_search_note", schema=_SearchNote)
+    repo = _SearchRepo(table=table)
+    await repo.add(
+        [
+            _SearchNote(
+                id=f"n{i}",
+                text=f"meeting notes alpha {i}",
+                tokens=f"meeting notes alpha {i}",
+                vector=[1.0, 0.0, 0.0, 0.0],
+            )
+            for i in range(200)
+        ]
+    )
+    await _SearchNote.ensure_fts_indexes(table)
+
+    failures: list[str] = []
+    successes = 0
+    stop = False
+
+    async def _hammer() -> None:
+        nonlocal successes
+        while not stop:
+            try:
+                await table.query().nearest_to_text("alpha").limit(3).to_list()
+                successes += 1
+            except Exception as exc:
+                failures.append(f"{type(exc).__name__}: {exc}")
+            await asyncio.sleep(0)
+
+    hammer = asyncio.create_task(_hammer())
+    try:
+        for _ in range(3):
+            await repo.rebuild_indexes()
+    finally:
+        stop = True
+        await hammer
+
+    assert successes > 0, "the hammer never ran; the test proves nothing"
+    assert not failures, (
+        f"{len(failures)} keyword queries failed across the rebuild — the index "
+        f"went missing. First: {failures[0]}"
+    )
+    # And the rebuild still did its job: the column is indexed afterwards.
+    indexed = {c for i in await table.list_indices() for c in (i.columns or [])}
+    assert "tokens" in indexed
