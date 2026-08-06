@@ -122,6 +122,25 @@ def test_skill_name_allows_cjk_and_spaces() -> None:
     assert fm.name == "修复 Django 自动重载问题"
 
 
+def test_frontmatter_accepts_presanitized_adversarial_name() -> None:
+    """Mirrors ``extract_agent_skill._persist_skill``'s write path: the
+    caller sanitizes ``skill_name`` via
+    :meth:`AgentSkillFrontmatter.sanitize_skill_name` *before* constructing
+    the frontmatter, so a traversal-shaped LLM name never reaches the
+    validator above as a raw, unsanitized string — construction succeeds
+    and the resulting ``name`` is separator-free, rather than raising and
+    dead-lettering the extraction run for a name the writer would have
+    sanitized safely anyway.
+    """
+    adversarial = "../" * 8 + "tmp/pwned"
+    sanitized = AgentSkillFrontmatter.sanitize_skill_name(adversarial)
+
+    fm = AgentSkillFrontmatter(**_kwargs(name=sanitized))
+
+    assert "/" not in fm.name
+    assert "\\" not in fm.name
+
+
 def test_skill_directory_shape_classvars() -> None:
     """Path-shape ClassVars pin the wiki layout for the writer/reader pair."""
     assert AgentSkillFrontmatter.SKILLS_CONTAINER_NAME == "skills"

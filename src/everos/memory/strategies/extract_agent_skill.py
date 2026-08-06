@@ -459,11 +459,25 @@ async def _persist_skill(
     app_id: str,
     project_id: str,
 ) -> None:
-    """Write one ``SKILL.md`` with the post-stamped ``cluster_id``."""
+    """Write one ``SKILL.md`` with the post-stamped ``cluster_id``.
+
+    ``skill.name`` is LLM output and is sanitized once, up front, via
+    :meth:`AgentSkillFrontmatter.sanitize_skill_name` — the same helper
+    :meth:`AgentSkillFrontmatter.skill_dir_name` uses for the directory
+    segment. Sanitizing here (rather than handing the raw name to the
+    frontmatter constructor) keeps ``frontmatter.name`` byte-identical to
+    the on-disk directory name, and means a traversal-shaped LLM name
+    (reachable via prompt injection, since the LLM's input is user
+    conversation content) is made filesystem-safe *before* it reaches
+    ``AgentSkillFrontmatter``, instead of tripping the read-side traversal
+    validator and dead-lettering the whole extraction run for a name the
+    writer would have sanitized safely anyway.
+    """
+    sanitized_name = AgentSkillFrontmatter.sanitize_skill_name(skill.name)
     frontmatter = AgentSkillFrontmatter(
-        id=f"{agent_id}_{skill.name}",
+        id=f"{agent_id}_{sanitized_name}",
         agent_id=agent_id,
-        name=skill.name,
+        name=sanitized_name,
         description=skill.description,
         confidence=skill.confidence,
         maturity_score=skill.maturity_score,
@@ -472,7 +486,7 @@ async def _persist_skill(
     )
     await writer.write_main(
         agent_id,
-        skill.name,
+        sanitized_name,
         frontmatter=frontmatter,
         body=skill.content,
         app_id=app_id,

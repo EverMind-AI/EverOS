@@ -156,6 +156,35 @@ def test_main_path_sanitizes_traversal_skill_name(
     assert path.parent.parent == root.agents_dir() / "agent_x" / "skills"
 
 
+@pytest.mark.parametrize(
+    "raw_name",
+    [
+        "../" * 8 + "tmp/pwned",
+        "修复 Django 自动重载问题",
+    ],
+)
+async def test_presanitized_name_identical_to_directory_segment(
+    root: MemoryRoot, writer: AgentSkillWriter, raw_name: str
+) -> None:
+    """Mirrors ``extract_agent_skill._persist_skill``: sanitize
+    ``skill_name`` once, up front, then use that same sanitized string for
+    both the frontmatter ``name`` field and the writer's ``skill_name``
+    argument. ``frontmatter.name`` must then be byte-identical (an
+    identity, not merely idempotent-if-resanitized) to the directory
+    segment actually written, for both an adversarial and a CJK/space raw
+    name.
+    """
+    sanitized_name = AgentSkillFrontmatter.sanitize_skill_name(raw_name)
+    fm = _make_fm(name=sanitized_name, id=f"agent_x_{sanitized_name}")
+
+    path = await writer.write_main("agent_x", sanitized_name, frontmatter=fm, body="b")
+
+    dir_derived_name = path.parent.name.removeprefix(
+        AgentSkillFrontmatter.SKILL_DIR_PREFIX
+    )
+    assert fm.name == dir_derived_name
+
+
 async def test_write_main_normalises_trailing_newline(
     root: MemoryRoot, writer: AgentSkillWriter
 ) -> None:

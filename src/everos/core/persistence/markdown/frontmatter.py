@@ -232,11 +232,14 @@ class SkillPathMixin:
             SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
             ...
 
-    ``skill_dir_name`` is the single sanitization point both
-    ``AgentSkillWriter`` and ``AgentSkillReader`` derive their
-    ``skill_<name>`` directory segment from — ``skill_name`` is LLM output
-    (see ``memory.strategies.extract_agent_skill``) and must not reach the
-    filesystem unsanitized (CWE-22).
+    ``skill_dir_name`` / ``sanitize_skill_name`` are the single
+    sanitization point both ``AgentSkillWriter`` and ``AgentSkillReader``
+    derive their ``skill_<name>`` directory segment from, and that
+    ``memory.strategies.extract_agent_skill._persist_skill`` uses to
+    sanitize LLM-emitted ``skill_name`` *before* constructing
+    ``AgentSkillFrontmatter`` — ``skill_name`` is LLM output and must not
+    reach the filesystem, or the frontmatter's traversal validator,
+    unsanitized (CWE-22).
     """
 
     SKILLS_CONTAINER_NAME: ClassVar[str]
@@ -253,6 +256,21 @@ class SkillPathMixin:
         )
 
     @classmethod
+    def sanitize_skill_name(cls, skill_name: str) -> str:
+        """Bare sanitized skill name (no ``skill_`` prefix).
+
+        The single sanitization point for a skill's ``name`` value itself —
+        as opposed to :meth:`skill_dir_name`, which additionally prefixes
+        it for the directory segment. Callers building
+        ``AgentSkillFrontmatter.name`` from LLM output (see
+        ``memory.strategies.extract_agent_skill._persist_skill``) route
+        through this *before* constructing the frontmatter, so
+        ``frontmatter.name`` ends up byte-identical to the directory-derived
+        name rather than merely idempotent-if-resanitized.
+        """
+        return sanitize_dirname(skill_name, fallback="unnamed")
+
+    @classmethod
     def skill_dir_name(cls, skill_name: str) -> str:
         """Sanitized ``skill_<name>`` directory segment (traversal-safe).
 
@@ -262,8 +280,7 @@ class SkillPathMixin:
         the on-disk directory and a writer deriving it from raw LLM output
         land on the same path.
         """
-        safe_name = sanitize_dirname(skill_name, fallback="unnamed")
-        return f"{cls.SKILL_DIR_PREFIX}{safe_name}"
+        return f"{cls.SKILL_DIR_PREFIX}{cls.sanitize_skill_name(skill_name)}"
 
 
 class ProfilePathMixin:

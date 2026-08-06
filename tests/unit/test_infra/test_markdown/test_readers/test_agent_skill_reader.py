@@ -207,14 +207,19 @@ async def test_frontmatter_name_and_directory_name_agree_after_sanitization(
     ``_hydrate_algo_skills``-style re-read (raw ``fm.name``) must land on
     the same file.
 
-    This is the exact seam sanitization would break if the writer and
-    reader derived the ``skill_<name>`` segment independently:
-    ``list_by_cluster`` recovers ``skill_name`` from the on-disk
-    (already-sanitized) directory, while
-    ``memory.strategies.extract_agent_skill._hydrate_algo_skills`` re-reads
-    using the frontmatter's raw ``name`` field. Routing both through the
-    same ``skill_dir_name`` classmethod keeps them consistent because
-    sanitization is idempotent.
+    In production, ``extract_agent_skill._persist_skill`` sanitizes
+    ``skill_name`` *before* constructing ``AgentSkillFrontmatter``, so
+    ``fm.name`` is already the directory-derived name — an identity, not
+    just an idempotency argument (see
+    ``test_agent_skill_writer.test_presanitized_name_identical_to_directory_segment``
+    for that proof). This test instead writes via the *raw*, unsanitized
+    name directly through the writer (bypassing ``_persist_skill``) to
+    prove the reader-side idempotency guarantee holds even for a caller
+    that doesn't pre-sanitize: ``list_by_cluster`` recovers ``skill_name``
+    from the on-disk (already-sanitized) directory, while a
+    ``_hydrate_algo_skills``-style re-read uses the frontmatter's raw
+    ``name`` field. Routing both through the same ``skill_dir_name``
+    classmethod keeps them consistent because sanitization is idempotent.
     """
     space_name = "修复 Django 自动重载问题"
     await writer.write_main(
