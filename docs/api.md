@@ -1073,7 +1073,7 @@ Manually trigger a registered OME strategy.
 | `status` | `"ok" \| "timeout" \| "not_dispatched"` | `ok` = every dispatched run settled — a dead-lettered run still counts as settled (see `runs[*].error`); `timeout` = at least one run had not settled when `timeout` elapsed; `not_dispatched` = no strategy was dispatched (see below) |
 | `name` | `string` | Echoes the requested strategy name |
 | `dispatched` | `int` | Number of strategy routes enqueued. `0` iff `status == "not_dispatched"` |
-| `runs` | `list[RunSummary]` | One entry per dispatched run: `{run_id: string, status: string, error?: string}`. `status` is one of `running` / `success` / `failed` / `dead_letter` / `crashed`. Includes dead-lettered runs |
+| `runs` | `list[RunSummary]` | One entry per strategy run *attempt*, not per dispatched route: `{run_id: string, status: string, error?: string}`. A strategy that retried before settling contributes multiple entries sharing one `event_id`. `status` is one of `running` / `success` / `failed` / `dead_letter` / `crashed`. Includes dead-lettered runs |
 
 **`not_dispatched`** means every subscriber was rejected by one of the
 four dispatch gates (`_routes_to` / `enabled` / `applies_to` /

@@ -75,11 +75,12 @@ def _to_everalgo_doc_metadata(
     across several fields (``name``/``description`` for skills,
     ``task_intent``/``approach`` for cases), so ``format_passage`` is the
     same kind-shaped formatter the reranker uses — this keeps the passage the
-    LLM sufficiency check sees identical to the passage the reranker scores,
-    and guarantees a non-empty ``content`` even for a name-only skill (a
-    single raw field can be empty; the formatter falls back to whichever
-    field is populated). An empty ``content`` makes ``_format_docs`` raise
-    ``ValueError``. Mirrors the episode path's bridge in ``agentic.py``.
+    LLM sufficiency check sees identical to the passage the reranker scores.
+    ``content`` is non-empty as long as at least one of the two source
+    fields is populated (the formatter falls back to whichever is set); a
+    row where both are empty still yields ``""``, which makes
+    ``_format_docs`` raise ``ValueError``. Mirrors the episode path's bridge
+    in ``agentic.py``.
     ``_restore_shaper_metadata`` reverts it before DTO shaping.
     """
     bridged = dict(metadata)
@@ -122,7 +123,6 @@ async def search_agent_cases_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
-    radius: float | None = None,
 ) -> list[SearchAgentCaseItem]:
     """Agent-case AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -134,9 +134,6 @@ async def search_agent_cases_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum cases to return.
-        radius: Minimum fused hybrid score a candidate must clear to survive
-            Round 1 recall (``None`` disables the floor). Mirrors the HYBRID
-            lane's ``min_score`` behavior.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentCaseItem`` objects.
@@ -149,7 +146,6 @@ async def search_agent_cases_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
-        radius=radius,
         kind="case",
     )
     return [
@@ -169,7 +165,6 @@ async def search_agent_skills_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
-    radius: float | None = None,
 ) -> list[SearchAgentSkillItem]:
     """Agent-skill AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -181,9 +176,6 @@ async def search_agent_skills_agentic(
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
         top_k: Maximum skills to return.
-        radius: Minimum fused hybrid score a candidate must clear to survive
-            Round 1 recall (``None`` disables the floor). Mirrors the HYBRID
-            lane's ``min_score`` behavior.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentSkillItem`` objects.
@@ -196,7 +188,6 @@ async def search_agent_skills_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
-        radius=radius,
         kind="skill",
     )
     return [
@@ -216,7 +207,6 @@ async def _run_agentic_retrieve(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
-    radius: float | None,
     kind: Literal["case", "skill"],
 ) -> list[Candidate]:
     """Shared flat agentic retrieve pipeline for agent memory kinds.
@@ -261,7 +251,6 @@ async def _run_agentic_retrieve(
                 dense_candidates=_DENSE_CANDIDATES,
                 sparse_candidates=_SPARSE_CANDIDATES,
                 rrf_k=_HYBRID_RRF_K,
-                min_score=radius,
             )
         # Bridge to the everalgo doc contract so ``_format_docs`` (the LLM
         # sufficiency / multi-query prompt) sees an episode dict + ms

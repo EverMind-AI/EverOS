@@ -57,10 +57,12 @@ class TriggerResponse(BaseModel):
     """Number of strategy routes that were enqueued. ``0`` iff status is
     ``not_dispatched``."""
     runs: list[RunSummary] = []
-    """One entry per dispatched run. Includes dead-lettered runs whose
-    errors would otherwise be invisible to the caller (they live in
-    the SQLite ``run_record`` table with no HTTP surface until this
-    field was added)."""
+    """One entry per strategy run *attempt*, not per dispatched route: a
+    strategy that retried before settling contributes multiple entries
+    sharing one ``event_id``. Includes dead-lettered runs whose errors
+    would otherwise be invisible to the caller (they live in the SQLite
+    ``run_record`` table with no HTTP surface until this field was
+    added)."""
 
 
 @router.post("/trigger", response_model=TriggerResponse)

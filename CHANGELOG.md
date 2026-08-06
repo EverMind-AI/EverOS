@@ -23,19 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were previously invisible to the caller. **If your client matches
   `status` exhaustively (Python `Literal`, TypeScript union), add a
   `not_dispatched` branch.**
-- **Agentic search on agent memory now honors `radius` and uses the
-  skill-shaped rerank passage.** Both were silently no-ops before —
-  `SearchRequest.radius` never reached the recall filter, and the
-  cross-encoder saw only the raw `description` field instead of the
-  `name + description + skill instruction` triple that the HYBRID lane uses.
-  A skill with empty `description` (a legal everalgo output — see
-  `everalgo/agent_memory/skill_ops.py:294`) no longer causes HTTP 500 during
-  the LLM sufficiency check.
+- **Agentic search on agent memory now uses the skill-shaped rerank
+  passage.** The cross-encoder previously saw only the raw `description`
+  field instead of the `name + description + skill instruction` triple that
+  the HYBRID lane uses. A skill with empty `description` (a legal everalgo
+  output — see `everalgo/agent_memory/skill_ops.py:294`) no longer causes
+  HTTP 500 during the LLM sufficiency check.
 - **OME strategy retries now back off between attempts.** A retry-class error
   (e.g. waiting on eventually-consistent state) previously exhausted its
   `max_retries` budget in milliseconds; the loop now sleeps
   `min(base * 2**(attempt-1), cap)` plus up to `jitter` seconds
-  (defaults: `1s / 10s / 0.5s`, configurable via `[ome]` in `everos.toml`).
+  (defaults: `1s` base / `10s` cap / `0.5s` jitter — code-only defaults,
+  not currently exposed via `everos.toml` or `ome.toml`).
 - **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /
   `find_where_paginated` / `search`). The write-side deadline work skipped them
   on the reasoning that a read takes no lock and so blocks no writer — true, but
@@ -146,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `OfflineEngine.trigger_manual` now returns
+  `tuple[BaseEvent, list[tuple[StrategyMeta, str]]]` instead of `None`,
+  enabling the `dispatched`/`runs` fields below.
 - `TriggerResponse` gains `dispatched: int` and `runs: list[RunSummary]`.
 - `OMEConfig` gains `retry_backoff_base_seconds`, `retry_backoff_cap_seconds`,
   and `retry_jitter_seconds` for the retry-loop sleep.

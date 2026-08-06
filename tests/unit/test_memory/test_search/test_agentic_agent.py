@@ -9,8 +9,8 @@ Two groups of tests:
 * Black-box (does NOT patch ``aagentic_retrieve``): exercises the real
   ``_format_docs`` prompt-rendering path and the real kind-shaped rerank_fn
   via ``everalgo.testing.fake_llm.FakeLLMClient``. These pin the regression
-  fixed by the metadata-bridge refactor (empty-description skill -> 500),
-  the ``radius``/``min_score`` wiring, and the skill/case rerank-fn swap.
+  fixed by the metadata-bridge refactor (empty-description skill -> 500)
+  and the skill/case rerank-fn swap.
 
 The skill verify step has been removed from production code; this test
 module covers the agentic retrieve flow only.
@@ -309,7 +309,7 @@ _SUFFICIENT_LLM_RESPONSE = json.dumps(
 
 class _StubSkillRecallerAsym:
     """Like ``_StubSkillRecaller`` but with independently controllable
-    dense/sparse routes, needed to pin an exact fused score (radius test)."""
+    dense/sparse routes, needed to pin an exact fused score."""
 
     kind: ClassVar[str] = "agent_skill"
     everalgo_memory_type: ClassVar[str] = "skill"
@@ -398,41 +398,6 @@ async def test_agentic_survives_name_only_skill() -> None:
 
     assert len(result) == 1
     assert result[0].name == "rotate_secrets"
-
-
-async def test_agentic_honors_radius() -> None:
-    """A candidate whose fused hybrid score is below ``radius`` is dropped
-    from Round 1 recall before it ever reaches the reranker or the LLM --
-    ``ahybrid_retrieve``'s ``min_score`` mirrors the HYBRID lane's radius
-    floor (``manager._effective_radius``). Sparse recall returns nothing so
-    the fused score is exactly the dense score, keeping the assertion
-    unambiguous."""
-    kept = Candidate(
-        id="s_kept",
-        score=0.9,
-        source="vector",
-        metadata=_skill_metadata(name="skill_kept", description="kept"),
-    )
-    dropped = Candidate(
-        id="s_dropped",
-        score=0.3,
-        source="vector",
-        metadata=_skill_metadata(name="skill_dropped", description="dropped"),
-    )
-    recaller = _StubSkillRecallerAsym(dense=[kept, dropped], sparse=[])
-
-    result = await search_agent_skills_agentic(
-        "which skill applies here?",
-        where="owner_id = 'agent_a' AND owner_type = 'agent'",
-        skill_recaller=recaller,
-        embed_query_fn=_fake_embed,
-        reranker=_IdentityReranker(),
-        llm=FakeLLMClient(responses=[_SUFFICIENT_LLM_RESPONSE]),
-        top_k=5,
-        radius=0.5,
-    )
-
-    assert [item.id for item in result] == ["s_kept"]
 
 
 async def test_agentic_uses_skill_rerank_passage() -> None:

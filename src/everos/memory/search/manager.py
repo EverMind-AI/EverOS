@@ -447,7 +447,6 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
-                radius=_effective_radius(req),
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_case")
         enable_rerank = _effective_llm_rerank(req)
@@ -510,7 +509,6 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
-                radius=_effective_radius(req),
             )
         fusion_mode, _ = resolve_pipeline(req.method, "agent_skill")
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
