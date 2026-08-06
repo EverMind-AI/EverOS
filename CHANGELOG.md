@@ -54,17 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backoff. A soak run at a 600s cadence hit 3 conflicts in 119 attempts, all
   while a concurrent CLI storm was running.
 
-### Removed
-
-- **The empty-index-dir sweep.** `cleanup_older_than` deletes the files under a
-  superseded `_indices/<uuid>/` but leaves the directory, so husks accumulate
-  (a soak run reached 13061 dirs, 98% empty) and everos swept them with its own
-  `rmdir`. Nothing in the LanceDB contract says an empty index dir is garbage,
-  and reaching into lance's internal layout to delete directories is not worth
-  the risk for inode pressure; the behaviour is being raised upstream. This is
-  a *separate* gap from index files not being reclaimed at all under
-  `delete_unverified=False` (measured: 260MB retained on a 19k-row soak table)
-  — fixing that one still leaves the empty directories behind.
 - **The index-rebuild sweep can no longer park forever** waiting on the
   optimize runner. That wait had no deadline, and the runner's loop condition is
   "keep going while there is unindexed data" — which under sustained writes is
@@ -86,6 +75,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already done), but it now logs `memory_root_lock_waiting` and gives up after
   `timeout_seconds` (default 300s) instead of leaving a server startup looking
   like a hang whose last message is `lifespan_provider_startup name=lancedb`.
+
+### Removed
+
+- **The empty-index-dir sweep.** `cleanup_older_than` deletes the files under a
+  superseded `_indices/<uuid>/` but leaves the directory, so husks accumulate
+  (a soak run reached 13061 dirs, 98% empty) and everos swept them with its own
+  `rmdir`. Nothing in the LanceDB contract says an empty index dir is garbage,
+  and reaching into lance's internal layout to delete directories is not worth
+  the risk for inode pressure; the behaviour is being raised upstream. This is
+  a *separate* gap from index files not being reclaimed at all under
+  `delete_unverified=False` (measured: 260MB retained on a 19k-row soak table)
+  — fixing that one still leaves the empty directories behind.
 
 ### Changed
 
