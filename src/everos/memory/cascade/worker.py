@@ -77,6 +77,26 @@ DEFAULT_MAX_RETRY = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
 DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 10.0
+"""Throttle between ``optimize()`` runs on one kind.
+
+Not a visibility delay. A row is searchable the moment its upsert commits —
+LanceDB flat-scans the unindexed tail, and that covers BM25 as well as vector
+and scalar (verified: a row with ``num_unindexed_rows=1`` is returned by
+``nearest_to_text``). What ``optimize`` buys is folding that row out of the tail
+and into the index, i.e. speed. Sparse writes do not even wait: the scheduler
+uses ``max(0, interval - elapsed)``, so when the last run is already older than
+the interval the next one starts immediately.
+
+It is also the **ceiling on index-directory growth**, which is the reason to
+think twice before lowering it. Every beat leaves new ``_indices/<uuid>/``
+dirs behind, and lance never removes the empty ones, so the accrual rate is
+capped by this interval rather than by write volume: past roughly one write per
+table per interval the beats coalesce and writing harder adds nothing. Measured
+at that ceiling: ~127k dirs/day across three active tables, ~890k at the 7-day
+reclaim horizon (~3.6GB of empty dirs). Raising this interval lowers that
+proportionally — 60s would cut it to a sixth — at the cost of a longer
+flat-scanned tail.
+"""
 DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS = 60.0
 _OPTIMIZE_FAILURE_ALERT_THRESHOLD = 5
 """Consecutive **non-benign** ``optimize()`` failures (per kind) before

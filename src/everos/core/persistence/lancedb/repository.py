@@ -85,6 +85,18 @@ index UUID that no manifest references is only assumed dead once it is at least
 still in progress. Matching the threshold means this sweep can never be more
 aggressive than lance itself — the earlier 300s value was our invention, and
 that is precisely what made it unjustifiable.
+
+**The cost of the 7-day gate is accepted, with numbers.** Nothing reclaims an
+empty index dir before then, and each one costs an inode plus one 4KB block.
+Measured on a soak at ceiling load (see
+``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``): ~127k dirs/day, so a 7-day steady
+state is ~890k dirs = **~3.6GB of empty directories and 14% of a default 98GB
+ext4's inodes**. That is the worst case, not the expected one — it needs
+sustained saturation, and a single-user deployment writing a few hundred times
+a day sits four orders of magnitude below it (tens of MB). Platform-wise only
+ext4 has a fixed inode budget at all; APFS and xfs allocate dynamically, and
+Windows is out of scope. The knob to reach for if this ever does bite is the
+optimize cooldown, not this threshold — see there.
 """
 
 _HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
