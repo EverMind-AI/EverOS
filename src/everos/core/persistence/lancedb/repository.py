@@ -15,10 +15,12 @@ import datetime as dt
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, ClassVar
 
 from lancedb import AsyncTable
 
+from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import VectorStoreBusyError
 from everos.core.observability.logging import get_logger
 
@@ -73,6 +75,24 @@ task per kind and skips a kind whose task is in flight, so a compaction that
 never returns parks that kind's maintenance permanently. Measured at ~460ms on
 a table with 77 retained versions."""
 
+_HUSK_MIN_AGE_SECONDS = 7 * 24 * 60 * 60.0
+"""Minimum age of an empty ``_indices/<uuid>/`` dir before it is removed.
+
+Deliberately **lance's own number**, not one of ours. ``cleanup.rs`` defines
+``UNVERIFIED_THRESHOLD_DAYS = 7`` and uses it for exactly this judgement: an
+index UUID that no manifest references is only assumed dead once it is at least
+7 days old, because before that it is indistinguishable from an index build
+still in progress. Matching the threshold means this sweep can never be more
+aggressive than lance itself — the earlier 300s value was our invention, and
+that is precisely what made it unjustifiable.
+"""
+
+_HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
+"""Deadline on the (lock-free) husk sweep. Same last-resort role as
+:data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
+task is in flight, so a sweep that never returns would park that kind's
+maintenance forever. Measured at ~460ms over 13061 dirs in the soak."""
+
 _READ_TIMEOUT_SECONDS = 60.0
 """Deadline on every read. Reads take no lock, so a hung read blocks no writer
 — but it does park the caller, and the cascade drain loop reads on every batch
@@ -106,6 +126,51 @@ def _q(value: str) -> str:
     is defensive.
     """
     return value.replace("'", "''")
+
+
+def _remove_empty_index_dirs(
+    table_uri: str, *, live_uuids: frozenset[str], min_age_seconds: float
+) -> int:
+    """Remove empty ``_indices/<uuid>/`` husks under a table dir; return count.
+
+    lance's cleanup unlinks the *files* of a superseded index but never the
+    directory — ``cleanup.rs`` contains no ``rmdir``/``remove_dir`` at all, and
+    that is structural rather than an oversight: lance is written against an
+    object store where paths are flat keys and an "empty directory" does not
+    exist. Only a local filesystem materialises them, where they accumulate as
+    inodes and slow every directory scan (a soak run reached 13061 dirs, 98%
+    empty).
+
+    Three independent guarantees, in order of strength:
+
+    1. **``rmdir`` cannot delete data.** The kernel refuses it on a non-empty
+       directory (``ENOTEMPTY``). No file can be lost through this function
+       whatever the rest of the logic decides — and because the check *is* the
+       operation, there is no check-then-act window to race.
+    2. **Live indexes are excluded** by UUID, read from ``list_indices()``.
+    3. **Anything else waits out lance's own conservatism bound**
+       (:data:`_HUSK_MIN_AGE_SECONDS`): a directory a concurrent
+       ``create_index`` just made is seconds old, so it can never qualify.
+
+    Best-effort throughout: a directory that becomes non-empty, vanishes, or is
+    unreadable between listing and ``rmdir`` is skipped, not an error.
+    """
+    indices = Path(table_uri) / "_indices"
+    if not indices.is_dir():
+        return 0
+    cutoff = get_utc_now().timestamp() - min_age_seconds
+    removed = 0
+    for child in indices.iterdir():
+        if not child.is_dir() or child.name in live_uuids:
+            continue
+        try:
+            if child.stat().st_mtime > cutoff:
+                continue
+            child.rmdir()
+        except OSError:
+            continue
+        removed += 1
+    return removed
 
 
 class LanceRepoBase[T: BaseLanceTable]:
@@ -408,17 +473,20 @@ class LanceRepoBase[T: BaseLanceTable]:
            load comes from running under the write lock so the cleanup commit
            never loses the manifest race, not from the flag.
 
-        ``cleanup_older_than`` deletes the *files* under a superseded
-        ``_indices/<uuid>/`` but leaves the now-empty directory behind, so
-        those husks accumulate (a soak run reached 13061 dirs, 98% empty).
-        everos used to sweep them with its own ``rmdir``; that has been removed
-        because nothing in the LanceDB contract says an empty index dir is
-        garbage, and reaching into lance's internal layout to delete
-        directories is not a risk worth taking for inode pressure. The
-        behaviour is being raised upstream. Note this is a *separate* gap from
-        the files not being reclaimed at all under ``delete_unverified=False``
-        (measured: 260MB retained on a 19k-row soak table) — solving that one
-        still leaves the empty directories.
+        ``cleanup_older_than`` deletes the *files* under a
+        superseded ``_indices/<uuid>/`` but never the directory (lance's
+        ``cleanup.rs`` contains no directory removal at all — it is written
+        against an object store where an empty directory does not exist), so
+        those husks accumulate on a local filesystem: a soak run reached 13061
+        dirs, 98% empty. They are swept here, outside the lock — see
+        :func:`_remove_empty_index_dirs` for why that is safe.
+
+        This is a *separate* gap from index files not being reclaimed while
+        they are young: lance skips an index UUID that no manifest references
+        until it is 7 days old, and a short retention window deletes those
+        manifests first, so the files lose their last reference and wait out
+        the full 7 days (measured: 260MB retained on a 19k-row soak table,
+        reclaimed in full once backdated past the threshold).
 
         The trade-off is a brief write stall (~seconds on a churned table,
         dominated by the cleanup's file scan/delete — flat, not proportional
@@ -430,6 +498,27 @@ class LanceRepoBase[T: BaseLanceTable]:
         async with self._locked(_PRUNE_TIMEOUT_SECONDS, "prune"):
             table = await self._table()
             await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
+            table_uri = await table.uri()
+            live_uuids = frozenset(
+                i.index_uuid for i in await table.list_indices() if i.index_uuid
+            )
+        # Lock-free: the sweep can only ``rmdir``, which the kernel refuses on a
+        # non-empty directory, so it cannot lose data no matter who else is
+        # writing. Keeping it out of the critical section also means a slow
+        # filesystem walk cannot overrun the prune budget.
+        async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
+            removed = await asyncio.to_thread(
+                _remove_empty_index_dirs,
+                table_uri,
+                live_uuids=live_uuids,
+                min_age_seconds=_HUSK_MIN_AGE_SECONDS,
+            )
+        if removed:
+            logger.debug(
+                "lancedb_pruned_empty_index_dirs",
+                table=self.table_name,
+                removed=removed,
+            )
 
     async def rebuild_indexes(self) -> None:
         """Drop and re-create every index on this table.

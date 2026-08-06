@@ -46,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — measured 0 failures across 49 queries spanning 3 replaces, versus 55
   failures for the same test against drop-then-create — and collapses the live
   index fragment set exactly as before (7 index files back to 4).
+- **The empty-index-dir sweep is bounded by lance's own threshold.** lance's
+  `cleanup.rs` unlinks a superseded index's files but never its directory — it
+  contains no `rmdir` at all, which is structural rather than an oversight: it
+  targets object stores, where paths are flat keys and an empty directory does
+  not exist. Only a local filesystem materialises them, and a soak run reached
+  13061 dirs, 98% empty. everos sweeps them, now with three independent
+  guarantees instead of a self-chosen age: `rmdir` cannot delete a non-empty
+  directory (the kernel refuses it, so no file can be lost and there is no
+  check-then-act window), live index UUIDs are excluded via `list_indices()`,
+  and anything else must outlive `UNVERIFIED_THRESHOLD_DAYS = 7` — lance's own
+  bound for deciding an unreferenced index UUID is dead rather than mid-build.
+  The previous 300s was our invention, which is what made it indefensible.
 - **A rebuild that loses a commit race is retried** instead of waiting out the
   full 12h cadence. Lance labels the conflict `Retryable` and it is: a
   concurrent writer in another process won the manifest, nothing is wrong with
@@ -75,18 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already done), but it now logs `memory_root_lock_waiting` and gives up after
   `timeout_seconds` (default 300s) instead of leaving a server startup looking
   like a hang whose last message is `lifespan_provider_startup name=lancedb`.
-
-### Removed
-
-- **The empty-index-dir sweep.** `cleanup_older_than` deletes the files under a
-  superseded `_indices/<uuid>/` but leaves the directory, so husks accumulate
-  (a soak run reached 13061 dirs, 98% empty) and everos swept them with its own
-  `rmdir`. Nothing in the LanceDB contract says an empty index dir is garbage,
-  and reaching into lance's internal layout to delete directories is not worth
-  the risk for inode pressure; the behaviour is being raised upstream. This is
-  a *separate* gap from index files not being reclaimed at all under
-  `delete_unverified=False` (measured: 260MB retained on a 19k-row soak table)
-  — fixing that one still leaves the empty directories behind.
 
 ### Changed
 

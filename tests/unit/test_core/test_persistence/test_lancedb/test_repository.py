@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import os
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -736,6 +739,12 @@ async def test_prune_holds_write_lock_and_is_cross_process_safe(
         async def uri(self) -> str:
             return str(tmp_path)
 
+        async def list_indices(self):  # type: ignore[no-untyped-def]
+            # Mirrors the real signature: prune reads live index UUIDs so the
+            # husk sweep can spare them. A double that omits it hides a real
+            # TypeError behind a green test.
+            return []
+
     repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
     await repo.prune(dt.timedelta(seconds=42))
 
@@ -1040,3 +1049,85 @@ async def test_rebuild_never_leaves_the_column_without_an_fts_index(
     # And the rebuild still did its job: the column is indexed afterwards.
     indexed = {c for i in await table.list_indices() for c in (i.columns or [])}
     assert "tokens" in indexed
+
+
+def _aged(path: Path, seconds: float) -> Path:
+    """Backdate ``path`` so the sweep's age gate accepts it."""
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+    return path
+
+
+class _SweepTable:
+    """Prune-path double: no-op optimize, a uri(), and a live index list."""
+
+    def __init__(self, uri: str, live: tuple[str, ...] = ()) -> None:
+        self._uri = uri
+        self._live = live
+
+    async def optimize(self, **_kw):  # type: ignore[no-untyped-def]
+        return None
+
+    async def uri(self) -> str:
+        return self._uri
+
+    async def list_indices(self):  # type: ignore[no-untyped-def]
+        return [SimpleNamespace(index_uuid=u) for u in self._live]
+
+
+async def test_husk_sweep_only_takes_dead_empty_old_dirs(tmp_path: Path) -> None:
+    """Every case the sweep must refuse, in one pass.
+
+    lance's cleanup unlinks an index's files but never its directory (there is
+    no ``rmdir`` anywhere in ``cleanup.rs`` — it targets object stores, where an
+    empty directory is not a thing), so on a local filesystem the husks pile up:
+    13061 dirs in one soak run, 98% empty. Sweeping them is ours to do, which
+    means the refusals are what needs pinning down.
+    """
+    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
+
+    indices = tmp_path / "_indices"
+    old = _HUSK_MIN_AGE_SECONDS * 2
+
+    dead = indices / "dead-uuid"
+    dead.mkdir(parents=True)
+    live = indices / "live-uuid"
+    fresh = indices / "being-built-right-now"
+    populated = indices / "has-files"
+    for d in (live, fresh, populated):
+        d.mkdir()
+    (populated / "part_0").write_text("index data")
+    for d in (dead, live, populated):
+        _aged(d, old)  # only `fresh` keeps its current mtime
+
+    repo = _NoteRepo(table=_SweepTable(str(tmp_path), live=("live-uuid",)))  # type: ignore[arg-type]
+    await repo.prune(dt.timedelta(seconds=1))
+
+    assert not dead.exists(), "a dead, empty, aged husk is the whole point"
+    assert live.exists(), (
+        "a UUID still in list_indices() must be spared even when its dir looks "
+        "empty and old"
+    )
+    assert fresh.exists(), (
+        "a dir younger than lance's own 7-day unverified threshold may be an "
+        "index build in progress"
+    )
+    assert populated.exists() and (populated / "part_0").exists(), (
+        "rmdir is refused by the kernel on a non-empty dir — no file can ever "
+        "be lost here"
+    )
+
+
+def test_husk_age_gate_matches_lance_own_threshold() -> None:
+    """The age bound is lance's number, not one we picked.
+
+    ``cleanup.rs`` sets ``UNVERIFIED_THRESHOLD_DAYS = 7`` and applies it to
+    exactly this judgement: an index UUID no manifest references is only assumed
+    dead once it is that old, because until then it is indistinguishable from an
+    in-progress build. Matching it means this sweep can never be more aggressive
+    than lance itself. An earlier version used 300s — our own invention, and the
+    reason the sweep was not defensible.
+    """
+    from everos.core.persistence.lancedb.repository import _HUSK_MIN_AGE_SECONDS
+
+    assert _HUSK_MIN_AGE_SECONDS == 7 * 24 * 60 * 60.0
