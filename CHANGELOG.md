@@ -63,11 +63,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `".."` verbatim without this fallback — cannot resolve to the same
   directory or its parent; this closes both the agent-skill case and an
   equivalent one-level escape on the knowledge-upload path, which has no
-  `skill_`-style prefix protecting its sanitized segment. No data
-  migration: agent-skill extraction has never successfully produced a
-  `SKILL.md` before this release (see the cascade-lag fix above), so
-  there is no legacy skill corpus whose directory names would change
-  under the new sanitizer. Sanitizing is lossy: skills whose raw names
+  `skill_`-style prefix protecting its sanitized segment. **No data
+  migration is needed for agent skills**: extraction has never
+  successfully produced a `SKILL.md` before this release (see the
+  cascade-lag fix above), so there is no legacy skill corpus whose
+  directory names would change. **Knowledge documents do have a
+  pre-existing corpus**, and two inputs resolve to a different directory
+  than before: a decomposed (NFD) topic or category now keeps its
+  combining marks (`"Résumé"` no longer degrades to `"Resume"`) because
+  the shared helper NFC-normalizes first, and a topic or category of
+  exactly `.` or `..` now falls back instead of resolving onto the
+  parent directory. Precomposed input — including CJK — is unaffected;
+  the character class is unchanged from the previous private copy.
+  Sanitizing is lossy: skills whose raw names
   differ only in characters the sanitizer drops or replaces (e.g.
   `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and so do
   names differing only in a combining mark regardless of script (e.g.
@@ -75,6 +83,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and is stripped either way; same for Thai tone marks, Hebrew niqqud,
   Arabic harakat). The later write wins — the earlier skill's
   `source_case_ids`, `maturity_score`, and body are silently lost, not
+  merged. Case is *not* folded, so `"Fix Django"` and `"fix django"` stay
+  two distinct sanitized names — two LanceDB rows, but one directory on a
+  case-insensitive filesystem (macOS APFS and Windows NTFS defaults),
+  where the index then advertises a name whose content was overwritten.
+  This is accepted for now rather than mitigated: detecting a collision
+  and raising would reintroduce the dead-letter DoS the sanitizer was
+  built to avoid, and a disambiguating suffix — the workable option —
+  needs a collision probe plus a case-folding rule, so it is deferred to
+  a deliberate pass rather than added here.
+- **A single unparseable `SKILL.md` no longer disables skill extraction
+  for its whole cluster.** `AgentSkillReader.list_by_cluster` propagated
+  any frontmatter `ValidationError`, which aborted the enumeration that
+  feeds `extract_agent_skill` its existing skills — so one hand-edited
+  file (or, after a future schema revision adds a required field, every
+  existing file at once) dead-lettered that cluster's extraction on every
+  run. Offending files are now logged and skipped. `read_main` still
+  raises, since a caller naming one specific skill needs to hear about
+  corruption rather than receive the `None` that already means "not
+  created yet".
   merged. This is accepted, not mitigated, on two grounds: a
   disambiguating suffix would break the `name` ≡ directory-suffix
   identity the reader/writer relies on, and detecting a collision and
@@ -231,6 +258,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`SkillClusterUpdated` carries the case's 1024-dim embedding, growing the
+  OME `run_record` table.** The event payload is persisted verbatim in
+  `run_record.event_payload` (and in the APScheduler jobstore while a job is
+  queued), so a `skill_cluster_updated` record goes from roughly 0.8 KB to
+  14 KB. At the default `max_records_per_strategy = 1000` ring buffer that is
+  ~14 MB for this one strategy instead of ~0.8 MB. **Operators sizing
+  `~/.everos/.index/sqlite/ome.db` should expect this.** The vector is only
+  read when a cluster holds more skills than `MAX_SKILLS_IN_PROMPT`, so it
+  usually rides along unused; trimming it from the persisted copy is not a
+  local change, because crash recovery replays `event_payload` to rebuild the
+  event and a trimmed payload would silently take the recovered run down a
+  different branch than the original. Tracked as a follow-up.
 - **`cascade_lancedb_optimize_conflict` now records `pruned`** — which
   maintenance beat lost the commit race. Lance labels both beats' commit the
   same way (`This Rewrite transaction was preempted by concurrent transaction
