@@ -36,6 +36,8 @@ from typing import Any, ClassVar, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from .path_safety import sanitize_dirname
+
 # ── YAML helpers ────────────────────────────────────────────────────────
 
 _DELIM = "---"
@@ -229,6 +231,12 @@ class SkillPathMixin:
             SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
             SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
             ...
+
+    ``skill_dir_name`` is the single sanitization point both
+    ``AgentSkillWriter`` and ``AgentSkillReader`` derive their
+    ``skill_<name>`` directory segment from — ``skill_name`` is LLM output
+    (see ``memory.strategies.extract_agent_skill``) and must not reach the
+    filesystem unsanitized (CWE-22).
     """
 
     SKILLS_CONTAINER_NAME: ClassVar[str]
@@ -243,6 +251,19 @@ class SkillPathMixin:
             f"*/*/{cls.SCOPE_DIR}/*/{cls.SKILLS_CONTAINER_NAME}/"
             f"{cls.SKILL_DIR_PREFIX}*/{cls.SKILL_MAIN_FILENAME}"
         )
+
+    @classmethod
+    def skill_dir_name(cls, skill_name: str) -> str:
+        """Sanitized ``skill_<name>`` directory segment (traversal-safe).
+
+        Idempotent in ``skill_name``: calling this again on an already
+        sanitized name (e.g. one recovered by walking the directory tree)
+        returns the same segment, so a reader deriving ``skill_name`` from
+        the on-disk directory and a writer deriving it from raw LLM output
+        land on the same path.
+        """
+        safe_name = sanitize_dirname(skill_name, fallback="unnamed")
+        return f"{cls.SKILL_DIR_PREFIX}{safe_name}"
 
 
 class ProfilePathMixin:

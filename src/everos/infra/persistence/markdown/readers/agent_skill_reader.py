@@ -19,7 +19,10 @@ need to distinguish "missing" from "empty body" check for ``None``
 explicitly.
 
 Path resolution mirrors :class:`AgentSkillWriter` and reads the same
-ClassVars off :class:`AgentSkillFrontmatter`.
+ClassVars off :class:`AgentSkillFrontmatter`, including
+:meth:`AgentSkillFrontmatter.skill_dir_name` for the traversal-safe
+directory segment — the reader and writer must never diverge on how a
+``skill_name`` maps to a directory.
 """
 
 from __future__ import annotations
@@ -185,9 +188,9 @@ class AgentSkillReader:
     def _skill_dir(
         self, agent_id: str, skill_name: str, app_id: str, project_id: str
     ) -> Path:
-        return self._skills_root(agent_id, app_id, project_id) / (
-            f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
-        )
+        return self._skills_root(
+            agent_id, app_id, project_id
+        ) / AgentSkillFrontmatter.skill_dir_name(skill_name)
 
     def _main_path(
         self, agent_id: str, skill_name: str, app_id: str, project_id: str

@@ -198,3 +198,46 @@ async def test_list_by_cluster_missing_dir_returns_empty(
 ) -> None:
     """New agent with no skill dir yet — returns [] without raising."""
     assert await reader.list_by_cluster("a_new", "cl1") == []
+
+
+async def test_frontmatter_name_and_directory_name_agree_after_sanitization(
+    writer: AgentSkillWriter, reader: AgentSkillReader
+) -> None:
+    """``list_by_cluster`` (directory-derived name) and
+    ``_hydrate_algo_skills``-style re-read (raw ``fm.name``) must land on
+    the same file.
+
+    This is the exact seam sanitization would break if the writer and
+    reader derived the ``skill_<name>`` segment independently:
+    ``list_by_cluster`` recovers ``skill_name`` from the on-disk
+    (already-sanitized) directory, while
+    ``memory.strategies.extract_agent_skill._hydrate_algo_skills`` re-reads
+    using the frontmatter's raw ``name`` field. Routing both through the
+    same ``skill_dir_name`` classmethod keeps them consistent because
+    sanitization is idempotent.
+    """
+    space_name = "修复 Django 自动重载问题"
+    await writer.write_main(
+        "a1",
+        space_name,
+        frontmatter=_make_fm(
+            id="a1_django_reload_fix",
+            agent_id="a1",
+            name=space_name,
+            cluster_id="cl1",
+        ),
+        body="The fix body.",
+    )
+
+    listed = await reader.list_by_cluster("a1", "cl1")
+    assert len(listed) == 1
+    fm = listed[0]
+    assert fm.name == space_name
+
+    # Re-derive the path from the raw frontmatter name, exactly like
+    # ``_hydrate_algo_skills`` does — must resolve to the same file.
+    out = await reader.read_main("a1", fm.name, schema=AgentSkillFrontmatter)
+    assert out is not None
+    fm_out, body = out
+    assert fm_out.name == space_name
+    assert body == "The fix body."

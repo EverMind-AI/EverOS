@@ -95,6 +95,33 @@ def test_skill_extra_fields_still_allowed() -> None:
     assert dumped["last_indexed_at"] == "2026-05-07T08:00:00Z"
 
 
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "../../../etc/passwd",
+        "skills/../../escape",
+        "a/b",
+        "a\\b",
+        "..",
+    ],
+)
+def test_skill_name_rejects_path_traversal(bad_name: str) -> None:
+    """Defence in depth: a hand-edited ``SKILL.md`` with a traversal-shaped
+    ``name`` is caught on parse rather than silently relocating the skill
+    on the next write (see :mod:`.frontmatter`'s ``skill_dir_name``, which
+    sanitizes the directory segment independently of this validator).
+    """
+    with pytest.raises(ValidationError, match="path separators"):
+        AgentSkillFrontmatter(**_kwargs(name=bad_name))  # type: ignore[arg-type]
+
+
+def test_skill_name_allows_cjk_and_spaces() -> None:
+    """Non-ASCII / whitespace names are legitimate — only traversal shapes
+    are rejected."""
+    fm = AgentSkillFrontmatter(**_kwargs(name="修复 Django 自动重载问题"))  # type: ignore[arg-type]
+    assert fm.name == "修复 Django 自动重载问题"
+
+
 def test_skill_directory_shape_classvars() -> None:
     """Path-shape ClassVars pin the wiki layout for the writer/reader pair."""
     assert AgentSkillFrontmatter.SKILLS_CONTAINER_NAME == "skills"

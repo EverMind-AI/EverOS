@@ -35,6 +35,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `min(base * 2**(attempt-1), cap)` plus up to `jitter` seconds
   (defaults: `1s` base / `10s` cap / `0.5s` jitter — code-only defaults,
   not currently exposed via `everos.toml` or `ome.toml`).
+- **Path-traversal hardening for LLM-generated agent-skill names (CWE-22).**
+  `AgentSkillFrontmatter.name` comes straight from LLM output
+  (`extract_agent_skill`) and was concatenated unsanitized into the
+  `skills/skill_<name>/` directory segment on both the write and read
+  paths; given a sufficiently long `../` prefix, the write target could
+  escape the memory root. This is the same class of defect previously
+  fixed for knowledge-upload titles/categories (see `knowledge_writer.py`
+  in an earlier 1.2.x). The sanitizer is now a single shared helper
+  (`everos.core.persistence.markdown.sanitize_dirname`) used by both
+  `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()`, instead
+  of two independently maintained copies. `AgentSkillFrontmatter.name`
+  also gained a validator rejecting path separators / `..` so a
+  hand-edited `SKILL.md` is caught on read rather than silently
+  relocated. No data migration: agent-skill extraction has never
+  successfully produced a `SKILL.md` before this release (see the
+  cascade-lag fix above), so there is no legacy skill corpus whose
+  directory names would change under the new sanitizer.
 - **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /
   `find_where_paginated` / `search`). The write-side deadline work skipped them
   on the reasoning that a read takes no lock and so blocks no writer — true, but

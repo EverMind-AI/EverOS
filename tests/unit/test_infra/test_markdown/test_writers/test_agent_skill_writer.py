@@ -135,6 +135,27 @@ def test_main_path_does_not_create_anything(
     assert not root.agents_dir().exists()
 
 
+def test_main_path_sanitizes_traversal_skill_name(
+    root: MemoryRoot, writer: AgentSkillWriter
+) -> None:
+    """A ``../``-laden ``skill_name`` (raw LLM output) must not escape the agent dir.
+
+    CWE-22 regression guard: prior to sanitization, ``skill_name`` was
+    concatenated straight into the path, so a sufficiently long ``../``
+    prefix resolved outside ``root.agents_dir()`` entirely. ``main_path``
+    is a pure resolver (no frontmatter involved, no IO), matching how the
+    traversal was originally measured.
+    """
+    traversal_name = "../" * 8 + "tmp/pwned"
+
+    path = writer.main_path("agent_x", traversal_name)
+
+    assert path.resolve().is_relative_to(root.agents_dir().resolve())
+    assert path.name == "SKILL.md"
+    assert "/" not in path.parent.name
+    assert path.parent.parent == root.agents_dir() / "agent_x" / "skills"
+
+
 async def test_write_main_normalises_trailing_newline(
     root: MemoryRoot, writer: AgentSkillWriter
 ) -> None:

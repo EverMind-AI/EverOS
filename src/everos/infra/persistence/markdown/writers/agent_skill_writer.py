@@ -22,7 +22,11 @@ This writer is intentionally distinct from :class:`BaseDailyWriter`:
 Path resolution comes from :class:`MemoryRoot` + the ClassVars on
 :class:`AgentSkillFrontmatter` (``SKILLS_CONTAINER_NAME`` /
 ``SKILL_DIR_PREFIX`` / etc.). The writer + reader pair is the single
-addressing API for skills.
+addressing API for skills. ``skill_name`` is LLM output (see
+``memory.strategies.extract_agent_skill``), so the directory segment is
+built via :meth:`AgentSkillFrontmatter.skill_dir_name` — the shared,
+traversal-safe path-safety point both this writer and
+:class:`AgentSkillReader` derive from.
 """
 
 from __future__ import annotations
@@ -157,7 +161,7 @@ class AgentSkillWriter:
             self._root.agents_dir(app_id, project_id)
             / agent_id
             / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-            / f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
+            / AgentSkillFrontmatter.skill_dir_name(skill_name)
         )
 
     def _main_path(
