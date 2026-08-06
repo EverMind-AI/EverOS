@@ -451,7 +451,7 @@ class EverOSDemoApp(App[None]):
                     )
                     yield Input(
                         placeholder=(
-                            "tell EverOS something & enter  ·  /help  ·  /quit"
+                            "tell EverOS something & enter  ·  /live  ·  /quit"
                         ),
                         id="console-input",
                     )
@@ -522,16 +522,14 @@ class EverOSDemoApp(App[None]):
             return
         prompt = self.query_one("#console-prompt", Static)
         if event.value.startswith("/"):
-            prompt.update(_help_text())
+            prompt.update(_commands_text())
         elif event.value:
             prompt.update(self._phase_prompt())
 
     def _run_slash_command(self, command: str) -> None:
         prompt = self.query_one("#console-prompt", Static)
         self.query_one("#console-input", Input).value = ""
-        if command in {"/help", "/?"}:
-            prompt.update(_help_text())
-        elif command == "/live":
+        if command == "/live":
             prompt.update(_live_guidance_text())
         elif command == "/replay":
             self.action_replay()
@@ -806,11 +804,9 @@ def _recall_error_text(message: str) -> Text:
     )
 
 
-def _help_text() -> Text:
+def _commands_text() -> Text:
     return Text.assemble(
         ("commands  ", f"bold {EVEROS_YELLOW}"),
-        ("/help", f"bold {EVEROS_GREEN}"),
-        (" list  ", EVEROS_MUTED),
         ("/live", f"bold {EVEROS_GREEN}"),
         (" use your key  ", EVEROS_MUTED),
         ("/replay", f"bold {EVEROS_GREEN}"),
@@ -834,7 +830,7 @@ def _live_guidance_text() -> Text:
 def _unknown_command_text(command: str) -> Text:
     return Text.assemble(
         (f"unknown command {command}  ", f"bold {EVEROS_ORANGE}"),
-        ("try /help", EVEROS_INK),
+        ("available: /live /replay /clear /quit", EVEROS_INK),
     )
 
 
