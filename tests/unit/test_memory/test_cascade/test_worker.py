@@ -1289,6 +1289,59 @@ async def test_a_permanently_crashing_loop_asks_the_process_to_exit(
     assert exits == ["test-loop"], "process exit must be requested exactly once"
 
 
+async def test_a_stable_run_refills_the_restart_budget(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Independent transients days apart must not pool into a process exit.
+
+    The restart budget counts consecutive *quick* crashes, not crashes over
+    the process lifetime. Without the reset, a loop that hits one recoverable
+    transient every few days — each cleared by a single restart — spends the
+    budget strike by strike and the crash after the last one SIGTERMs a
+    healthy server weeks in, which punishes exactly the case supervision
+    exists to absorb. A body that ran at least ``_LOOP_STABLE_RUN_SECONDS``
+    before raising is a fresh incident and gets the full ladder again.
+    """
+    from types import SimpleNamespace
+
+    from everos.memory.cascade import worker as wmod
+
+    w = CascadeWorker({"episode": _OkHandler()}, retry_backoff_seconds=0)
+    exits: list[str] = []
+    clock = {"now": 0.0}
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0))
+    # Only the worker module sees the fake clock; the event loop keeps real
+    # time, so the zero backoffs above still pass through _wait_or_stop.
+    monkeypatched.setattr(wmod, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    monkeypatched.setattr(w, "_request_process_exit", exits.append)
+
+    runs = 0
+
+    async def _body() -> None:
+        nonlocal runs
+        runs += 1
+        if runs == 3:
+            # A long, honest run before this crash — an independent incident.
+            clock["now"] += wmod._LOOP_STABLE_RUN_SECONDS + 1
+            raise RuntimeError("independent transient")
+        if runs == 5:
+            w._stop.set()  # clean exit
+            return
+        raise RuntimeError("quick crash")
+
+    try:
+        await w._supervise("test-loop", _body)
+    finally:
+        monkeypatched.undo()
+
+    # Budget is 2 restarts here: crashes 1-2 spend it, crash 3 (after a
+    # stable run) must start over rather than exceed it, leaving room for
+    # crash 4 and the clean run 5. A lifetime budget exits after run 3.
+    assert runs == 5, "the stable run must refill the budget"
+    assert exits == [], "no process exit for independent incidents"
+
+
 async def test_supervision_does_not_swallow_cancellation(
     patched_repo: _FakeRepo,
 ) -> None:

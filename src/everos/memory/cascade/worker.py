@@ -92,10 +92,11 @@ think twice before lowering it. Every beat leaves new ``_indices/<uuid>/``
 dirs behind, and lance never removes the empty ones, so the accrual rate is
 capped by this interval rather than by write volume: past roughly one write per
 table per interval the beats coalesce and writing harder adds nothing. Measured
-at that ceiling: ~127k dirs/day across three active tables, ~890k at the 7-day
-reclaim horizon (~3.6GB of empty dirs). Raising this interval lowers that
-proportionally — 60s would cut it to a sixth — at the cost of a longer
-flat-scanned tail.
+at that ceiling: ~127k dirs/day across three active tables, ~1.8M at the
+~14-day reclaim horizon (~7GB of empty dirs — the horizon is the file wait
+plus the 7-day age gate, see ``_HUSK_MIN_AGE_SECONDS`` in the lancedb
+repository module). Raising this interval lowers that proportionally — 60s
+would cut it to a sixth — at the cost of a longer flat-scanned tail.
 """
 DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS = 60.0
 _OPTIMIZE_FAILURE_ALERT_THRESHOLD = 5
@@ -183,7 +184,24 @@ one would otherwise spin. After the last entry is used the worker asks the
 process to exit (see :meth:`CascadeWorker._request_process_exit`) — a server
 whose projection pipeline is permanently dead should not keep serving as if
 healthy.
+
+The budget is **per incident, not per process lifetime**: a body that ran at
+least :data:`_LOOP_STABLE_RUN_SECONDS` before crashing gets a full budget
+again. Without that reset, rare *independent* transients — one every few
+days, each recovered by a single restart — would still spend the budget one
+by one and SIGTERM the server weeks later on the 4th, which punishes exactly
+the case supervision exists to absorb. This mirrors how process supervisors
+count restarts within a window (systemd ``StartLimitIntervalSec``, Erlang
+``max_restarts`` per ``max_seconds``) rather than forever.
 """
+
+_LOOP_STABLE_RUN_SECONDS = 60.0
+"""A supervised loop body that ran at least this long before raising is
+treated as a fresh incident (restart budget resets). Sized well above the
+escalation ladder's total (5+15+45 = 65s of *backoff*, but each attempt's
+run time counts from body start): a deterministic crash-on-startup fails in
+milliseconds and cannot reach it, while a loop that did an hour of honest
+work before hitting a transient obviously should not inherit stale strikes."""
 
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
@@ -504,27 +522,44 @@ class CascadeWorker:
         else is logged with the loop name and retried per
         :data:`_LOOP_RESTART_BACKOFF_SECONDS`; when those are exhausted the
         process is asked to exit rather than run on with a dead loop.
+
+        The budget counts **consecutive quick crashes**, not crashes over the
+        process lifetime: a body that ran at least
+        :data:`_LOOP_STABLE_RUN_SECONDS` before raising starts a fresh
+        incident. A deterministic crash-on-entry still exhausts the budget in
+        ~65s; independent transients days apart each get the full ladder.
         """
-        attempts = len(_LOOP_RESTART_BACKOFF_SECONDS)
-        for attempt, backoff in enumerate((0.0, *_LOOP_RESTART_BACKOFF_SECONDS)):
-            if backoff and await self._wait_or_stop(backoff):
+        budget = len(_LOOP_RESTART_BACKOFF_SECONDS)
+        strikes = 0
+        while True:
+            if strikes and await self._wait_or_stop(
+                _LOOP_RESTART_BACKOFF_SECONDS[strikes - 1]
+            ):
                 return
             if self._stop.is_set():
                 return
+            started = time.monotonic()
             try:
                 await body()
                 return
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                ran = time.monotonic() - started
+                if ran >= _LOOP_STABLE_RUN_SECONDS:
+                    strikes = 0
+                strikes += 1
                 logger.exception(
                     "cascade_loop_crashed",
                     loop=loop_name,
-                    attempt=attempt,
-                    restarts_left=attempts - attempt,
+                    strike=strikes,
+                    restarts_left=max(0, budget - strikes + 1),
+                    ran_seconds=round(ran, 1),
                     error=f"{type(exc).__name__}: {exc}",
                 )
-        logger.error("cascade_loop_unrecoverable", loop=loop_name, restarts=attempts)
+                if strikes > budget:
+                    break
+        logger.error("cascade_loop_unrecoverable", loop=loop_name, restarts=budget)
         self._request_process_exit(loop_name)
 
     def _on_loop_task_done(self, loop_name: str, task: asyncio.Task[None]) -> None:
