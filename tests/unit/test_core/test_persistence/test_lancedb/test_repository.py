@@ -1160,3 +1160,29 @@ async def test_husk_sweep_timeout_must_not_fail_the_prune(
 
     repo = _NoteRepo(table=_SweepTable(str(tmp_path)))  # type: ignore[arg-type]
     await repo.prune(dt.timedelta(seconds=1))  # must not raise
+
+
+async def test_a_broken_sweep_still_surfaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the *timeout* is absorbed — a real fault in the sweep must escape.
+
+    The sibling test pins that a deadline miss does not bill prune. The risk on
+    the other side is the catch drifting wider: swallowing every exception
+    would turn a genuine bug in ``_remove_empty_index_dirs`` (a TypeError after
+    a signature change, a permission error on the index dir) into a silent
+    ``removed = 0``, and nothing anywhere would say the sweep had stopped
+    working. That is the exact failure shape this module keeps being audited
+    for, so the narrowness of the catch is worth a test of its own — widening
+    it to ``except Exception`` passes every other test in this file.
+    """
+    from everos.core.persistence.lancedb import repository as repo_mod
+
+    def _broken_sweep(table_uri, *, live_uuids, min_age_seconds):  # type: ignore[no-untyped-def]
+        raise TypeError("sweep signature drifted")
+
+    monkeypatch.setattr(repo_mod, "_remove_empty_index_dirs", _broken_sweep)
+
+    repo = _NoteRepo(table=_SweepTable(str(tmp_path)))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="signature drifted"):
+        await repo.prune(dt.timedelta(seconds=1))
