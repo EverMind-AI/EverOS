@@ -6,9 +6,10 @@ Pairs with :class:`AgentSkillWriter`:
   :class:`AgentSkillFrontmatter` subclass instance + the Tier-2 body, so
   the caller never deals with raw dicts.
 - :meth:`list_by_cluster` walks every ``skill_*/SKILL.md`` under an agent
-  and returns the ones whose parsed ``cluster_id`` matches. This is the
-  strong-consistency source of truth for cluster membership — LanceDB is
-  cascade-lagged and must not be used for that check.
+  and returns ``(frontmatter, body)`` for the ones whose parsed
+  ``cluster_id`` matches. This is the strong-consistency source of truth
+  for cluster membership — LanceDB is cascade-lagged and must not be used
+  for that check.
 - :meth:`read_reference` / :meth:`read_script` are plain text reads;
   no frontmatter, no schema.
 
@@ -24,13 +25,18 @@ ClassVars off :class:`AgentSkillFrontmatter`, including
 directory segment. ``read_main`` / ``read_reference`` / ``read_script``
 take a caller-supplied ``skill_name`` and re-derive the path from it, so
 the reader and writer must never diverge on how a ``skill_name`` maps to
-a directory. ``list_by_cluster`` avoids that class of risk entirely for
-its own enumeration: it reads each globbed ``SKILL.md`` path directly
-rather than recovering a name from the directory and re-deriving a path
-from it — the reader never derives a path at all on that route, so a
-directory whose suffix happens not to be a sanitizer fixpoint (e.g. one
-containing a space) can never be silently dropped by a re-sanitization
-mismatch.
+a directory. ``list_by_cluster`` never derives a path at all: it reads
+each globbed ``SKILL.md`` path directly and hands back the body it
+already read, rather than recovering a name from the directory and
+leaving the caller to re-derive a path from that name for a second read.
+A caller that discarded the body and re-read by name would recreate
+exactly the re-sanitization risk this method exists to avoid — a
+directory whose suffix isn't itself a sanitizer fixpoint (e.g. one
+containing a raw space) would silently miss on that second, name-based
+read even though the first, path-based read found it just fine. Returning
+the body is what makes "the reader never derives a path" a property of
+the full ``list_by_cluster`` → caller flow, not just of the enumeration
+step in isolation.
 """
 
 from __future__ import annotations
@@ -88,11 +94,11 @@ class AgentSkillReader:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[AgentSkillFrontmatter]:
+    ) -> list[tuple[AgentSkillFrontmatter, str]]:
         """Enumerate this agent's ``SKILL.md`` files whose ``cluster_id`` matches.
 
         Walks ``skills/skill_*/SKILL.md`` under the agent's memory root and
-        returns fully-parsed frontmatter for each match. Skills whose
+        returns ``(frontmatter, body)`` for each match. Skills whose
         frontmatter has ``cluster_id is None`` (or a different cluster) are
         filtered out.
 
@@ -105,7 +111,11 @@ class AgentSkillReader:
         derives a path at all on this route, so this enumeration cannot drop
         a skill whose on-disk directory suffix is not itself a sanitizer
         fixpoint (e.g. one written with a raw, unsanitized name containing a
-        space).
+        space). Returning the body here (rather than frontmatter alone) is
+        load-bearing, not a convenience: a caller that discarded it and
+        re-read by ``frontmatter.name`` would reintroduce the same
+        name-based re-derivation this method exists to avoid, one call
+        later.
 
         Args:
             agent_id: Owning agent.
@@ -114,7 +124,7 @@ class AgentSkillReader:
             project_id: Project scope; defaults to ``"default"``.
 
         Returns:
-            ``AgentSkillFrontmatter`` list sorted by skill directory path.
+            ``(frontmatter, body)`` pairs sorted by skill directory path.
             Empty if the agent has no skill directory yet, or none match.
         """
         skills_dir = self._skills_root(agent_id, app_id, project_id)
@@ -125,14 +135,14 @@ class AgentSkillReader:
             f"/{AgentSkillFrontmatter.SKILL_MAIN_FILENAME}"
         )
         paths = await anyio.to_thread.run_sync(lambda: sorted(skills_dir.glob(pattern)))
-        matches: list[AgentSkillFrontmatter] = []
+        matches: list[tuple[AgentSkillFrontmatter, str]] = []
         for path in paths:
             parsed = await self._read_path(path, schema=AgentSkillFrontmatter)
             if parsed is None:
                 continue
-            frontmatter, _body = parsed
+            frontmatter, body = parsed
             if frontmatter.cluster_id == cluster_id:
-                matches.append(frontmatter)
+                matches.append((frontmatter, body))
         return matches
 
     async def read_reference(
@@ -177,7 +187,7 @@ class AgentSkillReader:
         text = await apath.read_text(encoding="utf-8")
         return text.rstrip("\n")
 
-    # ── Internals ─────────────────────────────────────────────────────────
+    # ── Internals — same shape as AgentSkillWriter ────────────────────────────
 
     async def _read_path(self, path: Path, *, schema: type[T]) -> tuple[T, str] | None:
         """Read + parse an already-resolved ``SKILL.md`` path.
@@ -192,8 +202,6 @@ class AgentSkillReader:
         frontmatter = schema.model_validate(parsed.frontmatter)
         body = parsed.body.rstrip("\n")
         return frontmatter, body
-
-    # ── Internals — same shape as AgentSkillWriter ────────────────────────────
 
     def _skills_root(self, agent_id: str, app_id: str, project_id: str) -> Path:
         return (

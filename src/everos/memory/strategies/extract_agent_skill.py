@@ -245,6 +245,15 @@ async def _select_existing_skills(
     count exceeds ``MAX_SKILLS_IN_PROMPT`` and ``case_vector`` is
     available; when it isn't (pre-1.2.3 event, or embedding was
     unavailable upstream), fall back to md ordering.
+
+    ``list_by_cluster`` returns each skill's frontmatter *and* body
+    together, so there is no second, name-based read to hydrate
+    ``content`` — a prior version re-read each selected skill by
+    ``fm.name`` via ``read_main``, which re-derives (and re-sanitizes) a
+    path from that name and would silently miss a skill whose on-disk
+    directory suffix isn't itself a sanitizer fixpoint, even though the
+    first, path-based enumeration found it. See
+    ``AgentSkillReader.list_by_cluster``'s docstring.
     """
     reader = _get_reader()
     md_skills = await reader.list_by_cluster(
@@ -254,9 +263,9 @@ async def _select_existing_skills(
         return []
 
     if len(md_skills) <= MAX_SKILLS_IN_PROMPT:
-        selected_fms = md_skills
+        selected = md_skills
     elif case_vector is not None:
-        selected_fms = await _rank_skills_by_relevance(
+        selected = await _rank_skills_by_relevance(
             md_skills,
             agent_id=agent_id,
             cluster_id=cluster_id,
@@ -269,20 +278,18 @@ async def _select_existing_skills(
             cluster_id=cluster_id,
             md_count=len(md_skills),
         )
-        selected_fms = md_skills[:MAX_SKILLS_IN_PROMPT]
+        selected = md_skills[:MAX_SKILLS_IN_PROMPT]
 
-    return await _hydrate_algo_skills(
-        selected_fms, agent_id=agent_id, app_id=app_id, project_id=project_id
-    )
+    return [_md_to_algo_skill(fm, body) for fm, body in selected]
 
 
 async def _rank_skills_by_relevance(
-    md_skills: list[AgentSkillFrontmatter],
+    md_skills: list[tuple[AgentSkillFrontmatter, str]],
     *,
     agent_id: str,
     cluster_id: str,
     case_vector: list[float],
-) -> list[AgentSkillFrontmatter]:
+) -> list[tuple[AgentSkillFrontmatter, str]]:
     """Ask LanceDB to rank the md skills by cosine relevance, capped at K.
 
     LanceDB is used purely as a ranking index here, never as the
@@ -291,57 +298,25 @@ async def _rank_skills_by_relevance(
     skill LanceDB didn't return (also stale index) is appended in
     arbitrary order so no skill is silently dropped from the prompt.
     """
-    md_by_name = {fm.name: fm for fm in md_skills}
+    md_by_name = {fm.name: (fm, body) for fm, body in md_skills}
     ranked_lance = await agent_skill_repo.find_topk_relevant_in_cluster(
         owner_id=agent_id,
         cluster_id=cluster_id,
         query_vector=case_vector,
         top_k=MAX_SKILLS_IN_PROMPT,
     )
-    selected: list[AgentSkillFrontmatter] = []
+    selected: list[tuple[AgentSkillFrontmatter, str]] = []
     seen_names: set[str] = set()
     for lance_row in ranked_lance:
-        fm = md_by_name.get(lance_row.name)
-        if fm is not None and fm.name not in seen_names:
-            selected.append(fm)
-            seen_names.add(fm.name)
-    for fm in md_skills:
+        pair = md_by_name.get(lance_row.name)
+        if pair is not None and pair[0].name not in seen_names:
+            selected.append(pair)
+            seen_names.add(pair[0].name)
+    for fm, body in md_skills:
         if fm.name not in seen_names and len(selected) < MAX_SKILLS_IN_PROMPT:
-            selected.append(fm)
+            selected.append((fm, body))
             seen_names.add(fm.name)
     return selected
-
-
-async def _hydrate_algo_skills(
-    frontmatters: list[AgentSkillFrontmatter],
-    *,
-    agent_id: str,
-    app_id: str,
-    project_id: str,
-) -> list[AlgoAgentSkill]:
-    """Re-read each selected skill's body and project it onto the algo type.
-
-    A second read (rather than reusing the frontmatter-only rows from
-    ``list_by_cluster``) is needed because ``content`` must carry the
-    real skill body — see :func:`_md_to_algo_skill`. A skill deleted
-    between the enumeration and this read is skipped rather than
-    raising; the next run will simply not see it.
-    """
-    reader = _get_reader()
-    algo_skills: list[AlgoAgentSkill] = []
-    for fm in frontmatters:
-        result = await reader.read_main(
-            agent_id,
-            fm.name,
-            schema=AgentSkillFrontmatter,
-            app_id=app_id,
-            project_id=project_id,
-        )
-        if result is None:
-            continue
-        fresh_fm, body = result
-        algo_skills.append(_md_to_algo_skill(fresh_fm, body))
-    return algo_skills
 
 
 async def _select_supporting_cases(

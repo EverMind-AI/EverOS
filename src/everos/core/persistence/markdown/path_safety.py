@@ -38,10 +38,18 @@ _DEGENERATE = frozenset({"", ".", ".."})
 def sanitize_dirname(raw: str, fallback: str) -> str:
     """Produce a safe directory/file name segment from free-text input.
 
-    * NFC-normalize first, so a decomposed (NFD) accented character (e.g. an
-      ``"e"`` + combining acute accent) collapses to its precomposed form
-      before the character filter runs, rather than losing the accent
-      entirely (a combining mark is not ``\\w``).
+    * NFC-normalize first. For an ordinary decomposed (NFD) input — a base
+      letter plus a combining mark, e.g. ``"e"`` + combining acute accent —
+      this collapses to the precomposed form before the character filter
+      runs, so the accent survives (a combining mark alone is not ``\\w``
+      and would otherwise be silently stripped). This is best-effort, not a
+      guarantee: for the ~1,082 Unicode *composition exclusion* codepoints
+      (e.g. Devanagari ``क़``/``ख़``, U+0958/U+0959), NFC does the
+      opposite — it *decomposes* an already-precomposed exclusion
+      character, because recomposing it is explicitly excluded from the
+      NFC algorithm, and the resulting combining mark is then stripped just
+      the same. Normalizing here improves fidelity for the common case; it
+      does not make every Unicode script round-trip losslessly.
     * Replace spaces with underscores.
     * Strip characters outside ``[a-zA-Z0-9_\\-.]`` (``\\w`` is Unicode-aware,
       so CJK and other non-ASCII scripts survive readably). Note that ``.``

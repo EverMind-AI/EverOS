@@ -78,7 +78,6 @@ _DRAIN_INTER_ROUND_SLEEP_SECONDS = 5.0
 @pytest.fixture(autouse=True)
 def _opt_in_real_embedding(
     _reset_embedding_capability_singleton: None,
-    _reset_rerank_capability_singleton: None,
 ) -> Iterator[None]:
     """Opt this module's test into a real embedding capability.
 
@@ -93,15 +92,13 @@ def _opt_in_real_embedding(
     Scoped to this file only (not the global fixture) so every other
     test keeps its hermetic default.
 
-    Requesting both ``_reset_embedding_capability_singleton`` and
-    ``_reset_rerank_capability_singleton`` as parameters — rather than
-    relying on collection/declaration order between this file's conftest
-    chain and the root conftest — makes pytest's dependency graph
-    guarantee this fixture's setup runs after both and its teardown before
-    either. This fixture does not touch the rerank capability's value
-    (see the module docstring for why); the rerank fixture is requested
-    purely for that ordering guarantee, not because this fixture opts
-    rerank in.
+    Requesting ``_reset_embedding_capability_singleton`` as a parameter
+    — rather than relying on collection/declaration order between this
+    file's conftest chain and the root conftest — makes pytest's
+    dependency graph guarantee this fixture's setup runs after it and its
+    teardown before it. Rerank is left untouched (see the module
+    docstring): this fixture reads and writes only the embedding
+    capability, so there is nothing to order it against.
 
     Setting ``_capability = None`` (rather than constructing a capability
     object directly) makes the accessor rebuild lazily from

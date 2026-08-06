@@ -166,8 +166,9 @@ async def test_list_by_cluster_returns_matching_skills(
 
     results = await reader.list_by_cluster("a1", "cl1")
 
-    names = sorted(r.name for r in results)
+    names = sorted(fm.name for fm, _body in results)
     assert names == ["drain_queue", "revive_replica"]
+    assert all(body == "b" for _fm, body in results)
 
 
 async def test_list_by_cluster_ignores_skills_without_cluster_id(
@@ -189,7 +190,8 @@ async def test_list_by_cluster_ignores_skills_without_cluster_id(
         body="b",
     )
 
-    assert [r.name for r in await reader.list_by_cluster("a1", "cl1")] == ["assigned"]
+    results = await reader.list_by_cluster("a1", "cl1")
+    assert [fm.name for fm, _body in results] == ["assigned"]
     assert await reader.list_by_cluster("a1", "cl_missing") == []
 
 
@@ -219,7 +221,13 @@ async def test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space(
     ``AgentSkillWriter`` and ``_persist_skill``) to reproduce a directory
     that was never sanitized in the first place — the scenario the fix
     (reading the globbed path directly, never re-deriving it) must cover
-    regardless of how such a directory came to exist.
+    regardless of how such a directory came to exist. Asserts the body
+    too, not just enumeration: a fix that stopped at "the frontmatter is
+    found" but still forced a caller to re-read by name (re-derive, and
+    re-sanitize, the same path) would have moved the drop one layer
+    downstream rather than closing it — see
+    ``test_extract_agent_skill.test_select_existing_skills_finds_skill_whose_directory_suffix_has_a_space``
+    for the end-to-end version of this same property.
     """
     skill_dir = root.agents_dir() / "a1" / "skills" / "skill_My Skill"
     skill_dir.mkdir(parents=True)
@@ -235,36 +243,35 @@ async def test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space(
         "maturity_score: 0.5\n"
         "cluster_id: cl1\n"
         "---\n"
-        "body\n",
+        "The real skill body.\n",
         encoding="utf-8",
     )
 
     results = await reader.list_by_cluster("a1", "cl1")
 
-    assert [r.name for r in results] == ["My Skill"]
+    assert len(results) == 1
+    fm, body = results[0]
+    assert fm.name == "My Skill"
+    assert body == "The real skill body."
 
 
-async def test_frontmatter_name_and_read_main_rederivation_agree(
+async def test_read_main_rederivation_from_raw_name_is_idempotent_safe(
     writer: AgentSkillWriter, reader: AgentSkillReader
 ) -> None:
-    """A ``read_main`` re-derivation from the raw frontmatter ``name`` must
-    land on the same file a direct write produced.
+    """``read_main`` re-derives a path from a caller-supplied name; that
+    re-derivation must land on the same file a direct write produced, even
+    when the name it's given is raw and unsanitized.
 
-    ``list_by_cluster`` no longer re-derives a path from a name at all (it
-    reads each globbed ``SKILL.md`` path directly — see
-    ``test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space``
-    for that regression guard), so the remaining seam is
-    ``read_main``, which *does* re-derive a path from a caller-supplied
-    name — exactly what
-    ``extract_agent_skill._hydrate_algo_skills`` does with a skill's raw
-    frontmatter ``name`` field. In production that name is already
-    pre-sanitized by ``_persist_skill`` before it reaches the frontmatter
-    (an identity, proved by
-    ``test_agent_skill_writer.test_presanitized_name_identical_to_directory_segment``).
-    This test instead writes via a *raw*, unsanitized name directly through
-    the writer (bypassing ``_persist_skill``) to prove ``read_main``'s
-    re-derivation is still idempotent-safe even for a caller that doesn't
-    pre-sanitize.
+    No production caller currently re-derives a path from
+    ``list_by_cluster``'s output — it returns each skill's body directly
+    (see ``AgentSkillReader.list_by_cluster``'s docstring), so
+    ``extract_agent_skill`` never calls ``read_main`` in that flow anymore.
+    ``read_main`` remains a general single-skill lookup on the reader's
+    public API, so this test pins its re-derivation as a property of the
+    method itself: writing via a *raw*, unsanitized name directly through
+    the writer, then reading back via that same raw name, must resolve to
+    the same file (idempotent-safe), for any future caller that does pass
+    a raw name.
     """
     space_name = "修复 Django 自动重载问题"
     await writer.write_main(
@@ -279,14 +286,7 @@ async def test_frontmatter_name_and_read_main_rederivation_agree(
         body="The fix body.",
     )
 
-    listed = await reader.list_by_cluster("a1", "cl1")
-    assert len(listed) == 1
-    fm = listed[0]
-    assert fm.name == space_name
-
-    # Re-derive the path from the raw frontmatter name, exactly like
-    # ``_hydrate_algo_skills`` does — must resolve to the same file.
-    out = await reader.read_main("a1", fm.name, schema=AgentSkillFrontmatter)
+    out = await reader.read_main("a1", space_name, schema=AgentSkillFrontmatter)
     assert out is not None
     fm_out, body = out
     assert fm_out.name == space_name

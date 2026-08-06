@@ -69,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there is no legacy skill corpus whose directory names would change
   under the new sanitizer. Sanitizing is lossy: skills whose raw names
   differ only in characters the sanitizer drops or replaces (e.g.
+  `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and so do
+  names differing only in a combining mark regardless of script (e.g.
+  Devanagari `"किताब"` vs. `"कताब"` — a combining mark alone is not `\w`
+  and is stripped either way; same for Thai tone marks, Hebrew niqqud,
+  Arabic harakat). The later write wins — the earlier skill's
+  `source_case_ids`, `maturity_score`, and body are silently lost, not
+  merged. This is accepted, not mitigated, on two grounds: a
+  disambiguating suffix would break the `name` ≡ directory-suffix
+  identity the reader/writer relies on, and detecting a collision and
+  raising would reintroduce the dead-letter DoS the sanitizer was built
+  to avoid.
   `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and the
   later write wins — the earlier skill's `source_case_ids`,
   `maturity_score`, and body are silently lost, not merged. This is

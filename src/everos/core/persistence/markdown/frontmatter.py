@@ -269,20 +269,34 @@ class SkillPathMixin:
         name rather than merely idempotent-if-resanitized.
 
         This is lossy: distinct raw names can collapse onto the same
-        sanitized name (``"fix django"`` and ``"fix_django"`` both become
-        ``"fix_django"``; ``"fix!django"`` and ``"fixdjango"`` both become
-        ``"fixdjango"``; two names differing only past the 50-character cap
-        also collide). Because ``AgentSkillWriter.write_main`` is a full-file
-        replace and the LanceDB primary key is
-        ``f"{agent_id}_{sanitized_name}"``, a collision means the later skill
-        silently overwrites the earlier one — its accumulated
-        ``source_case_ids``, ``maturity_score``, and body are lost, not
-        merged. This is deliberate, not an oversight: the LLM's add/update
-        decision for a skill is keyed on the name it sees, so a collision
-        usually reads as an intended update anyway; and disambiguating
-        colliding names (e.g. with a suffix) would break the
+        sanitized name. Dropped punctuation, space/underscore collapse, and
+        the 50-character cap are the visible cases (``"fix django"`` and
+        ``"fix_django"`` both become ``"fix_django"``; ``"fix!django"`` and
+        ``"fixdjango"`` both become ``"fixdjango"``). The larger case is
+        every combining mark: a combining mark alone is not ``\\w``, so it
+        is stripped regardless of script, and two names that differ only in
+        their marks collide — e.g. Devanagari ``"किताब"`` and ``"कताब"``
+        both sanitize to ``"कतब"``; the same holds for Thai tone marks,
+        Hebrew niqqud, and Arabic harakat.
+
+        Because ``AgentSkillWriter.write_main`` is a full-file replace and
+        the LanceDB primary key is ``f"{agent_id}_{sanitized_name}"``, a
+        collision means the later skill silently overwrites the earlier
+        one — its accumulated ``source_case_ids``, ``maturity_score``, and
+        body are lost, not merged.
+
+        This is deliberate, not an oversight — but not because a collision
+        "usually reads as an intended update". ``_persist_skill`` sanitizes
+        *before* constructing the frontmatter, so the LLM is shown the
+        already-sanitized name in ``existing_relevant_skills``; when it
+        then emits a raw name like ``"fix django"`` after having just been
+        shown ``"fix_django"``, it has affirmatively treated them as two
+        different skills, and the write silently merges them anyway. The
+        decision to accept this is justified on two other grounds instead:
+        a disambiguating suffix on a collision would break the
         ``frontmatter.name`` ≡ directory-suffix identity the reader/writer
-        seam relies on.
+        seam relies on, and detecting a collision and raising would
+        reintroduce the dead-letter DoS this sanitizer was built to avoid.
         """
         return sanitize_dirname(skill_name, fallback="unnamed")
 

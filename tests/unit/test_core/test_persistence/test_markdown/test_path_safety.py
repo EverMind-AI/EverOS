@@ -93,6 +93,28 @@ def test_nfc_normalizes_decomposed_accents() -> None:
     assert sanitized_nfc == sanitized_nfd == "café"
 
 
+def test_nfc_does_not_help_composition_exclusions() -> None:
+    """Pins the documented exception: for Unicode "composition exclusion"
+    codepoints, NFC normalization does not help — it decomposes an
+    already-precomposed character, and the resulting combining mark is
+    stripped either way.
+
+    U+0958 / U+0959 (Devanagari letters formed from a base letter + nukta)
+    are composition exclusions: their canonical decomposition is excluded
+    from NFC recomposition, so ``normalize("NFC", precomposed)`` yields the
+    *decomposed* form, not the precomposed one.
+    """
+    precomposed = "क़ख़"
+    assert unicodedata.normalize("NFC", precomposed) != precomposed
+
+    sanitized = sanitize_dirname(precomposed, fallback="unnamed")
+
+    # The nukta (combining mark, U+093C) is lost: NFC decomposes the
+    # precomposed input into base + nukta, and the nukta is then stripped
+    # (not \w) -- the opposite of what NFC does for an ordinary NFD accent.
+    assert sanitized == "कख"
+
+
 def test_cjk_and_space_input_preserved_readably() -> None:
     raw = "修复 Django 自动重载问题"
     sanitized = sanitize_dirname(raw, fallback="unnamed")

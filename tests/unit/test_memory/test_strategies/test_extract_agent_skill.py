@@ -179,20 +179,14 @@ def _frontmatter(
 
 
 def _reader_stub(fms: list[AgentSkillFrontmatter]) -> MagicMock:
-    """Reader double: ``list_by_cluster`` returns ``fms``; ``read_main``
-    hydrates each by name with a synthetic body, mirroring the real
-    frontmatter-then-body two-read shape."""
-    by_name = {fm.name: fm for fm in fms}
-
-    async def _read_main(agent_id: str, name: str, **_kwargs: object):
-        fm = by_name.get(name)
-        if fm is None:
-            return None
-        return fm, f"body of {name}"
-
+    """Reader double: ``list_by_cluster`` returns each frontmatter paired
+    with a synthetic body — mirroring the real ``AgentSkillReader``, which
+    returns ``(frontmatter, body)`` pairs directly rather than requiring a
+    second, name-based read to hydrate ``content``."""
     reader = MagicMock()
-    reader.list_by_cluster = AsyncMock(return_value=fms)
-    reader.read_main = AsyncMock(side_effect=_read_main)
+    reader.list_by_cluster = AsyncMock(
+        return_value=[(fm, f"body of {fm.name}") for fm in fms]
+    )
     return reader
 
 
@@ -436,6 +430,104 @@ async def test_existing_skills_come_from_md_even_when_lancedb_stale(
     assert hydrated.source_case_ids == ["c0"]
     assert hydrated.content != ""
     assert "stop, resync, verify" in hydrated.content
+
+
+async def test_existing_skills_reaches_llm_for_skill_whose_directory_has_a_space(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    embed_available: None,
+) -> None:
+    """End-to-end regression guard for the ``list_by_cluster`` drop bug: a
+    ``skill_My Skill/`` directory written outside the writer (raw space,
+    never sanitized) must reach ``existing_relevant_skills`` with
+    non-empty ``content`` — not merely be enumerable by ``list_by_cluster``
+    in isolation, but survive the full enumeration→hydration path this
+    strategy drives without a second, name-based read dropping it one
+    layer downstream.
+
+    A prior fix made ``list_by_cluster`` enumerate this directory
+    successfully, but ``_hydrate_algo_skills`` then re-read each selected
+    skill by ``fm.name`` via ``read_main`` — which re-derives (and
+    re-sanitizes) a path from ``"My Skill"`` to ``skill_My_Skill/``, a
+    path that doesn't exist, and dropped the skill again. The fix removed
+    that second read entirely: ``list_by_cluster`` now hands back the
+    body it already read, so there is no name-based re-derivation left
+    anywhere on this path.
+    """
+    mod = importlib.import_module("everos.memory.strategies.extract_agent_skill")
+    monkeypatch.setattr(
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+    )
+    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    monkeypatch.setattr(mod, "_reader", None, raising=False)
+
+    skill_dir = (
+        MemoryRoot(root=tmp_path).agents_dir() / "a1" / "skills" / "skill_My Skill"
+    )
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "id: a1_My Skill\n"
+        "type: agent_skill\n"
+        "agent_id: a1\n"
+        "track: agent\n"
+        "name: My Skill\n"
+        "description: d\n"
+        "confidence: 0.5\n"
+        "maturity_score: 0.5\n"
+        "cluster_id: cl1\n"
+        "---\n"
+        "The real skill body.\n",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, list] = {}
+
+    async def spy_aextract(target, *, existing_relevant_skills, supporting_cases):
+        captured["existing"] = list(existing_relevant_skills)
+        return []
+
+    with (
+        patch(
+            "everos.memory.strategies.extract_agent_skill.cluster_repo"
+        ) as mock_cluster_repo,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
+        ) as mock_skill_repo,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.agent_case_repo"
+        ) as mock_case_repo,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
+        ) as mock_extractor_cls,
+    ):
+        mock_cluster_repo.get_with_members = AsyncMock(
+            return_value=_algo_cluster(cluster_id="cl1", members=["c0", "c1"])
+        )
+        mock_skill_repo.find_topk_relevant_in_cluster = AsyncMock(
+            side_effect=AssertionError(
+                "must not be reached: cluster is within MAX_SKILLS_IN_PROMPT"
+            )
+        )
+        mock_case_repo.find_by_owner_entries = AsyncMock(return_value=[])
+        mock_extractor_cls.return_value.aextract = spy_aextract
+
+        event = _event(
+            cluster_id="cl1",
+            agent_id="a1",
+            case_entry_id="c1",
+            case_vector=[0.1] * 1024,
+        )
+        await extract_agent_skill(event, FakeStrategyContext())
+
+    assert len(captured["existing"]) == 1
+    hydrated = captured["existing"][0]
+    assert hydrated.name == "My Skill"
+    assert hydrated.content == "The real skill body."
 
 
 # ── end-to-end orchestration (mocked) ────────────────────────────────────
