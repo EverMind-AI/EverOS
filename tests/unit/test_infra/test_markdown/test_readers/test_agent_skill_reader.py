@@ -255,6 +255,83 @@ async def test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space(
     assert body == "The real skill body."
 
 
+@pytest.mark.parametrize(
+    "frontmatter_lines",
+    [
+        # Any schema constraint can fail, not just the traversal validator —
+        # a field a later schema revision makes required is the case existing
+        # files on disk would hit at upgrade time, all at once.
+        pytest.param("name: broken\ncluster_id: cl1\n", id="missing_required_field"),
+        # The traversal validator, whose whole stated purpose is catching a
+        # hand-edited name — i.e. a file that reaches exactly this route.
+        pytest.param(
+            "name: ..\ndescription: d\nconfidence: 0.5\n"
+            "maturity_score: 0.5\ncluster_id: cl1\n",
+            id="traversal_name",
+        ),
+    ],
+)
+async def test_list_by_cluster_skips_unparseable_skill(
+    root: MemoryRoot,
+    reader: AgentSkillReader,
+    frontmatter_lines: str,
+) -> None:
+    """One unparseable ``SKILL.md`` must not starve the whole cluster.
+
+    ``_read_path`` validates the full :class:`AgentSkillFrontmatter` schema,
+    so a single malformed file used to abort the entire enumeration — and
+    the enumeration is what feeds ``extract_agent_skill`` its existing
+    skills. Propagating would leave that strategy raising on every run for
+    the whole cluster, i.e. permanently dead-lettered: the exact failure
+    mode the md-first read path was introduced to eliminate. The good files
+    on either side of the bad one pin that the skip is per-file rather than
+    "stop at the first error" — sorted glob order puts ``skill_bad`` between
+    them, so a fix that merely stopped raising would still lose ``zzz``.
+    """
+    skills = root.agents_dir() / "a1" / "skills"
+
+    def _write(dirname: str, body_frontmatter: str, body: str) -> None:
+        d = skills / dirname
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            f"---\ntype: agent_skill\nagent_id: a1\ntrack: agent\n"
+            f"id: a1_{dirname}\n{body_frontmatter}---\n{body}\n",
+            encoding="utf-8",
+        )
+
+    good = "description: d\nconfidence: 0.5\nmaturity_score: 0.5\ncluster_id: cl1\n"
+    _write("skill_aaa", f"name: aaa\n{good}", "body aaa")
+    _write("skill_bad", frontmatter_lines, "body bad")
+    _write("skill_zzz", f"name: zzz\n{good}", "body zzz")
+
+    results = await reader.list_by_cluster("a1", "cl1")
+
+    assert [fm.name for fm, _ in results] == ["aaa", "zzz"]
+    assert [body for _, body in results] == ["body aaa", "body zzz"]
+
+
+async def test_read_main_propagates_validation_error(
+    root: MemoryRoot, reader: AgentSkillReader
+) -> None:
+    """``read_main`` keeps raising — the skip is scoped to enumeration.
+
+    A caller naming one specific skill gets an error rather than ``None``:
+    ``None`` means "not created yet", a normal state this reader's callers
+    branch on, and silently reusing it for "exists but is corrupt" would let
+    an upsert overwrite the damaged file instead of surfacing it.
+    """
+    skill_dir = root.agents_dir() / "a1" / "skills" / "skill_aaa"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\ntype: agent_skill\nagent_id: a1\ntrack: agent\n"
+        "id: a1_aaa\nname: aaa\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        await reader.read_main("a1", "aaa", schema=AgentSkillFrontmatter)
+
+
 async def test_read_main_rederivation_from_raw_name_is_idempotent_safe(
     writer: AgentSkillWriter, reader: AgentSkillReader
 ) -> None:

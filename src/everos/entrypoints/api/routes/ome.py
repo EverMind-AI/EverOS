@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from everos.core.errors import NotFoundError
 from everos.core.observability.logging import get_logger
-from everos.infra.ome.engine import OfflineEngine
+
+if TYPE_CHECKING:
+    # Type-only — used solely to annotate `_summarize_runs`. Importing the
+    # engine eagerly costs ~750ms (apscheduler + aiosqlite, 26 modules), so
+    # keep it out of the runtime path even though `service.memorize` already
+    # imports it eagerly and today's app startup pays that cost regardless:
+    # this router's own `_get_engine` import is deliberately deferred (see
+    # `trigger`), and an eager import here would contradict it.
+    from everos.infra.ome.engine import OfflineEngine
 
 router = APIRouter(prefix="/ome", tags=["ome"])
 

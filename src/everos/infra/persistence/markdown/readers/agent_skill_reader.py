@@ -45,12 +45,16 @@ from pathlib import Path
 from typing import TypeVar
 
 import anyio
+from pydantic import ValidationError
 
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, MemoryRoot
 
 from ..mds import AgentSkillFrontmatter
 
 T = TypeVar("T", bound=AgentSkillFrontmatter)
+
+logger = get_logger(__name__)
 
 
 class AgentSkillReader:
@@ -117,6 +121,19 @@ class AgentSkillReader:
         name-based re-derivation this method exists to avoid, one call
         later.
 
+        A ``SKILL.md`` whose frontmatter fails schema validation is logged
+        and skipped, not propagated. Isolating it matters because the
+        blast radius of propagating is the whole cluster, not the one
+        file: :meth:`_read_path` validates the full
+        :class:`AgentSkillFrontmatter` schema, so *any* constraint can
+        raise — a hand-edited ``name``, but equally a field that a later
+        schema revision made required and existing files therefore lack.
+        A single bad file would otherwise abort the enumeration, starve
+        ``extract_agent_skill`` of every existing skill in the cluster,
+        and dead-letter that cluster's extraction on every subsequent
+        run — the exact permanent-failure mode this md-first read path
+        exists to eliminate.
+
         Args:
             agent_id: Owning agent.
             cluster_id: Cluster to filter on.
@@ -125,7 +142,8 @@ class AgentSkillReader:
 
         Returns:
             ``(frontmatter, body)`` pairs sorted by skill directory path.
-            Empty if the agent has no skill directory yet, or none match.
+            Empty if the agent has no skill directory yet, none match, or
+            every candidate failed validation.
         """
         skills_dir = self._skills_root(agent_id, app_id, project_id)
         if not await anyio.Path(skills_dir).is_dir():
@@ -137,7 +155,16 @@ class AgentSkillReader:
         paths = await anyio.to_thread.run_sync(lambda: sorted(skills_dir.glob(pattern)))
         matches: list[tuple[AgentSkillFrontmatter, str]] = []
         for path in paths:
-            parsed = await self._read_path(path, schema=AgentSkillFrontmatter)
+            try:
+                parsed = await self._read_path(path, schema=AgentSkillFrontmatter)
+            except ValidationError as exc:
+                logger.warning(
+                    "agent_skill.list_by_cluster.unparseable_skill_skipped",
+                    path=str(path),
+                    cluster_id=cluster_id,
+                    error=str(exc),
+                )
+                continue
             if parsed is None:
                 continue
             frontmatter, body = parsed
@@ -195,6 +222,13 @@ class AgentSkillReader:
         Shared by :meth:`read_main` (path derived from a caller-supplied
         ``skill_name``) and :meth:`list_by_cluster` (path taken directly
         from a directory glob, never re-derived from a name).
+
+        Raises:
+            ValidationError: the file's frontmatter violates *schema*.
+                Propagated to the caller — ``read_main`` asked for one
+                specific skill and a corrupt answer is not a substitute,
+                while ``list_by_cluster`` catches it per file so one bad
+                file cannot starve the rest of the cluster.
         """
         if not await anyio.Path(path).is_file():
             return None
