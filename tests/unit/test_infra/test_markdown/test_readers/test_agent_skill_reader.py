@@ -200,26 +200,71 @@ async def test_list_by_cluster_missing_dir_returns_empty(
     assert await reader.list_by_cluster("a_new", "cl1") == []
 
 
-async def test_frontmatter_name_and_directory_name_agree_after_sanitization(
+async def test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space(
+    root: MemoryRoot, reader: AgentSkillReader
+) -> None:
+    """Regression guard: before the fix, ``list_by_cluster`` recovered
+    ``skill_name`` from the directory suffix and called ``read_main``,
+    which re-derives (and re-sanitizes) the path from that name. A
+    directory whose suffix is not itself already a sanitizer fixpoint —
+    e.g. ``skill_My Skill`` (a raw space, never passed through
+    ``sanitize_dirname``) — re-derived to ``skill_My_Skill``, a path that
+    does not exist, so the skill was silently dropped from the result.
+    ``list_by_cluster`` is documented as the strong-consistency existence
+    check for cluster membership, so a dropped skill here would make the
+    LLM emit ``add()`` for a skill that already exists, duplicating it at
+    the sanitized path and orphaning the original.
+
+    Writes the ``SKILL.md`` directly to the filesystem (bypassing both
+    ``AgentSkillWriter`` and ``_persist_skill``) to reproduce a directory
+    that was never sanitized in the first place — the scenario the fix
+    (reading the globbed path directly, never re-deriving it) must cover
+    regardless of how such a directory came to exist.
+    """
+    skill_dir = root.agents_dir() / "a1" / "skills" / "skill_My Skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "id: a1_My Skill\n"
+        "type: agent_skill\n"
+        "agent_id: a1\n"
+        "track: agent\n"
+        "name: My Skill\n"
+        "description: d\n"
+        "confidence: 0.5\n"
+        "maturity_score: 0.5\n"
+        "cluster_id: cl1\n"
+        "---\n"
+        "body\n",
+        encoding="utf-8",
+    )
+
+    results = await reader.list_by_cluster("a1", "cl1")
+
+    assert [r.name for r in results] == ["My Skill"]
+
+
+async def test_frontmatter_name_and_read_main_rederivation_agree(
     writer: AgentSkillWriter, reader: AgentSkillReader
 ) -> None:
-    """``list_by_cluster`` (directory-derived name) and
-    ``_hydrate_algo_skills``-style re-read (raw ``fm.name``) must land on
-    the same file.
+    """A ``read_main`` re-derivation from the raw frontmatter ``name`` must
+    land on the same file a direct write produced.
 
-    In production, ``extract_agent_skill._persist_skill`` sanitizes
-    ``skill_name`` *before* constructing ``AgentSkillFrontmatter``, so
-    ``fm.name`` is already the directory-derived name — an identity, not
-    just an idempotency argument (see
-    ``test_agent_skill_writer.test_presanitized_name_identical_to_directory_segment``
-    for that proof). This test instead writes via the *raw*, unsanitized
-    name directly through the writer (bypassing ``_persist_skill``) to
-    prove the reader-side idempotency guarantee holds even for a caller
-    that doesn't pre-sanitize: ``list_by_cluster`` recovers ``skill_name``
-    from the on-disk (already-sanitized) directory, while a
-    ``_hydrate_algo_skills``-style re-read uses the frontmatter's raw
-    ``name`` field. Routing both through the same ``skill_dir_name``
-    classmethod keeps them consistent because sanitization is idempotent.
+    ``list_by_cluster`` no longer re-derives a path from a name at all (it
+    reads each globbed ``SKILL.md`` path directly — see
+    ``test_list_by_cluster_finds_skill_whose_directory_suffix_has_a_space``
+    for that regression guard), so the remaining seam is
+    ``read_main``, which *does* re-derive a path from a caller-supplied
+    name — exactly what
+    ``extract_agent_skill._hydrate_algo_skills`` does with a skill's raw
+    frontmatter ``name`` field. In production that name is already
+    pre-sanitized by ``_persist_skill`` before it reaches the frontmatter
+    (an identity, proved by
+    ``test_agent_skill_writer.test_presanitized_name_identical_to_directory_segment``).
+    This test instead writes via a *raw*, unsanitized name directly through
+    the writer (bypassing ``_persist_skill``) to prove ``read_main``'s
+    re-derivation is still idempotent-safe even for a caller that doesn't
+    pre-sanitize.
     """
     space_name = "修复 Django 自动重载问题"
     await writer.write_main(

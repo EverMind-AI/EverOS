@@ -21,8 +21,16 @@ explicitly.
 Path resolution mirrors :class:`AgentSkillWriter` and reads the same
 ClassVars off :class:`AgentSkillFrontmatter`, including
 :meth:`AgentSkillFrontmatter.skill_dir_name` for the traversal-safe
-directory segment — the reader and writer must never diverge on how a
-``skill_name`` maps to a directory.
+directory segment. ``read_main`` / ``read_reference`` / ``read_script``
+take a caller-supplied ``skill_name`` and re-derive the path from it, so
+the reader and writer must never diverge on how a ``skill_name`` maps to
+a directory. ``list_by_cluster`` avoids that class of risk entirely for
+its own enumeration: it reads each globbed ``SKILL.md`` path directly
+rather than recovering a name from the directory and re-deriving a path
+from it — the reader never derives a path at all on that route, so a
+directory whose suffix happens not to be a sanitizer fixpoint (e.g. one
+containing a space) can never be silently dropped by a re-sanitization
+mismatch.
 """
 
 from __future__ import annotations
@@ -71,12 +79,7 @@ class AgentSkillReader:
             is stripped to give the *logical* body back.
         """
         path = self._main_path(agent_id, skill_name, app_id, project_id)
-        if not await anyio.Path(path).is_file():
-            return None
-        parsed = await MarkdownReader.read(path)
-        frontmatter = schema.model_validate(parsed.frontmatter)
-        body = parsed.body.rstrip("\n")
-        return frontmatter, body
+        return await self._read_path(path, schema=schema)
 
     async def list_by_cluster(
         self,
@@ -95,7 +98,14 @@ class AgentSkillReader:
 
         This is the strong-consistency source of truth for "which skills
         belong to this cluster" — LanceDB is cascade-lagged and must not be
-        used for existence checks.
+        used for existence checks. Each glob match is read directly by its
+        already-resolved ``path`` (see :meth:`_read_path`), *not* by
+        recovering a ``skill_name`` from the directory and calling
+        :meth:`read_main` to re-derive the same path — the reader never
+        derives a path at all on this route, so this enumeration cannot drop
+        a skill whose on-disk directory suffix is not itself a sanitizer
+        fixpoint (e.g. one written with a raw, unsanitized name containing a
+        space).
 
         Args:
             agent_id: Owning agent.
@@ -117,16 +127,7 @@ class AgentSkillReader:
         paths = await anyio.to_thread.run_sync(lambda: sorted(skills_dir.glob(pattern)))
         matches: list[AgentSkillFrontmatter] = []
         for path in paths:
-            skill_name = path.parent.name.removeprefix(
-                AgentSkillFrontmatter.SKILL_DIR_PREFIX
-            )
-            parsed = await self.read_main(
-                agent_id,
-                skill_name,
-                schema=AgentSkillFrontmatter,
-                app_id=app_id,
-                project_id=project_id,
-            )
+            parsed = await self._read_path(path, schema=AgentSkillFrontmatter)
             if parsed is None:
                 continue
             frontmatter, _body = parsed
@@ -175,6 +176,22 @@ class AgentSkillReader:
             return None
         text = await apath.read_text(encoding="utf-8")
         return text.rstrip("\n")
+
+    # ── Internals ─────────────────────────────────────────────────────────
+
+    async def _read_path(self, path: Path, *, schema: type[T]) -> tuple[T, str] | None:
+        """Read + parse an already-resolved ``SKILL.md`` path.
+
+        Shared by :meth:`read_main` (path derived from a caller-supplied
+        ``skill_name``) and :meth:`list_by_cluster` (path taken directly
+        from a directory glob, never re-derived from a name).
+        """
+        if not await anyio.Path(path).is_file():
+            return None
+        parsed = await MarkdownReader.read(path)
+        frontmatter = schema.model_validate(parsed.frontmatter)
+        body = parsed.body.rstrip("\n")
+        return frontmatter, body
 
     # ── Internals — same shape as AgentSkillWriter ────────────────────────────
 

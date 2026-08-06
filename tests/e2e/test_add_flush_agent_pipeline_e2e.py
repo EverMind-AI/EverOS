@@ -2,10 +2,13 @@
 
 Drives the full HTTP route through to storage, exercising the agent-track
 pipeline (boundary → memcell → extract_agent_case → trigger_skill_clustering
-→ extract_agent_skill) with real LLM, real embedder, and real reranker
-credentials — this module's own ``_opt_in_real_embedding_and_rerank``
-fixture opts both capabilities back in (see its docstring for why that is
-necessary and why it does not weaken the global hermeticity fixture).
+→ extract_agent_skill) with real LLM and real embedder credentials — this
+module's own ``_opt_in_real_embedding`` fixture opts the embedding
+capability back in (see its docstring for why that is necessary and why
+it does not weaken the global hermeticity fixture). Rerank is
+deliberately left at its hermetic default: nothing on this write path
+touches rerank, so opting it in would only widen the credential surface
+with no coverage benefit.
 
 Mixed tenancy by design (sender_id alignment from fixture):
 
@@ -43,7 +46,6 @@ import httpx
 import pytest
 
 import everos.component.embedding.accessor as _embedding_accessor
-import everos.component.rerank.accessor as _rerank_accessor
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence.lancedb import agent_case_repo, agent_skill_repo
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
@@ -74,31 +76,41 @@ _DRAIN_INTER_ROUND_SLEEP_SECONDS = 5.0
 
 
 @pytest.fixture(autouse=True)
-def _opt_in_real_embedding_and_rerank() -> Iterator[None]:
-    """Opt this module's test into real embedding + rerank capabilities.
+def _opt_in_real_embedding(
+    _reset_embedding_capability_singleton: None,
+    _reset_rerank_capability_singleton: None,
+) -> Iterator[None]:
+    """Opt this module's test into a real embedding capability.
 
-    ``tests/conftest.py``'s ``_reset_embedding_capability_singleton`` /
-    ``_reset_rerank_capability_singleton`` autouse fixtures pin both
-    capabilities to unavailable for every test (hermeticity); their
-    docstrings say a test may "explicitly opt in by re-assigning
-    ``acc._capability``". This test needs both: ``trigger_skill_clustering``
-    and ``extract_agent_skill`` each body-guard on
-    ``get_embedding_capability().available`` and return early when it is
-    false, so without opting in here the module docstring's "real embedder"
-    claim would be false and the skill chain would never run — which is
-    exactly the coverage gap this fixture closes. Scoped to this file only
-    (not the global fixture) so every other test keeps its hermetic default.
+    ``tests/conftest.py``'s ``_reset_embedding_capability_singleton``
+    autouse fixture pins the capability to unavailable for every test
+    (hermeticity); its docstring says a test may "explicitly opt in by
+    re-assigning ``acc._capability``". This test needs it:
+    ``trigger_skill_clustering`` and ``extract_agent_skill`` both
+    body-guard on ``get_embedding_capability().available`` and return
+    early when it is false, so without opting in here the skill chain
+    would never run — exactly the coverage gap this fixture closes.
+    Scoped to this file only (not the global fixture) so every other
+    test keeps its hermetic default.
+
+    Requesting both ``_reset_embedding_capability_singleton`` and
+    ``_reset_rerank_capability_singleton`` as parameters — rather than
+    relying on collection/declaration order between this file's conftest
+    chain and the root conftest — makes pytest's dependency graph
+    guarantee this fixture's setup runs after both and its teardown before
+    either. This fixture does not touch the rerank capability's value
+    (see the module docstring for why); the rerank fixture is requested
+    purely for that ordering guarantee, not because this fixture opts
+    rerank in.
 
     Setting ``_capability = None`` (rather than constructing a capability
-    object directly) makes the accessor rebuild lazily from ``load_settings()``
-    on next call, picking up the real ``.env`` credentials
-    ``tests/e2e/conftest.py`` loads at import time.
+    object directly) makes the accessor rebuild lazily from
+    ``load_settings()`` on next call, picking up the real ``.env``
+    credentials ``tests/e2e/conftest.py`` loads at import time.
     """
     _embedding_accessor._capability = None
-    _rerank_accessor._capability = None
     yield
     _embedding_accessor._capability = None
-    _rerank_accessor._capability = None
 
 
 def _load_fixture(session_id: str) -> dict:
@@ -238,7 +250,20 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     # directly: a dead-letter means the chain attempted and failed
     # (exhausted retries), as opposed to a quality-gated 0-skill outcome,
     # which is not a failure.
+    #
+    # The dead-letter check alone is vacuous if the strategy never ran at
+    # all — zero dead-letters is also what a never-executed strategy
+    # looks like. Assert (any status) runs exist first, so the dead-letter
+    # assertion below is only non-vacuous because of this check, not
+    # because the skill-count floor in 4.5 happened to run first.
     engine = _get_engine()
+    all_skill_runs = await engine.list_runs("extract_agent_skill")
+    assert all_skill_runs, (
+        "extract_agent_skill never ran at all — the dead-letter check "
+        "below would be vacuously satisfied by a strategy that never "
+        "executed"
+    )
+
     dead_letters = await engine.list_runs(
         "extract_agent_skill", status=RunStatus.DEAD_LETTER
     )

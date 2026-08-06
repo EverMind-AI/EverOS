@@ -44,6 +44,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed for knowledge-upload titles/categories (see `knowledge_writer.py`
   in an earlier 1.2.x). The sanitizer is now a single shared helper
   (`everos.core.persistence.markdown.sanitize_dirname`) used by both
+  `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()` /
+  `sanitize_skill_name()`, instead of two independently maintained copies.
+  `extract_agent_skill` now sanitizes the LLM-emitted name *before*
+  constructing `AgentSkillFrontmatter`, so **`AgentSkillFrontmatter.name`
+  and the LanceDB `agent_skill` primary key now hold the sanitized name**
+  (spaces become `_`, characters outside `[\w\-.]` are dropped, capped at
+  50 chars), not the raw LLM output — a user-visible change for anything
+  that reads a skill's `name` field expecting the verbatim LLM string.
+  `AgentSkillFrontmatter.name` also gained a validator rejecting a name
+  containing a path separator, or being exactly `..`, so a hand-edited
+  `SKILL.md` that bypasses the writer's sanitization is caught on read
+  rather than silently relocated (the substring form, e.g. a name that
+  merely *contains* `..`, is deliberately allowed — sanitized output can
+  legitimately contain runs of literal dots). `sanitize_dirname` itself
+  falls back (not just on an empty result, but also on `.` or `..`) so a
+  short input that is itself a sanitizer fixpoint — e.g. `"../"` sanitizes
+  to `".."` verbatim without this fallback — cannot resolve to the same
+  directory or its parent; this closes both the agent-skill case and an
+  equivalent one-level escape on the knowledge-upload path, which has no
+  `skill_`-style prefix protecting its sanitized segment. No data
+  migration: agent-skill extraction has never successfully produced a
+  `SKILL.md` before this release (see the cascade-lag fix above), so
+  there is no legacy skill corpus whose directory names would change
+  under the new sanitizer.
   `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()`, instead
   of two independently maintained copies. `AgentSkillFrontmatter.name`
   also gained a validator rejecting path separators / `..` so a

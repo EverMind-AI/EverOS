@@ -156,25 +156,43 @@ def test_main_path_sanitizes_traversal_skill_name(
     assert path.parent.parent == root.agents_dir() / "agent_x" / "skills"
 
 
-@pytest.mark.parametrize(
-    "raw_name",
-    [
-        "../" * 8 + "tmp/pwned",
-        "修复 Django 自动重载问题",
-    ],
-)
+_BOUNDARY_RAW_NAMES = [
+    "..",
+    "../",
+    "/../",
+    ".",
+    "./",
+    "!!!",  # sanitizes to empty -> fallback
+    "a" * 200,  # truncation
+    "修复 Django 自动重载问题",  # CJK + space
+    "../" * 8 + "tmp/pwned",
+]
+
+
+@pytest.mark.parametrize("raw_name", _BOUNDARY_RAW_NAMES)
 async def test_presanitized_name_identical_to_directory_segment(
     root: MemoryRoot, writer: AgentSkillWriter, raw_name: str
 ) -> None:
     """Mirrors ``extract_agent_skill._persist_skill``: sanitize
     ``skill_name`` once, up front, then use that same sanitized string for
     both the frontmatter ``name`` field and the writer's ``skill_name``
-    argument. ``frontmatter.name`` must then be byte-identical (an
-    identity, not merely idempotent-if-resanitized) to the directory
-    segment actually written, for both an adversarial and a CJK/space raw
-    name.
+    argument. Covers the boundary family that previously slipped through
+    the sanitizer as a fixpoint (``".."`` alone, or with a leading/trailing
+    separator that strips down to it; ``"."`` likewise) in addition to the
+    empty/truncation/CJK/traversal cases already covered.
+
+    For each input: the sanitized name is a single path component
+    (contains no separator), is never ``""`` / ``"."`` / ``".."``,
+    constructing ``AgentSkillFrontmatter`` with it succeeds, and
+    ``frontmatter.name`` is byte-identical (an identity, not merely
+    idempotent-if-resanitized) to the directory segment actually written.
     """
     sanitized_name = AgentSkillFrontmatter.sanitize_skill_name(raw_name)
+
+    assert "/" not in sanitized_name
+    assert "\\" not in sanitized_name
+    assert sanitized_name not in ("", ".", "..")
+
     fm = _make_fm(name=sanitized_name, id=f"agent_x_{sanitized_name}")
 
     path = await writer.write_main("agent_x", sanitized_name, frontmatter=fm, body="b")

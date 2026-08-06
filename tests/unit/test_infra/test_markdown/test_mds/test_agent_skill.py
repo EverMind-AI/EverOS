@@ -122,23 +122,46 @@ def test_skill_name_allows_cjk_and_spaces() -> None:
     assert fm.name == "修复 Django 自动重载问题"
 
 
-def test_frontmatter_accepts_presanitized_adversarial_name() -> None:
+@pytest.mark.parametrize(
+    "raw_name",
+    [
+        "..",
+        "../",
+        "/../",
+        ".",
+        "./",
+        "!!!",  # sanitizes to empty -> fallback
+        "a" * 200,  # truncation
+        "修复 Django 自动重载问题",  # CJK + space
+        "../" * 8 + "tmp/pwned",
+    ],
+)
+def test_frontmatter_accepts_presanitized_boundary_names(raw_name: str) -> None:
     """Mirrors ``extract_agent_skill._persist_skill``'s write path: the
     caller sanitizes ``skill_name`` via
     :meth:`AgentSkillFrontmatter.sanitize_skill_name` *before* constructing
-    the frontmatter, so a traversal-shaped LLM name never reaches the
-    validator above as a raw, unsanitized string — construction succeeds
-    and the resulting ``name`` is separator-free, rather than raising and
-    dead-lettering the extraction run for a name the writer would have
-    sanitized safely anyway.
+    the frontmatter, so a traversal-shaped or degenerate LLM name never
+    reaches the validator above as a raw, unsanitized string — construction
+    succeeds and the resulting ``name`` is a single, non-degenerate
+    component, rather than raising and dead-lettering the extraction run
+    for a name the sanitizer would have handled safely anyway.
+
+    Covers the boundary family that a single long traversal payload does
+    not exercise: bare ``".."``, and inputs that strip down to ``".."`` or
+    ``"."`` once a leading/trailing separator is removed (``"." is a safe
+    character, so it is not itself stripped) — these are sanitizer
+    fixpoints, not just substrings, and are the exact inputs the fallback
+    in ``sanitize_dirname`` exists to catch.
     """
-    adversarial = "../" * 8 + "tmp/pwned"
-    sanitized = AgentSkillFrontmatter.sanitize_skill_name(adversarial)
+    sanitized = AgentSkillFrontmatter.sanitize_skill_name(raw_name)
+
+    assert "/" not in sanitized
+    assert "\\" not in sanitized
+    assert sanitized not in ("", ".", "..")
 
     fm = AgentSkillFrontmatter(**_kwargs(name=sanitized))
 
-    assert "/" not in fm.name
-    assert "\\" not in fm.name
+    assert fm.name == sanitized
 
 
 def test_skill_directory_shape_classvars() -> None:
