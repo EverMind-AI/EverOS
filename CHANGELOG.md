@@ -86,6 +86,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside `prune()` — the cleanup commit already succeeded, so escaping would
   bill a prune "failure" (feeding the fallback-rebuild threshold) and stall the
   prune-staleness clock for a cleanup stall that did not happen.
+- **The optimize runner's wait on an in-flight rebuild is bounded too.** The two
+  maintenance jobs park on each other — whichever arrives second waits — so an
+  unbounded wait on this side is the same hazard as the one already fixed on
+  the rebuild side, just seen from the other end: the kind's task slot stays
+  occupied, `_schedule_optimize` keeps short-circuiting on it, and that table
+  quietly stops being pruned. It was left open on the argument that
+  `rebuild_indexes` carries its own 300s deadline, which covers its critical
+  section but not the task's dispatch and teardown, so the transitive bound was
+  never real. Now bounded at 180s, logging
+  `cascade_lancedb_optimize_skipped_rebuild_unfinished` and skipping the beat
+  rather than compacting under a live rebuild — the two commit on the same
+  manifest, which is what the wait exists to prevent.
 - **A rebuild that loses a commit race is retried** instead of waiting out the
   full 12h cadence. Lance labels the conflict `Retryable` and it is: a
   concurrent writer in another process won the manifest, nothing is wrong with

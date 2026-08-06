@@ -1385,3 +1385,47 @@ async def test_all_three_loops_are_supervised(patched_repo: _FakeRepo) -> None:
             )
     finally:
         await w.stop()
+
+
+async def test_optimize_does_not_park_forever_on_a_rebuild(
+    patched_repo: _FakeRepo,
+) -> None:
+    """The optimize runner's wait on a rebuild must be bounded, like its mirror.
+
+    Whichever maintenance job arrives second parks on the first, so the two
+    waits are the same hazard seen from opposite ends: while the runner waits,
+    its task slot stays occupied, ``_schedule_optimize`` keeps short-circuiting
+    on it, and that table quietly stops being pruned. The rebuild-side wait was
+    bounded; this one was left open on the argument that ``rebuild_indexes``
+    carries its own deadline — true of its critical section only, not of the
+    task's dispatch and teardown, so nothing actually bounded it.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
+
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+    )
+    state = wmod._KindOptimizerState()
+    w._optimizer_states["episode"] = state
+    state.dirty = True
+    # A rebuild that never finishes: exactly the state the runner used to wait
+    # out forever.
+    state.rebuild_task = asyncio.create_task(asyncio.sleep(30))
+
+    try:
+        async with asyncio.timeout(5):
+            await w._optimize_runner("episode", initial_delay=0)
+    finally:
+        state.rebuild_task.cancel()
+        monkeypatched.undo()
+
+    assert not fake.optimize_calls, (
+        "the runner must skip the beat, not compact under a live rebuild — "
+        "both commit on the same manifest"
+    )

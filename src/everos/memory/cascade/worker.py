@@ -918,11 +918,35 @@ class CascadeWorker:
         try:
             if initial_delay > 0 and await self._wait_or_stop(initial_delay):
                 return
-            # Serialise behind any in-flight rebuild (rare; only during
-            # the 12h sweep). Failures are absorbed in _run_rebuild_once.
+            # Serialise behind any in-flight rebuild (rare; only during the
+            # 12h sweep). Failures are absorbed in _run_rebuild_once.
+            #
+            # Bounded, and symmetric with the wait on the other side: whichever
+            # of the two maintenance jobs arrives second parks on the first, so
+            # an unbounded wait here is the same defect as an unbounded wait
+            # there — this kind's task slot never frees, _schedule_optimize
+            # keeps short-circuiting on it, and that table silently stops being
+            # pruned. It was left unbounded on the argument that
+            # rebuild_indexes carries its own 300s deadline; that only covers
+            # the critical section, not the task's dispatch and teardown around
+            # it, so the transitive bound was never real.
             if state.rebuild_task is not None and not state.rebuild_task.done():
-                with contextlib.suppress(Exception):
-                    await state.rebuild_task
+                try:
+                    async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                        await state.rebuild_task
+                except TimeoutError:
+                    # Give up this beat rather than compact under a live
+                    # rebuild — the two commit on the same manifest, which is
+                    # what the wait exists to prevent. Writes keep the dirty
+                    # flag set, so the next beat retries.
+                    logger.warning(
+                        "cascade_lancedb_optimize_skipped_rebuild_unfinished",
+                        kind=kind,
+                        waited_seconds=_MAINTENANCE_TASK_TIMEOUT_SECONDS,
+                    )
+                    return
+                except Exception:
+                    pass  # _run_rebuild_once already logged and counted it
             while state.dirty and not self._stop.is_set():
                 state.dirty = False
                 state.last_run_at = time.monotonic()
