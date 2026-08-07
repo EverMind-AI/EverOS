@@ -202,8 +202,8 @@ curl http://127.0.0.1:8000/health
 `everos server start` 会按以下顺序查找 `.env`：`--env-file <path>` →
 `./.env`（当前目录）→ `${XDG_CONFIG_HOME:-~/.config}/everos/.env` →
 `~/.everos/.env`。端点栈兼容 OpenAI protocol（OpenAI / OpenRouter /
-vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
-来指向任意这些模型服务。
+OrcaRouter / vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的
+`*__BASE_URL` 来指向任意这些模型服务。
 
 现在可以把 demo 跑成真实 server flow。在第二个 terminal 里运行：
 

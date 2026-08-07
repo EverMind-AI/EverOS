@@ -104,7 +104,11 @@ for fast retrieval and self-evolving reuse.
 | Embedding + rerank | [DeepInfra](https://deepinfra.com/) | `EMBEDDING` / `RERANK` | `EVEROS_EMBEDDING__API_KEY`, `EVEROS_RERANK__API_KEY` |
 
 You can use other OpenAI-compatible providers by changing the matching
-`*__BASE_URL` fields in `.env`.
+`*__BASE_URL` fields in `.env`. [OrcaRouter](https://www.orcarouter.ai)
+(`https://api.orcarouter.ai/v1`) is a drop-in for the `LLM` / `MULTIMODAL`
+slots — it uses the same `vendor/model` slugs, so the shipped
+`openai/gpt-4.1-mini` and `google/gemini-3-flash-preview` defaults work
+unchanged and only the base URL and key differ.
 
 ### 1. Install
 
@@ -184,9 +188,9 @@ Expected response:
 
 `everos server start` searches for `.env` in this order: `--env-file <path>` →
 `./.env` (cwd) → `${XDG_CONFIG_HOME:-~/.config}/everos/.env` → `~/.everos/.env`.
-The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
-Ollama / DeepInfra) - override `*__BASE_URL` in the generated `.env` to point
-at any of them.
+The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter /
+OrcaRouter / vLLM / Ollama / DeepInfra) - override `*__BASE_URL` in the
+generated `.env` to point at any of them.
 
 Now make the demo real. In the second terminal, run:
 

@@ -72,7 +72,9 @@ api_key  = "..."
 
 The generated file pre-fills recommended `model` and `base_url`
 defaults — just drop in your API keys. Any OpenAI-compatible endpoint
-works.
+works: [OrcaRouter](https://www.orcarouter.ai), for instance, uses the
+same `vendor/model` slugs, so `base_url = "https://api.orcarouter.ai/v1"`
+is the only edit besides the key.
 
 > **Multimodal** (`[multimodal]`) is optional — only needed when
 > ingesting image / pdf / audio content items. See
