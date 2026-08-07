@@ -122,24 +122,34 @@ class Runner:
     ) -> None:
         """Execute ``meta.func(event, ctx)`` with the attempt retry loop.
 
-        Holds ``engine_sem`` for the full retry chain so concurrency cap
-        applies end-to-end. Each attempt gets a fresh ``run_id`` after
-        the first, so the run history records every try.
+        ``engine_sem`` is held per *attempt*, not across the whole retry
+        chain: the backoff sleep happens outside it. The cap exists to
+        bound concurrent strategy work — LLM calls, embeddings, storage
+        IO — and a coroutine sleeping between attempts consumes none of
+        that. Holding the slot across the sleep turned a partial outage
+        into a total stall: with ``max_concurrent_runs`` slots and a
+        ``1s → 2s → 4s`` backoff, enough simultaneously-failing runs
+        park every slot in ``asyncio.sleep`` and starve strategies that
+        would have succeeded. Backpressure on the failing work is
+        wanted; backpressure on everything else is not.
+
+        Each attempt gets a fresh ``run_id`` after the first, so the run
+        history records every try.
         """
         if max_retries_snapshot < 0:
             raise ValueError(
                 f"max_retries_snapshot must be >= 0, got {max_retries_snapshot}"
             )
 
-        async with self._sem:
-            event_topic = type(event).topic()
-            event_payload = event.model_dump_json()
-            current_run_id = run_id
+        event_topic = type(event).topic()
+        event_payload = event.model_dump_json()
+        current_run_id = run_id
 
-            for attempt in range(max_retries_snapshot + 1):
-                if attempt > 0:
-                    await self._sleep_backoff(attempt)
-                    current_run_id = uuid4().hex
+        for attempt in range(max_retries_snapshot + 1):
+            if attempt > 0:
+                await self._sleep_backoff(attempt)
+                current_run_id = uuid4().hex
+            async with self._sem:
                 terminated = await self._run_one_attempt(
                     meta=meta,
                     event=event,
@@ -150,8 +160,8 @@ class Runner:
                     max_retries_snapshot=max_retries_snapshot,
                     traceparent=traceparent,
                 )
-                if terminated:
-                    return
+            if terminated:
+                return
 
     async def _sleep_backoff(self, attempt: int) -> None:
         """Sleep before retry ``attempt`` (1-indexed): ``base * 2**(attempt-1)``,

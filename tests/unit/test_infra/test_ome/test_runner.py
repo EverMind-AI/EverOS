@@ -437,6 +437,73 @@ async def test_runner_applies_exponential_backoff_between_attempts(
 
 
 @pytest.mark.asyncio
+async def test_runner_releases_engine_sem_across_backoff_sleep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The concurrency slot must be free while a run waits to retry.
+
+    ``engine_sem`` bounds concurrent strategy *work* — LLM calls,
+    embeddings, storage IO — and a coroutine sleeping between attempts
+    consumes none of it. Holding the slot across the sleep turns a
+    partial outage into a total stall: with N slots and a 1s/2s/4s
+    backoff, N simultaneously-failing runs park every slot in
+    ``asyncio.sleep`` and starve strategies that would have succeeded.
+
+    Uses a single-permit semaphore so ``locked()`` is unambiguous, and
+    asserts a second waiter actually acquires — ``locked()`` alone would
+    pass on an implementation that released the slot but left a waiter
+    unable to take it.
+    """
+    storage = OMEStorage(db_path=tmp_path / "ome.db")
+    await storage.init()
+    rec_store = RunRecordStore(storage=storage, max_records_per_strategy=1000)
+    sem = asyncio.Semaphore(1)
+    config = OMEConfig(
+        jobstore_path=tmp_path / "ome.db",
+        retry_backoff_base_seconds=1.0,
+        retry_backoff_cap_seconds=10.0,
+        retry_jitter_seconds=0.0,
+    )
+
+    held_during_sleep: list[bool] = []
+    acquired_during_sleep: list[bool] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        held_during_sleep.append(sem.locked())
+        try:
+            async with asyncio.timeout(0.5):
+                await sem.acquire()
+        except TimeoutError:
+            acquired_during_sleep.append(False)
+        else:
+            acquired_during_sleep.append(True)
+            sem.release()
+
+    monkeypatch.setattr("everos.infra.ome._dispatch.runner.asyncio.sleep", fake_sleep)
+
+    @offline_strategy(
+        name="sem_probe_failing",
+        trigger=Immediate(on=[_E]),
+        emits=[],
+        max_retries=2,
+    )
+    async def s(event: _E, ctx: StrategyContext) -> None:
+        raise RuntimeError("transient")
+
+    runner = Runner(
+        run_record_store=rec_store,
+        engine_sem=sem,
+        emit_hook=_no_emit,
+        config=config,
+        engine=MagicMock(),
+    )
+    await runner.run(s.meta, _E(), run_id="r1", max_retries_snapshot=2)
+
+    assert held_during_sleep == [False, False]
+    assert acquired_during_sleep == [True, True]
+
+
+@pytest.mark.asyncio
 async def test_runner_backoff_caps_at_configured_maximum(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
