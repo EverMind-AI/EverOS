@@ -301,7 +301,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and below LanceDB's 7-day unverified window they then wait out the full 7
   days.
 
-
 ### Changed
 
 - **`extract_foresight` now ships disabled** (`enabled=False`). Not because
