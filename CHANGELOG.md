@@ -367,10 +367,20 @@ during an index rebuild, and the maintenance cadences moved into settings.
 
 ### Upgrade
 
+Two behaviour changes to know about before upgrading.
+
 `extract_foresight` now ships disabled — a deployment relying on foresight
-entries must set `enabled = true` for it in `ome.toml`. Nothing else needs
-action: the new `[cascade]` section is optional and a config written by an
-earlier version falls back to the same defaults (verified on a clean install).
+entries must set `enabled = true` for it in `ome.toml`.
+
+`SkillClusterUpdated` now carries the case's 1024-dim embedding, so a
+`skill_cluster_updated` row in the OME `run_record` table grows from ~0.8 KB to
+~14 KB — about 14 MB for that strategy's default 1000-record ring buffer,
+against ~0.8 MB before. Anyone sizing `~/.everos/.index/sqlite/ome.db` should
+account for it.
+
+Nothing else needs action: the new `[cascade]` section is optional and a config
+written by an earlier version falls back to the same defaults (verified on a
+clean install).
 
 One deployment note. When a supervised background loop crashes repeatedly and
 exhausts its restart budget, the worker now sends itself `SIGTERM` rather than
