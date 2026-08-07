@@ -23,10 +23,7 @@ BRAILLE_DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),
     (0x08, 0x10, 0x20, 0x80),
 )
-WAVE_RINGS = 13
-WAVE_LONGITUDE_DENSITY = 32
-# Wave motion is adapted for Braille terminals from Thinking Orbs' MIT-licensed
-# "listening" preset: https://github.com/Jakubantalik/thinking-orbs
+SPHERE_POINT_COUNT = 1300
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -141,76 +138,43 @@ def build_dot_sphere(
     sub_height = height * 4
     sub_center_x = (sub_width - 1) / 2
     sub_center_y = (sub_height - 1) / 2
-    radius_x = max(1.0, sub_center_x - 6)
-    radius_y = max(1.0, sub_center_y - 5)
-    animation_time = phase * math.tau
-    wave_scale = {
-        "booting": 0.55,
-        "ingesting": 0.8,
-        "extracting": 1.15,
-        "indexing": 0.45,
-        "recalling": 0.75,
-        "remembered": 0.35,
-        "source": 0.35,
-    }[state.key]
-    yaw = animation_time * 0.18
-    tilt = 0.38
-    sin_yaw, cos_yaw = math.sin(yaw), math.cos(yaw)
-    sin_tilt, cos_tilt = math.sin(tilt), math.cos(tilt)
+    radius_x = max(1.0, sub_center_x - 5)
+    radius_y = max(1.0, sub_center_y - 3)
+    rotation = phase * math.tau
+    active_target = _highlight_target(width, height)
 
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
     highlighted_positions: set[tuple[int, int]] = set()
-    for ring in range(WAVE_RINGS + 1):
-        latitude = -math.pi / 2 + (ring / WAVE_RINGS) * math.pi
-        cos_latitude = math.cos(latitude)
-        sin_latitude = math.sin(latitude)
-        wave = wave_scale * (
-            0.62 * math.sin(animation_time * 2.1 - ring * 0.52)
-            + 0.38 * math.sin(animation_time * 1.27 + ring * 0.83)
+    for index in range(SPHERE_POINT_COUNT):
+        y3 = 1 - 2 * ((index + 0.5) / SPHERE_POINT_COUNT)
+        ring_radius = math.sqrt(max(0.0, 1.0 - y3 * y3))
+        theta = index * GOLDEN_ANGLE + rotation
+        x3 = ring_radius * math.cos(theta)
+        z3 = ring_radius * math.sin(theta)
+        sub_x = round(sub_center_x + x3 * radius_x)
+        sub_y = round(sub_center_y + y3 * radius_y)
+        if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
+            continue
+        _add_braille_dot(
+            masks=masks,
+            depths=depths,
+            sub_x=sub_x,
+            sub_y=sub_y,
+            z=z3,
         )
-        shell_radius = 0.88 + 0.105 * wave
-        longitude_count = max(1, round(abs(cos_latitude) * WAVE_LONGITUDE_DENSITY))
-        for longitude_index in range(longitude_count):
-            longitude = (longitude_index / longitude_count) * math.tau
-            x3 = cos_latitude * math.cos(longitude) * shell_radius
-            y3 = sin_latitude * shell_radius
-            z3 = cos_latitude * math.sin(longitude) * shell_radius
-
-            x_rotated = x3 * cos_yaw + z3 * sin_yaw
-            z_rotated = -x3 * sin_yaw + z3 * cos_yaw
-            y_projected = y3 * cos_tilt - z_rotated * sin_tilt
-            depth = y3 * sin_tilt + z_rotated * cos_tilt
-            sub_x = round(sub_center_x + x_rotated * radius_x)
-            sub_y = round(sub_center_y - y_projected * radius_y)
-            if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
-                continue
-
-            _add_braille_dot(
-                masks=masks,
-                depths=depths,
-                sub_x=sub_x,
-                sub_y=sub_y,
-                z=depth,
-            )
-            if depth > 0.08 and sub_y + 1 < sub_height:
-                _add_braille_dot(
-                    masks=masks,
-                    depths=depths,
-                    sub_x=sub_x,
-                    sub_y=sub_y + 1,
-                    z=depth,
-                )
 
     if state.key in {"recalling", "remembered", "source"}:
-        active_target = min(
-            masks,
-            key=lambda position: (
-                (position[0] - (width - 1) * 0.72) ** 2
-                + (position[1] - (height - 1) * 0.28) ** 2
-            ),
-        )
         highlighted_positions.add(active_target)
+        target_sub_x = active_target[0] * 2 + 1
+        target_sub_y = active_target[1] * 4 + 1
+        _add_braille_dot(
+            masks=masks,
+            depths=depths,
+            sub_x=target_sub_x,
+            sub_y=target_sub_y,
+            z=1.0,
+        )
 
     cells = []
     for (x, y), mask in masks.items():
@@ -347,6 +311,10 @@ def _style_for_depth(z: float, state: SphereState) -> str:
     if z > 0.05:
         return EVEROS_YELLOW
     return EVEROS_AMBER
+
+
+def _highlight_target(width: int, height: int) -> tuple[int, int]:
+    return (round((width - 1) * 0.66), round((height - 1) * 0.42))
 
 
 def _state_local_phase(phase: float, state_key: str) -> float:

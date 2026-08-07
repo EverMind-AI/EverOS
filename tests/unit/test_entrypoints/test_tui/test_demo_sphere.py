@@ -9,13 +9,13 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
 )
 
 
-def test_dot_sphere_forms_depth_shaded_bounded_wave_shell() -> None:
+def test_dot_sphere_forms_round_bounded_cloud() -> None:
     frame = build_dot_sphere(width=41, height=19, phase=0.0, state_key="extracting")
 
     assert frame.width == 41
     assert frame.height == 19
     assert frame.caption == "extracting episode -> atomic facts"
-    assert len(frame.cells) >= 55
+    assert len(frame.cells) >= 90
 
     center_x = (frame.width - 1) / 2
     center_y = (frame.height - 1) / 2
@@ -27,20 +27,23 @@ def test_dot_sphere_forms_depth_shaded_bounded_wave_shell() -> None:
         ) ** 2
         assert normalized <= 1.08
 
-    depths = [cell.z for cell in frame.cells]
-    assert max(depths) > 0.65
-    assert min(depths) < -0.3
-    assert {cell.style for cell in frame.cells} >= {"#F9B91C", "#8B763F"}
+    row_counts: dict[int, int] = {}
+    for cell in frame.cells:
+        row_counts[cell.y] = row_counts.get(cell.y, 0) + 1
+    assert row_counts[frame.height // 2] > row_counts[min(row_counts)]
+    assert row_counts[frame.height // 2] > row_counts[max(row_counts)]
 
 
-def test_dot_sphere_keeps_terminal_wave_shell_visually_round() -> None:
+def test_dot_sphere_keeps_terminal_poles_visually_round() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
     row_spans = _row_spans(frame)
 
-    occupied_rows = [y for y, span in row_spans.items() if span]
-    assert min(occupied_rows) <= 2
-    assert max(occupied_rows) >= frame.height - 3
-    assert row_spans[frame.height // 2] >= 26
+    assert row_spans[0] <= 8
+    assert row_spans[1] <= 20
+    assert row_spans[2] <= 26
+    assert row_spans[frame.height // 2] >= 31
+    assert row_spans[frame.height - 2] <= 20
+    assert row_spans[frame.height - 1] <= 8
 
 
 def test_dot_sphere_uses_braille_fine_dot_cells() -> None:
@@ -64,18 +67,19 @@ def test_dot_sphere_packs_multiple_subdots_per_terminal_cell() -> None:
 
     subdot_count = sum(_braille_subdot_count(cell.glyph) for cell in frame.cells)
 
-    assert subdot_count > len(frame.cells) * 1.3
-    assert subdot_count < frame.width * frame.height * 0.65
-    assert any(_braille_subdot_count(cell.glyph) >= 3 for cell in frame.cells)
+    assert subdot_count > len(frame.cells) * 1.8
+    assert subdot_count > frame.width * frame.height * 0.9
+    assert any(_braille_subdot_count(cell.glyph) >= 4 for cell in frame.cells)
 
 
-def test_dot_sphere_morphs_between_animation_phases() -> None:
+def test_dot_sphere_avoids_flat_sides_in_terminal_frame() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
-    next_frame = build_dot_sphere(width=37, height=17, phase=0.25, state_key="booting")
+    row_spans = _row_spans(frame)
 
-    assert {(cell.x, cell.y, cell.glyph) for cell in frame.cells} != {
-        (cell.x, cell.y, cell.glyph) for cell in next_frame.cells
-    }
+    assert max(row_spans.values()) <= frame.width - 4
+    assert row_spans[frame.height // 2] >= frame.width - 4
+    for y in range(frame.height // 2):
+        assert abs(row_spans[y] - row_spans[frame.height - 1 - y]) <= 4
 
 
 def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
