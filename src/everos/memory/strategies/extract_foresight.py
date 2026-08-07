@@ -10,6 +10,29 @@ Per-owner batching: each sender's full foresight list is appended in
 one batched ``append_entries`` call rather than ``N`` single appends,
 dropping IO complexity to ``O(N)`` per owner and narrowing the
 per-path lock window.
+
+**Disabled by default** (``enabled=False``), temporarily, because the
+sender scan below reads ``m.role`` off every ``memcell.items`` entry
+and only ``ChatMessage`` carries that attribute: ``ToolCallRequest``
+has ``sender_id`` but no ``role``, and ``ToolCallResult`` has neither.
+Any memcell holding a tool call therefore raises ``AttributeError``
+before the first sender is resolved. That makes the strategy sound on
+plain user chat and guaranteed to fail on agent trajectories — it
+burns its ``max_retries`` budget and dead-letters every time, on a
+result nothing downstream consumes today. Disabling is the stop-gap,
+not the fix; the real change is to extract per-episode (like
+``atomic_fact``) rather than per-memcell, which needs an everalgo
+``aextract_from_text``-style entry point that does not exist yet.
+
+Re-enable per install with ``ome.toml`` (hot-reloaded, ~2s):
+
+.. code-block:: toml
+
+    [strategies.extract_foresight]
+    enabled = true
+
+Note the opt-in is deliberately left working rather than removed: on a
+user-chat-only deployment the strategy does produce correct foresights.
 """
 
 from __future__ import annotations
@@ -47,6 +70,7 @@ def _get_writer() -> ForesightWriter:
     trigger=Immediate(on=[UserPipelineStarted]),
     emits=[],
     max_retries=2,
+    enabled=False,
 )
 async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
     # 1. List the user senders in this memcell.

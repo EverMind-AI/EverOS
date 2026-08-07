@@ -258,6 +258,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`extract_foresight` now ships disabled** (`enabled=False`), temporarily.
+  The strategy reads `m.role` off every memcell item, but only `ChatMessage`
+  carries that attribute — `ToolCallRequest` has `sender_id` and no `role`,
+  `ToolCallResult` has neither — so any memcell holding a tool call raises
+  `AttributeError` before the first sender is resolved. It is correct on
+  plain user chat and fails every time on agent trajectories, burning its
+  `max_retries` budget and dead-lettering on output nothing consumes today.
+  **Re-enable per install** in `ome.toml` (hot-reloaded, no restart):
+
+  ```toml
+  [strategies.extract_foresight]
+  enabled = true
+  ```
+
+  The opt-in is deliberately left working rather than removed, since a
+  chat-only deployment does get correct foresights. This is a stop-gap, not
+  the fix: the real change is per-episode extraction (as `atomic_fact` does)
+  instead of per-memcell, which needs an everalgo entry point that does not
+  exist yet. Note that editing `default_ome.toml` alone would not have
+  reached existing installs — `everos init` does not overwrite an existing
+  `~/.everos/ome.toml` — so the code default is what changed.
 - **`SkillClusterUpdated` carries the case's 1024-dim embedding, growing the
   OME `run_record` table.** The event payload is persisted verbatim in
   `run_record.event_payload` (and in the APScheduler jobstore while a job is

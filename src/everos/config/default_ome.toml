@@ -29,8 +29,13 @@
 # Atomic fact extraction runs per memcell. Always enabled — search
 # depends on atomic facts for MaxSim retrieval.
 
-# Foresight extraction (runs per memcell). Heavy LLM call — set
-# enabled = false to skip in evaluation / benchmark runs.
+# Foresight extraction (runs per memcell). Heavy LLM call.
+#
+# DISABLED BY DEFAULT since 1.2.3, temporarily: the strategy reads a
+# `role` attribute that only chat messages carry, so any memcell holding
+# a tool call raises AttributeError and dead-letters. It is correct on
+# plain user chat and always fails on agent trajectories. Uncomment to
+# opt back in if your deployment only ingests user conversations.
 # [strategies.extract_foresight]
 # enabled = true
 
