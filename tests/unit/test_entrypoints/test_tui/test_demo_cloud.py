@@ -40,7 +40,7 @@ def test_resolve_keys_read_their_env_vars(monkeypatch) -> None:
 
 def test_public_demo_ships_no_api_key(monkeypatch) -> None:
     monkeypatch.delenv(cloud.CLOUD_DEMO_KEY_ENV, raising=False)
-    assert cloud.CLOUD_API_BASE_URL == "https://everos-demo.evermind.ai"
+    assert cloud.CLOUD_API_BASE_URL == "https://everosdemo.com"
     assert cloud.resolve_demo_key() == ""
 
 

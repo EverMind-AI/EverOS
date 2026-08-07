@@ -36,7 +36,7 @@ LIVE_DEMO_SESSION_ID = "everos-demo-live"
 LIVE_DEMO_USER_ID = "everos_demo_user"
 
 CLOUD_PLATFORM_API_BASE_URL = "https://api.evermind.ai"
-CLOUD_API_BASE_URL = "https://everos-demo.evermind.ai"
+CLOUD_API_BASE_URL = "https://everosdemo.com"
 CLOUD_DEMO_SERVER_URL_ENV = "EVEROS_CLOUD_DEMO_URL"
 CLOUD_DEMO_KEY_ENV = "EVEROS_CLOUD_DEMO_KEY"
 CLOUD_USER_KEY_ENV = "EVEROS_CLOUD_API_KEY"

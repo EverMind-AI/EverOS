@@ -12,7 +12,7 @@ everos demo
 
 This opens a full-screen terminal UI with an input box. You type a memory and a
 recall question directly in the UI, and each round runs the **real** memory
-pipeline through the public relay (`https://everos-demo.evermind.ai`):
+pipeline through the public relay (`https://everosdemo.com`):
 `POST /api/v1/memories` -> `POST /api/v1/memories/flush` ->
 `POST /api/v1/memories/search`. The panels follow your own input: conversation
 -> memory sphere -> recall -> source proof -> confetti.

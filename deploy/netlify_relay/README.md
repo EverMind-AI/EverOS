@@ -40,7 +40,7 @@ are configured, never their values.
    as `true`.
 7. Test the client with
    `EVEROS_CLOUD_DEMO_URL=https://<site>.netlify.app everos demo`.
-8. After validation, add `everos-demo.evermind.ai` as the custom domain.
+8. After validation, add `everosdemo.com` as the custom domain.
 
 ## Local checks
 
