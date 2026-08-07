@@ -1070,8 +1070,32 @@ Manually trigger a registered OME strategy.
 
 | Field | Type | Notes |
 |---|---|---|
-| `status` | `"ok" \| "timeout"` | Whether the strategy completed within the timeout |
+| `status` | `"ok" \| "timeout" \| "not_dispatched"` | `ok` = every dispatched run settled — a dead-lettered run still counts as settled (see `runs[*].error`); `timeout` = at least one run had not settled when `timeout` elapsed; `not_dispatched` = no strategy was dispatched (see below) |
 | `name` | `string` | Echoes the requested strategy name |
+| `dispatched` | `int` | Number of strategy routes enqueued. `0` iff `status == "not_dispatched"` |
+| `runs` | `list[RunSummary]` | One entry per strategy run *attempt*, not per dispatched route: `{run_id: string, status: string, error?: string}`. A strategy that retried before settling contributes multiple entries sharing one `event_id`. `status` is one of `running` / `success` / `failed` / `dead_letter` / `crashed`. Includes dead-lettered runs |
+
+**`not_dispatched`** means every subscriber was rejected by one of the
+four dispatch gates (`_routes_to` / `enabled` / `applies_to` /
+`Counter`). The most common cause is forgetting `"force": true` on a
+strategy that is `enabled=false` in `ome.toml` — e.g. triggering
+`reflect_episodes` without `force` while it is disabled in config
+returns `{"status": "not_dispatched", "dispatched": 0, "runs": []}`
+instead of an error.
+
+> `status: "ok"` means all dispatched strategy runs settled — including
+> runs that dead-lettered (their errors are in `runs[*].error`). It does
+> **not** mean the LanceDB index has caught up. Markdown is written
+> synchronously; the index syncs asynchronously (see
+> [Eventual consistency](#eventual-consistency)).
+>
+> If you need read-your-write semantics, poll `GET /health`'s
+> `cascade.pending` field until it reads `0` on two consecutive samples
+> (a single zero can be a false convergence — the watcher-input window
+> can briefly report an empty queue between md write and enqueue).
+
+See [docs/openapi.json](openapi.json) for the exact generated schema
+(`TriggerResponse` / `RunSummary`) behind this table.
 
 #### Errors
 

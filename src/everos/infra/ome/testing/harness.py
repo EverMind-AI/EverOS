@@ -42,6 +42,7 @@ class StrategyTestHarness:
             config_watch=False,
             max_concurrent_runs=20,
             max_retries=1,
+            retry_backoff_base_seconds=0.0,
         )
         self._engine = OfflineEngine(config=cfg)
 

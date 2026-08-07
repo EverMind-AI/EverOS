@@ -7,25 +7,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **`[cascade]` settings section** — the four maintenance cadences
-  (`optimize_heartbeat_seconds`, `optimize_prune_interval_seconds`,
-  `optimize_prune_retention_seconds`, `optimize_rebuild_interval_seconds`) are
-  now configurable. They were already constructor arguments on `CascadeWorker`,
-  but `CascadeConfig` did not carry them and no production path passed one, so
-  the defaults were unreachable — which is why the 12h rebuild sweep could not
-  be exercised by any soak run shorter than half a day. The deadlines that
-  bound a hung call are deliberately **not** exposed: they are hang-catchers
-  sized from measured durations, where too low manufactures failures on a
-  healthy table and too high leaves a wedged one invisible for longer. Note
-  `optimize_prune_retention_seconds` has a second effect worth reading before
-  tuning — it also decides how long index files keep a manifest naming them,
-  and below LanceDB's 7-day unverified window they then wait out the full 7
-  days.
+## [1.2.3] - 2026-08-07
 
 ### Fixed
 
+- **Agent skill extraction is no longer stuck in a retry-then-dead-letter
+  loop.** Target case data now travels on `SkillClusterUpdated` and existing
+  skills for the cluster are read from markdown (strong-consistency), so the
+  strategy never races cascade indexing. Prior to this fix, running a fresh
+  agent trajectory produced zero `SKILL.md` files — `.skills/` did not exist.
+  **The related stale-index clobber is fully closed only for clusters at or
+  below `MAX_SKILLS_IN_PROMPT` (10).** Above it, markdown still supplies the
+  candidate set but LanceDB orders it, and the skill a lagging index omits is
+  by definition the one written most recently — the one most likely to need
+  `update` — so it can be ranked out of the prompt and re-added instead. The
+  window is narrow (it needs a cluster over 10 skills *and* an index that has
+  not caught up) and the consequence is the pre-existing full-replace, not a
+  new failure mode.
+- **`POST /api/v2/ome/trigger` no longer masks strategy state.** The `status`
+  field now distinguishes `not_dispatched` (all dispatch gates rejected the
+  strategy — usually a missing `"force": true`) from `ok` (dispatched and
+  settled). The new `runs` field surfaces dead-lettered strategy runs that
+  were previously invisible to the caller. **If your client matches
+  `status` exhaustively (Python `Literal`, TypeScript union), add a
+  `not_dispatched` branch.**
+- **Agentic search on agent memory now uses the skill-shaped rerank
+  passage.** The cross-encoder previously saw only the raw `description`
+  field instead of the `name + description + skill instruction` triple that
+  the HYBRID lane uses. A skill with empty `description` (a legal everalgo
+  output — see `everalgo/agent_memory/skill_ops.py:294`) no longer causes
+  HTTP 500 during the LLM sufficiency check.
+- **OME strategy retries now back off between attempts.** A retry-class error
+  (e.g. waiting on eventually-consistent state) previously exhausted its
+  `max_retries` budget in milliseconds; the loop now sleeps
+  `min(base * 2**(attempt-1), cap)` plus up to `jitter` seconds
+  (defaults: `1s` base / `10s` cap / `0.5s` jitter — code-only defaults,
+  not currently exposed via `everos.toml` or `ome.toml`). **`engine_sem` is
+  now held per attempt rather than across the whole retry chain**, so the
+  backoff sleep does not occupy a concurrency slot. The cap bounds
+  concurrent strategy *work* — LLM calls, embeddings, storage IO — and a
+  coroutine waiting to retry consumes none of it; holding the slot would
+  have turned a partial outage into a total stall, since enough
+  simultaneously-failing runs park every one of the
+  `max_concurrent_runs` slots in `asyncio.sleep` and starve strategies that
+  would have succeeded. Backpressure on failing work is intended;
+  backpressure on everything else is not.
+- **Path-traversal hardening for LLM-generated agent-skill names (CWE-22).**
+  `AgentSkillFrontmatter.name` comes straight from LLM output
+  (`extract_agent_skill`) and was concatenated unsanitized into the
+  `skills/skill_<name>/` directory segment on both the write and read
+  paths; given a sufficiently long `../` prefix, the write target could
+  escape the memory root. This is the same class of defect previously
+  fixed for knowledge-upload titles/categories (see `knowledge_writer.py`
+  in an earlier 1.2.x). The sanitizer is now a single shared helper
+  (`everos.core.persistence.markdown.sanitize_dirname`) used by both
+  `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()` /
+  `sanitize_skill_name()`, instead of two independently maintained copies.
+  `extract_agent_skill` now sanitizes the LLM-emitted name *before*
+  constructing `AgentSkillFrontmatter`, so **`AgentSkillFrontmatter.name`
+  and the LanceDB `agent_skill` primary key now hold the sanitized name**
+  (spaces become `_`, characters outside `[\w\-.]` are dropped, capped at
+  50 chars), not the raw LLM output — a user-visible change for anything
+  that reads a skill's `name` field expecting the verbatim LLM string.
+  `AgentSkillFrontmatter.name` also gained a validator rejecting a name
+  containing a path separator, or being exactly `..`, so a hand-edited
+  `SKILL.md` that bypasses the writer's sanitization is caught on read
+  rather than silently relocated (the substring form, e.g. a name that
+  merely *contains* `..`, is deliberately allowed — sanitized output can
+  legitimately contain runs of literal dots). `sanitize_dirname` itself
+  falls back (not just on an empty result, but also on `.` or `..`) so a
+  short input that is itself a sanitizer fixpoint — e.g. `"../"` sanitizes
+  to `".."` verbatim without this fallback — cannot resolve to the same
+  directory or its parent; this closes both the agent-skill case and an
+  equivalent one-level escape on the knowledge-upload path, which has no
+  `skill_`-style prefix protecting its sanitized segment. **No data
+  migration is needed for agent skills**: extraction has never
+  successfully produced a `SKILL.md` before this release (see the
+  cascade-lag fix above), so there is no legacy skill corpus whose
+  directory names would change. **Knowledge documents do have a
+  pre-existing corpus**, and two inputs resolve to a different directory
+  than before: a decomposed (NFD) topic or category now keeps its
+  combining marks (`"Résumé"` no longer degrades to `"Resume"`) because
+  the shared helper NFC-normalizes first, and a topic or category of
+  exactly `.` or `..` now falls back instead of resolving onto the
+  parent directory. Precomposed input — including CJK — is unaffected;
+  the character class is unchanged from the previous private copy.
+  Sanitizing is lossy: skills whose raw names
+  differ only in characters the sanitizer drops or replaces (e.g.
+  `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and so do
+  names differing only in a combining mark regardless of script (e.g.
+  Devanagari `"किताब"` vs. `"कताब"` — a combining mark alone is not `\w`
+  and is stripped either way; same for Thai tone marks, Hebrew niqqud,
+  Arabic harakat). The later write wins — the earlier skill's
+  `source_case_ids`, `maturity_score`, and body are silently lost, not
+  merged. Case is *not* folded, so `"Fix Django"` and `"fix django"` stay
+  two distinct sanitized names — two LanceDB rows, but one directory on a
+  case-insensitive filesystem (macOS APFS and Windows NTFS defaults),
+  where the index then advertises a name whose content was overwritten.
+  This is accepted for now rather than mitigated: detecting a collision
+  and raising would reintroduce the dead-letter DoS the sanitizer was
+  built to avoid, and a disambiguating suffix — the workable option —
+  needs a collision probe plus a case-folding rule, so it is deferred to
+  a deliberate pass rather than added here.
+- **A renamed skill no longer leaves an orphan directory that pollutes the
+  next extraction.** everalgo treats a name change as a first-class update
+  (`skill_ops._apply_update` preserves `prior.id` while swapping the name),
+  so the emitted skill was written to a new `skill_<new_name>/` while the
+  old directory survived carrying the same `cluster_id`. Because existing
+  skills are now read from markdown rather than LanceDB, that orphan did
+  not merely sit on disk — it came back in the next run's
+  `existing_relevant_skills` as a duplicate of a skill the LLM had already
+  renamed, feeding exactly the `add`-instead-of-`update` full-replace
+  clobber this release set out to close, once more per rename. The old
+  directory is now reaped after the new one is written, keyed on the
+  skill's `id` (the only thing that survives a rename; a fresh `add` mints
+  a uuid and can never match). A prior name that another skill in the same
+  batch just claimed is never deleted.
+- **`extract_agent_skill` retire ops are documented as unimplemented rather
+  than silently mispersisted.** `AgentSkillExtractor.aextract` returns a
+  flat list with no op discriminator, so a retirement arrives as an
+  ordinary skill with `confidence < retire_confidence` and was written back
+  like any other — staying in markdown, in the next prompt, and in search.
+  The behaviour is unchanged; the module docstring no longer claims retire
+  is handled. Honouring it is a design decision (delete the directory, or
+  add a `retired` flag that the enumeration, cascade, and search all
+  filter on) deferred to its own change.
+- **`reference_name` and `script_filename` are sanitized.** Both are
+  appended *after* the `skill_<name>` segment, so `skill_dir_name` never
+  covered them; they now go through the same `sanitize_dirname` primitive
+  on both the reader and the writer. No caller in `src/` reaches them
+  today, so nothing was exploitable — this closes the gap before
+  progressive disclosure wires them up.
+- **A single unparseable `SKILL.md` no longer disables skill extraction
+  for its whole cluster.** `AgentSkillReader.list_by_cluster` propagated
+  any frontmatter `ValidationError`, which aborted the enumeration that
+  feeds `extract_agent_skill` its existing skills — so one hand-edited
+  file (or, after a future schema revision adds a required field, every
+  existing file at once) dead-lettered that cluster's extraction on every
+  run. Offending files are now logged and skipped. `read_main` still
+  raises, since a caller naming one specific skill needs to hear about
+  corruption rather than receive the `None` that already means "not
+  created yet".
+  merged. This is accepted, not mitigated, on two grounds: a
+  disambiguating suffix would break the `name` ≡ directory-suffix
+  identity the reader/writer relies on, and detecting a collision and
+  raising would reintroduce the dead-letter DoS the sanitizer was built
+  to avoid.
+  `"fix django"` vs. `"fix_django"`) now share one `SKILL.md`, and the
+  later write wins — the earlier skill's `source_case_ids`,
+  `maturity_score`, and body are silently lost, not merged. This is
+  accepted, not mitigated: the LLM's add/update decision is keyed on the
+  name it sees, so a collision usually reads as an intended update
+  anyway.
+  under the new sanitizer.
+  `KnowledgeWriter` and the new `SkillPathMixin.skill_dir_name()`, instead
+  of two independently maintained copies. `AgentSkillFrontmatter.name`
+  also gained a validator rejecting path separators / `..` so a
+  hand-edited `SKILL.md` is caught on read rather than silently
+  relocated. No data migration: agent-skill extraction has never
+  successfully produced a `SKILL.md` before this release (see the
+  cascade-lag fix above), so there is no legacy skill corpus whose
+  directory names would change under the new sanitizer.
 - **Reads now carry a deadline** (`count` / `get_by_id` / `find_where` /
   `find_where_paginated` / `search`). The write-side deadline work skipped them
   on the reasoning that a read takes no lock and so blocks no writer — true, but
@@ -134,8 +276,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   near the legitimate hold turns a slow migration into startup crashes for
   every waiting process.
 
+### Added
+
+- `OfflineEngine.trigger_manual` now returns
+  `tuple[BaseEvent, list[tuple[StrategyMeta, str]]]` instead of `None`,
+  enabling the `dispatched`/`runs` fields below.
+- `TriggerResponse` gains `dispatched: int` and `runs: list[RunSummary]`.
+- `OMEConfig` gains `retry_backoff_base_seconds`, `retry_backoff_cap_seconds`,
+  and `retry_jitter_seconds` for the retry-loop sleep.
+- `AgentSkillReader.list_by_cluster()` enumerates the cluster's SKILL.md
+  files from markdown (strong-consistency existence check).
+- **`[cascade]` settings section** — the four maintenance cadences
+  (`optimize_heartbeat_seconds`, `optimize_prune_interval_seconds`,
+  `optimize_prune_retention_seconds`, `optimize_rebuild_interval_seconds`) are
+  now configurable. They were already constructor arguments on `CascadeWorker`,
+  but `CascadeConfig` did not carry them and no production path passed one, so
+  the defaults were unreachable — which is why the 12h rebuild sweep could not
+  be exercised by any soak run shorter than half a day. The deadlines that
+  bound a hung call are deliberately **not** exposed: they are hang-catchers
+  sized from measured durations, where too low manufactures failures on a
+  healthy table and too high leaves a wedged one invisible for longer. Note
+  `optimize_prune_retention_seconds` has a second effect worth reading before
+  tuning — it also decides how long index files keep a manifest naming them,
+  and below LanceDB's 7-day unverified window they then wait out the full 7
+  days.
+
 ### Changed
 
+- **`extract_foresight` now ships disabled** (`enabled=False`). Not because
+  it is broken — the crash below is fixed — but because it is one LLM call
+  per sender per memcell whose output nothing in EverOS reads today: no
+  search route surfaces foresights and no prompt slot consumes them. Until
+  something does, running it by default spends tokens on write-only data.
+  **Re-enable per install** in `ome.toml` (hot-reloaded, no restart):
+
+  ```toml
+  [strategies.extract_foresight]
+  enabled = true
+  ```
+
+  Editing `default_ome.toml` alone would not have reached existing installs
+  — `everos init` does not overwrite an existing `~/.everos/ome.toml` — so
+  the code default is what changed.
+- **`extract_foresight` no longer crashes on a memcell containing tool
+  calls.** The sender scan read `m.role` off every item, but only
+  `ChatMessage` carries it (`ToolCallRequest` has `sender_id` without it,
+  `ToolCallResult` has neither), so the first tool call raised
+  `AttributeError` — before any sender was resolved. The strategy was
+  correct on plain user chat and dead-lettered every time on agent
+  trajectories. everalgo explicitly contracts for the mixed case
+  (`user_memory/_render.chat_messages`: the caller need not pre-filter),
+  and every other user-memory extractor gets that for free by delegating;
+  this was the one place the filter was hand-rolled. The scan now tests
+  `isinstance(m, ChatMessage)`, so a pure agent trajectory yields no senders
+  and returns without an LLM call. Matters even with the strategy off by
+  default: it is what makes the opt-in above actually usable.
+- **`SkillClusterUpdated` carries the case's 1024-dim embedding, growing the
+  OME `run_record` table.** The event payload is persisted verbatim in
+  `run_record.event_payload` (and in the APScheduler jobstore while a job is
+  queued), so a `skill_cluster_updated` record goes from roughly 0.8 KB to
+  14 KB. At the default `max_records_per_strategy = 1000` ring buffer that is
+  ~14 MB for this one strategy instead of ~0.8 MB. **Operators sizing
+  `~/.everos/.index/sqlite/ome.db` should expect this.** The vector is only
+  read when a cluster holds more skills than `MAX_SKILLS_IN_PROMPT`, so it
+  usually rides along unused; trimming it from the persisted copy is not a
+  local change, because crash recovery replays `event_payload` to rebuild the
+  event and a trimmed payload would silently take the recovered run down a
+  different branch than the original. Tracked as a follow-up.
 - **`cascade_lancedb_optimize_conflict` now records `pruned`** — which
   maintenance beat lost the commit race. Lance labels both beats' commit the
   same way (`This Rewrite transaction was preempted by concurrent transaction

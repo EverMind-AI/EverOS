@@ -319,6 +319,7 @@ class OfflineEngine:
             run_record_store=self._run_record_store,
             engine_sem=self._engine_sem,
             emit_hook=self._dispatch_event,
+            config=self._config,
             on_dead_letter=self._on_dead_letter,
             engine=self,
         )
@@ -614,7 +615,7 @@ class OfflineEngine:
         *,
         event: BaseEvent | None = None,
         force: bool = False,
-    ) -> None:
+    ) -> tuple[BaseEvent, list[tuple[StrategyMeta, str]]]:
         """Manually trigger one strategy.
 
         - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``
@@ -624,6 +625,14 @@ class OfflineEngine:
         Routes through :meth:`EventDispatcher.dispatch` with
         ``strategy_filter=name`` so the same three-gate logic is applied
         as for engine-driven dispatch.
+
+        Returns:
+            Tuple of ``(event, routes)``:
+                - ``event``: the event that was dispatched (either supplied
+                  or the engine-generated ``ManualTick``).
+                - ``routes``: the ``(meta, run_id)`` pairs that were
+                  enqueued. Empty list when every dispatch gate rejected
+                  the strategy.
         """
         if not self._started:
             raise OMEError("trigger_manual: engine not started")
@@ -636,6 +645,7 @@ class OfflineEngine:
         )
         for meta, run_id in routes:
             self._enqueue_run(meta, event, run_id)
+        return event, routes
 
     def _enqueue_run(self, meta: StrategyMeta, event: BaseEvent, run_id: str) -> None:
         """Add a one-shot APScheduler job that hands the event to Runner.

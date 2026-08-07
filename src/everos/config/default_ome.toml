@@ -29,8 +29,12 @@
 # Atomic fact extraction runs per memcell. Always enabled — search
 # depends on atomic facts for MaxSim retrieval.
 
-# Foresight extraction (runs per memcell). Heavy LLM call — set
-# enabled = false to skip in evaluation / benchmark runs.
+# Foresight extraction (runs per memcell). Heavy LLM call.
+#
+# DISABLED BY DEFAULT since 1.2.3: nothing in EverOS reads foresights yet
+# — no search route surfaces them, no prompt slot consumes them — so
+# running it spends one LLM call per sender per memcell on write-only
+# data. Uncomment to opt in; it works on agent and chat input alike.
 # [strategies.extract_foresight]
 # enabled = true
 

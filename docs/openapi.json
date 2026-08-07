@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.2.2"
+    "version": "1.2.3"
   },
   "paths": {
     "/health": {
@@ -222,7 +222,7 @@
           "ome"
         ],
         "summary": "Trigger",
-        "description": "Manually trigger a registered OME strategy and wait for completion.",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
         "operationId": "trigger_api_v1_ome_trigger_post",
         "requestBody": {
           "content": {
@@ -982,7 +982,7 @@
           "ome"
         ],
         "summary": "Trigger",
-        "description": "Manually trigger a registered OME strategy and wait for completion.",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
         "operationId": "trigger_api_v2_ome_trigger_post",
         "requestBody": {
           "content": {
@@ -3089,6 +3089,36 @@
         ],
         "title": "MessageItemDTO"
       },
+      "RunSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunSummary",
+        "description": "One strategy run within a trigger response."
+      },
       "SearchAgentCaseItem": {
         "properties": {
           "id": {
@@ -4006,15 +4036,28 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "dispatched": {
+            "type": "integer",
+            "title": "Dispatched"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "type": "array",
+            "title": "Runs",
+            "default": []
           }
         },
         "type": "object",
         "required": [
           "status",
-          "name"
+          "name",
+          "dispatched"
         ],
         "title": "TriggerResponse",
-        "description": "Response body for ``POST /api/v2/ome/trigger``."
+        "description": "Response body for ``POST /api/v2/ome/trigger``.\n\n``status`` distinguishes three outcomes that were previously masked as\na single ``ok``:\n\n- ``ok``: at least one strategy was dispatched and all runs settled\n  within ``timeout``. Individual run outcomes are in ``runs`` (a\n  ``dead_letter`` there is still ``ok`` at this level — the strategy\n  *ran*, it just failed permanently).\n- ``timeout``: at least one strategy was dispatched but the engine did\n  not go idle within ``timeout``. Runs may be partially complete;\n  poll ``GET /health`` for cascade convergence separately.\n- ``not_dispatched``: no strategy was dispatched — the subscriber was\n  rejected by one of the dispatch gates (``_routes_to`` / ``enabled`` /\n  ``applies_to`` / ``Counter``). Common cause: forgetting\n  ``force=true`` on a strategy that is ``enabled=false`` in ome.toml."
       },
       "UnprocessedMessageDTO": {
         "properties": {

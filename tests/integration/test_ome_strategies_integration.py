@@ -141,12 +141,35 @@ async def test_emit_dispatches_both_strategies_to_success(
 
         # Ensure the sqlite dir exists before the engine creates ome.db.
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "ome.toml").write_text("# test\n")
+        # `extract_foresight` now ships disabled (see its module docstring).
+        # This test needs a `UserPipelineStarted` subscriber to cover the
+        # second trigger route, so it opts back in through the very `ome.toml`
+        # key that docstring points users at — which makes the opt-in path
+        # itself covered, rather than working around the new default.
+        (tmp_path / "ome.toml").write_text(
+            "[strategies.extract_foresight]\nenabled = true\n"
+        )
         await _setup_system_db_schema(monkeypatch)
 
         engine = svc._get_engine()
         await engine.start()
         try:
+            # `ConfigReloader.start()` fires its initial load as a task, so
+            # `engine.start()` returns before `ome.toml` has been applied.
+            # An emit inside that window is judged against the coded defaults
+            # and silently dropped by the enabled gate — the event is not
+            # redelivered once the override lands. Wait for the override to
+            # be visible in the registry before emitting.
+            for _ in range(50):
+                if any(
+                    m.name == "extract_foresight" and m.enabled
+                    for m in engine._registry.all()
+                ):
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                pytest.fail("ome.toml override never reached the registry")
+
             # Foresight still subscribes to UserPipelineStarted.
             await engine.emit(
                 UserPipelineStarted(

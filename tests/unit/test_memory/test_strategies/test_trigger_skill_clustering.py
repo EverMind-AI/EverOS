@@ -54,11 +54,15 @@ def _event(
     agent_id: str = "agent_42",
     task_intent: str = "summarise the doc",
     case_timestamp_ms: int = 1_700_000_001_000,
+    approach: str = "",
+    key_insight: str | None = None,
 ) -> AgentCaseExtracted:
     return AgentCaseExtracted(
         memcell_id="mc_a",
         case_entry_id=case_entry_id,
         task_intent=task_intent,
+        approach=approach,
+        key_insight=key_insight,
         quality_score=quality_score,
         case_timestamp_ms=case_timestamp_ms,
         agent_id=agent_id,
@@ -168,6 +172,62 @@ async def test_creates_new_cluster_when_no_existing(
     assert emitted[0].cluster_id == "cl_newxxxx0001"
     assert emitted[0].case_entry_id == "ac_20260517_0001"
     assert emitted[0].agent_id == "agent_42"
+
+
+async def test_emit_passes_through_case_body_and_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1.2.3+ trigger_skill_clustering passes case body verbatim and includes
+    the embedding it just computed so extract_agent_skill doesn't need to
+    re-embed for the top-k branch.
+    """
+    fake_vector = [0.1] * 1024
+    embedder = MagicMock()
+    embedder.embed = AsyncMock(return_value=fake_vector)
+    _install_embedder(monkeypatch, embedder)
+    ctx = FakeStrategyContext()
+
+    incoming = _event(
+        task_intent="restore replica",
+        approach="stop, resync, verify",
+        key_insight="watch oplog",
+        quality_score=0.8,
+        case_timestamp_ms=1_700_000_000_000,
+        agent_id="a1",
+        case_entry_id="c1",
+    )
+
+    with (
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.cluster_repo"
+        ) as mock_repo,
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.cluster_by_llm",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "everos.memory.strategies.trigger_skill_clustering.mint_cluster_id",
+            return_value="cl_newxxxx0001",
+        ),
+    ):
+        mock_repo.list_for_owner = AsyncMock(return_value=[])
+        mock_repo.upsert_with_members = AsyncMock(return_value=None)
+
+        await trigger_skill_clustering(incoming, ctx)
+
+    emitted = [e for e in ctx.emitted if isinstance(e, SkillClusterUpdated)]
+    assert len(emitted) == 1
+    ev = emitted[0]
+    assert ev.task_intent == "restore replica"
+    assert ev.approach == "stop, resync, verify"
+    assert ev.key_insight == "watch oplog"
+    assert ev.quality_score == 0.8
+    assert ev.case_timestamp_ms == 1_700_000_000_000
+    assert ev.case_vector == fake_vector
 
 
 async def test_merges_into_existing_cluster_when_algo_matches(

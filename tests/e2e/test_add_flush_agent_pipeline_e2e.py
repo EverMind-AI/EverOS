@@ -2,7 +2,13 @@
 
 Drives the full HTTP route through to storage, exercising the agent-track
 pipeline (boundary → memcell → extract_agent_case → trigger_skill_clustering
-→ extract_agent_skill) with real LLM and real embedder credentials.
+→ extract_agent_skill) with real LLM and real embedder credentials — this
+module's own ``_opt_in_real_embedding`` fixture opts the embedding
+capability back in (see its docstring for why that is necessary and why
+it does not weaken the global hermeticity fixture). Rerank is
+deliberately left at its hermetic default: nothing on this write path
+touches rerank, so opting it in would only widen the credential surface
+with no coverage benefit.
 
 Mixed tenancy by design (sender_id alignment from fixture):
 
@@ -24,21 +30,26 @@ White-box assertions (audit trail of internal surfaces touched):
     - sqlite ``memcell`` rows per session_id
     - filesystem ``<root>/agents/<agent>/.cases/*.md`` presence
     - LanceDB ``agent_case`` rows by ``owner_id`` (count + session_id set)
-    - LanceDB ``agent_skill`` rows by ``owner_id`` (soft — LLM-dependent)
+    - LanceDB ``agent_skill`` rows by ``owner_id`` (aggregate floor — see
+      ``test_agent_pipeline_e2e_mixed_tenancy``'s section 4.5)
+    - OME ``run_record``: no dead-lettered ``extract_agent_skill`` run
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 
 import httpx
 import pytest
 
+import everos.component.embedding.accessor as _embedding_accessor
+from everos.infra.ome.records import RunStatus
 from everos.infra.persistence.lancedb import agent_case_repo, agent_skill_repo
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
+from everos.service.memorize import _get_engine
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "agent_trajectories"
 
@@ -62,6 +73,41 @@ _AGENT_DJANGO = "agent_django"
 _DRAIN_ROUNDS = 4
 _DRAIN_TIMEOUT_SECONDS = 300.0
 _DRAIN_INTER_ROUND_SLEEP_SECONDS = 5.0
+
+
+@pytest.fixture(autouse=True)
+def _opt_in_real_embedding(
+    _reset_embedding_capability_singleton: None,
+) -> Iterator[None]:
+    """Opt this module's test into a real embedding capability.
+
+    ``tests/conftest.py``'s ``_reset_embedding_capability_singleton``
+    autouse fixture pins the capability to unavailable for every test
+    (hermeticity); its docstring says a test may "explicitly opt in by
+    re-assigning ``acc._capability``". This test needs it:
+    ``trigger_skill_clustering`` and ``extract_agent_skill`` both
+    body-guard on ``get_embedding_capability().available`` and return
+    early when it is false, so without opting in here the skill chain
+    would never run — exactly the coverage gap this fixture closes.
+    Scoped to this file only (not the global fixture) so every other
+    test keeps its hermetic default.
+
+    Requesting ``_reset_embedding_capability_singleton`` as a parameter
+    — rather than relying on collection/declaration order between this
+    file's conftest chain and the root conftest — makes pytest's
+    dependency graph guarantee this fixture's setup runs after it and its
+    teardown before it. Rerank is left untouched (see the module
+    docstring): this fixture reads and writes only the embedding
+    capability, so there is nothing to order it against.
+
+    Setting ``_capability = None`` (rather than constructing a capability
+    object directly) makes the accessor rebuild lazily from
+    ``load_settings()`` on next call, picking up the real ``.env``
+    credentials ``tests/e2e/conftest.py`` loads at import time.
+    """
+    _embedding_accessor._capability = None
+    yield
+    _embedding_accessor._capability = None
 
 
 def _load_fixture(session_id: str) -> dict:
@@ -174,21 +220,56 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         f"want {set(_DJANGO_SESSIONS)}"
     )
 
-    # 4.5 agent_skill — soft: emission depends on LLM clustering quality
-    # gate (skip_quality_threshold + cluster size). pytest/sympy are
-    # single-case clusters and may legitimately yield 0 skills. django
-    # has 3 cases and should aggregate into ≥1 cluster of size ≥2,
-    # producing ≥1 skill — but we keep this informational (LLM-dependent)
-    # rather than a hard floor to avoid flaky CI signal.
+    # 4.5 agent_skill — aggregate floor across all three agents. Per-agent
+    # emission depends on everalgo's per-case quality gate
+    # (skip_quality_threshold, see everalgo/agent_memory/skill_ops.py) —
+    # extract_agent_skill itself has no cluster-size gate, so a per-agent
+    # floor would be genuinely flaky (a single low-quality trajectory can
+    # legitimately yield 0 skills for that agent). Empirically, on this
+    # branch with real credentials, 1 django trajectory alone produced 1
+    # SKILL.md (extract_agent_skill status "success", no retries); driving
+    # 5 trajectories across 3 agents should clear an aggregate floor of 1
+    # even if any single agent's cluster is quality-gated to 0.
     pytest_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_PYTEST}'")
     sympy_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_SYMPY}'")
     django_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_DJANGO}'")
-    # Hard sanity: counts non-negative (the repo isn't broken).
-    assert len(pytest_skills) >= 0
-    assert len(sympy_skills) >= 0
-    assert len(django_skills) >= 0
+    total_skills = len(pytest_skills) + len(sympy_skills) + len(django_skills)
+    assert total_skills >= 1, (
+        "agent-skill chain produced nothing — the strategy chain "
+        "(extract_agent_case → trigger_skill_clustering → extract_agent_skill) "
+        "is broken or gated off "
+        f"(pytest={len(pytest_skills)}, sympy={len(sympy_skills)}, "
+        f"django={len(django_skills)})"
+    )
 
-    # 4.6 strict md ↔ LanceDB parity across every cascade kind
+    # 4.6 no dead-lettered extract_agent_skill run. Sharper signal than
+    # the skill-count floor above and targets this branch's actual defect
+    # directly: a dead-letter means the chain attempted and failed
+    # (exhausted retries), as opposed to a quality-gated 0-skill outcome,
+    # which is not a failure.
+    #
+    # The dead-letter check alone is vacuous if the strategy never ran at
+    # all — zero dead-letters is also what a never-executed strategy
+    # looks like. Assert (any status) runs exist first, so the dead-letter
+    # assertion below is only non-vacuous because of this check, not
+    # because the skill-count floor in 4.5 happened to run first.
+    engine = _get_engine()
+    all_skill_runs = await engine.list_runs("extract_agent_skill")
+    assert all_skill_runs, (
+        "extract_agent_skill never ran at all — the dead-letter check "
+        "below would be vacuously satisfied by a strategy that never "
+        "executed"
+    )
+
+    dead_letters = await engine.list_runs(
+        "extract_agent_skill", status=RunStatus.DEAD_LETTER
+    )
+    assert not dead_letters, (
+        "extract_agent_skill dead-lettered "
+        f"{len(dead_letters)} run(s): {[r.error for r in dead_letters]}"
+    )
+
+    # 4.7 strict md ↔ LanceDB parity across every cascade kind
     #
     # The per-owner counts above are loose (LLM-emission-dependent); this
     # check enforces byte-exact id-set + content_sha256 parity across
