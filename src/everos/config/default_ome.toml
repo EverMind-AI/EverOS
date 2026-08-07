@@ -31,11 +31,10 @@
 
 # Foresight extraction (runs per memcell). Heavy LLM call.
 #
-# DISABLED BY DEFAULT since 1.2.3, temporarily: the strategy reads a
-# `role` attribute that only chat messages carry, so any memcell holding
-# a tool call raises AttributeError and dead-letters. It is correct on
-# plain user chat and always fails on agent trajectories. Uncomment to
-# opt back in if your deployment only ingests user conversations.
+# DISABLED BY DEFAULT since 1.2.3: nothing in EverOS reads foresights yet
+# — no search route surfaces them, no prompt slot consumes them — so
+# running it spends one LLM call per sender per memcell on write-only
+# data. Uncomment to opt in; it works on agent and chat input alike.
 # [strategies.extract_foresight]
 # enabled = true
 

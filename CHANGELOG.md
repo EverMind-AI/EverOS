@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skills for the cluster are read from markdown (strong-consistency), so the
   strategy never races cascade indexing. Prior to this fix, running a fresh
   agent trajectory produced zero `SKILL.md` files — `.skills/` did not exist.
+  **The related stale-index clobber is fully closed only for clusters at or
+  below `MAX_SKILLS_IN_PROMPT` (10).** Above it, markdown still supplies the
+  candidate set but LanceDB orders it, and the skill a lagging index omits is
+  by definition the one written most recently — the one most likely to need
+  `update` — so it can be ranked out of the prompt and re-added instead. The
+  window is narrow (it needs a cluster over 10 skills *and* an index that has
+  not caught up) and the consequence is the pre-existing full-replace, not a
+  new failure mode.
 - **`POST /api/v2/ome/trigger` no longer masks strategy state.** The `status`
   field now distinguishes `not_dispatched` (all dispatch gates rejected the
   strategy — usually a missing `"force": true`) from `ok` (dispatched and
@@ -34,7 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `max_retries` budget in milliseconds; the loop now sleeps
   `min(base * 2**(attempt-1), cap)` plus up to `jitter` seconds
   (defaults: `1s` base / `10s` cap / `0.5s` jitter — code-only defaults,
-  not currently exposed via `everos.toml` or `ome.toml`).
+  not currently exposed via `everos.toml` or `ome.toml`). **`engine_sem` is
+  now held per attempt rather than across the whole retry chain**, so the
+  backoff sleep does not occupy a concurrency slot. The cap bounds
+  concurrent strategy *work* — LLM calls, embeddings, storage IO — and a
+  coroutine waiting to retry consumes none of it; holding the slot would
+  have turned a partial outage into a total stall, since enough
+  simultaneously-failing runs park every one of the
+  `max_concurrent_runs` slots in `asyncio.sleep` and starve strategies that
+  would have succeeded. Backpressure on failing work is intended;
+  backpressure on everything else is not.
 - **Path-traversal hardening for LLM-generated agent-skill names (CWE-22).**
   `AgentSkillFrontmatter.name` comes straight from LLM output
   (`extract_agent_skill`) and was concatenated unsanitized into the
@@ -92,6 +109,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built to avoid, and a disambiguating suffix — the workable option —
   needs a collision probe plus a case-folding rule, so it is deferred to
   a deliberate pass rather than added here.
+- **A renamed skill no longer leaves an orphan directory that pollutes the
+  next extraction.** everalgo treats a name change as a first-class update
+  (`skill_ops._apply_update` preserves `prior.id` while swapping the name),
+  so the emitted skill was written to a new `skill_<new_name>/` while the
+  old directory survived carrying the same `cluster_id`. Because existing
+  skills are now read from markdown rather than LanceDB, that orphan did
+  not merely sit on disk — it came back in the next run's
+  `existing_relevant_skills` as a duplicate of a skill the LLM had already
+  renamed, feeding exactly the `add`-instead-of-`update` full-replace
+  clobber this release set out to close, once more per rename. The old
+  directory is now reaped after the new one is written, keyed on the
+  skill's `id` (the only thing that survives a rename; a fresh `add` mints
+  a uuid and can never match). A prior name that another skill in the same
+  batch just claimed is never deleted.
+- **`extract_agent_skill` retire ops are documented as unimplemented rather
+  than silently mispersisted.** `AgentSkillExtractor.aextract` returns a
+  flat list with no op discriminator, so a retirement arrives as an
+  ordinary skill with `confidence < retire_confidence` and was written back
+  like any other — staying in markdown, in the next prompt, and in search.
+  The behaviour is unchanged; the module docstring no longer claims retire
+  is handled. Honouring it is a design decision (delete the directory, or
+  add a `retired` flag that the enumeration, cascade, and search all
+  filter on) deferred to its own change.
+- **`reference_name` and `script_filename` are sanitized.** Both are
+  appended *after* the `skill_<name>` segment, so `skill_dir_name` never
+  covered them; they now go through the same `sanitize_dirname` primitive
+  on both the reader and the writer. No caller in `src/` reaches them
+  today, so nothing was exploitable — this closes the gap before
+  progressive disclosure wires them up.
 - **A single unparseable `SKILL.md` no longer disables skill extraction
   for its whole cluster.** `AgentSkillReader.list_by_cluster` propagated
   any frontmatter `ValidationError`, which aborted the enumeration that
@@ -258,13 +304,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`extract_foresight` now ships disabled** (`enabled=False`), temporarily.
-  The strategy reads `m.role` off every memcell item, but only `ChatMessage`
-  carries that attribute — `ToolCallRequest` has `sender_id` and no `role`,
-  `ToolCallResult` has neither — so any memcell holding a tool call raises
-  `AttributeError` before the first sender is resolved. It is correct on
-  plain user chat and fails every time on agent trajectories, burning its
-  `max_retries` budget and dead-lettering on output nothing consumes today.
+- **`extract_foresight` now ships disabled** (`enabled=False`). Not because
+  it is broken — the crash below is fixed — but because it is one LLM call
+  per sender per memcell whose output nothing in EverOS reads today: no
+  search route surfaces foresights and no prompt slot consumes them. Until
+  something does, running it by default spends tokens on write-only data.
   **Re-enable per install** in `ome.toml` (hot-reloaded, no restart):
 
   ```toml
@@ -272,13 +316,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enabled = true
   ```
 
-  The opt-in is deliberately left working rather than removed, since a
-  chat-only deployment does get correct foresights. This is a stop-gap, not
-  the fix: the real change is per-episode extraction (as `atomic_fact` does)
-  instead of per-memcell, which needs an everalgo entry point that does not
-  exist yet. Note that editing `default_ome.toml` alone would not have
-  reached existing installs — `everos init` does not overwrite an existing
-  `~/.everos/ome.toml` — so the code default is what changed.
+  Editing `default_ome.toml` alone would not have reached existing installs
+  — `everos init` does not overwrite an existing `~/.everos/ome.toml` — so
+  the code default is what changed.
+- **`extract_foresight` no longer crashes on a memcell containing tool
+  calls.** The sender scan read `m.role` off every item, but only
+  `ChatMessage` carries it (`ToolCallRequest` has `sender_id` without it,
+  `ToolCallResult` has neither), so the first tool call raised
+  `AttributeError` — before any sender was resolved. The strategy was
+  correct on plain user chat and dead-lettered every time on agent
+  trajectories. everalgo explicitly contracts for the mixed case
+  (`user_memory/_render.chat_messages`: the caller need not pre-filter),
+  and every other user-memory extractor gets that for free by delegating;
+  this was the one place the filter was hand-rolled. The scan now tests
+  `isinstance(m, ChatMessage)`, so a pure agent trajectory yields no senders
+  and returns without an LLM call. Matters even with the strategy off by
+  default: it is what makes the opt-in above actually usable.
 - **`SkillClusterUpdated` carries the case's 1024-dim embedding, growing the
   OME `run_record` table.** The event payload is persisted verbatim in
   `run_record.event_payload` (and in the APScheduler jobstore while a job is

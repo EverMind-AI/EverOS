@@ -11,28 +11,35 @@ one batched ``append_entries`` call rather than ``N`` single appends,
 dropping IO complexity to ``O(N)`` per owner and narrowing the
 per-path lock window.
 
-**Disabled by default** (``enabled=False``), temporarily, because the
-sender scan below reads ``m.role`` off every ``memcell.items`` entry
-and only ``ChatMessage`` carries that attribute: ``ToolCallRequest``
-has ``sender_id`` but no ``role``, and ``ToolCallResult`` has neither.
-Any memcell holding a tool call therefore raises ``AttributeError``
-before the first sender is resolved. That makes the strategy sound on
-plain user chat and guaranteed to fail on agent trajectories — it
-burns its ``max_retries`` budget and dead-letters every time, on a
-result nothing downstream consumes today. Disabling is the stop-gap,
-not the fix; the real change is to extract per-episode (like
-``atomic_fact``) rather than per-memcell, which needs an everalgo
-``aextract_from_text``-style entry point that does not exist yet.
-
-Re-enable per install with ``ome.toml`` (hot-reloaded, ~2s):
+**Disabled by default** (``enabled=False``). Not because it is broken —
+the crash it used to have is fixed below — but because it is one LLM
+call per sender per memcell whose output nothing in EverOS reads today:
+no search route surfaces foresights, no prompt slot consumes them. Until
+something does, running it by default spends tokens on write-only data.
+Re-enable per install in ``ome.toml`` (hot-reloaded, ~2s):
 
 .. code-block:: toml
 
     [strategies.extract_foresight]
     enabled = true
 
-Note the opt-in is deliberately left working rather than removed: on a
-user-chat-only deployment the strategy does produce correct foresights.
+The opt-in has to actually work, so the sender scan below filters on
+``isinstance(m, ChatMessage)`` rather than reaching for ``m.role``.
+Only ``ChatMessage`` carries ``role``: ``ToolCallRequest`` has
+``sender_id`` without it, ``ToolCallResult`` has neither — so the old
+attribute test raised ``AttributeError`` on the first tool call, making
+the strategy correct on plain user chat and guaranteed to dead-letter on
+agent trajectories. everalgo contracts for exactly this mixed input
+(``user_memory/_render.chat_messages``: "the caller need not pre-filter;
+an AgentMemCell-shaped MemCell is acceptable input"), and every other
+user-memory extractor gets it for free by delegating; this strategy was
+the one place that hand-rolled the filter. A pure agent trajectory now
+yields no senders and returns without an LLM call.
+
+Extraction granularity is a separate, still-open question: this runs per
+memcell, while ``atomic_fact`` runs per episode. Moving it needs an
+everalgo entry point that does not exist yet — unrelated to the crash,
+and not what the default-off above is about.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 
+from everalgo.types import ChatMessage
 from everalgo.user_memory import ForesightExtractor
 
 from everos.component.llm import get_llm_client
@@ -75,7 +83,13 @@ def _get_writer() -> ForesightWriter:
 async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
     # 1. List the user senders in this memcell.
     memcell = event.memcell
-    sender_ids = sorted({m.sender_id for m in memcell.items if m.role == "user"})
+    sender_ids = sorted(
+        {
+            m.sender_id
+            for m in memcell.items
+            if isinstance(m, ChatMessage) and m.role == "user"
+        }
+    )
     extractor = ForesightExtractor(llm=get_llm_client()) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).
