@@ -10,6 +10,7 @@ static, no-network renderings for non-interactive shells and README media.
 from __future__ import annotations
 
 import getpass
+import os
 import subprocess
 import sys
 
@@ -25,6 +26,8 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
     build_dot_sphere,
     render_dot_sphere_text,
 )
+
+TEXTUAL_DISABLE_KITTY_KEY_ENV = "TEXTUAL_DISABLE_KITTY_KEY"
 
 
 def register(parent: typer.Typer) -> None:
@@ -124,6 +127,13 @@ def _resolve_local_user() -> str:
 
 
 def _load_run_demo_tui():
+    # Textual's Kitty extended-key parser conflicts with macOS Chinese IMEs in
+    # some terminals: the pinyin pre-edit is delivered as ordinary key presses
+    # before the selected Han characters are committed. Configure Textual
+    # before its first import so `everos demo` accepts composed Chinese input.
+    # Keep an explicit user override intact for terminals that need the
+    # extended-key protocol.
+    os.environ.setdefault(TEXTUAL_DISABLE_KITTY_KEY_ENV, "1")
     try:
         from everos.entrypoints.tui.demo.app import run_demo_tui
     except ModuleNotFoundError as exc:

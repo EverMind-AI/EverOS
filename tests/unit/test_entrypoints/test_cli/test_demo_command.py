@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 import typer
@@ -110,6 +111,24 @@ def test_launch_interactive_live_uses_own_cloud_key(monkeypatch) -> None:
     assert captured["base_url"] == cloud.CLOUD_PLATFORM_API_BASE_URL
     assert captured["api_key"] == "user-key"
     assert str(captured["session_id"]).startswith("everos-demo-")
+
+
+def test_loading_demo_tui_disables_kitty_keys_for_ime_compatibility(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv(demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV, raising=False)
+
+    demo_command._load_run_demo_tui()
+
+    assert os.environ[demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV] == "1"
+
+
+def test_loading_demo_tui_preserves_explicit_kitty_key_override(monkeypatch) -> None:
+    monkeypatch.setenv(demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV, "0")
+
+    demo_command._load_run_demo_tui()
+
+    assert os.environ[demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV] == "0"
 
 
 def _strip_ansi(value: str) -> str:
