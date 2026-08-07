@@ -88,25 +88,13 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 
 ## 快速开始
 
-> 目标：先体验 memory visualizer，然后启动 EverOS，写入一条真实记忆，
-> 再把它搜索回来。
+> 只需要一个 OpenRouter API Key，就可以启动 EverOS、写入持久化记忆，
+> 并通过关键词把记忆搜索回来。
 
 ### 0. 前置条件
 
 - Python 3.12+
-- `everos demo` 不需要 API keys。
-- 如果要运行真正的 server-backed memory flow，中文默认推荐先在
-  [阿里云百炼控制台](https://bailian.console.aliyun.com/) 创建一个
-  DashScope API Key：
-
-| 能力 | 默认 Provider | 用途 | 填入这些 `.env` 字段 |
-| --- | --- | --- | --- |
-| Chat / extraction | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `LLM` | `EVEROS_LLM__API_KEY` |
-| Embedding | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `EMBEDDING` | `EVEROS_EMBEDDING__API_KEY` |
-| Re-rank | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `RERANK` | `EVEROS_RERANK__API_KEY` |
-
-同一个 DashScope API Key 可以填到这三个 slot。多模态文件摄取仍通过
-`EVEROS_MULTIMODAL__*` 单独配置；如果只跑下面的文本记忆闭环，不需要先配置它。
+- 一个 [OpenRouter API Key](https://openrouter.ai/keys)
 
 ### 1. 安装
 
@@ -115,73 +103,27 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. 体验 Demo
-
-在配置 API keys 或启动 server 之前，先运行：
-
-```bash
-everos demo
-```
-
-这个命令会询问一条记忆和一个召回问题，然后打开一个全屏 terminal UI。
-这是一个 educational visualizer：它是 hardcoded 的，只在 CLI 本地运行，
-不会连接 EverOS server。它的作用是把 memory lifecycle 变成可感知的过程：
-conversation -> memory sphere -> recall -> source proof -> confetti。Demo
-范围和 TUI 代码结构见 [docs/everos-demo.md](docs/everos-demo.md)。
-
-Sphere 会经历 ingest、extraction、indexing、recall、source reveal，
-并在第一条记忆落地后进入 confetti successful moment。按 `r` 可以 replay，
-按 `q` 可以退出。
-
-<p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
-</p>
-
-README 媒体使用的循环 showroom view 可以这样运行：
-
-```bash
-everos demo --cinematic
-```
-
-如果 shell 不是 interactive，或者你只想看一个可复制的静态预览：
-
-```bash
-everos demo --plain
-```
-
-### 3. 配置
-
-生成一个 starter `.env` 文件，然后根据生成的注释填入对应的 API key 字段。
-中文 quick start 默认推荐使用
-[阿里云百炼控制台](https://bailian.console.aliyun.com/) 的 DashScope API Key
-配置 `LLM` / `EMBEDDING` / `RERANK` 三个核心能力。
+### 2. 初始化并填入 Key
 
 ```bash
 everos init
-# or, from a source checkout:
-cp .env.example .env
 ```
 
-`everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`
-写入 `${XDG_CONFIG_HOME:-~/.config}/everos/.env`。
+这个命令会创建 `~/.everos/everos.toml` 和 `~/.everos/ome.toml`。打开
+`~/.everos/everos.toml`；model 和 OpenRouter URL 已经填好，只需要替换空的
+`api_key`：
 
-百炼三件套示例：
-
-```env
-EVEROS_LLM__MODEL=qwen-plus
-EVEROS_LLM__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_LLM__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-
-EVEROS_EMBEDDING__MODEL=text-embedding-v4
-EVEROS_EMBEDDING__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_EMBEDDING__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-
-EVEROS_RERANK__MODEL=gte-rerank-v2
-EVEROS_RERANK__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_RERANK__BASE_URL=https://dashscope.aliyuncs.com
+```toml
+[llm]
+model = "openai/gpt-4.1-mini"
+api_key = "<OPENROUTER_API_KEY>"
+base_url = "https://openrouter.ai/api/v1"
 ```
 
-### 4. 启动 EverOS
+如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
+传入同一个 `--root <path>`。
+
+### 3. 启动 EverOS
 
 ```bash
 everos server start
@@ -193,30 +135,10 @@ everos server start
 curl http://127.0.0.1:8000/health
 ```
 
-预期响应：
+确认响应里有 `"status":"ok"`。在单 Key 配置下，`capabilities.llm` 为
+`true`；embedding 和 rerank 会保持 `false`，直到你配置对应 provider。
 
-```json
-{"status":"ok"}
-```
-
-`everos server start` 会按以下顺序查找 `.env`：`--env-file <path>` →
-`./.env`（当前目录）→ `${XDG_CONFIG_HOME:-~/.config}/everos/.env` →
-`~/.everos/.env`。端点栈兼容 OpenAI protocol（OpenAI / OpenRouter /
-vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
-来指向任意这些模型服务。
-
-现在可以把 demo 跑成真实 server flow。在第二个 terminal 里运行：
-
-```bash
-everos demo --live
-```
-
-Live demo mode 会连接正在运行的 server，并在打开同一个 memory sphere UI
-之前真实执行 `/health` -> `/api/v2/memory/add` -> `/api/v2/memory/flush` ->
-`/api/v2/memory/search`。如果 server 不在 `http://127.0.0.1:8000`，可以使用
-`--server-url <url>`。
-
-### 5. 试写第一条记忆
+### 4. 写入并搜索第一条记忆
 
 > [!NOTE]
 > 业务接口位于 `/api/v2`。旧的 `/api/v1` 前缀仍然指向同一批 handler，已有集成
@@ -241,7 +163,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   }"
 ```
 
-为了本地 demo，手动触发一次 extraction：
+在 session 结束时手动 flush 这条记忆：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
@@ -259,12 +181,14 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
+    "method": "keyword",
     "top_k": 5
   }'
 ```
 
-响应里应该能看到 Yosemite 相关记忆。如果第一次搜索为空，稍等片刻再试；
-Markdown 会同步写入，本地索引会在后台追上。
+响应里应该能看到 Yosemite 相关记忆。单 Key 配置下必须显式指定
+`"method": "keyword"`，因为 API 默认使用 hybrid search，而 hybrid 需要
+embedding provider。
 
 > [!TIP]
 > **第一条记忆已经写入。**
@@ -273,6 +197,36 @@ Markdown 会同步写入，本地索引会在后台追上。
 > 想看看 source of truth？打开 `~/.everos`，直接检查生成的 Markdown 文件。
 
 带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
+
+### 一个 Key 可以使用哪些能力？
+
+单 Key 配置就是 EverOS Tier 1，支持 server 启动、memory add / flush、
+持久化 Markdown、cascade indexing 和 keyword search。只有需要下面这些能力时，
+才需要添加可选 provider：
+
+| 配置 | 新增能力 |
+| --- | --- |
+| 只有 `[llm]` | 核心记忆流程和 keyword search |
+| 添加 `[embedding]` | Vector / user hybrid search、reflection、skill extraction |
+| 再添加 `[rerank]` | Agentic search、默认 agent hybrid search、Knowledge Wiki |
+| 添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
+
+`/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会
+返回明确的 HTTP 422。
+
+### 可选：体验本地 Visualizer
+
+`everos demo` 是 hardcoded 的 educational visualizer，不需要 API Key，也不需要
+启动 server：
+
+```bash
+everos demo
+# 非交互式预览：
+everos demo --plain
+```
+
+具体范围见 [docs/everos-demo.md](docs/everos-demo.md)。Live demo 目前使用
+hybrid search，因此运行 `everos demo --live` 前需要先配置 embedding。
 
 ### 可选：摄取多模态文件
 
@@ -284,8 +238,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
 这会引入 `everalgo-parser`（包含用于 SVG 支持的 `[svg]` bundle，通过
-cairosvg）并接入多模态 LLM client（`.env` 中的 `EVEROS_MULTIMODAL__*`
-字段，默认通过 OpenRouter 使用 `google/gemini-3-flash-preview`）。
+cairosvg）。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
+OpenRouter 使用的 `google/gemini-3-flash-preview`。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
 `soffice`（LibreOffice 的 headless renderer），先把 `.doc` / `.docx` /
@@ -308,7 +262,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 把百炼 DashScope API Key 填进 .env
+everos init                          # 把一个 OpenRouter Key 填进 ~/.everos/everos.toml
 
 everos --help
 make test
