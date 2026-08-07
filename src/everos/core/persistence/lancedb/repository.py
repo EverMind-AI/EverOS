@@ -103,6 +103,16 @@ a day sits four orders of magnitude below it (tens of MB). Platform-wise only
 ext4 has a fixed inode budget at all; APFS and xfs allocate dynamically, and
 Windows is out of scope. The knob to reach for if this ever does bite is the
 optimize cooldown, not this threshold — see there.
+
+**When to remove this sweep** — lance-format/lance#8322 (merged 2026-08-06,
+not in any release as of lancedb 0.34.0 / lance 8.0.0 — the merge sits ahead of
+v11.0.0-beta.2) makes lance's own cleanup remove the directories it empties,
+under this same 7-day / ``delete_unverified`` policy. Once a release carrying
+it is pinned, delete :func:`_remove_empty_index_dirs` and its call site rather
+than keep a second implementation of upstream's rule. That upgrade also halves
+the horizon above: lance drops the directory in the pass that empties it, so
+our age gate stops stacking on top of theirs and the steady state goes from
+~14 days back to ~7.
 """
 
 _HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
