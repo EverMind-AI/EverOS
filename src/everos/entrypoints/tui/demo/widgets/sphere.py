@@ -23,7 +23,10 @@ BRAILLE_DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),
     (0x08, 0x10, 0x20, 0x80),
 )
-SPHERE_POINT_COUNT = 1300
+RING_LANES = 5
+RING_SEGMENTS = 88
+# Ring motion is adapted for Braille terminals from Thinking Orbs' MIT-licensed
+# "breathing" preset: https://github.com/Jakubantalik/thinking-orbs
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -138,43 +141,61 @@ def build_dot_sphere(
     sub_height = height * 4
     sub_center_x = (sub_width - 1) / 2
     sub_center_y = (sub_height - 1) / 2
-    radius_x = max(1.0, sub_center_x - 5)
-    radius_y = max(1.0, sub_center_y - 3)
-    rotation = phase * math.tau
-    active_target = _highlight_target(width, height)
+    radius_x = max(1.0, sub_center_x - 6)
+    radius_y = max(1.0, sub_center_y - 5)
+    animation_time = phase * math.tau
+    wobble_scale = {
+        "booting": 0.55,
+        "ingesting": 0.8,
+        "extracting": 1.15,
+        "indexing": 0.45,
+        "recalling": 0.75,
+        "remembered": 0.35,
+        "source": 0.35,
+    }[state.key]
+    wobble_amplitude = 0.23 * wobble_scale
+    base_scale = 1 / (1 + 0.85 * wobble_amplitude)
+    shimmer_angle = animation_time * 1.15
 
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
     highlighted_positions: set[tuple[int, int]] = set()
-    for index in range(SPHERE_POINT_COUNT):
-        y3 = 1 - 2 * ((index + 0.5) / SPHERE_POINT_COUNT)
-        ring_radius = math.sqrt(max(0.0, 1.0 - y3 * y3))
-        theta = index * GOLDEN_ANGLE + rotation
-        x3 = ring_radius * math.cos(theta)
-        z3 = ring_radius * math.sin(theta)
-        sub_x = round(sub_center_x + x3 * radius_x)
-        sub_y = round(sub_center_y + y3 * radius_y)
-        if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
-            continue
-        _add_braille_dot(
-            masks=masks,
-            depths=depths,
-            sub_x=sub_x,
-            sub_y=sub_y,
-            z=z3,
-        )
+    for lane in range(RING_LANES):
+        lane_offset = (lane - (RING_LANES - 1) / 2) * 0.018
+        for segment in range(RING_SEGMENTS):
+            angle = (segment / RING_SEGMENTS) * math.tau
+            wobble = wobble_scale * (
+                0.16 * math.sin(angle * 3 - animation_time * 1.7 + lane * 0.22)
+                + 0.07 * math.sin(angle * 5 + animation_time * 1.1)
+            )
+            radial_scale = base_scale * (1 + wobble + lane_offset)
+            sub_x = round(sub_center_x + math.cos(angle) * radius_x * radial_scale)
+            sub_y = round(sub_center_y + math.sin(angle) * radius_y * radial_scale)
+            if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
+                continue
+
+            # A traveling brightness crest gives the ring the reference orb's
+            # thinking motion while the short Braille marks keep it airy.
+            shimmer = math.cos(angle - shimmer_angle)
+            edge = abs(lane - (RING_LANES - 1) / 2) / ((RING_LANES - 1) / 2)
+            depth = shimmer - edge * 0.18
+            _add_braille_dot(
+                masks=masks,
+                depths=depths,
+                sub_x=sub_x,
+                sub_y=sub_y,
+                z=depth,
+            )
 
     if state.key in {"recalling", "remembered", "source"}:
-        highlighted_positions.add(active_target)
-        target_sub_x = active_target[0] * 2 + 1
-        target_sub_y = active_target[1] * 4 + 1
-        _add_braille_dot(
-            masks=masks,
-            depths=depths,
-            sub_x=target_sub_x,
-            sub_y=target_sub_y,
-            z=1.0,
+        active_target = min(
+            masks,
+            key=lambda position: (
+                (position[0] - (width - 1) * 0.72) ** 2
+                + (position[1] - (height - 1) * 0.28) ** 2
+            ),
         )
+        highlighted_positions.add(active_target)
 
     cells = []
     for (x, y), mask in masks.items():
@@ -311,10 +332,6 @@ def _style_for_depth(z: float, state: SphereState) -> str:
     if z > 0.05:
         return EVEROS_YELLOW
     return EVEROS_AMBER
-
-
-def _highlight_target(width: int, height: int) -> tuple[int, int]:
-    return (round((width - 1) * 0.66), round((height - 1) * 0.42))
 
 
 def _state_local_phase(phase: float, state_key: str) -> float:
