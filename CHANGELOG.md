@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.3] - 2026-08-07
 
+**Background maintenance that fails loudly instead of quietly.** A soak run on
+1.2.2 found a table that had stopped reclaiming disk for 100 minutes while
+`/health` stayed green — nothing had *failed*, a call had simply never returned,
+and every signal was built from failure counters. Auditing for that shape turned
+up six more places it could happen: reads with no deadline (which stop the whole
+md to LanceDB projection, not just one table), background loops that die
+permanently on one exception with no log at all, an alert counter reset by the
+remediation it triggers. All of them are now bounded, and a stall that does
+happen names the table it happened to. Alongside that, agent-skill extraction is
+rescued from a retry-then-dead-letter loop, keyword search no longer returns 500
+during an index rebuild, and the maintenance cadences moved into settings.
+
 ### Fixed
 
 - **Agent skill extraction is no longer stuck in a retry-then-dead-letter
@@ -352,6 +364,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disk. Attributing index-dir growth previously meant back-inferring which
   beats were heavy from the 300s cadence. Log level (`debug`) and the
   benign-conflict semantics are unchanged — this adds one field.
+
+### Upgrade
+
+`extract_foresight` now ships disabled — a deployment relying on foresight
+entries must set `enabled = true` for it in `ome.toml`. Nothing else needs
+action: the new `[cascade]` section is optional and a config written by an
+earlier version falls back to the same defaults (verified on a clean install).
+
+One deployment note. When a supervised background loop crashes repeatedly and
+exhausts its restart budget, the worker now sends itself `SIGTERM` rather than
+serving on with a dead projection pipeline. That assumes something restarts the
+process — systemd `Restart=always`, Docker `restart: unless-stopped`, a k8s
+Deployment. Without one the process simply stops, which is still preferable to a
+server answering searches from a silently frozen index, but it is worth knowing
+before the first time it happens.
 
 ## [1.2.2] - 2026-08-04
 
