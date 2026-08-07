@@ -27,16 +27,16 @@ click **Publish**.
 1. Bump the version    → pyproject.toml [project] version = "X.Y.Z"
    (single source; everos.__version__ reads installed package metadata)
 2. Update CHANGELOG.md → move the Unreleased entries under a new
-   ## [X.Y.Z] - <date> heading
+   ## [X.Y.Z] - <date> heading, and write the release page's prose here
+   (lead paragraph + `### Upgrade` group — see "The release page")
 3. Commit              → git commit -m "chore(release): vX.Y.Z"
 4. Open a PR, merge to main after green CI
 5. Tag main + push     → git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
 6. Approve             → the release.yml run pauses on the `release`
    environment; a reviewer approves in the Actions run
 7. Verify              → https://pypi.org/project/everos/X.Y.Z/
-8. Publish the page    → the run leaves a DRAFT GitHub Release titled
-   "EverOS X.Y.Z", body prefilled from the CHANGELOG section. Write the lead
-   summary at the top, then click Publish.
+8. Publish the page    → the run leaves a DRAFT GitHub Release, already
+   complete if step 2 was done properly. Read it once, click Publish.
 ```
 
 The tag must equal the `pyproject.toml` version — the workflow refuses to
@@ -45,25 +45,37 @@ section fails the release job for the same reason.
 
 ## The release page
 
-Every page has the same shape:
+**The whole page is written in CHANGELOG.md, during the release PR.** Nothing
+is meant to be composed at publish time — by then the changes are weeks old and
+the text gets no review. Write the version section like this:
 
+```markdown
+## [X.Y.Z] - 2026-09-01
+
+**What this release is for.** One paragraph, prose, no bullets — it becomes the
+lead of the release page. Say what changed for a user, not what was refactored.
+
+### Added
+### Changed
+### Fixed
+
+### Upgrade
+
+What a reader must know before upgrading: what happens on first startup, which
+command recovers a bad state, which pins moved. Omit the group entirely when a
+plain `pip install --upgrade` is all there is — 1.1.4 and 1.2.0 have nothing
+here. Do not write filler.
 ```
-<lead summary>          prose — CI cannot write this
-## Added / ## Changed / ## Fixed / ...    from the CHANGELOG section, verbatim
-## Upgrade              pip line + compare link prefilled; migration notes by hand
-```
 
-Two parts are yours to write in the draft:
+CI turns that into the page: everything above `### Upgrade` is lifted verbatim
+with the group headings demoted to `##`, and the Upgrade prose is wrapped in the
+boilerplate — pip line above it, compare link below — which is the shape every
+release since 1.1.3 has. See
+[1.2.1](https://github.com/EverMind-AI/EverOS/releases/tag/v1.2.1).
 
-- **The lead summary** — the two or three sentences above the first heading
-  saying what this release is for.
-- **Migration notes in `## Upgrade`**, when the release has any: what happens on
-  the first startup after upgrading, which command recovers a bad state, which
-  pins moved. Skip when a plain `pip install --upgrade` is genuinely all there
-  is; do not invent filler.
-
-See [1.2.1](https://github.com/EverMind-AI/EverOS/releases/tag/v1.2.1) for the
-shape of both.
+So publishing is a read-through and a click. If the draft looks wrong, the fix
+belongs in CHANGELOG.md on `main`, not only in the draft — otherwise the two
+drift apart and the next release inherits the habit.
 
 > While it is a draft, GitHub serves the release at
 > `releases/tag/untagged-<hash>`, and that URL keeps serving a stale page after
