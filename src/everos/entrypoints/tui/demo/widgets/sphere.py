@@ -23,10 +23,10 @@ BRAILLE_DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),
     (0x08, 0x10, 0x20, 0x80),
 )
-RING_LANES = 5
-RING_SEGMENTS = 88
-# Ring motion is adapted for Braille terminals from Thinking Orbs' MIT-licensed
-# "breathing" preset: https://github.com/Jakubantalik/thinking-orbs
+WAVE_RINGS = 13
+WAVE_LONGITUDE_DENSITY = 32
+# Wave motion is adapted for Braille terminals from Thinking Orbs' MIT-licensed
+# "listening" preset: https://github.com/Jakubantalik/thinking-orbs
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -144,7 +144,7 @@ def build_dot_sphere(
     radius_x = max(1.0, sub_center_x - 6)
     radius_y = max(1.0, sub_center_y - 5)
     animation_time = phase * math.tau
-    wobble_scale = {
+    wave_scale = {
         "booting": 0.55,
         "ingesting": 0.8,
         "extracting": 1.15,
@@ -153,32 +153,39 @@ def build_dot_sphere(
         "remembered": 0.35,
         "source": 0.35,
     }[state.key]
-    wobble_amplitude = 0.23 * wobble_scale
-    base_scale = 1 / (1 + 0.85 * wobble_amplitude)
-    shimmer_angle = animation_time * 1.15
+    yaw = animation_time * 0.18
+    tilt = 0.38
+    sin_yaw, cos_yaw = math.sin(yaw), math.cos(yaw)
+    sin_tilt, cos_tilt = math.sin(tilt), math.cos(tilt)
 
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
     highlighted_positions: set[tuple[int, int]] = set()
-    for lane in range(RING_LANES):
-        lane_offset = (lane - (RING_LANES - 1) / 2) * 0.018
-        for segment in range(RING_SEGMENTS):
-            angle = (segment / RING_SEGMENTS) * math.tau
-            wobble = wobble_scale * (
-                0.16 * math.sin(angle * 3 - animation_time * 1.7 + lane * 0.22)
-                + 0.07 * math.sin(angle * 5 + animation_time * 1.1)
-            )
-            radial_scale = base_scale * (1 + wobble + lane_offset)
-            sub_x = round(sub_center_x + math.cos(angle) * radius_x * radial_scale)
-            sub_y = round(sub_center_y + math.sin(angle) * radius_y * radial_scale)
+    for ring in range(WAVE_RINGS + 1):
+        latitude = -math.pi / 2 + (ring / WAVE_RINGS) * math.pi
+        cos_latitude = math.cos(latitude)
+        sin_latitude = math.sin(latitude)
+        wave = wave_scale * (
+            0.62 * math.sin(animation_time * 2.1 - ring * 0.52)
+            + 0.38 * math.sin(animation_time * 1.27 + ring * 0.83)
+        )
+        shell_radius = 0.88 + 0.105 * wave
+        longitude_count = max(1, round(abs(cos_latitude) * WAVE_LONGITUDE_DENSITY))
+        for longitude_index in range(longitude_count):
+            longitude = (longitude_index / longitude_count) * math.tau
+            x3 = cos_latitude * math.cos(longitude) * shell_radius
+            y3 = sin_latitude * shell_radius
+            z3 = cos_latitude * math.sin(longitude) * shell_radius
+
+            x_rotated = x3 * cos_yaw + z3 * sin_yaw
+            z_rotated = -x3 * sin_yaw + z3 * cos_yaw
+            y_projected = y3 * cos_tilt - z_rotated * sin_tilt
+            depth = y3 * sin_tilt + z_rotated * cos_tilt
+            sub_x = round(sub_center_x + x_rotated * radius_x)
+            sub_y = round(sub_center_y - y_projected * radius_y)
             if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
                 continue
 
-            # A traveling brightness crest gives the ring the reference orb's
-            # thinking motion while the short Braille marks keep it airy.
-            shimmer = math.cos(angle - shimmer_angle)
-            edge = abs(lane - (RING_LANES - 1) / 2) / ((RING_LANES - 1) / 2)
-            depth = shimmer - edge * 0.18
             _add_braille_dot(
                 masks=masks,
                 depths=depths,
@@ -186,6 +193,14 @@ def build_dot_sphere(
                 sub_y=sub_y,
                 z=depth,
             )
+            if depth > 0.08 and sub_y + 1 < sub_height:
+                _add_braille_dot(
+                    masks=masks,
+                    depths=depths,
+                    sub_x=sub_x,
+                    sub_y=sub_y + 1,
+                    z=depth,
+                )
 
     if state.key in {"recalling", "remembered", "source"}:
         active_target = min(

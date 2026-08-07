@@ -9,7 +9,7 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
 )
 
 
-def test_dot_sphere_forms_hollow_bounded_ring() -> None:
+def test_dot_sphere_forms_depth_shaded_bounded_wave_shell() -> None:
     frame = build_dot_sphere(width=41, height=19, phase=0.0, state_key="extracting")
 
     assert frame.width == 41
@@ -27,23 +27,20 @@ def test_dot_sphere_forms_hollow_bounded_ring() -> None:
         ) ** 2
         assert normalized <= 1.08
 
-    center_cells = [
-        cell
-        for cell in frame.cells
-        if abs(cell.x - center_x) < frame.width * 0.12
-        and abs(cell.y - center_y) < frame.height * 0.12
-    ]
-    assert not center_cells
+    depths = [cell.z for cell in frame.cells]
+    assert max(depths) > 0.65
+    assert min(depths) < -0.3
+    assert {cell.style for cell in frame.cells} >= {"#F9B91C", "#8B763F"}
 
 
-def test_dot_sphere_keeps_terminal_ring_visually_round() -> None:
+def test_dot_sphere_keeps_terminal_wave_shell_visually_round() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="booting")
     row_spans = _row_spans(frame)
 
     occupied_rows = [y for y, span in row_spans.items() if span]
     assert min(occupied_rows) <= 2
     assert max(occupied_rows) >= frame.height - 3
-    assert row_spans[frame.height // 2] >= 28
+    assert row_spans[frame.height // 2] >= 26
 
 
 def test_dot_sphere_uses_braille_fine_dot_cells() -> None:
@@ -68,7 +65,7 @@ def test_dot_sphere_packs_multiple_subdots_per_terminal_cell() -> None:
     subdot_count = sum(_braille_subdot_count(cell.glyph) for cell in frame.cells)
 
     assert subdot_count > len(frame.cells) * 1.3
-    assert subdot_count < frame.width * frame.height * 0.55
+    assert subdot_count < frame.width * frame.height * 0.65
     assert any(_braille_subdot_count(cell.glyph) >= 3 for cell in frame.cells)
 
 
