@@ -19,6 +19,12 @@ yet created" is a normal state for the upsert-style workflow. Callers that
 need to distinguish "missing" from "empty body" check for ``None``
 explicitly.
 
+``reference_name`` / ``script_filename`` are appended after the skill
+directory, so ``skill_dir_name`` does not cover them; both go through
+:func:`sanitize_dirname` here exactly as :class:`AgentSkillWriter` does.
+The two sides must agree on *every* segment — sanitizing one side only
+would route a write and its matching read to different paths.
+
 Path resolution mirrors :class:`AgentSkillWriter` and reads the same
 ClassVars off :class:`AgentSkillFrontmatter`, including
 :meth:`AgentSkillFrontmatter.skill_dir_name` for the traversal-safe
@@ -48,7 +54,7 @@ import anyio
 from pydantic import ValidationError
 
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.core.persistence import MarkdownReader, MemoryRoot, sanitize_dirname
 
 from ..mds import AgentSkillFrontmatter
 
@@ -270,7 +276,7 @@ class AgentSkillReader:
         return (
             self._skill_dir(agent_id, skill_name, app_id, project_id)
             / AgentSkillFrontmatter.SKILL_REFERENCES_DIR_NAME
-            / f"{reference_name}.md"
+            / f"{sanitize_dirname(reference_name, 'reference')}.md"
         )
 
     def _script_path(
@@ -284,5 +290,5 @@ class AgentSkillReader:
         return (
             self._skill_dir(agent_id, skill_name, app_id, project_id)
             / AgentSkillFrontmatter.SKILL_SCRIPTS_DIR_NAME
-            / script_filename
+            / sanitize_dirname(script_filename, "script")
         )

@@ -44,7 +44,23 @@ has assigned the fresh case to its cluster. The strategy:
    not a wrong write.
 4. Feeds the target + existing + supporting trio to
    :class:`everalgo.agent_memory.AgentSkillExtractor`, then writes the
-   emitted skills back via :class:`AgentSkillWriter`.
+   emitted skills back via :class:`AgentSkillWriter` and reaps the
+   directory an update left behind when it renamed a skill (see
+   :func:`_reap_renamed_skills`).
+
+**Retire is not implemented.** ``AgentSkillExtractor.aextract`` returns a
+flat ``list[AgentSkill]`` with no op discriminator; its retire branch
+(``skill_ops._apply_update``, taken when ``confidence <
+retire_confidence``, default ``0.1``) is an ordinary skill carrying a
+lowered confidence and nothing else. This strategy writes every emitted
+skill back the same way, so a retirement persists as a normal skill: it
+stays in markdown, stays in the next run's prompt, and stays searchable.
+Honouring it means choosing between deleting the directory — handing an
+LLM-produced confidence score the authority to destroy the source of
+truth — and a ``retired`` frontmatter flag, which only works if the
+enumeration, cascade, and search all learn to filter on it. That is a
+design decision, not an omission to patch over, so it is deferred and
+stated here rather than left implied by a docstring listing three ops.
 
 Per-case granularity (one strategy run per fresh case) — algo
 short-circuits low-quality cases internally via its own
@@ -53,6 +69,8 @@ short-circuits low-quality cases internally via its own
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 
 from everalgo.agent_memory import AgentSkillExtractor
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -132,13 +150,16 @@ def _get_reader() -> AgentSkillReader:
     max_retries=3,
 )
 async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) -> None:
-    # Body-guard: capability is checked here for defensive degradation.
-    # Belt-and-suspenders even though the upstream
-    # trigger_skill_clustering already gates on the same capability — a
-    # direct emit of SkillClusterUpdated (tests, future features) should
-    # still degrade cleanly without an owner lock or OME retry pressure.
-    # Tier upgrades require a server restart; this guard is not a
-    # hot-reload mechanism.
+    # Body-guard: this strategy no longer embeds anything (the query
+    # vector rides the event), so the guard is not protecting a local
+    # call — it keeps the whole agent-skill track consistent with the
+    # tier the deployment is actually running. Upstream
+    # trigger_skill_clustering gates on the same capability, so no
+    # SkillClusterUpdated normally exists without an embedder; the guard
+    # covers a direct emit (tests, future features), which should degrade
+    # cleanly rather than take an owner lock and produce skills the
+    # ranking half of the pipeline cannot serve. Tier upgrades require a
+    # server restart; this guard is not a hot-reload mechanism.
     #
     # ``debug`` level (not ``info``) is intentional; see the body-guard
     # in :func:`everos.memory.strategies.trigger_profile_clustering` for
@@ -186,7 +207,9 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
             project_id=event.project_id,
         )
 
-        # 5. Run the LLM extractor → add / update / retire skill operations.
+        # 5. Run the LLM extractor. Emits add / update ops; a retire op comes
+        #    back as an ordinary skill with confidence < retire_confidence and
+        #    is NOT honoured here — see the module docstring.
         extractor = AgentSkillExtractor(llm=get_llm_client())
         emitted_skills = await extractor.aextract(
             target,
@@ -194,10 +217,12 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
             supporting_cases=[_to_algo_case(c) for c in supporting_lance],
         )
 
-        # 6. Write each emitted skill back to its SKILL.md.
+        # 6. Write each emitted skill back to its SKILL.md, then reap the
+        #    directories that a rename left behind.
         writer = _get_writer()
+        written_names: dict[str, str] = {}
         for skill in emitted_skills:
-            await _persist_skill(
+            written_names[skill.id] = await _persist_skill(
                 writer,
                 skill,
                 agent_id=event.agent_id,
@@ -205,6 +230,14 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
                 app_id=event.app_id,
                 project_id=event.project_id,
             )
+        await _reap_renamed_skills(
+            writer,
+            written_names,
+            existing_skills=existing_skills,
+            agent_id=event.agent_id,
+            app_id=event.app_id,
+            project_id=event.project_id,
+        )
     logger.info(
         "agent_skills_extracted",
         case_entry_id=event.case_entry_id,
@@ -429,6 +462,62 @@ def _md_to_algo_skill(fm: AgentSkillFrontmatter, body: str) -> AlgoAgentSkill:
     )
 
 
+async def _reap_renamed_skills(
+    writer: AgentSkillWriter,
+    written_names: Mapping[str, str],
+    *,
+    existing_skills: Sequence[AlgoAgentSkill],
+    agent_id: str,
+    app_id: str,
+    project_id: str,
+) -> None:
+    """Delete the directory an update left behind when it renamed a skill.
+
+    everalgo treats a name change as a first-class update
+    (``skill_ops._apply_update`` computes ``name_changed`` and returns
+    ``prior.model_copy(update={"name": eff_name, ...})``), so the emitted
+    skill keeps ``prior.id`` while carrying the new name. ``_persist_skill``
+    writes it to ``skill_<new_name>/`` and the old directory would survive
+    with the same ``cluster_id``.
+
+    That matters more here than it looks. Since this release the input to
+    the next extraction is the markdown enumeration, not LanceDB — so a
+    surviving pre-rename directory does not merely sit on disk, it comes
+    back in the next run's ``existing_relevant_skills`` as a duplicate of a
+    skill the LLM already renamed. Shown its own stale copy, the LLM emits
+    ``add`` for something that exists, and ``write_main`` full-replaces —
+    which is precisely the clobber this release set out to close. Left
+    unreaped, every rename adds another one.
+
+    Identity comes from ``skill.id``, which is the only thing that survives
+    a rename: ``_apply_update`` preserves ``prior.id`` while ``_apply_add``
+    mints a fresh ``uuid4().hex``, so an id present in the enumerated set is
+    an update by construction and a new skill can never match.
+
+    A prior name that some *other* emitted skill just claimed is never
+    deleted — with two ops in one batch (rename ``a``→``b`` while another
+    op writes ``a``) the reap would otherwise remove a file written
+    moments earlier in the same loop.
+    """
+    claimed = set(written_names.values())
+    for prior in existing_skills:
+        new_name = written_names.get(prior.id)
+        prior_name = AgentSkillFrontmatter.sanitize_skill_name(prior.name)
+        if new_name is None or new_name == prior_name or prior_name in claimed:
+            continue
+        removed = await writer.delete_skill(
+            agent_id, prior_name, app_id=app_id, project_id=project_id
+        )
+        logger.info(
+            "agent_skill_renamed_directory_reaped",
+            agent_id=agent_id,
+            skill_id=prior.id,
+            old_name=prior_name,
+            new_name=new_name,
+            removed=removed,
+        )
+
+
 async def _persist_skill(
     writer: AgentSkillWriter,
     skill: AlgoAgentSkill,
@@ -437,8 +526,11 @@ async def _persist_skill(
     cluster_id: str,
     app_id: str,
     project_id: str,
-) -> None:
+) -> str:
     """Write one ``SKILL.md`` with the post-stamped ``cluster_id``.
+
+    Returns the sanitized name it wrote under, so the caller can
+    reconcile renames without re-deriving it.
 
     ``skill.name`` is LLM output and is sanitized once, up front, via
     :meth:`AgentSkillFrontmatter.sanitize_skill_name` — the same helper
@@ -471,3 +563,4 @@ async def _persist_skill(
         app_id=app_id,
         project_id=project_id,
     )
+    return sanitized_name

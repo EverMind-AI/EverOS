@@ -63,6 +63,11 @@ _MULTI_QUERY_COUNT: int = 3  # num_queries
 _REFINEMENT_STRATEGY: str = "multi_query"
 
 
+_EMPTY_PASSAGE = "(empty)"
+"""Stand-in body for a row whose every passage field is blank. Keeps
+``everalgo.rank.agentic._format_docs`` from raising on an empty string."""
+
+
 def _to_everalgo_doc_metadata(
     metadata: dict[str, Any], *, format_passage: Callable[[dict[str, Any]], str]
 ) -> dict[str, Any]:
@@ -76,17 +81,22 @@ def _to_everalgo_doc_metadata(
     ``task_intent``/``approach`` for cases), so ``format_passage`` is the
     same kind-shaped formatter the reranker uses — this keeps the passage the
     LLM sufficiency check sees identical to the passage the reranker scores.
-    ``content`` is non-empty as long as at least one of the two source
-    fields is populated (the formatter falls back to whichever is set); a
-    row where both are empty still yields ``""``, which makes
-    ``_format_docs`` raise ``ValueError``. Mirrors the episode path's bridge
-    in ``agentic.py``.
+    ``content`` falls back to ``_EMPTY_PASSAGE`` when the formatter yields
+    nothing. That happens only when *both* source fields are empty — a
+    degenerate row, but a reachable one on the case side, where nothing
+    guarantees ``task_intent`` is populated (the skill side is safe: the
+    sanitizer floors ``name`` at ``"unnamed"``). Without the fallback
+    ``_format_docs`` raises ``ValueError`` on the empty string and the whole
+    search request 500s, so one malformed row would take out a result set it
+    merely happens to appear in. A placeholder is strictly better: the LLM
+    sees a row it will rank last instead of the caller seeing nothing at all.
+    Mirrors the episode path's bridge in ``agentic.py``.
     ``_restore_shaper_metadata`` reverts it before DTO shaping.
     """
     bridged = dict(metadata)
     bridged["episode"] = {
         "subject": metadata.get("subject", ""),
-        "content": format_passage(metadata),
+        "content": format_passage(metadata) or _EMPTY_PASSAGE,
     }
     timestamp = metadata.get("timestamp")
     if isinstance(timestamp, _dt.datetime):

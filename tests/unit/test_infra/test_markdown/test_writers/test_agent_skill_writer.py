@@ -9,6 +9,7 @@ import pytest
 from everos.core.persistence import MarkdownReader, MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,
+    AgentSkillReader,
     AgentSkillWriter,
 )
 
@@ -213,3 +214,58 @@ async def test_write_main_normalises_trailing_newline(
         root.agents_dir() / "agent_x" / "skills" / "skill_alpha" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert text.endswith("no-newline-end\n")
+
+
+@pytest.mark.parametrize(
+    ("reference_name", "script_filename"),
+    [
+        pytest.param("../" * 6 + "etc/passwd", "../" * 6 + "evil.sh", id="traversal"),
+        pytest.param("..", "..", id="dotdot_fixpoint"),
+        pytest.param("", "", id="empty"),
+        pytest.param("notes/../../x", "run/../../x.sh", id="embedded_separators"),
+    ],
+)
+async def test_reference_and_script_segments_cannot_escape_the_skill_dir(
+    root: MemoryRoot,
+    writer: AgentSkillWriter,
+    reference_name: str,
+    script_filename: str,
+) -> None:
+    """These two segments are appended *after* ``skill_dir_name``.
+
+    ``skill_dir_name`` only sanitizes the ``skill_<name>`` component, so it
+    offers these no protection at all — they need their own pass through
+    ``sanitize_dirname``. Nothing in ``src/`` calls them yet; they are
+    covered now because they are public API whose inputs will come from the
+    same untrusted place the skill name does once progressive disclosure is
+    wired up, and because the traversal fix would otherwise read as
+    repo-wide when it is not.
+    """
+    skill_dir = root.agents_dir() / "agent_x" / "skills" / "skill_alpha"
+
+    ref = await writer.write_reference("agent_x", "alpha", reference_name, "x")
+    script = await writer.write_script("agent_x", "alpha", script_filename, "x")
+
+    for path in (ref, script):
+        assert path.is_relative_to(skill_dir)
+        assert ".." not in path.parts
+        assert path.is_file()
+
+
+async def test_reader_resolves_the_same_sanitized_reference_and_script_paths(
+    root: MemoryRoot, writer: AgentSkillWriter
+) -> None:
+    """Reader and writer must sanitize every segment identically.
+
+    Sanitizing only one side would silently split a write from its matching
+    read — the write lands on the safe path, the read looks at the raw one
+    and reports the file missing. This is the same reader/writer symmetry
+    ``skill_dir_name`` maintains for the skill directory, extended to the
+    two segments appended after it.
+    """
+    reader = AgentSkillReader(root)
+    await writer.write_reference("agent_x", "alpha", "my notes!", "ref body")
+    await writer.write_script("agent_x", "alpha", "run this.sh", "echo hi\n")
+
+    assert await reader.read_reference("agent_x", "alpha", "my notes!") == "ref body"
+    assert await reader.read_script("agent_x", "alpha", "run this.sh") == "echo hi"

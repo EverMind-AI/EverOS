@@ -49,6 +49,7 @@ from everos.memory.strategies.extract_agent_skill import (
     MAX_SUPPORTING_CASES,
     _ClusterMissingError,
     _collect_supporting_entry_ids,
+    _reap_renamed_skills,
     _select_existing_skills,
     _select_supporting_cases,
     extract_agent_skill,
@@ -932,3 +933,119 @@ async def test_partition_lock_lets_different_agents_run_in_parallel(
     log = await _run_serialisation_probe(monkeypatch, "agent_42", "agent_43")
     assert log.index("enter:ac_run_a") < log.index("leave:ac_run_b")
     assert log.index("enter:ac_run_b") < log.index("leave:ac_run_a")
+
+
+# ── rename reconciliation (orphan directories) ──────────────────────────
+
+
+def _identified_algo_skill(skill_id: str, name: str) -> AlgoAgentSkill:
+    """Like :func:`_algo_skill` but with an explicit id — rename
+    reconciliation keys off identity, so these tests must control it."""
+    return AlgoAgentSkill(
+        id=skill_id,
+        cluster_id="cl1",
+        name=name,
+        description="d",
+        content="body",
+        confidence=0.8,
+        maturity_score=0.5,
+        source_case_ids=["case_a"],
+    )
+
+
+async def _write_skill(writer: AgentSkillWriter, name: str) -> Path:
+    fm = AgentSkillFrontmatter(
+        id=f"agent_42_{name}",
+        agent_id="agent_42",
+        name=name,
+        description="d",
+        confidence=0.8,
+        maturity_score=0.5,
+        cluster_id="cl1",
+    )
+    path = await writer.write_main("agent_42", name, frontmatter=fm, body="body")
+    return path.parent
+
+
+async def test_reap_removes_the_directory_a_rename_left_behind(
+    tmp_path: Path,
+) -> None:
+    """An update that renames a skill must not leave its old directory.
+
+    everalgo's ``_apply_update`` keeps ``prior.id`` while changing the
+    name, so the emitted skill is written under a new directory and the
+    old one would survive carrying the same ``cluster_id``. That is not a
+    cosmetic leak: since this release the next extraction's
+    ``existing_relevant_skills`` come from the markdown enumeration, so the
+    orphan returns as a duplicate of a skill the LLM already renamed,
+    which is how ``add``-instead-of-``update`` full-replace clobbering gets
+    back in. Uses a real writer on a real tmp_path — the property under
+    test is that the directory is gone from the filesystem.
+    """
+    writer = AgentSkillWriter(MemoryRoot(tmp_path))
+    old_dir = await _write_skill(writer, "fix_django")
+    new_dir = await _write_skill(writer, "fix_django_autoreload")
+    assert old_dir.is_dir() and new_dir.is_dir()
+
+    await _reap_renamed_skills(
+        writer,
+        {"agent_42_fix_django": "fix_django_autoreload"},
+        existing_skills=[_identified_algo_skill("agent_42_fix_django", "fix_django")],
+        agent_id="agent_42",
+        app_id="default",
+        project_id="default",
+    )
+
+    assert not old_dir.exists()
+    assert (new_dir / "SKILL.md").is_file()
+
+
+async def test_reap_keeps_a_prior_name_another_emitted_skill_claimed(
+    tmp_path: Path,
+) -> None:
+    """Never delete a directory this same batch just wrote.
+
+    With two ops in one extraction — rename ``a`` → ``b`` while a second
+    op writes ``a`` — reaping ``a`` by prior name would remove a file
+    written moments earlier in the same loop. The claimed-name guard is
+    what prevents the reap from undoing its own caller.
+    """
+    writer = AgentSkillWriter(MemoryRoot(tmp_path))
+    dir_a = await _write_skill(writer, "alpha")
+    await _write_skill(writer, "beta")
+
+    await _reap_renamed_skills(
+        writer,
+        {"agent_42_alpha": "beta", "other_id": "alpha"},
+        existing_skills=[_identified_algo_skill("agent_42_alpha", "alpha")],
+        agent_id="agent_42",
+        app_id="default",
+        project_id="default",
+    )
+
+    assert dir_a.is_dir()
+
+
+async def test_reap_ignores_newly_added_skills(tmp_path: Path) -> None:
+    """A fresh ``add`` carries a uuid4 id absent from the enumerated set.
+
+    Identity is the only thing that survives a rename — ``_apply_update``
+    preserves ``prior.id`` while ``_apply_add`` mints a new one — so an
+    id that never appeared in ``existing_skills`` cannot be a rename, and
+    nothing may be deleted on its account.
+    """
+    writer = AgentSkillWriter(MemoryRoot(tmp_path))
+    kept = await _write_skill(writer, "existing_skill")
+
+    await _reap_renamed_skills(
+        writer,
+        {"3f2a9c1e4b6d47f8a0c5e9b2d7143a6f": "brand_new_skill"},
+        existing_skills=[
+            _identified_algo_skill("agent_42_existing_skill", "existing_skill")
+        ],
+        agent_id="agent_42",
+        app_id="default",
+        project_id="default",
+    )
+
+    assert kept.is_dir()
