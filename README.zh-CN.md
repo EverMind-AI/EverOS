@@ -88,13 +88,12 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 
 ## 快速开始
 
-> 只需要一个 OpenRouter API Key，就可以启动 EverOS、写入持久化记忆，
-> 并通过关键词把记忆搜索回来。
+> 根据所在地区选择线路：国内使用一个阿里云百炼 Key，海外使用一个
+> OpenRouter Key。
 
 ### 0. 前置条件
 
 - Python 3.12+
-- 一个 [OpenRouter API Key](https://openrouter.ai/keys)
 
 ### 1. 安装
 
@@ -103,15 +102,67 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. 初始化并填入 Key
+### 2. 先体验独立 Demo —— 不需要 Key
+
+在配置 provider 或启动 server 之前，先运行：
+
+```bash
+everos demo
+```
+
+这个命令会询问一条记忆和一个召回问题，然后打开全屏 terminal visualizer。
+它是 hardcoded 的本地 CLI 演示：不需要 API Key，不会启动或连接 EverOS
+server，也不会修改下面真实记忆流程的任何数据。
+
+<p align="center">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
+</p>
+
+按 `r` replay，按 `q` 退出。非交互式预览可以使用 `everos demo --plain`；
+循环 showroom view 可以使用 `everos demo --cinematic`。Visualizer 的范围见
+[docs/everos-demo.md](docs/everos-demo.md)。
+
+### 3. 初始化并选择线路
 
 ```bash
 everos init
 ```
 
 这个命令会创建 `~/.everos/everos.toml` 和 `~/.everos/ome.toml`。打开
-`~/.everos/everos.toml`；model 和 OpenRouter URL 已经填好，只需要替换空的
-`api_key`：
+`~/.everos/everos.toml`，根据所在地区选择一条 provider 线路。
+
+#### 国内：阿里云百炼
+
+在[百炼控制台](https://bailian.console.aliyun.com/)创建一个华北 2（北京）地域的
+DashScope API Key，并把同一个 Key 复用到三个文本 provider：
+
+```toml
+[llm]
+model = "qwen-plus"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[embedding]
+model = "text-embedding-v4"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+dimensions = 1024
+
+[rerank]
+provider = "dashscope"
+model = "gte-rerank-v2"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com"
+```
+
+Embedding 会启用 vector 和 user-hybrid retrieval；DashScope rerank 会进一步
+启用 agentic search、默认 agent-hybrid search 和 Knowledge Wiki。共享 DashScope
+host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
+
+#### 海外：OpenRouter
+
+创建一个 [OpenRouter API Key](https://openrouter.ai/keys)。生成文件中的 model
+和 URL 已经正确，只需要替换空的 `api_key`：
 
 ```toml
 [llm]
@@ -120,10 +171,13 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
+这是最小的 Tier 1 配置，支持 memory add / flush、Markdown 持久化、cascade
+indexing 和 keyword search。
+
 如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
 传入同一个 `--root <path>`。
 
-### 3. 启动 EverOS
+### 4. 启动 EverOS
 
 ```bash
 everos server start
@@ -135,10 +189,11 @@ everos server start
 curl http://127.0.0.1:8000/health
 ```
 
-确认响应里有 `"status":"ok"`。在单 Key 配置下，`capabilities.llm` 为
-`true`；embedding 和 rerank 会保持 `false`，直到你配置对应 provider。
+确认响应里有 `"status":"ok"`。完整百炼线路会显示三个文本 capability 均可用；
+OpenRouter Tier 1 会显示 `capabilities.llm=true`，embedding 和 rerank 为
+`false`。
 
-### 4. 写入并搜索第一条记忆
+### 5. 写入并搜索第一条记忆
 
 > [!NOTE]
 > 业务接口位于 `/api/v2`。旧的 `/api/v1` 前缀仍然指向同一批 handler，已有集成
@@ -186,9 +241,9 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   }'
 ```
 
-响应里应该能看到 Yosemite 相关记忆。单 Key 配置下必须显式指定
-`"method": "keyword"`，因为 API 默认使用 hybrid search，而 hybrid 需要
-embedding provider。
+响应里应该能看到 Yosemite 相关记忆。这个 keyword payload 在两条线路都能运行。
+OpenRouter Tier 1 必须保留 `"method": "keyword"`；完整百炼线路可以把它改成
+`"hybrid"`，也可以省略该字段，因为 API 默认就是 hybrid。
 
 > [!TIP]
 > **第一条记忆已经写入。**
@@ -198,35 +253,21 @@ embedding provider。
 
 带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
 
-### 一个 Key 可以使用哪些能力？
+### 两条单 Key 线路分别支持什么？
 
-单 Key 配置就是 EverOS Tier 1，支持 server 启动、memory add / flush、
-持久化 Markdown、cascade indexing 和 keyword search。只有需要下面这些能力时，
-才需要添加可选 provider：
-
-| 配置 | 新增能力 |
-| --- | --- |
-| 只有 `[llm]` | 核心记忆流程和 keyword search |
-| 添加 `[embedding]` | Vector / user hybrid search、reflection、skill extraction |
-| 再添加 `[rerank]` | Agentic search、默认 agent hybrid search、Knowledge Wiki |
-| 添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
+| 线路 | 一个 Key 配置 | 可用文本能力 |
+| --- | --- | --- |
+| 百炼 | `[llm]` + `[embedding]` + `[rerank]` | Keyword、vector、hybrid、agentic search；reflection、skill extraction、Knowledge Wiki |
+| OpenRouter | `[llm]` | 核心记忆流程和 keyword search |
+| 任一线路再加 `[multimodal]` 和 parser extra | Multimodal LLM | 图片、PDF、音频、Office 文件摄取 |
 
 `/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会
 返回明确的 HTTP 422。
 
-### 可选：体验本地 Visualizer
-
-`everos demo` 是 hardcoded 的 educational visualizer，不需要 API Key，也不需要
-启动 server：
-
-```bash
-everos demo
-# 非交互式预览：
-everos demo --plain
-```
-
-具体范围见 [docs/everos-demo.md](docs/everos-demo.md)。Live demo 目前使用
-hybrid search，因此运行 `everos demo --live` 前需要先配置 embedding。
+> [!NOTE]
+> `everos demo --live` 和步骤 2 的独立 Demo 不一样：它会连接正在运行的 server，
+> 并执行真实的 add / flush / search 流程。它使用 hybrid search，因此完整百炼线路
+> 可以直接运行；OpenRouter Tier 1 需要先补充 embedding provider。
 
 ### 可选：摄取多模态文件
 
@@ -262,7 +303,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 把一个 OpenRouter Key 填进 ~/.everos/everos.toml
+everos init                          # 在 ~/.everos/everos.toml 中选择百炼或 OpenRouter
 
 everos --help
 make test

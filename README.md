@@ -88,13 +88,12 @@ for fast retrieval and self-evolving reuse.
 
 ## Quick Start
 
-> One OpenRouter API key is enough to start EverOS, write durable memories,
-> and retrieve them with keyword search.
+> Choose the route closest to you: one OpenRouter key for the international
+> route, or one Alibaba Cloud Bailian key for the China route.
 
 ### 0. Prerequisites
 
 - Python 3.12+
-- One [OpenRouter API key](https://openrouter.ai/keys)
 
 ### 1. Install
 
@@ -103,15 +102,41 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. Initialize and add your key
+### 2. Try the standalone demo — no key required
+
+Before configuring a provider or starting the server, run:
+
+```bash
+everos demo
+```
+
+The command asks for one memory and one recall question, then opens a
+full-screen terminal visualizer. It is hardcoded and local to the CLI: it does
+not need an API key, start or call the EverOS server, or change anything in the
+real memory workflow below.
+
+<p align="center">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
+</p>
+
+Press `r` to replay and `q` to quit. For a non-interactive preview, use
+`everos demo --plain`; for the looping showroom view, use
+`everos demo --cinematic`. See [docs/everos-demo.md](docs/everos-demo.md) for
+the visualizer's scope.
+
+### 3. Initialize and choose your route
 
 ```bash
 everos init
 ```
 
 This creates `~/.everos/everos.toml` and `~/.everos/ome.toml`. Open
-`~/.everos/everos.toml`; the model and OpenRouter URL are already filled in,
-so only replace the empty `api_key`:
+`~/.everos/everos.toml` and choose one provider route.
+
+#### International: OpenRouter
+
+Create one [OpenRouter API key](https://openrouter.ai/keys). The generated
+model and URL are already correct, so replace only the empty `api_key`:
 
 ```toml
 [llm]
@@ -120,10 +145,43 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
+This is the smallest Tier 1 setup: memory add, flush, Markdown persistence,
+cascade indexing, and keyword search.
+
+#### China: Alibaba Cloud Bailian
+
+Create one China (Beijing) DashScope API key in the
+[Bailian console](https://bailian.console.aliyun.com/) and reuse that same key
+for all three text providers:
+
+```toml
+[llm]
+model = "qwen-plus"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[embedding]
+model = "text-embedding-v4"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+dimensions = 1024
+
+[rerank]
+provider = "dashscope"
+model = "gte-rerank-v2"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com"
+```
+
+Embedding enables vector and user-hybrid retrieval; DashScope rerank also
+enables agentic search, default agent-hybrid search, and Knowledge Wiki.
+The shared DashScope host remains available for Beijing-region keys. Production
+deployments may replace it with the matching workspace-specific Bailian host.
+
 Use `everos init --root <path>` if you want a different memory root. Pass the
 same `--root <path>` to subsequent commands.
 
-### 3. Start EverOS
+### 4. Start EverOS
 
 ```bash
 everos server start
@@ -135,10 +193,11 @@ Keep the server running, then open a second terminal and check it:
 curl http://127.0.0.1:8000/health
 ```
 
-Look for `"status":"ok"`. With the one-key setup, `capabilities.llm` is
-`true`; embedding and rerank remain `false` until you configure them.
+Look for `"status":"ok"`. OpenRouter Tier 1 reports `capabilities.llm` as
+`true` and embedding/rerank as `false`. The complete Bailian route reports all
+three text capabilities as available.
 
-### 4. Add and retrieve your first memory
+### 5. Add and retrieve your first memory
 
 > [!NOTE]
 > Business endpoints live under `/api/v2`. The older `/api/v1` prefix still
@@ -187,9 +246,10 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   }'
 ```
 
-You should see the Yosemite memory in the response. `method` must be
-`"keyword"` in the one-key setup because the API defaults to hybrid search,
-which requires an embedding provider.
+You should see the Yosemite memory in the response. The keyword payload works
+on both routes. Keep `"method": "keyword"` for OpenRouter Tier 1; with all
+three Bailian sections configured, you may change it to `"hybrid"` or omit the
+field because hybrid is the API default.
 
 > [!TIP]
 > **First memory unlocked.**
@@ -201,36 +261,22 @@ which requires an embedding provider.
 For annotated responses and the Markdown files EverOS creates, see
 [QUICKSTART.md](QUICKSTART.md).
 
-### What works with one key?
+### What does each one-key route enable?
 
-The one-key setup is EverOS Tier 1. It supports server startup, memory add and
-flush, durable Markdown storage, cascade indexing, and keyword search. Add
-optional providers only when you need the features below:
-
-| Configuration | Adds |
-| --- | --- |
-| `[llm]` only | Core memory flow and keyword search |
-| Add `[embedding]` | Vector/user hybrid search, reflection, and skill extraction |
-| Add `[rerank]` too | Agentic search, default agent hybrid search, and Knowledge Wiki |
-| Add `[multimodal]` + parser extra | Image, PDF, audio, and office-file ingestion |
+| Route | One key configures | Available text workflow |
+| --- | --- | --- |
+| OpenRouter | `[llm]` | Core memory flow and keyword search |
+| Bailian | `[llm]` + `[embedding]` + `[rerank]` | Keyword, vector, hybrid, and agentic search; reflection, skill extraction, and Knowledge Wiki |
+| Either route + `[multimodal]` and parser extra | Multimodal LLM | Image, PDF, audio, and office-file ingestion |
 
 Missing optional capabilities are reported by `/health` and return a clear
 HTTP 422 if you request a feature that needs them.
 
-### Optional: Explore the local visualizer
-
-`everos demo` is a hardcoded educational visualizer and needs no API key or
-running server:
-
-```bash
-everos demo
-# non-interactive preview:
-everos demo --plain
-```
-
-See [docs/everos-demo.md](docs/everos-demo.md) for its scope. The live demo
-currently uses hybrid search, so configure embedding before running
-`everos demo --live`.
+> [!NOTE]
+> `everos demo --live` is different from the standalone demo in step 2: it
+> connects to a running server and uses the real add/flush/search flow. It uses
+> hybrid search, so the Bailian route works as configured; OpenRouter Tier 1
+> needs an embedding provider before you run it.
 
 ### Optional: Ingest Multimodal Files
 
@@ -268,7 +314,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # try the local educational demo; no API keys needed
-everos init                          # add one OpenRouter key to ~/.everos/everos.toml
+everos init                          # choose OpenRouter or Bailian in ~/.everos/everos.toml
 
 everos --help
 make test
