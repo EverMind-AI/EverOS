@@ -1,26 +1,27 @@
 # Quickstart
 
-> Five minutes from one regional API key to durable Markdown memory and
-> recall.
+> Five minutes from one OpenRouter API key to durable Markdown memory and
+> keyword recall.
 
 EverOS runs as a local service. The minimum production path needs only an LLM:
-choose the OpenRouter route internationally or the Alibaba Cloud Bailian route
-in China, start the server, then call the HTTP API.
+configure one OpenRouter key, start the server, then call the HTTP API.
 
-## Choose the route closest to you
+## What the one-key setup includes
 
-| Route | One key configures | Search in this walkthrough |
-| --- | --- | --- |
-| OpenRouter (international) | LLM | Keyword |
-| Alibaba Cloud Bailian (China) | LLM + embedding + rerank | Hybrid or keyword |
+With only `[llm]` configured, EverOS can:
 
-Both routes support server startup, durable Markdown memory, cascade indexing,
-and keyword search. Bailian reuses one DashScope key across all three text
-providers; the minimal OpenRouter route can add embedding and rerank later.
+- start the server;
+- extract conversations into durable Markdown;
+- keep the local index in sync; and
+- retrieve memories with keyword search.
+
+Embedding, rerank, knowledge, and multimodal providers are optional upgrades.
+They are not required for this walkthrough.
 
 ## Prerequisites
 
 - Python 3.12+
+- One [OpenRouter API key](https://openrouter.ai/keys)
 
 ## 1. Install
 
@@ -81,13 +82,9 @@ This creates two files under the default memory root:
 To use another root, run `everos init --root <path>` and pass the same
 `--root <path>` to subsequent commands.
 
-## 4. Configure one regional key
+## 4. Add your OpenRouter key
 
-Open `~/.everos/everos.toml` and choose one route.
-
-### International: OpenRouter Tier 1
-
-Create one [OpenRouter API key](https://openrouter.ai/keys). The generated
+Open `~/.everos/everos.toml`. The generated
 `[llm]` section already contains the recommended model and base URL; replace
 only the empty `api_key`:
 
@@ -98,38 +95,9 @@ api_key = "<OPENROUTER_API_KEY>"
 base_url = "https://openrouter.ai/api/v1"
 ```
 
-Leave `[embedding]`, `[rerank]`, and `[multimodal]` unchanged. Their empty keys
-do not prevent the server from starting; this route uses keyword search.
-
-### China: Alibaba Cloud Bailian text-provider setup
-
-Create one China (Beijing) DashScope API key in the
-[Bailian console](https://bailian.console.aliyun.com/). Reuse that same key in
-all three sections:
-
-```toml
-[llm]
-model = "qwen-plus"
-api_key = "<DASHSCOPE_API_KEY>"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-[embedding]
-model = "text-embedding-v4"
-api_key = "<DASHSCOPE_API_KEY>"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-dimensions = 1024
-
-[rerank]
-provider = "dashscope"
-model = "gte-rerank-v2"
-api_key = "<DASHSCOPE_API_KEY>"
-base_url = "https://dashscope.aliyuncs.com"
-```
-
-`provider = "dashscope"` is required because the generated rerank provider
-defaults to DeepInfra. The shared DashScope host remains available for
-Beijing-region keys. Production deployments may replace it with the matching
-workspace-specific Bailian host.
+Leave `[embedding]`, `[rerank]`, and `[multimodal]` unchanged for this
+walkthrough. Their empty keys do not prevent the server from starting; this
+setup uses keyword search.
 
 ## 5. Start the server
 
@@ -144,8 +112,8 @@ terminal and verify it:
 curl http://127.0.0.1:8000/health
 ```
 
-The response includes the complete capability matrix. OpenRouter Tier 1 has
-this shape (trimmed):
+The response includes the complete capability matrix. In the one-key setup,
+the important fields look like this:
 
 ```json
 {
@@ -167,9 +135,7 @@ this shape (trimmed):
 ```
 
 The actual response also includes version, multimodal/parser capabilities, and
-cascade readiness. With the complete Bailian configuration, `llm`, `embed`,
-and `rerank` are all `true`; vector, hybrid, agentic, and knowledge features
-are no longer listed as disabled.
+cascade readiness.
 
 > [!NOTE]
 > EverOS opens local index files during concurrent search and indexing. If you
@@ -218,7 +184,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
 A successful flush returns `data.status` as `"extracted"`. The extraction is
 written to Markdown, then the cascade worker projects it into the local index.
 
-## 8. Search with your chosen route
+## 8. Search with the one-key method
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
@@ -236,12 +202,9 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 The response should contain an episode whose summary mentions Yosemite or El
 Cap. If the first search is empty, wait a moment for cascade indexing and retry.
 
-The keyword payload is copy-paste safe on both routes:
-
-- OpenRouter Tier 1 must keep `"method": "keyword"`. The API default is
-  hybrid, which requires embedding and returns HTTP 422 without it.
-- With all three Bailian sections configured, you may switch the line to
-  `"method": "hybrid"` or omit it because hybrid is the API default.
+> [!IMPORTANT]
+> Keep `"method": "keyword"` when only the LLM is configured. The API default
+> is hybrid, which requires embedding and returns HTTP 422 in the one-key tier.
 
 Keyword retrieval returns matching episodes from the local BM25 index. Atomic
 facts are created by an embedding-dependent strategy, so they are not expected
@@ -278,8 +241,7 @@ edit, diff, and version the memory files without a database client.
 ## Upgrade capabilities when you need them
 
 The generated `everos.toml` already includes commented guidance and default
-models for the optional providers. The Bailian route already includes the
-first three rows below; they are upgrade steps for OpenRouter Tier 1 users.
+models for the optional providers.
 
 | Configuration | Available capabilities |
 | --- | --- |

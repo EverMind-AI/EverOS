@@ -88,12 +88,13 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 
 ## 快速开始
 
-> 根据所在地区选择线路：国内使用一个阿里云百炼 Key，海外使用一个
-> OpenRouter Key。
+> 国内默认使用一个阿里云百炼 DashScope API Key，即可启动 EverOS、写入
+> 持久化记忆，并使用完整的文本检索能力。
 
-### 0. 前置条件
+### 前置条件
 
 - Python 3.12+
+- 一个[阿里云百炼 DashScope API Key](https://bailian.console.aliyun.com/)
 
 ### 1. 安装
 
@@ -122,16 +123,14 @@ server，也不会修改下面真实记忆流程的任何数据。
 循环 showroom view 可以使用 `everos demo --cinematic`。Visualizer 的范围见
 [docs/everos-demo.md](docs/everos-demo.md)。
 
-### 3. 初始化并选择线路
+### 3. 初始化并配置百炼
 
 ```bash
 everos init
 ```
 
 这个命令会创建 `~/.everos/everos.toml` 和 `~/.everos/ome.toml`。打开
-`~/.everos/everos.toml`，根据所在地区选择一条 provider 线路。
-
-#### 国内：阿里云百炼
+`~/.everos/everos.toml`，配置下面的百炼 provider。
 
 在[百炼控制台](https://bailian.console.aliyun.com/)创建一个华北 2（北京）地域的
 DashScope API Key，并把同一个 Key 复用到三个文本 provider：
@@ -159,21 +158,6 @@ Embedding 会启用 vector 和 user-hybrid retrieval；DashScope rerank 会进�
 启用 agentic search、默认 agent-hybrid search 和 Knowledge Wiki。共享 DashScope
 host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
 
-#### 海外：OpenRouter
-
-创建一个 [OpenRouter API Key](https://openrouter.ai/keys)。生成文件中的 model
-和 URL 已经正确，只需要替换空的 `api_key`：
-
-```toml
-[llm]
-model = "openai/gpt-4.1-mini"
-api_key = "<OPENROUTER_API_KEY>"
-base_url = "https://openrouter.ai/api/v1"
-```
-
-这是最小的 Tier 1 配置，支持 memory add / flush、Markdown 持久化、cascade
-indexing 和 keyword search。
-
 如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
 传入同一个 `--root <path>`。
 
@@ -189,9 +173,8 @@ everos server start
 curl http://127.0.0.1:8000/health
 ```
 
-确认响应里有 `"status":"ok"`。完整百炼线路会显示三个文本 capability 均可用；
-OpenRouter Tier 1 会显示 `capabilities.llm=true`，embedding 和 rerank 为
-`false`。
+确认响应里有 `"status":"ok"`。上面的百炼配置会显示 `llm`、`embed` 和
+`rerank` 三个文本 capability 均可用。
 
 ### 5. 写入并搜索第一条记忆
 
@@ -236,14 +219,13 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
-    "method": "keyword",
+    "method": "hybrid",
     "top_k": 5
   }'
 ```
 
-响应里应该能看到 Yosemite 相关记忆。这个 keyword payload 在两条线路都能运行。
-OpenRouter Tier 1 必须保留 `"method": "keyword"`；完整百炼线路可以把它改成
-`"hybrid"`，也可以省略该字段，因为 API 默认就是 hybrid。
+响应里应该能看到 Yosemite 相关记忆。完整百炼配置可以直接使用 hybrid search；
+也可以省略 `method` 字段，因为 API 默认就是 hybrid。
 
 > [!TIP]
 > **第一条记忆已经写入。**
@@ -251,23 +233,20 @@ OpenRouter Tier 1 必须保留 `"method": "keyword"`；完整百炼线路可以�
 > 并通过本地索引把它搜索回来。这就是 EverOS 的核心闭环。
 > 想看看 source of truth？打开 `~/.everos`，直接检查生成的 Markdown 文件。
 
-带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
+### 一个百炼 Key 可以使用哪些能力？
 
-### 两条单 Key 线路分别支持什么？
-
-| 线路 | 一个 Key 配置 | 可用文本能力 |
-| --- | --- | --- |
-| 百炼 | `[llm]` + `[embedding]` + `[rerank]` | Keyword、vector、hybrid、agentic search；reflection、skill extraction、Knowledge Wiki |
-| OpenRouter | `[llm]` | 核心记忆流程和 keyword search |
-| 任一线路再加 `[multimodal]` 和 parser extra | Multimodal LLM | 图片、PDF、音频、Office 文件摄取 |
+| 配置 | 可用能力 |
+| --- | --- |
+| 百炼 `[llm]` + `[embedding]` + `[rerank]` | Keyword、vector、hybrid、agentic search；reflection、skill extraction、Knowledge Wiki |
+| 再添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
 
 `/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会
 返回明确的 HTTP 422。
 
 > [!NOTE]
 > `everos demo --live` 和步骤 2 的独立 Demo 不一样：它会连接正在运行的 server，
-> 并执行真实的 add / flush / search 流程。它使用 hybrid search，因此完整百炼线路
-> 可以直接运行；OpenRouter Tier 1 需要先补充 embedding provider。
+> 并执行真实的 add / flush / search 流程。它使用 hybrid search，上面的完整百炼
+> 配置可以直接运行。
 
 ### 可选：摄取多模态文件
 
@@ -303,7 +282,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 在 ~/.everos/everos.toml 中选择百炼或 OpenRouter
+everos init                          # 把一个百炼 DashScope Key 配置到 ~/.everos/everos.toml
 
 everos --help
 make test
