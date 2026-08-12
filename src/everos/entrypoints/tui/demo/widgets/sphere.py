@@ -35,8 +35,11 @@ WORKING_SAMPLES_PER_RADIUS = 1.6
 WORKING_MIN_ORBITS = 14
 WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
-SOLVING_BACKGROUND_DENSITY = 0.21
+SOLVING_BACKGROUND_DENSITY = 0.11
 SOLVING_SIGNAL_COUNT = 9
+SHARED_EDGE_INNER_RADIUS = 0.72
+SHARED_EDGE_DENSITY = 0.25
+STAGE_INTERIOR_RADIUS = 0.69
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -286,6 +289,16 @@ def _build_working_cloud(
                     active_depths.get(position, -1.0),
                 )
 
+    shared_edge_positions = _replace_with_shared_outer_shell(
+        masks=masks,
+        depths=depths,
+        layer_maps=(active_depths,),
+        center_x=center_x,
+        center_y=center_y,
+        radius_x=radius_x,
+        radius_y=radius_y,
+    )
+
     highlighted_positions: set[tuple[int, int]] = set()
     if state.key in {"recalling", "remembered", "source"}:
         target_ratios = (
@@ -297,7 +310,9 @@ def _build_working_cloud(
             available = (
                 position
                 for position in masks
-                if position not in highlighted_positions and depths[position] > -0.15
+                if position not in highlighted_positions
+                and position not in shared_edge_positions
+                and depths[position] > -0.15
             )
             highlighted_positions.add(
                 min(
@@ -313,7 +328,9 @@ def _build_working_cloud(
     for (x, y), mask in masks.items():
         active_depth = active_depths.get((x, y))
         target_highlighted = (x, y) in highlighted_positions
-        if target_highlighted and state.key == "recalling":
+        if (x, y) in shared_edge_positions:
+            style = _style_for_shared_outer_shell(depths[(x, y)])
+        elif target_highlighted and state.key == "recalling":
             style = EVEROS_CYAN
         elif target_highlighted:
             style = EVEROS_YELLOW
@@ -373,8 +390,8 @@ def _build_solving_network(
         y_projected = y3 * cos_tilt - z_rotated * sin_tilt
         depth = y3 * sin_tilt + z_rotated * cos_tilt
         return (
-            round(center_x + x_rotated * radius_x),
-            round(center_y - y_projected * radius_y),
+            round(center_x + x_rotated * radius_x * STAGE_INTERIOR_RADIUS),
+            round(center_y - y_projected * radius_y * STAGE_INTERIOR_RADIUS),
             depth,
         )
 
@@ -383,8 +400,12 @@ def _build_solving_network(
 
     surface_area = math.pi * radius_x * radius_y
     background_count = max(
-        500,
-        round(surface_area * SOLVING_BACKGROUND_DENSITY),
+        140,
+        round(
+            surface_area
+            * SOLVING_BACKGROUND_DENSITY
+            * STAGE_INTERIOR_RADIUS**2
+        ),
     )
     node_count = max(28, round(radius_x * 1.05))
     masks: dict[tuple[int, int], int] = {}
@@ -430,27 +451,6 @@ def _build_solving_network(
                 depth,
                 background_depths.get(position, -1.0),
             )
-
-    # Cardinal surface samples keep the adaptive silhouette identical to the
-    # orbital state without drawing a separate outline.
-    for sub_x, sub_y in (
-        (round(center_x - radius_x), round(center_y)),
-        (round(center_x + radius_x), round(center_y)),
-        (round(center_x), round(center_y - radius_y)),
-        (round(center_x), round(center_y + radius_y)),
-    ):
-        position = (sub_x // 2, sub_y // 4)
-        _add_braille_dot(
-            masks=masks,
-            depths=depths,
-            sub_x=sub_x,
-            sub_y=sub_y,
-            z=0.0,
-        )
-        background_depths[position] = max(
-            0.0,
-            background_depths.get(position, -1.0),
-        )
 
     base_nodes: list[tuple[float, float, float]] = []
     nodes: list[tuple[float, float, float]] = []
@@ -590,13 +590,31 @@ def _build_solving_network(
                 signal_depths.get(position, -1.0),
             )
 
+    shared_edge_positions = _replace_with_shared_outer_shell(
+        masks=masks,
+        depths=depths,
+        layer_maps=(
+            background_depths,
+            signal_depths,
+            node_depths,
+            edge_depths,
+            edge_visibilities,
+        ),
+        center_x=center_x,
+        center_y=center_y,
+        radius_x=radius_x,
+        radius_y=radius_y,
+    )
+
     cells = []
     for (x, y), mask in masks.items():
         signal_depth = signal_depths.get((x, y))
         node_depth = node_depths.get((x, y))
         edge_depth = edge_depths.get((x, y))
         background_depth = background_depths.get((x, y), -1.0)
-        if signal_depth is not None:
+        if (x, y) in shared_edge_positions:
+            style = _style_for_shared_outer_shell(depths[(x, y)])
+        elif signal_depth is not None:
             style = _style_for_network_signal(signal_depth)
         elif node_depth is not None and node_depth >= background_depth - 0.05:
             style = _style_for_network_node(node_depth)
@@ -751,6 +769,108 @@ def _inside_sphere_projection(
     return normalized <= 1.0
 
 
+def _replace_with_shared_outer_shell(
+    *,
+    masks: dict[tuple[int, int], int],
+    depths: dict[tuple[int, int], float],
+    layer_maps: tuple[dict[tuple[int, int], float], ...],
+    center_x: float,
+    center_y: float,
+    radius_x: float,
+    radius_y: float,
+) -> set[tuple[int, int]]:
+    """Give every processing state one identical, stable particle edge.
+
+    Stage renderers are free to animate the center of the sphere. The outer
+    band is replaced after that work so a change in network or orbit density
+    cannot make the silhouette appear to jump between stages.
+    """
+
+    shared_masks: dict[tuple[int, int], int] = {}
+    shared_depths: dict[tuple[int, int], float] = {}
+    surface_area = math.pi * radius_x * radius_y
+    band_ratio = 1 - SHARED_EDGE_INNER_RADIUS**2
+    particle_count = max(
+        120,
+        round(surface_area * band_ratio * SHARED_EDGE_DENSITY),
+    )
+
+    for index in range(particle_count):
+        angle = index * GOLDEN_ANGLE
+        radial_hash = _stable_hash(index, 41.7)
+        radius = math.sqrt(
+            SHARED_EDGE_INNER_RADIUS**2 + band_ratio * radial_hash
+        )
+        sub_x = round(center_x + math.cos(angle) * radius_x * radius)
+        sub_y = round(center_y - math.sin(angle) * radius_y * radius)
+        hemisphere = 1.0 if _stable_hash(index, 17.9) >= 0.38 else -1.0
+        depth = hemisphere * math.sqrt(max(0.0, 1 - radius * radius))
+        _add_braille_dot(
+            masks=shared_masks,
+            depths=shared_depths,
+            sub_x=sub_x,
+            sub_y=sub_y,
+            z=depth,
+        )
+
+    # These anchors guarantee the same physical extent at every adaptive size.
+    for sub_x, sub_y in (
+        (round(center_x - radius_x), round(center_y)),
+        (round(center_x + radius_x), round(center_y)),
+        (round(center_x), round(center_y - radius_y)),
+        (round(center_x), round(center_y + radius_y)),
+    ):
+        _add_braille_dot(
+            masks=shared_masks,
+            depths=shared_depths,
+            sub_x=sub_x,
+            sub_y=sub_y,
+            z=0.0,
+        )
+
+    replace_positions = set(shared_masks)
+    replace_positions.update(
+        position
+        for position in masks
+        if _cell_projection_radius(
+            position,
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        )
+        >= SHARED_EDGE_INNER_RADIUS
+    )
+    for position in replace_positions:
+        masks.pop(position, None)
+        depths.pop(position, None)
+        for layer_map in layer_maps:
+            layer_map.pop(position, None)
+
+    masks.update(shared_masks)
+    depths.update(shared_depths)
+    return set(shared_masks)
+
+
+def _cell_projection_radius(
+    position: tuple[int, int],
+    *,
+    center_x: float,
+    center_y: float,
+    radius_x: float,
+    radius_y: float,
+) -> float:
+    """Return a terminal cell's radial position in the Braille projection."""
+
+    cell_x, cell_y = position
+    sub_x = cell_x * 2 + 0.5
+    sub_y = cell_y * 4 + 1.5
+    return math.sqrt(
+        ((sub_x - center_x) / radius_x) ** 2
+        + ((sub_y - center_y) / radius_y) ** 2
+    )
+
+
 def _rotate_around_axis(
     point: tuple[float, float, float],
     axis: tuple[float, float, float],
@@ -831,6 +951,18 @@ def _style_for_ghost_depth(depth: float) -> str:
     if depth_ratio > 0.55:
         return EVEROS_GOLD_DARK
     if depth_ratio > 0.28:
+        return EVEROS_GOLD_DEEP
+    return EVEROS_GOLD_SHADOW
+
+
+def _style_for_shared_outer_shell(depth: float) -> str:
+    """Keep edge contrast calm and identical while the center tells the story."""
+
+    if depth > 0.48:
+        return EVEROS_GOLD_MID
+    if depth > 0.18:
+        return EVEROS_GOLD_DARK
+    if depth > -0.18:
         return EVEROS_GOLD_DEEP
     return EVEROS_GOLD_SHADOW
 

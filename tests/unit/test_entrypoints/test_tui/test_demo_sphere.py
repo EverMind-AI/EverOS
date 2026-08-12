@@ -5,9 +5,12 @@ from __future__ import annotations
 import math
 
 from everos.entrypoints.tui.demo.widgets.sphere import (
+    SHARED_EDGE_INNER_RADIUS,
     SOLVING_SIGNAL_COUNT,
     SPHERE_STATES,
     DotSphereFrame,
+    _cell_projection_radius,
+    _sphere_geometry,
     build_dot_sphere,
 )
 
@@ -154,6 +157,36 @@ def test_pipeline_states_keep_the_same_outer_position_through_cycle() -> None:
                 state_key=state_key,
             )
             assert _frame_extents(reference) == _frame_extents(frame)
+
+
+def test_pipeline_states_share_the_exact_same_particle_edge() -> None:
+    _, _, center_x, center_y, radius_x, radius_y = _sphere_geometry(41, 19)
+
+    for phase in (0.0, 0.25, 0.5, 0.75):
+        edges = []
+        for state_key in ("ingesting", "extracting", "indexing", "recalling"):
+            frame = build_dot_sphere(
+                width=41,
+                height=19,
+                phase=phase,
+                state_key=state_key,
+            )
+            edges.append(
+                {
+                    (cell.x, cell.y, cell.glyph, cell.style)
+                    for cell in frame.cells
+                    if _cell_projection_radius(
+                        (cell.x, cell.y),
+                        center_x=center_x,
+                        center_y=center_y,
+                        radius_x=radius_x,
+                        radius_y=radius_y,
+                    )
+                    >= SHARED_EDGE_INNER_RADIUS
+                }
+            )
+
+        assert all(edge == edges[0] for edge in edges[1:])
 
 
 def test_pipeline_states_keep_comparable_default_size_density() -> None:
