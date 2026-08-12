@@ -154,19 +154,13 @@ def build_dot_sphere(
     if state.key in {
         "booting",
         "ingesting",
+        "extracting",
         "indexing",
         "recalling",
         "remembered",
         "source",
     }:
         return _build_working_cloud(
-            width=width,
-            height=height,
-            phase=phase,
-            state=state,
-        )
-    if state.key == "extracting":
-        return _build_solving_network(
             width=width,
             height=height,
             phase=phase,
@@ -302,6 +296,27 @@ def _build_working_cloud(
         radius_y=radius_y,
     )
 
+    network_edge_depths: dict[tuple[int, int], float] = {}
+    network_edge_visibilities: dict[tuple[int, int], float] = {}
+    network_node_depths: dict[tuple[int, int], float] = {}
+    network_signal_depths: dict[tuple[int, int], float] = {}
+    if state.key == "extracting":
+        (
+            network_edge_depths,
+            network_edge_visibilities,
+            network_node_depths,
+            network_signal_depths,
+        ) = _network_layers_on_particle_field(
+            masks=masks,
+            depths=depths,
+            shared_edge_positions=shared_edge_positions,
+            animation_time=animation_time,
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        )
+
     highlighted_positions: set[tuple[int, int]] = set()
     if state.key in {"recalling", "remembered", "source"}:
         target_ratios = (
@@ -329,10 +344,23 @@ def _build_working_cloud(
 
     cells = []
     for (x, y), mask in masks.items():
+        position = (x, y)
         active_depth = active_depths.get((x, y))
         target_highlighted = (x, y) in highlighted_positions
-        if (x, y) in shared_edge_positions:
+        network_signal_depth = network_signal_depths.get(position)
+        network_node_depth = network_node_depths.get(position)
+        network_edge_depth = network_edge_depths.get(position)
+        if position in shared_edge_positions:
             style = _style_for_shared_outer_shell(depths[(x, y)])
+        elif network_signal_depth is not None:
+            style = _style_for_network_signal(depths[position])
+        elif network_node_depth is not None:
+            style = _style_for_network_node(network_node_depth)
+        elif network_edge_depth is not None:
+            style = _style_for_network_edge(
+                network_edge_depth,
+                network_edge_visibilities[position],
+            )
         elif target_highlighted and state.key == "recalling":
             style = EVEROS_CYAN
         elif target_highlighted:
@@ -343,11 +371,17 @@ def _build_working_cloud(
             style = EVEROS_CYAN
         elif active_depth is not None and state.key == "ingesting":
             style = _style_for_active_particle(active_depth, allow_white=True)
+        elif state.key == "extracting":
+            style = _style_for_network_surface(depths[position])
         elif active_depth is not None:
             style = _style_for_active_particle(active_depth, allow_white=False)
         else:
             style = _style_for_ghost_depth(depths[(x, y)])
-        highlighted = target_highlighted or style == EVEROS_CYAN
+        highlighted = (
+            target_highlighted
+            or network_signal_depth is not None
+            or style == EVEROS_CYAN
+        )
         cells.append(
             DotCell(
                 x=x,
@@ -365,6 +399,185 @@ def _build_working_cloud(
         state=state,
         cells=tuple(sorted(cells, key=lambda cell: (cell.y, cell.x))),
     )
+
+
+def _network_layers_on_particle_field(
+    *,
+    masks: dict[tuple[int, int], int],
+    depths: dict[tuple[int, int], float],
+    shared_edge_positions: set[tuple[int, int]],
+    animation_time: float,
+    center_x: float,
+    center_y: float,
+    radius_x: float,
+    radius_y: float,
+) -> tuple[
+    dict[tuple[int, int], float],
+    dict[tuple[int, int], float],
+    dict[tuple[int, int], float],
+    dict[tuple[int, int], float],
+]:
+    """Color a moving network onto the shared particle field.
+
+    Extract used to build an independent sphere, so entering the stage replaced
+    most of the center in one frame. This layer snaps its graph, nodes, and
+    moving packets to particles that already exist in every stage. The shape
+    therefore remains continuous while the color animation still reads as a
+    connected extraction network.
+    """
+
+    candidates = tuple(
+        position for position in masks if position not in shared_edge_positions
+    )
+    candidate_set = set(candidates)
+    edge_depths: dict[tuple[int, int], float] = {}
+    edge_visibilities: dict[tuple[int, int], float] = {}
+    node_depths: dict[tuple[int, int], float] = {}
+    signal_depths: dict[tuple[int, int], float] = {}
+    if not candidates:
+        return edge_depths, edge_visibilities, node_depths, signal_depths
+
+    yaw = animation_time * 0.12
+    tilt = 0.32
+    sin_yaw, cos_yaw = math.sin(yaw), math.cos(yaw)
+    sin_tilt, cos_tilt = math.sin(tilt), math.cos(tilt)
+
+    def project(x3: float, y3: float, z3: float) -> tuple[float, float, float]:
+        x_rotated = x3 * cos_yaw + z3 * sin_yaw
+        z_rotated = -x3 * sin_yaw + z3 * cos_yaw
+        y_projected = y3 * cos_tilt - z_rotated * sin_tilt
+        depth = y3 * sin_tilt + z_rotated * cos_tilt
+        return (
+            center_x + x_rotated * radius_x * STAGE_INTERIOR_RADIUS,
+            center_y - y_projected * radius_y * STAGE_INTERIOR_RADIUS,
+            depth,
+        )
+
+    def nearest_particle(
+        sub_x: float,
+        sub_y: float,
+        depth: float,
+    ) -> tuple[int, int]:
+        depth_scale = min(radius_x, radius_y) * 0.22
+        target_x = round((sub_x - 0.5) / 2)
+        target_y = round((sub_y - 1.5) / 4)
+        local_candidates = tuple(
+            position
+            for y in range(target_y - 2, target_y + 3)
+            for x in range(target_x - 3, target_x + 4)
+            if (position := (x, y)) in candidate_set
+        )
+        return min(
+            local_candidates or candidates,
+            key=lambda position: (
+                (position[0] * 2 + 0.5 - sub_x) ** 2
+                + (position[1] * 4 + 1.5 - sub_y) ** 2
+                + ((depths[position] - depth) * depth_scale) ** 2
+            ),
+        )
+
+    node_count = max(28, round(radius_x * 1.05))
+    base_nodes: list[tuple[float, float, float]] = []
+    nodes: list[tuple[float, float, float]] = []
+    for index in range(node_count):
+        base_y = 1 - 2 * ((index + 0.5) / node_count)
+        latitude_radius = math.sqrt(max(0.0, 1.0 - base_y * base_y))
+        theta = index * GOLDEN_ANGLE
+        base_x = latitude_radius * math.cos(theta)
+        base_z = latitude_radius * math.sin(theta)
+        base_nodes.append((base_x, base_y, base_z))
+        nodes.append(
+            _normalize_3d(
+                base_x
+                + 0.12 * math.sin(animation_time * 0.72 + index * 0.31 + 9),
+                base_y
+                + 0.12 * math.sin(animation_time * 0.63 + index * 0.53 + 27),
+                base_z
+                + 0.12 * math.sin(animation_time * 0.81 + index * 0.77 + 55),
+            )
+        )
+
+    projected_nodes = [project(*node) for node in nodes]
+    edge_threshold = 0.72
+    edges: list[tuple[int, int, float]] = []
+    adjacency: list[list[int]] = [[] for _ in range(node_count)]
+    for start_index in range(node_count):
+        for end_index in range(start_index + 1, node_count):
+            distance = math.sqrt(
+                sum(
+                    (a - b) ** 2
+                    for a, b in zip(
+                        base_nodes[start_index],
+                        base_nodes[end_index],
+                        strict=True,
+                    )
+                )
+            )
+            if distance < edge_threshold:
+                edges.append((start_index, end_index, distance))
+                adjacency[start_index].append(end_index)
+                adjacency[end_index].append(start_index)
+
+    for start_index, end_index, distance in edges:
+        start_x, start_y, start_z = projected_nodes[start_index]
+        end_x, end_y, end_z = projected_nodes[end_index]
+        line_depth = (start_z + end_z) / 2
+        depth_factor = 0.3 + 0.55 * ((line_depth + 1) / 2)
+        visibility = (1 - distance / edge_threshold) * depth_factor
+        steps = max(1, round(max(abs(end_x - start_x), abs(end_y - start_y))))
+        for step in range(0, steps + 1, 2):
+            progress = step / steps
+            edge_depth = start_z + (end_z - start_z) * progress
+            position = nearest_particle(
+                start_x + (end_x - start_x) * progress,
+                start_y + (end_y - start_y) * progress,
+                edge_depth,
+            )
+            edge_depths[position] = max(
+                edge_depth,
+                edge_depths.get(position, -1.0),
+            )
+            edge_visibilities[position] = max(
+                visibility,
+                edge_visibilities.get(position, 0.0),
+            )
+
+    for sub_x, sub_y, depth in projected_nodes:
+        position = nearest_particle(sub_x, sub_y, depth)
+        node_depths[position] = max(depth, node_depths.get(position, -1.0))
+
+    for signal in range(SOLVING_SIGNAL_COUNT):
+        head_clock = animation_time * 0.46 + signal / SOLVING_SIGNAL_COUNT
+        seed = round((signal + 0.5) * node_count / SOLVING_SIGNAL_COUNT) % node_count
+        for trail_step in range(SOLVING_SIGNAL_TRAIL_STEPS):
+            signal_clock = max(
+                0.0,
+                head_clock - trail_step * SOLVING_SIGNAL_TRAIL_GAP,
+            )
+            route = _signal_route_edge(
+                adjacency=adjacency,
+                seed=seed,
+                segment=math.floor(signal_clock),
+                signal=signal,
+            )
+            if route is None:
+                continue
+            start_index, end_index = route
+            progress = signal_clock - math.floor(signal_clock)
+            start_x, start_y, start_z = projected_nodes[start_index]
+            end_x, end_y, end_z = projected_nodes[end_index]
+            depth = start_z + (end_z - start_z) * progress
+            position = nearest_particle(
+                start_x + (end_x - start_x) * progress,
+                start_y + (end_y - start_y) * progress,
+                depth,
+            )
+            signal_depths[position] = max(
+                depth,
+                signal_depths.get(position, -1.0),
+            )
+
+    return edge_depths, edge_visibilities, node_depths, signal_depths
 
 
 def _build_solving_network(
@@ -733,6 +946,72 @@ def render_dot_sphere_text(frame: DotSphereFrame) -> Text:
     text.append("\n")
     text.append(frame.caption, style=f"bold {frame.state.accent}")
     return text
+
+
+def blend_dot_sphere_frames(
+    previous: DotSphereFrame,
+    current: DotSphereFrame,
+    progress: float,
+    *,
+    background: str = "#1D1C18",
+) -> DotSphereFrame:
+    """Ease between states without replacing the whole particle field at once."""
+
+    if (previous.width, previous.height) != (current.width, current.height):
+        raise ValueError("dot sphere frames must have matching dimensions")
+    progress = max(0.0, min(1.0, progress))
+    previous_cells = {(cell.x, cell.y): cell for cell in previous.cells}
+    current_cells = {(cell.x, cell.y): cell for cell in current.cells}
+    cells = []
+    positions = previous_cells.keys() | current_cells.keys()
+    for position in sorted(positions, key=lambda item: (item[1], item[0])):
+        old = previous_cells.get(position)
+        new = current_cells.get(position)
+        if old is not None and new is not None:
+            glyph = old.glyph if old.glyph == new.glyph or progress < 0.5 else new.glyph
+            style = _blend_hex_color(old.style, new.style, progress)
+            z = old.z + (new.z - old.z) * progress
+            highlighted = new.highlighted if progress >= 0.5 else old.highlighted
+        elif old is not None:
+            glyph = old.glyph
+            style = _blend_hex_color(old.style, background, progress)
+            z = old.z
+            highlighted = old.highlighted and progress < 0.5
+        else:
+            assert new is not None
+            glyph = new.glyph
+            style = _blend_hex_color(background, new.style, progress)
+            z = new.z
+            highlighted = new.highlighted and progress >= 0.5
+        cells.append(
+            DotCell(
+                x=position[0],
+                y=position[1],
+                z=z,
+                glyph=glyph,
+                style=style,
+                highlighted=highlighted,
+            )
+        )
+
+    return DotSphereFrame(
+        width=current.width,
+        height=current.height,
+        state=current.state,
+        cells=tuple(cells),
+    )
+
+
+def _blend_hex_color(start: str, end: str, progress: float) -> str:
+    """Blend the plain RGB styles used by the particle renderer."""
+
+    start_rgb = tuple(int(start[index : index + 2], 16) for index in (1, 3, 5))
+    end_rgb = tuple(int(end[index : index + 2], 16) for index in (1, 3, 5))
+    channels = tuple(
+        round(a + (b - a) * progress)
+        for a, b in zip(start_rgb, end_rgb, strict=True)
+    )
+    return "#" + "".join(f"{channel:02X}" for channel in channels)
 
 
 def _add_braille_dot(

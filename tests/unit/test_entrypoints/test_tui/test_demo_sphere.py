@@ -11,6 +11,7 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
     DotSphereFrame,
     _cell_projection_radius,
     _sphere_geometry,
+    blend_dot_sphere_frames,
     build_dot_sphere,
 )
 
@@ -187,6 +188,56 @@ def test_pipeline_states_share_the_exact_same_particle_edge() -> None:
             )
 
         assert all(edge == edges[0] for edge in edges[1:])
+
+
+def test_pipeline_states_share_the_exact_same_particle_field() -> None:
+    for phase in (0.0, 0.25, 0.5, 0.75):
+        reference = build_dot_sphere(
+            width=41,
+            height=19,
+            phase=phase,
+            state_key="ingesting",
+        )
+        reference_geometry = [
+            (cell.x, cell.y, cell.glyph, cell.z) for cell in reference.cells
+        ]
+
+        for state_key in ("extracting", "indexing", "recalling"):
+            frame = build_dot_sphere(
+                width=41,
+                height=19,
+                phase=phase,
+                state_key=state_key,
+            )
+            assert [
+                (cell.x, cell.y, cell.glyph, cell.z) for cell in frame.cells
+            ] == reference_geometry
+
+
+def test_pipeline_state_color_transition_preserves_particle_geometry() -> None:
+    ingesting = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.25,
+        state_key="ingesting",
+    )
+    extracting = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.25,
+        state_key="extracting",
+    )
+    blended = blend_dot_sphere_frames(ingesting, extracting, 0.5)
+
+    assert [(cell.x, cell.y, cell.glyph) for cell in blended.cells] == [
+        (cell.x, cell.y, cell.glyph) for cell in ingesting.cells
+    ]
+    assert {cell.style for cell in blended.cells} != {
+        cell.style for cell in ingesting.cells
+    }
+    assert {cell.style for cell in blended.cells} != {
+        cell.style for cell in extracting.cells
+    }
 
 
 def test_shared_particle_edge_moves_without_density_or_position_jumps() -> None:

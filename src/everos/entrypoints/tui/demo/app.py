@@ -28,6 +28,7 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
     EVEROS_ORANGE,
     EVEROS_YELLOW,
     EVEROS_YELLOW_SOFT,
+    blend_dot_sphere_frames,
     build_dot_sphere,
     render_dot_sphere_text,
 )
@@ -51,6 +52,8 @@ DEFAULT_DEMO_ROUNDS = 3
 SPHERE_FPS = 24
 SPHERE_STAGE_SECONDS = 3.0
 SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
+SPHERE_TRANSITION_SECONDS = 0.35
+SPHERE_TRANSITION_TICKS = round(SPHERE_FPS * SPHERE_TRANSITION_SECONDS)
 
 # The four pipeline stages shown in the trace header. They line up with the four
 # core sphere states, so the active word can highlight in sync with the sphere.
@@ -105,6 +108,9 @@ class DotSphereWidget(Static):
         self._phase = 0.0
         self._tick = 0
         self._last_stage = -2
+        self._rendered_state: str | None = None
+        self._transition_from_state: str | None = None
+        self._transition_tick = 0
         self._animation_timer: Timer | None = None
         # When set, the sphere is pinned to a pipeline state (synced to the
         # signal rail during a round). When None it free-runs the idle loop.
@@ -154,6 +160,12 @@ class DotSphereWidget(Static):
             state = self._driven_state
         else:
             state = self.STATES[(self._tick // SPHERE_STAGE_TICKS) % len(self.STATES)]
+        if self._rendered_state is None:
+            self._rendered_state = state
+        elif state != self._rendered_state:
+            self._transition_from_state = self._rendered_state
+            self._rendered_state = state
+            self._transition_tick = 0
         frame_width, frame_height = self._frame_size()
         frame = build_dot_sphere(
             width=frame_width,
@@ -161,6 +173,27 @@ class DotSphereWidget(Static):
             phase=self._phase,
             state_key=state,
         )
+        if self._transition_from_state is not None:
+            previous_frame = build_dot_sphere(
+                width=frame_width,
+                height=frame_height,
+                phase=self._phase,
+                state_key=self._transition_from_state,
+            )
+            raw_progress = min(
+                1.0,
+                (self._transition_tick + 1) / SPHERE_TRANSITION_TICKS,
+            )
+            eased_progress = raw_progress * raw_progress * (3 - 2 * raw_progress)
+            frame = blend_dot_sphere_frames(
+                previous_frame,
+                frame,
+                eased_progress,
+                background=EVEROS_BLACK,
+            )
+            self._transition_tick += 1
+            if self._transition_tick >= SPHERE_TRANSITION_TICKS:
+                self._transition_from_state = None
         self.update(render_dot_sphere_text(frame))
 
         stage = _state_to_stage(state)
