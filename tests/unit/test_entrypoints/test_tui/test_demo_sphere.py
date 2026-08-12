@@ -589,15 +589,25 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.48,
+        state_phase=0.28,
     )
-    empty = build_dot_sphere(
+    drifted = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.75,
+        state_phase=0.4,
     )
+    empty_frames = [
+        build_dot_sphere(
+            width=41,
+            height=19,
+            phase=0.93,
+            state_key="celebrating",
+            state_phase=empty_phase,
+        )
+        for empty_phase in (0.56, 0.67, 0.78)
+    ]
     emerging = build_dot_sphere(
         width=41,
         height=19,
@@ -635,7 +645,10 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
     assert burst_dots > start_dots * 1.12
     corners = {(0, 0), (40, 0), (0, 18), (40, 18)}
     assert not corners.intersection((cell.x, cell.y) for cell in scattered.cells)
-    assert not empty.cells
+    assert [(cell.x, cell.y, cell.glyph) for cell in drifted.cells] != [
+        (cell.x, cell.y, cell.glyph) for cell in scattered.cells
+    ]
+    assert all(not empty.cells for empty in empty_frames)
     assert 0 < len(emerging.cells) < len(restored.cells)
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in restored.cells] == [
         (cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells

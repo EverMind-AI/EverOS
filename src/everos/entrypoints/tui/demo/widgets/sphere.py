@@ -842,20 +842,20 @@ def _build_soft_supernova(
         width,
         height,
     )
-    animation_time = progress * math.tau * 2.7
+    animation_time = progress * math.tau * 3.6
 
-    contraction = _smoothstep(min(1.0, progress / 0.045))
+    contraction = _smoothstep(min(1.0, progress / 0.035))
     contraction_release = 1 - _smoothstep(
-        max(0.0, min(1.0, (progress - 0.045) / 0.045))
+        max(0.0, min(1.0, (progress - 0.035) / 0.035))
     )
     contraction *= contraction_release
     source_scale_x = 1 - 0.085 * contraction
     source_scale_y = 1 - 0.065 * contraction
 
-    flash = max(0.0, 1 - abs(progress - 0.06) / 0.035)
-    wave_progress = max(0.0, min(1.0, (progress - 0.045) / 0.17))
+    flash = max(0.0, 1 - abs(progress - 0.047) / 0.03)
+    wave_progress = max(0.0, min(1.0, (progress - 0.035) / 0.14))
     wave_radius = 0.08 + 1.02 * (1 - (1 - wave_progress) ** 2)
-    wave_strength = 1 - _smoothstep(max(0.0, (progress - 0.2) / 0.08))
+    wave_strength = 1 - _smoothstep(max(0.0, (progress - 0.17) / 0.07))
 
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
@@ -910,8 +910,8 @@ def _build_soft_supernova(
                     (delta_x / radius_x) ** 2 + (delta_y / radius_y) ** 2
                 )
                 particle_id = original_y * sub_width + original_x
-                if progress >= 0.7:
-                    appearance_start = 0.8 + 0.06 * _stable_hash(
+                if progress >= 0.54:
+                    appearance_start = 0.79 + 0.06 * _stable_hash(
                         particle_id,
                         64.7,
                     )
@@ -941,8 +941,8 @@ def _build_soft_supernova(
                 spark_hash = _stable_hash(particle_id, 19.7)
                 source_x = center_x + delta_x * source_scale_x
                 source_y = center_y + delta_y * source_scale_y
-                launch_start = 0.035 + 0.035 * speed_hash
-                launch_duration = 0.04 + 0.07 * _stable_hash(
+                launch_start = 0.025 + 0.025 * speed_hash
+                launch_duration = 0.03 + 0.055 * _stable_hash(
                     particle_id,
                     71.4,
                 )
@@ -962,26 +962,21 @@ def _build_soft_supernova(
                 target_x = center_x + (
                     math.cos(scatter_angle)
                     * (sub_width - 1)
-                    * 0.49
+                    * 0.59
                     * scatter_distance
                 )
                 target_y = center_y + (
                     math.sin(scatter_angle)
                     * (sub_height - 1)
-                    * 0.49
+                    * 0.59
                     * scatter_distance
                 )
 
                 launch_end = launch_start + launch_duration
-                coast = _smoothstep(
-                    max(
-                        0.0,
-                        min(1.0, (progress - launch_end) / 0.28),
-                    )
-                )
-                coast_scale = 1 + coast * (0.025 + 0.055 * speed_hash)
-                travel_x = (target_x - source_x) * coast_scale
-                travel_y = (target_y - source_y) * coast_scale
+                coast_elapsed = max(0.0, progress - launch_end)
+                coast = _smoothstep(min(1.0, coast_elapsed / 0.08))
+                travel_x = target_x - source_x
+                travel_y = target_y - source_y
                 travel_length = max(1.0, math.hypot(travel_x, travel_y))
                 bend = (
                     _stable_hash(particle_id, 83.7) - 0.5
@@ -990,34 +985,60 @@ def _build_soft_supernova(
                 curve_x = -travel_y / travel_length * bend * curve
                 curve_y = travel_x / travel_length * bend * curve
                 drift_strength = launch * coast
-                drift_x = (
-                    math.sin(animation_time * 0.18 + particle_id * 0.13)
-                    * 1.35
+                drift_angle = scatter_angle + (
+                    _stable_hash(particle_id, 26.3) - 0.5
+                ) * math.pi * 0.75
+                coast_speed = 0.2 + 0.26 * _stable_hash(particle_id, 38.9)
+                ballistic_x = (
+                    math.cos(drift_angle)
+                    * (sub_width - 1)
+                    * coast_elapsed
+                    * coast_speed
                     * drift_strength
                 )
-                drift_y = (
-                    math.cos(animation_time * 0.16 + particle_id * 0.17)
-                    * 1.05
+                ballistic_y = (
+                    math.sin(drift_angle)
+                    * (sub_height - 1)
+                    * coast_elapsed
+                    * coast_speed
+                    * drift_strength
+                )
+                turbulence_x = (
+                    math.sin(animation_time * 0.22 + particle_id * 0.13)
+                    * 2.1
+                    * drift_strength
+                )
+                turbulence_y = (
+                    math.cos(animation_time * 0.19 + particle_id * 0.17)
+                    * 1.7
                     * drift_strength
                 )
                 sub_x = round(
                     reflect_into_frame(
-                        source_x + travel_x * launch + curve_x + drift_x,
+                        source_x
+                        + travel_x * launch
+                        + curve_x
+                        + ballistic_x
+                        + turbulence_x,
                         sub_width - 1.0,
                     )
                 )
                 sub_y = round(
                     reflect_into_frame(
-                        source_y + travel_y * launch + curve_y + drift_y,
+                        source_y
+                        + travel_y * launch
+                        + curve_y
+                        + ballistic_y
+                        + turbulence_y,
                         sub_height - 1.0,
                     )
                 )
 
-                fade_start = 0.41 + 0.08 * _stable_hash(
+                fade_start = 0.34 + 0.06 * _stable_hash(
                     particle_id,
                     91.6,
                 )
-                fade_duration = 0.13 + 0.07 * speed_hash
+                fade_duration = 0.12 + 0.04 * speed_hash
                 fade_raw = max(
                     0.0,
                     min(1.0, (progress - fade_start) / fade_duration),
