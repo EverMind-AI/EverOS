@@ -10,23 +10,24 @@ configure their own API keys.
 everos demo
 ```
 
-This opens a full-screen terminal UI with an input box. You type a memory and a
-recall question directly in the UI, and each round runs the **real** memory
-pipeline through the public relay (`https://everosdemo.com`):
-`POST /api/v1/memories` -> `POST /api/v1/memories/flush` ->
-`POST /api/v1/memories/search`. The panels follow your own input: conversation
--> memory sphere -> recall -> source proof -> confetti.
+This opens a full-screen terminal UI with an input box. Type something EverOS
+should remember, then ask a question that recalls it. No API key or server setup
+is needed for the default demo.
 
-The relay stores the shared platform key as a server-side secret and injects it
-when forwarding whitelisted demo requests to EverOS Cloud. The client ships no
-key. Each run uses a fresh, isolated `(session_id, user_id)` pair, so demo
-visitors never see each other's memories.
+Each round runs the memory lifecycle and visualizes its four stages:
 
-If the relay is unavailable or its quota is exhausted, the UI says so and
-points the user at configuring their own key — it never fakes a result.
+1. **Ingest** receives what you want EverOS to remember.
+2. **Extract** identifies the useful memory inside the conversation.
+3. **Index** prepares that memory for retrieval.
+4. **Recall** finds it again when you ask a related question.
 
-The endpoint can be overridden with `EVEROS_CLOUD_DEMO_URL` (or `--server-url`).
-The relay deployment lives in [`deploy/netlify_relay`](../deploy/netlify_relay/README.md).
+The same particle sphere flows continuously across all four stages. At the end,
+the particles burst across the memory field, fade to an empty beat, and reform
+as the next ingest cycle begins.
+
+If the demo service is temporarily unavailable or the trial limit is reached,
+the UI explains what happened and points you toward running with your own key.
+It never fabricates a memory result.
 
 ## Run It With Your Own Cloud Key
 
@@ -62,7 +63,7 @@ because the public command is still `everos demo`.
 The TUI implementation lives under `src/everos/entrypoints/tui/demo/`:
 
 - `app.py` renders the Textual app and drives the interactive rounds.
-- `cloud.py` is the relay/platform HTTP client (`add -> flush -> search`).
+- `cloud.py` runs the demo memory requests (`add -> flush -> search`).
 - `data.py` holds the static showcase story for `--plain` / `--cinematic`.
 - `widgets/sphere.py` builds the memory sphere frames.
 - `readme_media.py` renders README media.

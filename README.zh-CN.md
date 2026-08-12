@@ -124,20 +124,17 @@ uv pip install everos
 everos demo
 ```
 
-全屏 terminal UI 里带有一个输入框：你直接在 UI 里输入一条记忆，再输入一个
-召回问题。每一轮都会通过托管的 Demo 中转服务跑真实的
-memory pipeline（共享 key 仅保存在服务端，本地无需 API key），各面板跟着
-你自己的输入更新：
-conversation -> memory sphere -> recall -> source proof -> confetti。Demo
-范围和 TUI 代码结构见 [docs/everos-demo.md](docs/everos-demo.md)。
+全屏 terminal UI 里带有一个输入框：先输入一件希望 EverOS 记住的事情，再提出
+一个能够召回它的问题。不需要 API key，也不需要提前启动 server。每一轮都能
+直观看到记忆经历完整流程：ingest -> extract -> index -> recall。
 
-Sphere 会经历 ingest、extraction、indexing、recall、source reveal，
-并在第一条记忆落地后进入 confetti successful moment。输入 `/` 可以查看可用命令
-（`/replay`、`/live`、`/quit`）；`ctrl+c` 随时退出。几轮之后，demo 会引导你去
-配置自己的 key（`everos init`，然后 `everos demo --live`）。
+粒子球会随四个阶段持续变化，随后散落到 memory field、完全淡出，再重新聚合，
+进入下一轮。完整体验见 [docs/everos-demo.md](docs/everos-demo.md)。输入 `/` 可以
+查看可用命令（`/replay`、`/live`、`/quit`）；`ctrl+c` 随时退出。几轮之后，demo
+会引导你配置自己的 key（`everos init`，然后 `everos demo --live`）。
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
 README 媒体使用的循环 showroom view 可以这样运行：

@@ -122,23 +122,20 @@ Run this before configuring API keys or starting the server:
 everos demo
 ```
 
-The full-screen terminal UI has an input box: type a memory, then a recall
-question, directly in the UI. Each round runs the real memory pipeline through
-the hosted demo relay (the shared key stays server-side, so you need no local
-keys), and the panels follow your own input:
-conversation -> memory sphere ->
-recall -> source proof -> confetti. See
-[docs/everos-demo.md](docs/everos-demo.md) for the demo scope and TUI source
-layout.
+The full-screen terminal UI has an input box: type something EverOS should
+remember, then ask a question that recalls it. No API key or server setup is
+needed. Each round lets you watch the memory move through the real lifecycle:
+ingest -> extract -> index -> recall.
 
-The sphere moves through ingest, extraction, indexing, recall, source reveal,
-and a confetti burst after the first memory lands. Type `/` to see the
-commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime. After a few
-rounds the demo points you at configuring your own keys (`everos init`, then
-`everos demo --live`).
+The particle sphere changes with each stage, then bursts across the memory
+field, fades to an empty beat, and reforms for the next round. See
+[docs/everos-demo.md](docs/everos-demo.md) for the complete experience. Type
+`/` to see the commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime.
+After a few rounds the demo points you at configuring your own keys (`everos
+init`, then `everos demo --live`).
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
+  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
 For the looping showroom view used in README media, run:
