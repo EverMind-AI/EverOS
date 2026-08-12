@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from everos.component.utils.datetime import get_utc_now
@@ -180,6 +180,7 @@ def search_recall(
     memory: str,
     query: str,
     *,
+    stored_memories: Sequence[str] | None = None,
     base_url: str,
     session_id: str,
     user_id: str,
@@ -244,7 +245,15 @@ def search_recall(
         # An older memory can already have a positive score while the memory
         # flushed in this round is still entering the index. Stop only once the
         # answer actually resembles the current memory; otherwise keep polling.
-        if best is not None and best.score > 0.0 and _is_current_recall(best, memory):
+        if (
+            best is not None
+            and best.score > 0.0
+            and _is_current_recall(best, memory)
+            and (
+                best.score >= min_relevance_score
+                or _is_direct_current_recall(best, memory, query)
+            )
+        ):
             break
         if attempt < search_attempts - 1:
             time.sleep(search_interval_seconds)
@@ -257,7 +266,14 @@ def search_recall(
     # index did not catch up within the polling window, the session-pinned
     # search response still exposes this round's raw message. Use it only as a
     # final fallback so a processed episode/profile always wins.
-    return buffered
+    if buffered is not None:
+        return buffered
+    return _stored_memory_recall_story(
+        memory,
+        query,
+        stored_memories=stored_memories,
+        user_id=user_id,
+    )
 
 
 def _request_json(
@@ -459,6 +475,47 @@ def _buffered_recall_story(
         fact_filename="",
         # In-flight messages are intentionally unranked in v2, so do not invent
         # a similarity score for the UI.
+        score=0.0,
+    )
+
+
+def _stored_memory_recall_story(
+    current_memory: str,
+    query: str,
+    *,
+    stored_memories: Sequence[str] | None,
+    user_id: str,
+) -> DemoStory | None:
+    """Use a successfully written demo memory when v2 indexing lags.
+
+    The demo has already completed add and flush before search starts. If the
+    user's question clearly overlaps one of the memories from this run,
+    returning the original text is safer than turning a translated, low-scored
+    v2 candidate into a false miss. Ties prefer the most recent memory and
+    off-topic questions still return ``None``.
+    """
+
+    memories = list(stored_memories or ())
+    if not memories or memories[-1] != current_memory:
+        memories.append(current_memory)
+    matches = [
+        (_memory_match_score(candidate, query), index, candidate)
+        for index, candidate in enumerate(memories)
+        if candidate
+    ]
+    if not matches:
+        return None
+    match_score, index, answer = max(matches)
+    if match_score < CURRENT_MEMORY_MATCH_THRESHOLD:
+        return None
+    is_current = index == len(memories) - 1 and answer == current_memory
+    return DemoStory(
+        owner=user_id,
+        memory=answer,
+        query=query,
+        answer=answer,
+        source_filename="buffer:current" if is_current else "buffer:history",
+        fact_filename="",
         score=0.0,
     )
 

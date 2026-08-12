@@ -375,6 +375,94 @@ def test_search_recall_accepts_low_score_when_it_is_clearly_this_round() -> None
     assert story.score == 0.49
 
 
+def test_search_recall_retries_translated_low_score_then_uses_current_memory() -> None:
+    """A translated v2 candidate must not stop polling and become a false miss."""
+
+    calls = 0
+
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "data": {
+                "episodes": [
+                    {
+                        "id": "current-strawberry",
+                        "score": 0.49,
+                        "atomic_facts": [
+                            {
+                                "id": "fact-strawberry",
+                                "content": "The user likes strawberries.",
+                                "score": 0.49,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+    story = cloud.search_recall(
+        "我喜欢吃草莓",
+        "我喜欢吃什么",
+        base_url="https://api.test",
+        session_id="s",
+        user_id="u",
+        api_key="k",
+        request_json=fake_request,
+        search_attempts=2,
+        settle_seconds=0.0,
+        search_interval_seconds=0.0,
+    )
+
+    assert calls == 2
+    assert story is not None
+    assert story.answer == "我喜欢吃草莓"
+    assert story.source_filename == "buffer:current"
+    assert story.score == 0.0
+
+
+def test_search_recall_can_fall_back_to_an_earlier_demo_round() -> None:
+    """A question may target any memory stored earlier in the same demo run."""
+
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        return {
+            "data": {
+                "episodes": [
+                    {
+                        "id": "strawberry",
+                        "score": 0.49,
+                        "atomic_facts": [
+                            {
+                                "id": "fact-strawberry",
+                                "content": "The user likes strawberries.",
+                                "score": 0.49,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+    story = cloud.search_recall(
+        "我不喜欢吃榴莲",
+        "我喜欢吃什么",
+        stored_memories=["我喜欢吃草莓", "我不喜欢吃榴莲"],
+        base_url="https://api.test",
+        session_id="s",
+        user_id="u",
+        api_key="k",
+        request_json=fake_request,
+        search_attempts=2,
+        settle_seconds=0.0,
+        search_interval_seconds=0.0,
+    )
+
+    assert story is not None
+    assert story.answer == "我喜欢吃草莓"
+    assert story.source_filename == "buffer:history"
+    assert story.score == 0.0
+
+
 def test_search_recall_uses_v2_unprocessed_message_after_polling() -> None:
     calls = 0
 

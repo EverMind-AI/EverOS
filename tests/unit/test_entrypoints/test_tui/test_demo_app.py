@@ -468,16 +468,22 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
 
     from everos.entrypoints.tui.demo import cloud
 
-    searched: list[tuple[str, str]] = []
+    searched: list[tuple[str, str, tuple[str, ...]]] = []
 
     monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: None)
     monkeypatch.setattr(cloud, "flush_memory", lambda *_, **__: None)
 
     def fake_search(
-        memory: str, query: str, *, base_url: str, user_id: str, **_: object
+        memory: str,
+        query: str,
+        *,
+        stored_memories: list[str],
+        base_url: str,
+        user_id: str,
+        **_: object,
     ) -> DemoStory:
         assert base_url == "http://server.test"
-        searched.append((memory, query))
+        searched.append((memory, query, tuple(stored_memories)))
         return _story(memory, query, f"recalled<{query}>")
 
     monkeypatch.setattr(cloud, "search_recall", fake_search)
@@ -507,7 +513,7 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert searched == [("我喜欢吃杨梅", "我喜欢吃什么")]
+        assert searched == [("我喜欢吃杨梅", "我喜欢吃什么", ("我喜欢吃杨梅",))]
         assert app._story.query == "我喜欢吃什么"
         assert app._story.answer == "recalled<我喜欢吃什么>"
         assert "Yosemite" not in app._story.answer  # BUG 305 stays fixed

@@ -483,6 +483,7 @@ class EverOSDemoApp(App[None]):
         # the "*ing" variants mean a cloud call is in flight; "done" -> cap hit.
         self._conversation_phase = "memory"
         self._current_memory = ""
+        self._stored_memories: list[str] = []
         self._round = 0
         self._lights = _initial_lights()
         self._log: list[tuple[str, str]] = []
@@ -691,6 +692,7 @@ class EverOSDemoApp(App[None]):
         # The sphere stays pinned at the last stored stage (indexing) until a
         # question actually recalls; it is not reset here on purpose.
         self._current_memory = memory
+        self._stored_memories.append(memory)
         self.action_replay()
         self._conversation_phase = "query"
         self.query_one("#console-prompt", Static).update(_prompt_query_text())
@@ -711,6 +713,7 @@ class EverOSDemoApp(App[None]):
                     cloud.search_recall,
                     self._current_memory,
                     query,
+                    stored_memories=self._stored_memories.copy(),
                     base_url=base_url,
                     session_id=session_id,
                     user_id=user_id,
