@@ -582,7 +582,7 @@ def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.72,
+        state_phase=0.42,
     )
 
     assert start.caption == "memory crystallized"
@@ -601,7 +601,12 @@ def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
             for cell in frame.cells
         ) / len(frame.cells)
 
-    assert mean_radius(expanded) > mean_radius(start) * 1.04
+    assert mean_radius(expanded) > mean_radius(start) * 1.14
+    start_dots = sum(_braille_subdot_count(cell.glyph) for cell in start.cells)
+    expanded_dots = sum(
+        _braille_subdot_count(cell.glyph) for cell in expanded.cells
+    )
+    assert expanded_dots > start_dots * 1.12
 
 
 def test_dot_sphere_front_light_uses_poster_gold_primary() -> None:

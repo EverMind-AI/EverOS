@@ -826,7 +826,7 @@ def _build_soft_supernova(
     state: SphereState,
     progress: float,
 ) -> DotSphereFrame:
-    """Let the recalled sphere become a restrained, continuous supernova."""
+    """Burst the recalled sphere into a bright Braille-particle supernova."""
 
     progress = max(0.0, min(1.0, progress))
     source = _build_working_cloud(
@@ -840,25 +840,56 @@ def _build_soft_supernova(
         height,
     )
 
-    if progress < 0.16:
-        contraction = _smoothstep(progress / 0.16)
-        scale_x = 1 - 0.045 * contraction
-        scale_y = 1 - 0.035 * contraction
+    if progress < 0.14:
+        contraction = _smoothstep(progress / 0.14)
+        scale_x = 1 - 0.1 * contraction
+        scale_y = 1 - 0.075 * contraction
+        burst = 0.0
     else:
-        expansion = _smoothstep((progress - 0.16) / 0.84)
-        scale_x = 0.955 + 0.19 * expansion
-        scale_y = 0.965 + 0.125 * expansion
+        burst_input = max(0.0, min(1.0, (progress - 0.14) / 0.38))
+        burst = 1 - (1 - burst_input) ** 3
+        scale_x = 0.9 + 0.34 * burst
+        scale_y = 0.925 + 0.215 * burst
 
-    flash = max(0.0, 1 - abs(progress - 0.16) / 0.14)
-    fade = 0.82 * _smoothstep(max(0.0, (progress - 0.52) / 0.48))
-    wave_progress = max(0.0, min(1.0, (progress - 0.12) / 0.62))
-    wave_radius = 0.12 + 0.92 * _smoothstep(wave_progress)
-    drift_strength = 0.9 * _smoothstep(max(0.0, (progress - 0.24) / 0.76))
+    flash = max(0.0, 1 - abs(progress - 0.15) / 0.075)
+    fade = 0.76 * _smoothstep(max(0.0, (progress - 0.68) / 0.32))
+    wave_progress = max(0.0, min(1.0, (progress - 0.14) / 0.44))
+    wave_radius = 0.08 + 1.02 * (1 - (1 - wave_progress) ** 2)
+    fragmentation = _smoothstep(max(0.0, (progress - 0.2) / 0.48))
+    trails_visible = _smoothstep(max(0.0, (progress - 0.18) / 0.18)) * (
+        1 - _smoothstep(max(0.0, (progress - 0.76) / 0.2))
+    )
 
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
     source_styles: dict[tuple[int, int], str] = {}
     highlighted_positions: set[tuple[int, int]] = set()
+
+    def add_particle(
+        *,
+        sub_x: int,
+        sub_y: int,
+        depth: float,
+        style: str,
+        highlighted: bool,
+    ) -> None:
+        if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
+            return
+        position = (sub_x // 2, sub_y // 4)
+        if position not in depths or depth >= depths[position]:
+            source_styles[position] = style
+            if highlighted:
+                highlighted_positions.add(position)
+            else:
+                highlighted_positions.discard(position)
+        _add_braille_dot(
+            masks=masks,
+            depths=depths,
+            sub_x=sub_x,
+            sub_y=sub_y,
+            z=depth,
+        )
+
     for cell in source.cells:
         mask = ord(cell.glyph) - BRAILLE_BASE
         for local_x in range(2):
@@ -874,45 +905,66 @@ def _build_soft_supernova(
                 )
                 angle = math.atan2(delta_y / radius_y, delta_x / radius_x)
                 particle_id = original_y * sub_width + original_x
+                speed_hash = _stable_hash(particle_id, 44.1)
+                spark_hash = _stable_hash(particle_id, 19.7)
+                particle_boost = burst * 0.08 * (speed_hash - 0.35)
+                if spark_hash > 0.86:
+                    particle_boost += (
+                        burst * 0.12 * ((spark_hash - 0.86) / 0.14)
+                    )
                 tangent = (
                     _stable_hash(particle_id, 83.7) - 0.5
-                ) * drift_strength
+                ) * 2.4 * fragmentation
                 sub_x = round(
                     center_x
-                    + delta_x * scale_x
+                    + delta_x * (scale_x + particle_boost)
                     - math.sin(angle) * tangent
                 )
                 sub_y = round(
                     center_y
-                    + delta_y * scale_y
+                    + delta_y * (scale_y + particle_boost * 0.65)
                     + math.cos(angle) * tangent
                 )
-                if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
-                    continue
-
-                position = (sub_x // 2, sub_y // 4)
                 wave = (
-                    max(0.0, 1 - abs(radial - wave_radius) / 0.13)
-                    if progress > 0.12
+                    max(0.0, 1 - abs(radial - wave_radius) / 0.09)
+                    if progress > 0.14
                     else 0.0
                 )
-                glow = min(0.72, flash * 0.52 + wave * 0.42)
-                glow_target = EVEROS_CYAN if cell.highlighted else EVEROS_YELLOW_PALE
+                glow = min(0.92, flash * 0.82 + wave * 0.58)
+                glow_target = (
+                    EVEROS_CYAN
+                    if cell.highlighted or (flash > 0 and radial < 0.32)
+                    else EVEROS_YELLOW_PALE
+                )
                 style = _blend_hex_color(cell.style, glow_target, glow)
                 style = _blend_hex_color(style, "#1D1C18", fade)
-                if cell.z >= depths.get(position, -1.0):
-                    source_styles[position] = style
-                    if cell.highlighted and progress < 0.68:
-                        highlighted_positions.add(position)
-                    else:
-                        highlighted_positions.discard(position)
-                _add_braille_dot(
-                    masks=masks,
-                    depths=depths,
+                add_particle(
                     sub_x=sub_x,
                     sub_y=sub_y,
-                    z=cell.z,
+                    depth=cell.z,
+                    style=style,
+                    highlighted=cell.highlighted and progress < 0.72,
                 )
+
+                if spark_hash <= 0.82 or trails_visible <= 0:
+                    continue
+                trail_count = 2 if spark_hash > 0.92 else 1
+                for trail_step in range(1, trail_count + 1):
+                    distance = trail_step * (1.0 + trails_visible * 1.7)
+                    trail_x = round(sub_x - math.cos(angle) * distance)
+                    trail_y = round(sub_y - math.sin(angle) * distance)
+                    trail_style = _blend_hex_color(
+                        style,
+                        "#1D1C18",
+                        0.22 + trail_step * 0.18,
+                    )
+                    add_particle(
+                        sub_x=trail_x,
+                        sub_y=trail_y,
+                        depth=cell.z - trail_step * 0.02,
+                        style=trail_style,
+                        highlighted=False,
+                    )
 
     cells = tuple(
         DotCell(
