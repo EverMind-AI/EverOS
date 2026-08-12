@@ -22,8 +22,8 @@ put their values in this repository.
 | `RELAY_MAX_BODY_BYTES` | no | `1000000` |
 
 The per-minute limit counts every relay request. The daily limit counts only
-`POST /api/v1/memories`, which starts a demo round; task polling, flush, and
-search requests do not spend additional rounds. The quota service fails closed:
+`POST /api/v2/memory/add`, which starts a demo round; flush and search requests
+do not spend additional rounds. The quota service fails closed:
 demo API requests return `503` when Redis is not configured or unavailable.
 `/healthz` remains available for diagnostics and reports only whether secrets
 are configured, never their values.

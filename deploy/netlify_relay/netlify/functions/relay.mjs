@@ -5,11 +5,10 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 
 const ALLOWED_EXACT = new Set([
-  "POST /api/v1/memories",
-  "POST /api/v1/memories/flush",
-  "POST /api/v1/memories/search",
+  "POST /api/v2/memory/add",
+  "POST /api/v2/memory/flush",
+  "POST /api/v2/memory/search",
 ]);
-const TASK_PATH = /^\/api\/v1\/tasks\/[^/]+$/;
 
 function readPositiveInteger(name, fallback) {
   const value = Number.parseInt(process.env[name] ?? "", 10);
@@ -24,10 +23,7 @@ function jsonResponse(body, status = 200) {
 }
 
 export function isAllowed(method, path) {
-  if (ALLOWED_EXACT.has(`${method} ${path}`)) {
-    return true;
-  }
-  return method === "GET" && TASK_PATH.test(path);
+  return ALLOWED_EXACT.has(`${method} ${path}`);
 }
 
 function clientIp(request, context) {
@@ -112,7 +108,8 @@ async function forwardRequest(request, path, context) {
 
   let quota;
   try {
-    const countRound = request.method === "POST" && path === "/api/v1/memories";
+    const countRound =
+      request.method === "POST" && path === "/api/v2/memory/add";
     quota = await checkQuota(clientIp(request, context), countRound);
   } catch {
     return jsonResponse({ error: "relay quota service is unavailable" }, 503);
@@ -198,5 +195,5 @@ export default async function relay(request, context) {
 }
 
 export const config = {
-  path: ["/healthz", "/api/v1/*"],
+  path: ["/healthz", "/api/v2/*"],
 };

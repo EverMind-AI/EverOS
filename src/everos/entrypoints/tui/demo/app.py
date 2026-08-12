@@ -650,7 +650,7 @@ class EverOSDemoApp(App[None]):
             self._api_key,
         )
         try:
-            task_id = await anyio.to_thread.run_sync(
+            await anyio.to_thread.run_sync(
                 partial(
                     cloud.add_memory,
                     memory,
@@ -664,14 +664,10 @@ class EverOSDemoApp(App[None]):
             self._set_light("core", "ready")
             self._set_light("conversation", "captured")
             await anyio.to_thread.run_sync(
-                partial(cloud.wait_task, task_id, base_url=base_url, api_key=api_key)
-            )
-            await anyio.to_thread.run_sync(
                 partial(
                     cloud.flush_memory,
                     base_url=base_url,
                     session_id=session_id,
-                    user_id=user_id,
                     api_key=api_key,
                 )
             )
@@ -703,7 +699,12 @@ class EverOSDemoApp(App[None]):
     async def _ask(self, query: str) -> None:
         # Step 2 of a round: recall against everything stored so far.
         self._reset_recall_light()
-        base_url, user_id, api_key = self._base_url, self._user_id, self._api_key
+        base_url, session_id, user_id, api_key = (
+            self._base_url,
+            self._session_id,
+            self._user_id,
+            self._api_key,
+        )
         try:
             story = await anyio.to_thread.run_sync(
                 partial(
@@ -711,6 +712,7 @@ class EverOSDemoApp(App[None]):
                     self._current_memory,
                     query,
                     base_url=base_url,
+                    session_id=session_id,
                     user_id=user_id,
                     api_key=api_key,
                 )

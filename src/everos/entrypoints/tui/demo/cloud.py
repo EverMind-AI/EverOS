@@ -5,8 +5,8 @@ demo relay. The relay holds the shared platform key server-side, so the default
 demo sends no credentials. ``--live`` bypasses the relay and talks directly to
 EverOS Cloud with the user's own key (env ``EVEROS_CLOUD_API_KEY``).
 
-One round is: ``add`` (async, returns a task) -> wait for the task -> ``flush``
-(force extraction) -> poll ``search``. Each run uses a fresh
+One round is: synchronously ``add`` the message -> ``flush`` (force extraction)
+-> poll ``search``. Each run uses a fresh
 ``(session_id, user_id)`` pair so demo visitors never read each other's memory.
 
 The functions here are typer-free on purpose: they are called from the Textual
@@ -46,8 +46,6 @@ CLOUD_USER_KEY_ENV = "EVEROS_CLOUD_API_KEY"
 DEFAULT_CLOUD_DEMO_KEY = ""
 
 TIMEOUT_SECONDS = 15.0
-TASK_ATTEMPTS = 12
-TASK_INTERVAL_SECONDS = 1.0
 SEARCH_ATTEMPTS = 8
 SEARCH_INTERVAL_SECONDS = 1.5
 # How far ahead an episode must score to beat a concise profile answer. Profiles
@@ -125,79 +123,40 @@ def add_memory(
     api_key: str,
     request_json: Callable[..., dict[str, Any]] | None = None,
     timeout_seconds: float = TIMEOUT_SECONDS,
-) -> str:
-    """Queue one user memory; returns the async task id. Blocking."""
+) -> None:
+    """Write one user message to the v2 session buffer. Blocking."""
 
     request = request_json or _request_json
     timestamp_ms = int(get_utc_now().timestamp() * 1000)
-    resp = request(
+    response = request(
         "POST",
-        "/api/v1/memories",
+        "/api/v2/memory/add",
         base_url=base_url,
         api_key=api_key,
         json_body={
-            "user_id": user_id,
             "session_id": session_id,
+            # Complete the write before forcing extraction. v2 extraction itself
+            # is flush-triggered and remains asynchronous internally.
+            "async_mode": False,
             "messages": [
-                {"role": "user", "timestamp": timestamp_ms, "content": memory}
+                {
+                    "sender_id": user_id,
+                    "role": "user",
+                    "timestamp": timestamp_ms,
+                    "content": memory,
+                }
             ],
         },
         timeout_seconds=timeout_seconds,
     )
-    data = resp.get("data")
-    return _string_field(data if isinstance(data, dict) else None, "task_id")
-
-
-def wait_task(
-    task_id: str,
-    *,
-    base_url: str,
-    api_key: str,
-    request_json: Callable[..., dict[str, Any]] | None = None,
-    attempts: int = TASK_ATTEMPTS,
-    interval_seconds: float = TASK_INTERVAL_SECONDS,
-    timeout_seconds: float = TIMEOUT_SECONDS,
-) -> None:
-    """Best-effort poll of the async add task until it finishes. Blocking.
-
-    Transient errors (e.g. a 404 before the task registers) are tolerated; if
-    the task never reports success we return anyway and let flush/search drive
-    eventual consistency. A reported failure raises.
-    """
-
-    if not task_id:
-        return
-    request = request_json or _request_json
-    for _ in range(attempts):
-        # Wait before each poll: the async task takes ~1-2s to register, so
-        # polling immediately would just log a benign 404 on the platform side.
-        time.sleep(interval_seconds)
-        status = ""
-        try:
-            resp = request(
-                "GET",
-                f"/api/v1/tasks/{task_id}",
-                base_url=base_url,
-                api_key=api_key,
-                timeout_seconds=timeout_seconds,
-            )
-            data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
-            status = _string_field(data, "status")
-        except CloudQuotaError:
-            raise
-        except CloudDemoError:
-            status = ""  # task not registered yet / transient
-        if status in {"success", "completed", "done"}:
-            return
-        if status in {"failed", "error"}:
-            raise CloudDemoError("memory processing failed")
+    if not isinstance(response.get("data"), dict):
+        raise CloudDemoError("EverOS Cloud returned an invalid add response")
 
 
 def flush_memory(
     *,
     base_url: str,
     session_id: str,
-    user_id: str,
     api_key: str,
     request_json: Callable[..., dict[str, Any]] | None = None,
     timeout_seconds: float = TIMEOUT_SECONDS,
@@ -205,14 +164,16 @@ def flush_memory(
     """Force extraction of the session into episodes/facts. Blocking."""
 
     request = request_json or _request_json
-    request(
+    response = request(
         "POST",
-        "/api/v1/memories/flush",
+        "/api/v2/memory/flush",
         base_url=base_url,
         api_key=api_key,
-        json_body={"user_id": user_id, "session_id": session_id, "force": True},
+        json_body={"session_id": session_id},
         timeout_seconds=timeout_seconds,
     )
+    if not isinstance(response.get("data"), dict):
+        raise CloudDemoError("EverOS Cloud returned an invalid flush response")
 
 
 def search_recall(
@@ -220,6 +181,7 @@ def search_recall(
     query: str,
     *,
     base_url: str,
+    session_id: str,
     user_id: str,
     api_key: str,
     request_json: Callable[..., dict[str, Any]] | None = None,
@@ -249,9 +211,13 @@ def search_recall(
     request = request_json or _request_json
     payload = {
         "query": query,
-        "filters": {"user_id": user_id},
+        "user_id": user_id,
+        # Pin this demo session so v2 can also expose its in-flight tail while
+        # the newly extracted episode is settling into the search index.
+        "filters": {"session_id": session_id},
         "method": "hybrid",
         "top_k": 5,
+        "include_profile": True,
     }
     best: DemoStory | None = None
     for attempt in range(search_attempts):
@@ -259,7 +225,7 @@ def search_recall(
             time.sleep(settle_seconds)
         search = request(
             "POST",
-            "/api/v1/memories/search",
+            "/api/v2/memory/search",
             base_url=base_url,
             api_key=api_key,
             json_body=payload,
@@ -508,8 +474,14 @@ def _episode_answer(episode: dict[str, Any], memory: str) -> tuple[str, str, str
     facts = episode.get("atomic_facts")
     first_fact = facts[0] if isinstance(facts, list) and facts else None
     fact = first_fact if isinstance(first_fact, dict) else None
-    answer = _string_field(fact, "atomic_fact") or (
-        _string_field(episode, "summary") or _string_field(episode, "episode") or memory
+    answer = (
+        _string_field(fact, "content")
+        or _string_field(fact, "atomic_fact")
+        or (
+            _string_field(episode, "summary")
+            or _string_field(episode, "episode")
+            or memory
+        )
     )
     episode_id = _string_field(episode, "id") or "live"
     return answer, episode_id, _string_field(fact, "id") or "live"

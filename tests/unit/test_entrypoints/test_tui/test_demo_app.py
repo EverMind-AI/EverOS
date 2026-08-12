@@ -470,8 +470,7 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
 
     searched: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: "task-1")
-    monkeypatch.setattr(cloud, "wait_task", lambda *_, **__: None)
+    monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: None)
     monkeypatch.setattr(cloud, "flush_memory", lambda *_, **__: None)
 
     def fake_search(

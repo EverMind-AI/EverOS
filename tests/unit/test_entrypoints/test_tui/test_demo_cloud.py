@@ -54,7 +54,7 @@ def test_new_demo_identity_is_unique_and_paired() -> None:
     assert user_a.startswith("everos_demo_")
 
 
-def test_add_memory_posts_messages_and_returns_task_id() -> None:
+def test_add_memory_posts_v2_message_synchronously() -> None:
     calls: list[tuple[str, str, dict[str, object] | None, str | None]] = []
 
     def fake_request(
@@ -67,9 +67,9 @@ def test_add_memory_posts_messages_and_returns_task_id() -> None:
         timeout_seconds: float,
     ) -> dict[str, object]:
         calls.append((method, path, json_body, api_key))
-        return {"data": {"task_id": "task-123", "status": "queued"}}
+        return {"request_id": "req-123", "data": {"message_count": 1}}
 
-    task_id = cloud.add_memory(
+    result = cloud.add_memory(
         "我喜欢吃杨梅",
         base_url="https://api.test",
         session_id="everos-demo-abc",
@@ -78,12 +78,13 @@ def test_add_memory_posts_messages_and_returns_task_id() -> None:
         request_json=fake_request,
     )
 
-    assert task_id == "task-123"
+    assert result is None
     method, path, body, api_key = calls[0]
-    assert (method, path) == ("POST", "/api/v1/memories")
+    assert (method, path) == ("POST", "/api/v2/memory/add")
     assert api_key == "k-1"
-    assert body["user_id"] == "everos_demo_abc"
+    assert body["async_mode"] is False
     assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["sender_id"] == "everos_demo_abc"
     assert body["messages"][0]["content"] == "我喜欢吃杨梅"
 
 
@@ -100,45 +101,17 @@ def test_flush_memory_forces_extraction() -> None:
         timeout_seconds: float,
     ) -> dict[str, object]:
         bodies.append(json_body)
-        assert path == "/api/v1/memories/flush"
-        return {"data": {"status": "extracted"}}
+        assert path == "/api/v2/memory/flush"
+        return {"request_id": "req-456", "data": {}}
 
     cloud.flush_memory(
         base_url="https://api.test",
         session_id="s",
-        user_id="u",
         api_key="k",
         request_json=fake_request,
     )
 
-    assert bodies[0]["force"] is True
-    assert bodies[0]["user_id"] == "u"
-
-
-def test_wait_task_succeeds_and_fails() -> None:
-    def ok(*_: object, **__: object) -> dict[str, object]:
-        return {"task_id": "t", "status": "success"}
-
-    cloud.wait_task(
-        "t",
-        base_url="https://api.test",
-        api_key="k",
-        request_json=ok,
-        interval_seconds=0,
-    )
-
-    def failed(*_: object, **__: object) -> dict[str, object]:
-        return {"task_id": "t", "status": "failed"}
-
-    with pytest.raises(cloud.CloudDemoError):
-        cloud.wait_task(
-            "t",
-            base_url="https://api.test",
-            api_key="k",
-            request_json=failed,
-            attempts=1,
-            interval_seconds=0,
-        )
+    assert bodies[0] == {"session_id": "s"}
 
 
 def test_search_recall_parses_atomic_fact_and_score() -> None:
@@ -151,8 +124,10 @@ def test_search_recall_parses_atomic_fact_and_score() -> None:
         json_body: dict[str, object] | None = None,
         timeout_seconds: float,
     ) -> dict[str, object]:
-        assert path == "/api/v1/memories/search"
-        assert json_body["filters"] == {"user_id": "everos_demo_abc"}
+        assert path == "/api/v2/memory/search"
+        assert json_body["user_id"] == "everos_demo_abc"
+        assert json_body["filters"] == {"session_id": "everos-demo-abc"}
+        assert json_body["include_profile"] is True
         return {
             "data": {
                 "episodes": [
@@ -164,7 +139,7 @@ def test_search_recall_parses_atomic_fact_and_score() -> None:
                         "atomic_facts": [
                             {
                                 "id": "af1",
-                                "atomic_fact": "You like Yangmei.",
+                                "content": "You like Yangmei.",
                                 "score": 0.57,
                             }
                         ],
@@ -177,6 +152,7 @@ def test_search_recall_parses_atomic_fact_and_score() -> None:
         "我喜欢吃杨梅",
         "我喜欢吃什么",
         base_url="https://api.test",
+        session_id="everos-demo-abc",
         user_id="everos_demo_abc",
         api_key="k",
         request_json=fake_request,
@@ -211,6 +187,7 @@ def test_search_recall_picks_highest_scored_episode_not_first() -> None:
         "I climb in Yosemite",
         "Where do I climb?",
         base_url="https://api.test",
+        session_id="s",
         user_id="u",
         api_key="k",
         request_json=fake_request,
@@ -247,6 +224,7 @@ def test_search_recall_prefers_higher_scored_profile_over_episode() -> None:
         "I climb in Yosemite",
         "Where do I climb?",
         base_url="https://api.test",
+        session_id="s",
         user_id="u",
         api_key="k",
         request_json=fake_request,
@@ -294,6 +272,7 @@ def test_search_recall_waits_for_current_memory_instead_of_stale_profile() -> No
         "我不爱吃榴莲",
         "我不爱吃什么",
         base_url="https://api.test",
+        session_id="s",
         user_id="u",
         api_key="k",
         request_json=fake_request,
@@ -340,6 +319,7 @@ def test_search_recall_below_relevance_floor_is_a_miss() -> None:
         "我喜欢吃杨梅",
         "我是程序员吗",
         base_url="https://api.test",
+        session_id="s",
         user_id="u",
         api_key="k",
         request_json=fake_request,
@@ -367,6 +347,7 @@ def test_search_recall_returns_none_on_miss() -> None:
         "m",
         "q",
         base_url="https://api.test",
+        session_id="s",
         user_id="u",
         api_key="k",
         request_json=fake_request,

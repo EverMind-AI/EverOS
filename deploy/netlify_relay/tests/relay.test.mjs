@@ -53,13 +53,12 @@ function quotaResponse(minuteCount = 1, dailyCount = 1) {
 test.afterEach(restoreEnvironment);
 
 test("allows only the demo API surface", () => {
-  assert.equal(isAllowed("POST", "/api/v1/memories"), true);
-  assert.equal(isAllowed("POST", "/api/v1/memories/flush"), true);
-  assert.equal(isAllowed("POST", "/api/v1/memories/search"), true);
-  assert.equal(isAllowed("GET", "/api/v1/tasks/task-123"), true);
-  assert.equal(isAllowed("GET", "/api/v1/tasks/"), false);
-  assert.equal(isAllowed("DELETE", "/api/v1/memories"), false);
-  assert.equal(isAllowed("GET", "/api/v1/users"), false);
+  assert.equal(isAllowed("POST", "/api/v2/memory/add"), true);
+  assert.equal(isAllowed("POST", "/api/v2/memory/flush"), true);
+  assert.equal(isAllowed("POST", "/api/v2/memory/search"), true);
+  assert.equal(isAllowed("GET", "/api/v1/tasks/task-123"), false);
+  assert.equal(isAllowed("DELETE", "/api/v2/memory/add"), false);
+  assert.equal(isAllowed("GET", "/api/v2/memory/get"), false);
 });
 
 test("reports deployment readiness without exposing secrets", async () => {
@@ -79,7 +78,7 @@ test("reports deployment readiness without exposing secrets", async () => {
 
 test("rejects non-demo endpoints", async () => {
   const response = await relay(
-    new Request("https://demo.test/api/v1/users"),
+    new Request("https://demo.test/api/v2/memory/get"),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 403);
@@ -100,7 +99,7 @@ test("injects the server key and never forwards client authorization", async () 
   };
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/memories", {
+    new Request("https://demo.test/api/v2/memory/add", {
       method: "POST",
       headers: {
         authorization: "Bearer client-secret",
@@ -113,7 +112,7 @@ test("injects the server key and never forwards client authorization", async () 
 
   assert.equal(response.status, 202);
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].url, "https://api.test/api/v1/memories");
+  assert.equal(calls[1].url, "https://api.test/api/v2/memory/add");
   assert.equal(calls[1].options.headers.authorization, "Bearer server-secret");
   assert.notEqual(
     calls[1].options.headers.authorization,
@@ -126,7 +125,7 @@ test("enforces the distributed per-minute quota", async () => {
   globalThis.fetch = async () => quotaResponse(31, 31);
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/memories", { method: "POST" }),
+    new Request("https://demo.test/api/v2/memory/add", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 429);
@@ -138,14 +137,14 @@ test("enforces three demo rounds per day", async () => {
   globalThis.fetch = async () => quotaResponse(1, 4);
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/memories", { method: "POST" }),
+    new Request("https://demo.test/api/v2/memory/add", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 429);
   assert.match((await response.json()).error, /daily demo round limit/);
 });
 
-test("task polling does not spend another demo round", async () => {
+test("flush does not spend another demo round", async () => {
   configureEnvironment();
   const calls = [];
   globalThis.fetch = async (url, options) => {
@@ -162,7 +161,7 @@ test("task polling does not spend another demo round", async () => {
   };
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/tasks/task-123"),
+    new Request("https://demo.test/api/v2/memory/flush", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 200);
@@ -177,7 +176,7 @@ test("fails closed when the server API key is missing", async () => {
   };
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/tasks/task-123"),
+    new Request("https://demo.test/api/v2/memory/flush", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 500);
@@ -191,7 +190,7 @@ test("fails closed when the quota store is unavailable", async () => {
   };
 
   const response = await relay(
-    new Request("https://demo.test/api/v1/tasks/task-123"),
+    new Request("https://demo.test/api/v2/memory/flush", { method: "POST" }),
     { ip: "192.0.2.1" },
   );
   assert.equal(response.status, 503);
