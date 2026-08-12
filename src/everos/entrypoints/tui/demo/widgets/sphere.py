@@ -873,6 +873,23 @@ def _build_soft_supernova(
     source_styles: dict[tuple[int, int], str] = {}
     highlighted_positions: set[tuple[int, int]] = set()
 
+    def edge_visibility(sub_x: int, sub_y: int, particle_id: int) -> float:
+        """Feather particles before the rectangular terminal crop is visible."""
+
+        if (
+            sub_x // 2 in {0, width - 1}
+            or sub_y // 4 in {0, height - 1}
+        ):
+            return 0.0
+        distance = min(
+            sub_x + 0.5,
+            sub_width - 0.5 - sub_x,
+            sub_y + 0.5,
+            sub_height - 0.5 - sub_y,
+        )
+        feather_width = 2.5 + 5.5 * _stable_hash(particle_id, 17.3)
+        return _smoothstep(max(0.0, min(1.0, distance / feather_width)))
+
     def add_particle(
         *,
         sub_x: int,
@@ -1037,9 +1054,10 @@ def _build_soft_supernova(
                     min(1.0, (progress - fade_start) / fade_duration),
                 )
                 visibility = 1 - _smoothstep(fade_raw)
-                if visibility <= 0.12:
-                    continue
                 if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
+                    continue
+                visibility *= edge_visibility(sub_x, sub_y, particle_id)
+                if visibility <= 0.12:
                     continue
                 wave = (
                     max(0.0, 1 - abs(radial - wave_radius) / 0.09)
@@ -1103,6 +1121,17 @@ def _build_soft_supernova(
                     distance = trail_step * (1.0 + trails_visible * 2.35)
                     trail_x = round(sub_x - math.cos(travel_angle) * distance)
                     trail_y = round(sub_y - math.sin(travel_angle) * distance)
+                    if not (
+                        0 <= trail_x < sub_width and 0 <= trail_y < sub_height
+                    ):
+                        continue
+                    trail_edge_visibility = edge_visibility(
+                        trail_x,
+                        trail_y,
+                        particle_id,
+                    )
+                    if trail_edge_visibility <= 0.12:
+                        continue
                     trail_style = _blend_hex_color(
                         style,
                         EVEROS_FIELD_BACKGROUND,
@@ -1112,6 +1141,11 @@ def _build_soft_supernova(
                             + trail_step * 0.18
                             + (1 - trails_visible) * 0.46,
                         ),
+                    )
+                    trail_style = _blend_hex_color(
+                        trail_style,
+                        EVEROS_FIELD_BACKGROUND,
+                        1 - trail_edge_visibility,
                     )
                     add_particle(
                         sub_x=trail_x,

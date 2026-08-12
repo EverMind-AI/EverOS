@@ -649,10 +649,12 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
     start_dots = sum(_braille_subdot_count(cell.glyph) for cell in start.cells)
     burst_dots = sum(_braille_subdot_count(cell.glyph) for cell in burst.cells)
     assert burst_dots > start_dots * 1.12
-    border_cells = sum(
-        cell.x in {0, 40} or cell.y in {0, 18} for cell in scattered.cells
-    )
-    assert border_cells < len(scattered.cells) * 0.15
+    for exploding_frame in (burst, scattered, drifted):
+        border_cells = sum(
+            cell.x in {0, 40} or cell.y in {0, 18}
+            for cell in exploding_frame.cells
+        )
+        assert border_cells == 0
     assert [(cell.x, cell.y, cell.glyph) for cell in drifted.cells] != [
         (cell.x, cell.y, cell.glyph) for cell in scattered.cells
     ]
