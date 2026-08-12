@@ -54,7 +54,7 @@ SPHERE_STAGE_SECONDS = 3.0
 SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
 SPHERE_TRANSITION_SECONDS = 0.35
 SPHERE_TRANSITION_TICKS = round(SPHERE_FPS * SPHERE_TRANSITION_SECONDS)
-SPHERE_SUPERNOVA_CYCLE_SECONDS = 7.0
+SPHERE_SUPERNOVA_CYCLE_SECONDS = 9.0
 SPHERE_SUPERNOVA_CYCLE_TICKS = round(
     SPHERE_FPS * SPHERE_SUPERNOVA_CYCLE_SECONDS
 )
@@ -126,6 +126,7 @@ class DotSphereWidget(Static):
         self._transition_from_state: str | None = None
         self._transition_tick = 0
         self._state_tick = 0
+        self._celebration_source_phase = 0.0
         self._animation_timer: Timer | None = None
         # When set, the sphere is pinned to a pipeline state (synced to the
         # signal rail during a round). When None it free-runs the idle loop.
@@ -182,20 +183,30 @@ class DotSphereWidget(Static):
             self._rendered_state = state
             self._transition_tick = 0
             self._state_tick = 0
+            if state == "celebrating":
+                self._celebration_source_phase = self._phase
         frame_width, frame_height = self._frame_size()
         state_phase = _sphere_state_phase(state, self._state_tick)
+        render_phase = (
+            self._celebration_source_phase if state == "celebrating" else self._phase
+        )
         frame = build_dot_sphere(
             width=frame_width,
             height=frame_height,
-            phase=self._phase,
+            phase=render_phase,
             state_key=state,
             state_phase=state_phase,
         )
         if self._transition_from_state is not None:
+            previous_phase = (
+                self._celebration_source_phase
+                if self._transition_from_state == "celebrating"
+                else self._phase
+            )
             previous_frame = build_dot_sphere(
                 width=frame_width,
                 height=frame_height,
-                phase=self._phase,
+                phase=previous_phase,
                 state_key=self._transition_from_state,
                 state_phase=(
                     1.0 if self._transition_from_state == "celebrating" else None

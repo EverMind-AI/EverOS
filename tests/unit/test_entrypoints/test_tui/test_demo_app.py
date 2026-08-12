@@ -288,6 +288,9 @@ async def test_successful_recall_goes_directly_to_celebration() -> None:
 
         app._celebrate_recall()
         assert sphere._driven_state == "celebrating"
+        source_phase = sphere._celebration_source_phase
+        sphere._advance()
+        assert sphere._celebration_source_phase == source_phase
 
 
 def test_ctrl_c_is_a_priority_quit_binding() -> None:
