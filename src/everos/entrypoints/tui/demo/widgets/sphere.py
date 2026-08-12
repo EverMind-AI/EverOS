@@ -293,6 +293,7 @@ def _build_working_cloud(
         masks=masks,
         depths=depths,
         layer_maps=(active_depths,),
+        animation_time=animation_time,
         center_x=center_x,
         center_y=center_y,
         radius_x=radius_x,
@@ -600,6 +601,7 @@ def _build_solving_network(
             edge_depths,
             edge_visibilities,
         ),
+        animation_time=animation_time,
         center_x=center_x,
         center_y=center_y,
         radius_x=radius_x,
@@ -774,6 +776,7 @@ def _replace_with_shared_outer_shell(
     masks: dict[tuple[int, int], int],
     depths: dict[tuple[int, int], float],
     layer_maps: tuple[dict[tuple[int, int], float], ...],
+    animation_time: float,
     center_x: float,
     center_y: float,
     radius_x: float,
@@ -796,10 +799,26 @@ def _replace_with_shared_outer_shell(
     )
 
     for index in range(particle_count):
-        angle = index * GOLDEN_ANGLE
+        angle = (
+            index * GOLDEN_ANGLE
+            + animation_time * 0.055
+            + 0.028
+            * math.sin(
+                animation_time * (0.16 + 0.05 * _stable_hash(index, 29.4))
+                + index * 0.43
+            )
+        )
         radial_hash = _stable_hash(index, 41.7)
-        radius = math.sqrt(
+        base_radius = math.sqrt(
             SHARED_EDGE_INNER_RADIUS**2 + band_ratio * radial_hash
+        )
+        radius = base_radius + 0.014 * math.sin(
+            animation_time * (0.22 + 0.08 * _stable_hash(index, 63.1))
+            + index * 0.37
+        )
+        radius = max(
+            SHARED_EDGE_INNER_RADIUS + 0.01,
+            min(0.985, radius),
         )
         sub_x = round(center_x + math.cos(angle) * radius_x * radius)
         sub_y = round(center_y - math.sin(angle) * radius_y * radius)
@@ -813,20 +832,39 @@ def _replace_with_shared_outer_shell(
             z=depth,
         )
 
-    # These anchors guarantee the same physical extent at every adaptive size.
-    for sub_x, sub_y in (
-        (round(center_x - radius_x), round(center_y)),
-        (round(center_x + radius_x), round(center_y)),
-        (round(center_x), round(center_y - radius_y)),
-        (round(center_x), round(center_y + radius_y)),
-    ):
-        _add_braille_dot(
-            masks=shared_masks,
-            depths=shared_depths,
-            sub_x=sub_x,
-            sub_y=sub_y,
-            z=0.0,
-        )
+    # Symmetric pairs drift around each cardinal direction. Their small
+    # tangential motion keeps the silhouette alive while preserving its exact
+    # adaptive width and height through the whole animation cycle.
+    boundary_wobble = 0.018 + 0.012 * (
+        0.5 + 0.5 * math.sin(animation_time * 0.34)
+    )
+    for cardinal in range(4):
+        cardinal_angle = cardinal * math.pi / 2
+        for direction in (-1, 1):
+            angle = cardinal_angle + direction * boundary_wobble
+            sub_x = round(center_x + math.cos(angle) * radius_x * 0.998)
+            sub_y = round(center_y - math.sin(angle) * radius_y * 0.998)
+            _add_braille_dot(
+                masks=shared_masks,
+                depths=shared_depths,
+                sub_x=sub_x,
+                sub_y=sub_y,
+                z=0.0,
+            )
+
+    # Braille cells are larger than their sub-dots. Keep only cells whose
+    # visual center belongs to the outer band so the moving shell never masks
+    # a stage-specific packet travelling through the middle.
+    for position in tuple(shared_masks):
+        if _cell_projection_radius(
+            position,
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        ) < SHARED_EDGE_INNER_RADIUS:
+            shared_masks.pop(position)
+            shared_depths.pop(position)
 
     replace_positions = set(shared_masks)
     replace_positions.update(

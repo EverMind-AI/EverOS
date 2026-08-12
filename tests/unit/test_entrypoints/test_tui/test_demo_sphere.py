@@ -189,6 +189,44 @@ def test_pipeline_states_share_the_exact_same_particle_edge() -> None:
         assert all(edge == edges[0] for edge in edges[1:])
 
 
+def test_shared_particle_edge_moves_without_density_or_position_jumps() -> None:
+    _, _, center_x, center_y, radius_x, radius_y = _sphere_geometry(41, 19)
+
+    edge_frames = []
+    for phase in (0.25, 0.2625, 0.5):
+        frame = build_dot_sphere(
+            width=41,
+            height=19,
+            phase=phase,
+            state_key="ingesting",
+        )
+        edge_frames.append(
+            {
+                (cell.x, cell.y, cell.glyph)
+                for cell in frame.cells
+                if _cell_projection_radius(
+                    (cell.x, cell.y),
+                    center_x=center_x,
+                    center_y=center_y,
+                    radius_x=radius_x,
+                    radius_y=radius_y,
+                )
+                >= SHARED_EDGE_INNER_RADIUS
+            }
+        )
+
+    assert edge_frames[0] != edge_frames[1]
+    assert len(edge_frames[0] ^ edge_frames[2]) > len(edge_frames[0]) * 0.2
+    for index in range(len(edge_frames) - 1):
+        before = edge_frames[index]
+        after = edge_frames[index + 1]
+        assert abs(len(after) - len(before)) < len(before) * 0.06
+        assert _position_hausdorff_distance(
+            {(x, y) for x, y, _ in before},
+            {(x, y) for x, y, _ in after},
+        ) <= 1
+
+
 def test_pipeline_states_keep_comparable_default_size_density() -> None:
     for phase in (0.0, 0.5, 1.0, 1.5, 1.8):
         reference = build_dot_sphere(
