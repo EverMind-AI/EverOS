@@ -975,24 +975,26 @@ def _build_soft_supernova(
                 # place on the sphere. A radial correlation turns the burst
                 # into a larger circular shell instead of a chaotic release.
                 scatter_angle = math.tau * _stable_hash(particle_id, 31.2)
-                scatter_distance = 0.93 * math.sqrt(
+                scatter_distance = math.sqrt(
                     _stable_hash(particle_id, 57.8)
                 )
+                field_radius = min(sub_width, sub_height) * 0.62
+                irregular_envelope = (
+                    0.78
+                    + 0.14 * math.sin(scatter_angle * 3 + 1.1)
+                    + 0.1 * math.sin(scatter_angle * 7 + 2.3)
+                    + 0.08 * (_stable_hash(particle_id, 68.4) - 0.5)
+                )
+                target_radius = (
+                    field_radius * scatter_distance * irregular_envelope
+                )
+                target_x = center_x + math.cos(scatter_angle) * target_radius
+                target_y = center_y + math.sin(scatter_angle) * target_radius
                 launch_end = launch_start + launch_duration
                 coast_elapsed = max(0.0, progress - launch_end)
                 coast = _smoothstep(min(1.0, coast_elapsed / 0.08))
-                travel_x = (
-                    math.cos(scatter_angle)
-                    * (sub_width - 1)
-                    * 0.52
-                    * scatter_distance
-                )
-                travel_y = (
-                    math.sin(scatter_angle)
-                    * (sub_height - 1)
-                    * 0.52
-                    * scatter_distance
-                )
+                travel_x = target_x - source_x
+                travel_y = target_y - source_y
                 travel_length = max(1.0, math.hypot(travel_x, travel_y))
                 bend = (
                     _stable_hash(particle_id, 83.7) - 0.5
@@ -1007,14 +1009,14 @@ def _build_soft_supernova(
                 coast_speed = 0.2 + 0.26 * _stable_hash(particle_id, 38.9)
                 ballistic_x = (
                     math.cos(drift_angle)
-                    * (sub_width - 1)
+                    * min(sub_width, sub_height)
                     * coast_elapsed
                     * coast_speed
                     * drift_strength
                 )
                 ballistic_y = (
                     math.sin(drift_angle)
-                    * (sub_height - 1)
+                    * min(sub_width, sub_height)
                     * coast_elapsed
                     * coast_speed
                     * drift_strength

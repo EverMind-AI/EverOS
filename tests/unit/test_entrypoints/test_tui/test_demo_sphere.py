@@ -655,6 +655,11 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
             for cell in exploding_frame.cells
         )
         assert border_cells == 0
+        corner_cells = sum(
+            abs(cell.x - center_x) > 14 and abs(cell.y - center_y) > 6
+            for cell in exploding_frame.cells
+        )
+        assert corner_cells < len(exploding_frame.cells) * 0.04
     assert [(cell.x, cell.y, cell.glyph) for cell in drifted.cells] != [
         (cell.x, cell.y, cell.glyph) for cell in scattered.cells
     ]
