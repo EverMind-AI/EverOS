@@ -582,7 +582,7 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.1,
+        state_phase=0.06,
     )
     scattered = build_dot_sphere(
         width=41,
@@ -622,6 +622,12 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
         state_key="celebrating",
         state_phase=1.0,
     )
+    next_ingest = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93 + 2.4,
+        state_key="ingesting",
+    )
 
     assert start.caption == "memory crystallized"
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells] == [
@@ -643,15 +649,17 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
     start_dots = sum(_braille_subdot_count(cell.glyph) for cell in start.cells)
     burst_dots = sum(_braille_subdot_count(cell.glyph) for cell in burst.cells)
     assert burst_dots > start_dots * 1.12
-    corners = {(0, 0), (40, 0), (0, 18), (40, 18)}
-    assert not corners.intersection((cell.x, cell.y) for cell in scattered.cells)
+    border_cells = sum(
+        cell.x in {0, 40} or cell.y in {0, 18} for cell in scattered.cells
+    )
+    assert border_cells < len(scattered.cells) * 0.15
     assert [(cell.x, cell.y, cell.glyph) for cell in drifted.cells] != [
         (cell.x, cell.y, cell.glyph) for cell in scattered.cells
     ]
     assert all(not empty.cells for empty in empty_frames)
     assert 0 < len(emerging.cells) < len(restored.cells)
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in restored.cells] == [
-        (cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells
+        (cell.x, cell.y, cell.glyph, cell.style) for cell in next_ingest.cells
     ]
 
 

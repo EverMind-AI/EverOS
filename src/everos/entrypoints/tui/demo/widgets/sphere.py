@@ -830,15 +830,25 @@ def _build_soft_supernova(
     """Burst the recalled sphere into a bright Braille-particle supernova."""
 
     progress = max(0.0, min(1.0, progress))
-    # Keep one stable particle set for the whole cycle. Rebuilding the source
-    # from the moving recall sphere made particles change identity mid-flight,
-    # which read as dropped frames instead of deliberate motion.
-    source = _build_working_cloud(
-        width=width,
-        height=height,
-        phase=phase,
-        state=SPHERE_STATES["recalling"],
-    )
+    if progress < 0.36:
+        # Freeze the recalled source only while it explodes, so particle
+        # identities cannot change in mid-flight.
+        source = _build_working_cloud(
+            width=width,
+            height=height,
+            phase=phase,
+            state=SPHERE_STATES["recalling"],
+        )
+    else:
+        # During the blank/reappearance section, use the *moving* Working
+        # field at the phase the next idle frame will inherit. The last
+        # celebration frame therefore joins the next loop without a jump.
+        source = _build_working_cloud(
+            width=width,
+            height=height,
+            phase=phase + progress * 2.4,
+            state=SPHERE_STATES["ingesting"],
+        )
     sub_width, sub_height, center_x, center_y, radius_x, radius_y = _sphere_geometry(
         width,
         height,
@@ -862,15 +872,6 @@ def _build_soft_supernova(
     depths: dict[tuple[int, int], float] = {}
     source_styles: dict[tuple[int, int], str] = {}
     highlighted_positions: set[tuple[int, int]] = set()
-
-    def reflect_into_frame(value: float, upper_bound: float) -> float:
-        """Reflect a curved flight path instead of piling it on an edge."""
-
-        if value < 0:
-            value = -value
-        elif value > upper_bound:
-            value = 2 * upper_bound - value
-        return max(0.0, min(upper_bound, value))
 
     def add_particle(
         *,
@@ -960,24 +961,21 @@ def _build_soft_supernova(
                 scatter_distance = 0.93 * math.sqrt(
                     _stable_hash(particle_id, 57.8)
                 )
-                target_x = center_x + (
-                    math.cos(scatter_angle)
-                    * (sub_width - 1)
-                    * 0.59
-                    * scatter_distance
-                )
-                target_y = center_y + (
-                    math.sin(scatter_angle)
-                    * (sub_height - 1)
-                    * 0.59
-                    * scatter_distance
-                )
-
                 launch_end = launch_start + launch_duration
                 coast_elapsed = max(0.0, progress - launch_end)
                 coast = _smoothstep(min(1.0, coast_elapsed / 0.08))
-                travel_x = target_x - source_x
-                travel_y = target_y - source_y
+                travel_x = (
+                    math.cos(scatter_angle)
+                    * (sub_width - 1)
+                    * 0.52
+                    * scatter_distance
+                )
+                travel_y = (
+                    math.sin(scatter_angle)
+                    * (sub_height - 1)
+                    * 0.52
+                    * scatter_distance
+                )
                 travel_length = max(1.0, math.hypot(travel_x, travel_y))
                 bend = (
                     _stable_hash(particle_id, 83.7) - 0.5
@@ -1015,24 +1013,18 @@ def _build_soft_supernova(
                     * drift_strength
                 )
                 sub_x = round(
-                    reflect_into_frame(
-                        source_x
-                        + travel_x * launch
-                        + curve_x
-                        + ballistic_x
-                        + turbulence_x,
-                        sub_width - 1.0,
-                    )
+                    source_x
+                    + travel_x * launch
+                    + curve_x
+                    + ballistic_x
+                    + turbulence_x
                 )
                 sub_y = round(
-                    reflect_into_frame(
-                        source_y
-                        + travel_y * launch
-                        + curve_y
-                        + ballistic_y
-                        + turbulence_y,
-                        sub_height - 1.0,
-                    )
+                    source_y
+                    + travel_y * launch
+                    + curve_y
+                    + ballistic_y
+                    + turbulence_y
                 )
 
                 fade_start = 0.14 + 0.04 * _stable_hash(
@@ -1046,6 +1038,8 @@ def _build_soft_supernova(
                 )
                 visibility = 1 - _smoothstep(fade_raw)
                 if visibility <= 0.12:
+                    continue
+                if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
                     continue
                 wave = (
                     max(0.0, 1 - abs(radial - wave_radius) / 0.09)

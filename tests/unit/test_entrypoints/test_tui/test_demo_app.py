@@ -245,6 +245,8 @@ def test_supernova_phase_repeats_after_one_complete_cycle() -> None:
 def test_idle_loop_plays_the_complete_supernova_before_restarting() -> None:
     regular_ticks = (len(DotSphereWidget.STATES) - 1) * SPHERE_STAGE_TICKS
 
+    assert _idle_sphere_state(0) == "booting"
+    assert _idle_sphere_state(SPHERE_STAGE_TICKS) == "ingesting"
     assert _idle_sphere_state(regular_ticks) == "celebrating"
     assert (
         _idle_sphere_state(regular_ticks + SPHERE_SUPERNOVA_CYCLE_TICKS - 1)
@@ -252,7 +254,7 @@ def test_idle_loop_plays_the_complete_supernova_before_restarting() -> None:
     )
     assert (
         _idle_sphere_state(regular_ticks + SPHERE_SUPERNOVA_CYCLE_TICKS)
-        == "booting"
+        == "ingesting"
     )
 
 
@@ -307,6 +309,11 @@ async def test_successful_recall_goes_directly_to_celebration() -> None:
         source_phase = sphere._celebration_source_phase
         sphere._advance()
         assert sphere._celebration_source_phase == source_phase
+
+        sphere._state_tick = SPHERE_SUPERNOVA_CYCLE_TICKS
+        sphere._advance()
+        assert sphere._driven_state is None
+        assert sphere._rendered_state == "ingesting"
 
 
 def test_ctrl_c_is_a_priority_quit_binding() -> None:

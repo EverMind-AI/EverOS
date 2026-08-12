@@ -100,13 +100,16 @@ def _sphere_state_phase(state: str, state_tick: int) -> float:
 
 
 def _idle_sphere_state(tick: int) -> str:
-    """Give celebration its full cycle while other idle states use 3 seconds."""
+    """Start with Working, then loop ingest through the full celebration."""
 
-    regular_state_ticks = (len(SPHERE_IDLE_STATES) - 1) * SPHERE_STAGE_TICKS
-    cycle_ticks = regular_state_ticks + SPHERE_SUPERNOVA_CYCLE_TICKS
-    cycle_tick = tick % cycle_ticks
-    if cycle_tick < regular_state_ticks:
-        return SPHERE_IDLE_STATES[cycle_tick // SPHERE_STAGE_TICKS]
+    if tick < SPHERE_STAGE_TICKS:
+        return SPHERE_IDLE_STATES[0]
+    pipeline_state_count = len(SPHERE_IDLE_STATES) - 2
+    pipeline_ticks = pipeline_state_count * SPHERE_STAGE_TICKS
+    cycle_ticks = pipeline_ticks + SPHERE_SUPERNOVA_CYCLE_TICKS
+    cycle_tick = (tick - SPHERE_STAGE_TICKS) % cycle_ticks
+    if cycle_tick < pipeline_ticks:
+        return SPHERE_IDLE_STATES[1 + cycle_tick // SPHERE_STAGE_TICKS]
     return SPHERE_IDLE_STATES[-1]
 
 
@@ -184,6 +187,12 @@ class DotSphereWidget(Static):
         # frequencies jump to a different shape every few seconds.
         self._phase += 0.3 / SPHERE_FPS
         self._tick += 1
+        if (
+            self._driven_state == "celebrating"
+            and self._state_tick >= SPHERE_SUPERNOVA_CYCLE_TICKS
+        ):
+            self._driven_state = None
+            self._tick = SPHERE_STAGE_TICKS
         if self._driven_state is not None:
             state = self._driven_state
         else:
