@@ -35,8 +35,8 @@ WORKING_SAMPLES_PER_RADIUS = 1.6
 WORKING_MIN_ORBITS = 14
 WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
-SOLVING_BACKGROUND_DENSITY = 0.19
-SOLVING_SIGNAL_COUNT = 5
+SOLVING_BACKGROUND_DENSITY = 0.21
+SOLVING_SIGNAL_COUNT = 9
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -386,7 +386,7 @@ def _build_solving_network(
         500,
         round(surface_area * SOLVING_BACKGROUND_DENSITY),
     )
-    node_count = max(24, round(radius_x * 0.92))
+    node_count = max(28, round(radius_x * 1.05))
     masks: dict[tuple[int, int], int] = {}
     depths: dict[tuple[int, int], float] = {}
     background_depths: dict[tuple[int, int], float] = {}
@@ -395,12 +395,25 @@ def _build_solving_network(
     edge_depths: dict[tuple[int, int], float] = {}
     edge_visibilities: dict[tuple[int, int], float] = {}
 
-    # A dense spherical field preserves the particle density of the unchanged
-    # states. Its front is warm yellow while the visible back stays dark gold.
+    # A dense spherical field preserves the particle density of the other
+    # stages. Each sample follows a small surface flow rather than remaining
+    # fixed, while the zero-mean motion keeps the sphere centered.
     for index in range(background_count):
-        y3 = 1 - 2 * ((index + 0.5) / background_count)
-        latitude_radius = math.sqrt(max(0.0, 1.0 - y3 * y3))
-        theta = index * GOLDEN_ANGLE + yaw
+        base_y = 1 - 2 * ((index + 0.5) / background_count)
+        base_latitude = math.asin(base_y)
+        flow_speed = 0.12 + 0.08 * _stable_hash(index, 4.3)
+        latitude = base_latitude + 0.04 * math.sin(
+            animation_time * (0.4 + 0.15 * _stable_hash(index, 8.1))
+            + index * GOLDEN_ANGLE * 0.37
+        )
+        latitude = max(-math.pi / 2, min(math.pi / 2, latitude))
+        y3 = math.sin(latitude)
+        latitude_radius = math.cos(latitude)
+        theta = (
+            index * GOLDEN_ANGLE
+            + animation_time * flow_speed
+            + 0.025 * math.sin(animation_time * 0.55 + index * 0.19)
+        )
         x3 = latitude_radius * math.cos(theta)
         z3 = latitude_radius * math.sin(theta)
         sub_x, sub_y, depth = project(x3, y3, z3)
@@ -448,9 +461,9 @@ def _build_solving_network(
         base_x = latitude_radius * math.cos(theta)
         base_z = latitude_radius * math.sin(theta)
         base_nodes.append((base_x, base_y, base_z))
-        x3 = base_x + 0.09 * math.sin(animation_time * 0.24 + index * 0.31 + 9)
-        y3 = base_y + 0.09 * math.sin(animation_time * 0.21 + index * 0.53 + 27)
-        z3 = base_z + 0.09 * math.sin(animation_time * 0.27 + index * 0.77 + 55)
+        x3 = base_x + 0.12 * math.sin(animation_time * 0.72 + index * 0.31 + 9)
+        y3 = base_y + 0.12 * math.sin(animation_time * 0.63 + index * 0.53 + 27)
+        z3 = base_z + 0.12 * math.sin(animation_time * 0.81 + index * 0.77 + 55)
         nodes.append(_normalize_3d(x3, y3, z3))
 
     projected_nodes = [project(*node) for node in nodes]

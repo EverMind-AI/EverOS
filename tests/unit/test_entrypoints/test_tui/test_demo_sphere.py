@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from everos.entrypoints.tui.demo.widgets.sphere import (
+    SOLVING_SIGNAL_COUNT,
     SPHERE_STATES,
     DotSphereFrame,
     build_dot_sphere,
@@ -360,8 +361,8 @@ def test_extracting_uses_solving_network_with_internal_sparks() -> None:
 
 
 def test_extracting_signals_cross_graph_nodes_without_teleporting() -> None:
-    for signal in range(5):
-        boundary = (1 - signal / 5) / (math.tau * 0.46)
+    for signal in range(SOLVING_SIGNAL_COUNT):
+        boundary = (1 - signal / SOLVING_SIGNAL_COUNT) / (math.tau * 0.46)
         before = build_dot_sphere(
             width=41,
             height=19,
@@ -379,7 +380,7 @@ def test_extracting_signals_cross_graph_nodes_without_teleporting() -> None:
         }
         after_signals = {(cell.x, cell.y) for cell in after.cells if cell.highlighted}
 
-        assert before_signals == after_signals
+        assert _position_hausdorff_distance(before_signals, after_signals) <= 1
 
 
 def test_extracting_uses_color_depth_without_changing_geometry() -> None:
@@ -571,6 +572,25 @@ def _frame_extents(frame: DotSphereFrame) -> tuple[int, int, int, int]:
     xs = [cell.x for cell in frame.cells]
     ys = [cell.y for cell in frame.cells]
     return min(xs), max(xs), min(ys), max(ys)
+
+
+def _position_hausdorff_distance(
+    before: set[tuple[int, int]],
+    after: set[tuple[int, int]],
+) -> int:
+    def directed(
+        source: set[tuple[int, int]],
+        target: set[tuple[int, int]],
+    ) -> int:
+        return max(
+            min(
+                max(abs(x - target_x), abs(y - target_y))
+                for target_x, target_y in target
+            )
+            for x, y in source
+        )
+
+    return max(directed(before, after), directed(after, before))
 
 
 def _is_braille_cell(glyph: str) -> bool:
