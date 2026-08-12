@@ -39,18 +39,12 @@ SOLVING_BACKGROUND_DENSITY = 0.11
 SOLVING_SIGNAL_COUNT = 9
 SOLVING_SIGNAL_TRAIL_STEPS = 3
 SOLVING_SIGNAL_TRAIL_GAP = 0.06
+EXTRACT_BRANCH_COUNT = 7
+EXTRACT_TRAIL_STEPS = 3
+EXTRACT_TRAIL_GAP = 0.055
 SHARED_EDGE_INNER_RADIUS = 0.72
 SHARED_EDGE_DENSITY = 0.29
 STAGE_INTERIOR_RADIUS = 0.69
-CONFETTI_POINT_COUNT = 150
-CONFETTI_GLYPHS = (".", "+", "*", "x")
-CONFETTI_STYLES = (
-    EVEROS_YELLOW,
-    EVEROS_YELLOW_SOFT,
-    EVEROS_CYAN,
-    EVEROS_ORANGE,
-    EVEROS_AMBER,
-)
 GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
 
 
@@ -134,7 +128,12 @@ SPHERE_STATES: dict[str, SphereState] = {
 
 
 def build_dot_sphere(
-    *, width: int, height: int, phase: float, state_key: str
+    *,
+    width: int,
+    height: int,
+    phase: float,
+    state_key: str,
+    state_phase: float | None = None,
 ) -> DotSphereFrame:
     """Build one dot-sphere animation frame."""
     if width < 13 or height < 7:
@@ -145,11 +144,16 @@ def build_dot_sphere(
         raise ValueError(f"unknown sphere state: {state_key}") from exc
 
     if state.key == "celebrating":
-        return _build_confetti_burst(
+        return _build_soft_supernova(
             width=width,
             height=height,
             phase=phase,
             state=state,
+            progress=(
+                _state_local_phase(phase, state.key)
+                if state_phase is None
+                else state_phase
+            ),
         )
     if state.key in {
         "booting",
@@ -437,22 +441,6 @@ def _network_layers_on_particle_field(
     if not candidates:
         return edge_depths, edge_visibilities, node_depths, signal_depths
 
-    yaw = animation_time * 0.12
-    tilt = 0.32
-    sin_yaw, cos_yaw = math.sin(yaw), math.cos(yaw)
-    sin_tilt, cos_tilt = math.sin(tilt), math.cos(tilt)
-
-    def project(x3: float, y3: float, z3: float) -> tuple[float, float, float]:
-        x_rotated = x3 * cos_yaw + z3 * sin_yaw
-        z_rotated = -x3 * sin_yaw + z3 * cos_yaw
-        y_projected = y3 * cos_tilt - z_rotated * sin_tilt
-        depth = y3 * sin_tilt + z_rotated * cos_tilt
-        return (
-            center_x + x_rotated * radius_x * STAGE_INTERIOR_RADIUS,
-            center_y - y_projected * radius_y * STAGE_INTERIOR_RADIUS,
-            depth,
-        )
-
     def nearest_particle(
         sub_x: float,
         sub_y: float,
@@ -476,106 +464,66 @@ def _network_layers_on_particle_field(
             ),
         )
 
-    node_count = max(28, round(radius_x * 1.05))
-    base_nodes: list[tuple[float, float, float]] = []
-    nodes: list[tuple[float, float, float]] = []
-    for index in range(node_count):
-        base_y = 1 - 2 * ((index + 0.5) / node_count)
-        latitude_radius = math.sqrt(max(0.0, 1.0 - base_y * base_y))
-        theta = index * GOLDEN_ANGLE
-        base_x = latitude_radius * math.cos(theta)
-        base_z = latitude_radius * math.sin(theta)
-        base_nodes.append((base_x, base_y, base_z))
-        nodes.append(
-            _normalize_3d(
-                base_x
-                + 0.12 * math.sin(animation_time * 0.72 + index * 0.31 + 9),
-                base_y
-                + 0.12 * math.sin(animation_time * 0.63 + index * 0.53 + 27),
-                base_z
-                + 0.12 * math.sin(animation_time * 0.81 + index * 0.77 + 55),
-            )
+    branch_rotation = 0.07 * math.sin(animation_time * 0.18)
+
+    def branch_point(
+        branch: int,
+        progress: float,
+    ) -> tuple[float, float, float]:
+        base_angle = branch * math.tau / EXTRACT_BRANCH_COUNT - math.pi / 2
+        bend = (1 if branch % 2 == 0 else -1) * 0.24
+        angle = (
+            base_angle
+            + branch_rotation
+            + bend * math.sin(progress * math.pi)
+        )
+        branch_length = 0.58 + 0.07 * _stable_hash(branch, 71.3)
+        radial = 0.06 + branch_length * progress
+        depth_limit = math.sqrt(max(0.0, 1 - radial * radial))
+        depth = (
+            math.cos(base_angle + animation_time * 0.1)
+            * depth_limit
+            * (0.35 + 0.55 * progress)
+        )
+        return (
+            center_x + math.cos(angle) * radius_x * radial,
+            center_y - math.sin(angle) * radius_y * radial,
+            depth,
         )
 
-    projected_nodes = [project(*node) for node in nodes]
-    edge_threshold = 0.72
-    edges: list[tuple[int, int, float]] = []
-    adjacency: list[list[int]] = [[] for _ in range(node_count)]
-    for start_index in range(node_count):
-        for end_index in range(start_index + 1, node_count):
-            distance = math.sqrt(
-                sum(
-                    (a - b) ** 2
-                    for a, b in zip(
-                        base_nodes[start_index],
-                        base_nodes[end_index],
-                        strict=True,
-                    )
-                )
-            )
-            if distance < edge_threshold:
-                edges.append((start_index, end_index, distance))
-                adjacency[start_index].append(end_index)
-                adjacency[end_index].append(start_index)
-
-    for start_index, end_index, distance in edges:
-        start_x, start_y, start_z = projected_nodes[start_index]
-        end_x, end_y, end_z = projected_nodes[end_index]
-        line_depth = (start_z + end_z) / 2
-        depth_factor = 0.3 + 0.55 * ((line_depth + 1) / 2)
-        visibility = (1 - distance / edge_threshold) * depth_factor
-        steps = max(1, round(max(abs(end_x - start_x), abs(end_y - start_y))))
-        for step in range(0, steps + 1, 2):
-            progress = step / steps
-            edge_depth = start_z + (end_z - start_z) * progress
-            position = nearest_particle(
-                start_x + (end_x - start_x) * progress,
-                start_y + (end_y - start_y) * progress,
-                edge_depth,
-            )
-            edge_depths[position] = max(
-                edge_depth,
-                edge_depths.get(position, -1.0),
-            )
+    samples_per_branch = max(12, round(radius_x * 0.55))
+    for branch in range(EXTRACT_BRANCH_COUNT):
+        for sample in range(samples_per_branch + 1):
+            progress = sample / samples_per_branch
+            sub_x, sub_y, depth = branch_point(branch, progress)
+            position = nearest_particle(sub_x, sub_y, depth)
+            edge_depths[position] = max(depth, edge_depths.get(position, -1.0))
             edge_visibilities[position] = max(
-                visibility,
+                0.2 + 0.28 * progress,
                 edge_visibilities.get(position, 0.0),
             )
 
-    for sub_x, sub_y, depth in projected_nodes:
-        position = nearest_particle(sub_x, sub_y, depth)
-        node_depths[position] = max(depth, node_depths.get(position, -1.0))
+        for node_progress in (0.06, 0.5, 1.0):
+            sub_x, sub_y, depth = branch_point(branch, node_progress)
+            position = nearest_particle(sub_x, sub_y, depth)
+            node_depths[position] = max(depth, node_depths.get(position, -1.0))
 
-    for signal in range(SOLVING_SIGNAL_COUNT):
-        head_clock = animation_time * 0.46 + signal / SOLVING_SIGNAL_COUNT
-        seed = round((signal + 0.5) * node_count / SOLVING_SIGNAL_COUNT) % node_count
-        for trail_step in range(SOLVING_SIGNAL_TRAIL_STEPS):
-            signal_clock = max(
-                0.0,
-                head_clock - trail_step * SOLVING_SIGNAL_TRAIL_GAP,
-            )
-            route = _signal_route_edge(
-                adjacency=adjacency,
-                seed=seed,
-                segment=math.floor(signal_clock),
-                signal=signal,
-            )
-            if route is None:
+        head_progress = (
+            animation_time * 0.16 + branch / EXTRACT_BRANCH_COUNT
+        ) % 1.0
+        for trail_step in range(EXTRACT_TRAIL_STEPS):
+            progress = head_progress - trail_step * EXTRACT_TRAIL_GAP
+            if progress < 0:
                 continue
-            start_index, end_index = route
-            progress = signal_clock - math.floor(signal_clock)
-            start_x, start_y, start_z = projected_nodes[start_index]
-            end_x, end_y, end_z = projected_nodes[end_index]
-            depth = start_z + (end_z - start_z) * progress
-            position = nearest_particle(
-                start_x + (end_x - start_x) * progress,
-                start_y + (end_y - start_y) * progress,
-                depth,
-            )
+            sub_x, sub_y, depth = branch_point(branch, progress)
+            position = nearest_particle(sub_x, sub_y, depth)
             signal_depths[position] = max(
                 depth,
                 signal_depths.get(position, -1.0),
             )
+
+    source = nearest_particle(center_x, center_y, 0.85)
+    node_depths[source] = 0.85
 
     return edge_depths, edge_visibilities, node_depths, signal_depths
 
@@ -870,54 +818,121 @@ def _build_solving_network(
     )
 
 
-def _build_confetti_burst(
-    *, width: int, height: int, phase: float, state: SphereState
+def _build_soft_supernova(
+    *,
+    width: int,
+    height: int,
+    phase: float,
+    state: SphereState,
+    progress: float,
 ) -> DotSphereFrame:
-    center_x = (width - 1) / 2
-    center_y = (height - 1) / 2
-    radius_x = max(1.0, center_x - 3)
-    radius_y = max(1.0, center_y - 2)
-    local_phase = _state_local_phase(phase, state.key)
-    bloom = 0.62 + 0.58 * math.sin(local_phase * math.pi)
-    rotation = phase * math.tau * 1.4
+    """Let the recalled sphere become a restrained, continuous supernova."""
 
-    cells_by_position: dict[tuple[int, int], DotCell] = {}
-    for index in range(CONFETTI_POINT_COUNT):
-        shell = 0.55 + 0.45 * ((index % 17) / 16)
-        angle = index * GOLDEN_ANGLE + rotation
-        drift = math.sin(phase * math.tau * 2 + index * 0.23)
-        x = round(center_x + math.cos(angle) * radius_x * shell * bloom)
-        y = round(
-            center_y
-            + math.sin(angle) * radius_y * shell * bloom
-            + drift * 0.75 * local_phase
+    progress = max(0.0, min(1.0, progress))
+    source = _build_working_cloud(
+        width=width,
+        height=height,
+        phase=phase,
+        state=SPHERE_STATES["recalling"],
+    )
+    sub_width, sub_height, center_x, center_y, radius_x, radius_y = _sphere_geometry(
+        width,
+        height,
+    )
+
+    if progress < 0.16:
+        contraction = _smoothstep(progress / 0.16)
+        scale_x = 1 - 0.045 * contraction
+        scale_y = 1 - 0.035 * contraction
+    else:
+        expansion = _smoothstep((progress - 0.16) / 0.84)
+        scale_x = 0.955 + 0.19 * expansion
+        scale_y = 0.965 + 0.125 * expansion
+
+    flash = max(0.0, 1 - abs(progress - 0.16) / 0.14)
+    fade = 0.82 * _smoothstep(max(0.0, (progress - 0.52) / 0.48))
+    wave_progress = max(0.0, min(1.0, (progress - 0.12) / 0.62))
+    wave_radius = 0.12 + 0.92 * _smoothstep(wave_progress)
+    drift_strength = 0.9 * _smoothstep(max(0.0, (progress - 0.24) / 0.76))
+
+    masks: dict[tuple[int, int], int] = {}
+    depths: dict[tuple[int, int], float] = {}
+    source_styles: dict[tuple[int, int], str] = {}
+    highlighted_positions: set[tuple[int, int]] = set()
+    for cell in source.cells:
+        mask = ord(cell.glyph) - BRAILLE_BASE
+        for local_x in range(2):
+            for local_y in range(4):
+                if not mask & BRAILLE_DOT_BITS[local_x][local_y]:
+                    continue
+                original_x = cell.x * 2 + local_x
+                original_y = cell.y * 4 + local_y
+                delta_x = original_x - center_x
+                delta_y = original_y - center_y
+                radial = math.sqrt(
+                    (delta_x / radius_x) ** 2 + (delta_y / radius_y) ** 2
+                )
+                angle = math.atan2(delta_y / radius_y, delta_x / radius_x)
+                particle_id = original_y * sub_width + original_x
+                tangent = (
+                    _stable_hash(particle_id, 83.7) - 0.5
+                ) * drift_strength
+                sub_x = round(
+                    center_x
+                    + delta_x * scale_x
+                    - math.sin(angle) * tangent
+                )
+                sub_y = round(
+                    center_y
+                    + delta_y * scale_y
+                    + math.cos(angle) * tangent
+                )
+                if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
+                    continue
+
+                position = (sub_x // 2, sub_y // 4)
+                wave = (
+                    max(0.0, 1 - abs(radial - wave_radius) / 0.13)
+                    if progress > 0.12
+                    else 0.0
+                )
+                glow = min(0.72, flash * 0.52 + wave * 0.42)
+                glow_target = EVEROS_CYAN if cell.highlighted else EVEROS_YELLOW_PALE
+                style = _blend_hex_color(cell.style, glow_target, glow)
+                style = _blend_hex_color(style, "#1D1C18", fade)
+                if cell.z >= depths.get(position, -1.0):
+                    source_styles[position] = style
+                    if cell.highlighted and progress < 0.68:
+                        highlighted_positions.add(position)
+                    else:
+                        highlighted_positions.discard(position)
+                _add_braille_dot(
+                    masks=masks,
+                    depths=depths,
+                    sub_x=sub_x,
+                    sub_y=sub_y,
+                    z=cell.z,
+                )
+
+    cells = tuple(
+        DotCell(
+            x=x,
+            y=y,
+            z=depths[(x, y)],
+            glyph=chr(BRAILLE_BASE + mask),
+            style=source_styles[(x, y)],
+            highlighted=(x, y) in highlighted_positions,
         )
-        if not (0 <= x < width and 0 <= y < height):
-            continue
-
-        z = math.cos(angle - rotation) * shell
-        glyph = CONFETTI_GLYPHS[(index + int(local_phase * 10)) % len(CONFETTI_GLYPHS)]
-        style = CONFETTI_STYLES[
-            (index * 3 + int(local_phase * 7)) % len(CONFETTI_STYLES)
-        ]
-        position = (x, y)
-        existing = cells_by_position.get(position)
-        if existing is None or z > existing.z:
-            cells_by_position[position] = DotCell(
-                x=x,
-                y=y,
-                z=z,
-                glyph=glyph,
-                style=style,
-            )
-
+        for (x, y), mask in sorted(
+            masks.items(),
+            key=lambda item: (item[0][1], item[0][0]),
+        )
+    )
     return DotSphereFrame(
         width=width,
         height=height,
         state=state,
-        cells=tuple(
-            sorted(cells_by_position.values(), key=lambda cell: (cell.y, cell.x))
-        ),
+        cells=cells,
     )
 
 
@@ -1423,6 +1438,11 @@ def _stable_hash(value: int, salt: float) -> float:
 
     hashed = math.sin((value + 1) * 12.9898 + salt * 78.233) * 43758.5453
     return hashed - math.floor(hashed)
+
+
+def _smoothstep(value: float) -> float:
+    value = max(0.0, min(1.0, value))
+    return value * value * (3 - 2 * value)
 
 
 def _style_for_depth(z: float, state: SphereState) -> str:

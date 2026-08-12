@@ -111,6 +111,7 @@ class DotSphereWidget(Static):
         self._rendered_state: str | None = None
         self._transition_from_state: str | None = None
         self._transition_tick = 0
+        self._state_tick = 0
         self._animation_timer: Timer | None = None
         # When set, the sphere is pinned to a pipeline state (synced to the
         # signal rail during a round). When None it free-runs the idle loop.
@@ -166,12 +167,14 @@ class DotSphereWidget(Static):
             self._transition_from_state = self._rendered_state
             self._rendered_state = state
             self._transition_tick = 0
+            self._state_tick = 0
         frame_width, frame_height = self._frame_size()
         frame = build_dot_sphere(
             width=frame_width,
             height=frame_height,
             phase=self._phase,
             state_key=state,
+            state_phase=min(1.0, self._state_tick / SPHERE_STAGE_TICKS),
         )
         if self._transition_from_state is not None:
             previous_frame = build_dot_sphere(
@@ -179,6 +182,9 @@ class DotSphereWidget(Static):
                 height=frame_height,
                 phase=self._phase,
                 state_key=self._transition_from_state,
+                state_phase=(
+                    1.0 if self._transition_from_state == "celebrating" else None
+                ),
             )
             raw_progress = min(
                 1.0,
@@ -195,6 +201,7 @@ class DotSphereWidget(Static):
             if self._transition_tick >= SPHERE_TRANSITION_TICKS:
                 self._transition_from_state = None
         self.update(render_dot_sphere_text(frame))
+        self._state_tick += 1
 
         stage = _state_to_stage(state)
         if stage != self._last_stage:

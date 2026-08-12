@@ -5,8 +5,8 @@ from __future__ import annotations
 import math
 
 from everos.entrypoints.tui.demo.widgets.sphere import (
+    EXTRACT_BRANCH_COUNT,
     SHARED_EDGE_INNER_RADIUS,
-    SOLVING_SIGNAL_COUNT,
     SPHERE_STATES,
     DotSphereFrame,
     _cell_projection_radius,
@@ -359,8 +359,6 @@ def test_processing_particles_move_without_density_jumps() -> None:
 
 def test_dot_sphere_uses_braille_fine_dot_cells() -> None:
     for state_key in SPHERE_STATES:
-        if state_key == "celebrating":
-            continue
         frame = build_dot_sphere(
             width=37,
             height=17,
@@ -454,7 +452,7 @@ def test_working_and_ingesting_share_particle_motion_but_not_color() -> None:
     assert working.caption == "working..."
 
 
-def test_extracting_uses_solving_network_with_internal_sparks() -> None:
+def test_extracting_uses_outward_branches_with_internal_sparks() -> None:
     frame = build_dot_sphere(width=41, height=19, phase=0.25, state_key="extracting")
     center_x = (frame.width - 1) / 2
     center_y = (frame.height - 1) / 2
@@ -466,7 +464,7 @@ def test_extracting_uses_solving_network_with_internal_sparks() -> None:
     )
     highlighted = [cell for cell in frame.cells if cell.highlighted]
     assert len(frame.cells) >= 120
-    assert len(highlighted) >= 12
+    assert len(highlighted) >= EXTRACT_BRANCH_COUNT
     highlighted_styles = {cell.style for cell in highlighted}
     assert "#F5EDDC" in highlighted_styles
     assert highlighted_styles <= {
@@ -482,19 +480,18 @@ def test_extracting_uses_solving_network_with_internal_sparks() -> None:
     assert "#FFD267" in {cell.style for cell in frame.cells}
 
 
-def test_extracting_signals_cross_graph_nodes_without_teleporting() -> None:
-    for signal in range(SOLVING_SIGNAL_COUNT):
-        boundary = (1 - signal / SOLVING_SIGNAL_COUNT) / (math.tau * 0.46)
+def test_extracting_signals_follow_branches_without_teleporting() -> None:
+    for phase in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
         before = build_dot_sphere(
             width=41,
             height=19,
-            phase=boundary - 0.0005,
+            phase=phase,
             state_key="extracting",
         )
         after = build_dot_sphere(
             width=41,
             height=19,
-            phase=boundary + 0.0005,
+            phase=phase + 0.002,
             state_key="extracting",
         )
         before_signals = {
@@ -502,7 +499,7 @@ def test_extracting_signals_cross_graph_nodes_without_teleporting() -> None:
         }
         after_signals = {(cell.x, cell.y) for cell in after.cells if cell.highlighted}
 
-        assert _position_hausdorff_distance(before_signals, after_signals) <= 1
+        assert _position_hausdorff_distance(before_signals, after_signals) <= 2
 
 
 def test_extracting_uses_color_depth_without_changing_geometry() -> None:
@@ -566,29 +563,45 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     assert frame.caption == "found the matching memory"
 
 
-def test_dot_sphere_celebrating_state_bursts_into_confetti() -> None:
-    frame = build_dot_sphere(width=41, height=19, phase=0.93, state_key="celebrating")
+def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
+    recalled = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="recalling",
+    )
+    start = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="celebrating",
+        state_phase=0.0,
+    )
+    expanded = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="celebrating",
+        state_phase=0.72,
+    )
 
-    assert frame.caption == "memory crystallized"
-    confetti = [cell for cell in frame.cells if cell.glyph in {"*", "+", ".", "x"}]
-    assert len(confetti) >= 70
-    assert all(not _is_braille_cell(cell.glyph) for cell in confetti)
-    assert not any(cell.style.startswith("bold ") for cell in confetti)
-
-    center_x = (frame.width - 1) / 2
-    center_y = (frame.height - 1) / 2
-    radius_x = max(1.0, center_x - 3)
-    radius_y = max(1.0, center_y - 2)
-    distances = [
-        ((cell.x - center_x) / radius_x) ** 2 + ((cell.y - center_y) / radius_y) ** 2
-        for cell in confetti
+    assert start.caption == "memory crystallized"
+    assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells] == [
+        (cell.x, cell.y, cell.glyph, cell.style) for cell in recalled.cells
     ]
-    assert max(distances) > 1.10
-    assert sum(distance > 0.72 for distance in distances) > len(distances) * 0.4
+    assert all(_is_braille_cell(cell.glyph) for cell in expanded.cells)
+    assert not any(cell.glyph in {"*", "+", ".", "x"} for cell in expanded.cells)
 
-    styles = {cell.style for cell in confetti}
-    assert "#F9B91C" in styles
-    assert "#F6C23B" in styles
+    center_x = (expanded.width - 1) / 2
+    center_y = (expanded.height - 1) / 2
+
+    def mean_radius(frame: DotSphereFrame) -> float:
+        return sum(
+            math.hypot(cell.x - center_x, (cell.y - center_y) * 2)
+            for cell in frame.cells
+        ) / len(frame.cells)
+
+    assert mean_radius(expanded) > mean_radius(start) * 1.04
 
 
 def test_dot_sphere_front_light_uses_poster_gold_primary() -> None:
