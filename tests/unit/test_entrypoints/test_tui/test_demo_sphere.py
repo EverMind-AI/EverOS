@@ -563,7 +563,7 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     assert frame.caption == "found the matching memory"
 
 
-def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
+def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
     recalled = build_dot_sphere(
         width=41,
         height=19,
@@ -577,19 +577,33 @@ def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
         state_key="celebrating",
         state_phase=0.0,
     )
-    expanded = build_dot_sphere(
+    burst = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.42,
+        state_phase=0.1,
     )
     scattered = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.56,
+        state_phase=0.48,
+    )
+    empty = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="celebrating",
+        state_phase=0.75,
+    )
+    emerging = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="celebrating",
+        state_phase=0.85,
     )
     restored = build_dot_sphere(
         width=41,
@@ -603,11 +617,11 @@ def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells] == [
         (cell.x, cell.y, cell.glyph, cell.style) for cell in recalled.cells
     ]
-    assert all(_is_braille_cell(cell.glyph) for cell in expanded.cells)
-    assert not any(cell.glyph in {"*", "+", ".", "x"} for cell in expanded.cells)
+    assert all(_is_braille_cell(cell.glyph) for cell in burst.cells)
+    assert not any(cell.glyph in {"*", "+", ".", "x"} for cell in burst.cells)
 
-    center_x = (expanded.width - 1) / 2
-    center_y = (expanded.height - 1) / 2
+    center_x = (scattered.width - 1) / 2
+    center_y = (scattered.height - 1) / 2
 
     def mean_radius(frame: DotSphereFrame) -> float:
         return sum(
@@ -615,13 +629,14 @@ def test_celebrating_soft_supernova_grows_from_the_recalled_sphere() -> None:
             for cell in frame.cells
         ) / len(frame.cells)
 
-    assert mean_radius(expanded) > mean_radius(start) * 1.14
+    assert mean_radius(scattered) > mean_radius(start) * 1.14
     start_dots = sum(_braille_subdot_count(cell.glyph) for cell in start.cells)
-    expanded_dots = sum(
-        _braille_subdot_count(cell.glyph) for cell in expanded.cells
-    )
-    assert expanded_dots > start_dots * 1.12
-    assert _frame_extents(scattered) == (0, 40, 0, 18)
+    burst_dots = sum(_braille_subdot_count(cell.glyph) for cell in burst.cells)
+    assert burst_dots > start_dots * 1.12
+    corners = {(0, 0), (40, 0), (0, 18), (40, 18)}
+    assert not corners.intersection((cell.x, cell.y) for cell in scattered.cells)
+    assert not empty.cells
+    assert 0 < len(emerging.cells) < len(restored.cells)
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in restored.cells] == [
         (cell.x, cell.y, cell.glyph, cell.style) for cell in start.cells
     ]
