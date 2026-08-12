@@ -311,7 +311,10 @@ def test_search_recall_below_relevance_floor_is_a_miss() -> None:
                             "embed_text": "food preference: 用户喜欢吃杨梅"
                         },
                     }
-                ]
+                ],
+                # v2 may also expose the just-written message while extraction
+                # is settling; an unrelated question must not surface it.
+                "unprocessed_messages": [{"id": "buffered", "content": "我喜欢吃杨梅"}],
             }
         }
 
@@ -328,6 +331,89 @@ def test_search_recall_below_relevance_floor_is_a_miss() -> None:
     )
 
     assert story is None  # 0.40 < MIN_RELEVANCE_SCORE
+
+
+def test_search_recall_accepts_low_score_when_it_is_clearly_this_round() -> None:
+    calls = 0
+
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "data": {
+                "episodes": [
+                    {
+                        "id": "current-strawberry",
+                        "score": 0.49,
+                        "atomic_facts": [
+                            {
+                                "id": "fact-strawberry",
+                                "content": "我喜欢吃草莓",
+                                "score": 0.49,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+    story = cloud.search_recall(
+        "我喜欢吃草莓",
+        "我喜欢吃什么",
+        base_url="https://api.test",
+        session_id="s",
+        user_id="u",
+        api_key="k",
+        request_json=fake_request,
+        settle_seconds=0.0,
+        search_interval_seconds=0.0,
+    )
+
+    assert calls == 1
+    assert story is not None
+    assert story.answer == "我喜欢吃草莓"
+    assert story.score == 0.49
+
+
+def test_search_recall_uses_v2_unprocessed_message_after_polling() -> None:
+    calls = 0
+
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "data": {
+                "episodes": [],
+                "profiles": [],
+                "unprocessed_messages": [
+                    {
+                        "id": "message-strawberry",
+                        "session_id": "s",
+                        "sender_id": "u",
+                        "content": "我喜欢吃草莓",
+                    }
+                ],
+            }
+        }
+
+    story = cloud.search_recall(
+        "我喜欢吃草莓",
+        "我喜欢吃什么",
+        base_url="https://api.test",
+        session_id="s",
+        user_id="u",
+        api_key="k",
+        request_json=fake_request,
+        search_attempts=2,
+        settle_seconds=0.0,
+        search_interval_seconds=0.0,
+    )
+
+    assert calls == 2
+    assert story is not None
+    assert story.answer == "我喜欢吃草莓"
+    assert story.source_filename == "buffer:message-stra"
+    assert story.score == 0.0
 
 
 def test_clean_profile_text_strips_label_across_colon_widths() -> None:

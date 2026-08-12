@@ -220,6 +220,7 @@ def search_recall(
         "include_profile": True,
     }
     best: DemoStory | None = None
+    buffered: DemoStory | None = None
     for attempt in range(search_attempts):
         if attempt == 0 and settle_seconds:
             time.sleep(settle_seconds)
@@ -232,6 +233,9 @@ def search_recall(
             timeout_seconds=timeout_seconds,
         )
         story = _best_recall_story(memory, query, search, user_id=user_id)
+        in_flight = _buffered_recall_story(memory, query, search, user_id=user_id)
+        if in_flight is not None:
+            buffered = in_flight
         if story is not None and (
             best is None
             or _story_priority(story, memory) > _story_priority(best, memory)
@@ -240,17 +244,20 @@ def search_recall(
         # An older memory can already have a positive score while the memory
         # flushed in this round is still entering the index. Stop only once the
         # answer actually resembles the current memory; otherwise keep polling.
-        if (
-            best is not None
-            and best.score > 0.0
-            and _is_current_recall(best, memory)
-        ):
+        if best is not None and best.score > 0.0 and _is_current_recall(best, memory):
             break
         if attempt < search_attempts - 1:
             time.sleep(search_interval_seconds)
-    if best is not None and best.score >= min_relevance_score:
+    if best is not None and (
+        best.score >= min_relevance_score
+        or _is_direct_current_recall(best, memory, query)
+    ):
         return best
-    return None
+    # v2 extraction remains asynchronous even after a successful flush. If the
+    # index did not catch up within the polling window, the session-pinned
+    # search response still exposes this round's raw message. Use it only as a
+    # final fallback so a processed episode/profile always wins.
+    return buffered
 
 
 def _request_json(
@@ -351,8 +358,9 @@ def _best_recall_story(
     # candidate that clearly matches this round's memory override a stale hit.
     default = max(
         candidates,
-        key=lambda candidate: candidate[3]
-        + (PROFILE_SCORE_BIAS if candidate[5] else 0.0),
+        key=lambda candidate: (
+            candidate[3] + (PROFILE_SCORE_BIAS if candidate[5] else 0.0)
+        ),
     )
     current = max(candidates, key=lambda candidate: (candidate[4], candidate[3]))
     selected = default
@@ -393,6 +401,66 @@ def _is_current_recall(story: DemoStory, memory: str) -> bool:
     return story.source_filename.startswith("episode:") and _has_negation(
         memory
     ) == _has_negation(story.answer)
+
+
+def _is_direct_current_recall(story: DemoStory, memory: str, query: str) -> bool:
+    """Accept a low-scored hit only when it clearly answers this demo round.
+
+    The global relevance floor protects against the platform's weak best-match
+    candidates. v2 can assign a just-written, short memory a score just below
+    that floor, though, so require lexical agreement with both the stored
+    memory and the user's question before treating it as a safe current hit.
+    """
+
+    return (
+        _memory_match_score(memory, story.answer) >= CURRENT_MEMORY_MATCH_THRESHOLD
+        and _memory_match_score(query, story.answer) >= CURRENT_MEMORY_MATCH_THRESHOLD
+    )
+
+
+def _buffered_recall_story(
+    memory: str,
+    query: str,
+    payload: dict[str, Any],
+    *,
+    user_id: str,
+) -> DemoStory | None:
+    """Build a final v2 fallback from this session's in-flight messages."""
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+
+    candidates: list[tuple[float, str, str]] = []
+    for message in _as_dicts(data.get("unprocessed_messages")):
+        content = _string_field(message, "content")
+        if not content:
+            continue
+        memory_match = _memory_match_score(memory, content)
+        query_match = _memory_match_score(query, content)
+        if (
+            memory_match < CURRENT_MEMORY_MATCH_THRESHOLD
+            or query_match < CURRENT_MEMORY_MATCH_THRESHOLD
+        ):
+            continue
+        candidates.append(
+            (memory_match + query_match, content, _string_field(message, "id"))
+        )
+
+    if not candidates:
+        return None
+    _, answer, message_id = max(candidates, key=lambda candidate: candidate[0])
+    return DemoStory(
+        owner=user_id,
+        memory=memory,
+        query=query,
+        answer=_humanize_answer(answer, user_id),
+        source_filename=f"buffer:{message_id[:12] or 'live'}",
+        fact_filename="",
+        # In-flight messages are intentionally unranked in v2, so do not invent
+        # a similarity score for the UI.
+        score=0.0,
+    )
 
 
 def _memory_match_score(memory: str, answer: str) -> float:
