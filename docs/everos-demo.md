@@ -22,8 +22,9 @@ Each round runs the memory lifecycle and visualizes its four stages:
 4. **Recall** finds it again when you ask a related question.
 
 The same particle sphere flows continuously across all four stages. At the end,
-the particles burst across the memory field, fade to an empty beat, and reform
-as the next ingest cycle begins.
+the particles burst across the memory field and fade away. A small core of
+yellow and white particles keeps moving at the center, then expands smoothly as
+the next ingest cycle begins.
 
 If the demo service is temporarily unavailable or the trial limit is reached,
 the UI explains what happened and points you toward running with your own key.

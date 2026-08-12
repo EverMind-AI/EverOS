@@ -128,8 +128,9 @@ everos demo
 一个能够召回它的问题。不需要 API key，也不需要提前启动 server。每一轮都能
 直观看到记忆经历完整流程：ingest -> extract -> index -> recall。
 
-粒子球会随四个阶段持续变化，随后散落到 memory field、完全淡出，再重新聚合，
-进入下一轮。完整体验见 [docs/everos-demo.md](docs/everos-demo.md)。输入 `/` 可以
+粒子球会随四个阶段持续变化，随后散落到 memory field 并淡出；中心会先留下少量
+黄白粒子攒动，再由中心向外扩展成完整球体，进入下一轮。完整体验见
+[docs/everos-demo.md](docs/everos-demo.md)。输入 `/` 可以
 查看可用命令（`/replay`、`/live`、`/quit`）；`ctrl+c` 随时退出。几轮之后，demo
 会引导你配置自己的 key（`everos init`，然后 `everos demo --live`）。
 

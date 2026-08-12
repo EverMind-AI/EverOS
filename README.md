@@ -128,7 +128,8 @@ needed. Each round lets you watch the memory move through the real lifecycle:
 ingest -> extract -> index -> recall.
 
 The particle sphere changes with each stage, then bursts across the memory
-field, fades to an empty beat, and reforms for the next round. See
+field and fades away. A small core of yellow and white particles keeps moving
+at the center, then expands smoothly into the next round. See
 [docs/everos-demo.md](docs/everos-demo.md) for the complete experience. Type
 `/` to see the commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime.
 After a few rounds the demo points you at configuring your own keys (`everos

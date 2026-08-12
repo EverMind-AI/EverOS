@@ -47,6 +47,10 @@ SHARED_EDGE_INNER_RADIUS = 0.72
 SHARED_EDGE_DENSITY = 0.29
 STAGE_INTERIOR_RADIUS = 0.69
 GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
+SUPERNOVA_CORE_START = 0.31
+SUPERNOVA_REFORM_START = 0.66
+SUPERNOVA_CORE_RADIUS = 0.1
+SUPERNOVA_REFORM_END = 0.94
 
 
 @dataclass(frozen=True)
@@ -830,7 +834,7 @@ def _build_soft_supernova(
     """Burst the recalled sphere into a bright Braille-particle supernova."""
 
     progress = max(0.0, min(1.0, progress))
-    if progress < 0.36:
+    if progress < SUPERNOVA_CORE_START:
         # Freeze the recalled source only while it explodes, so particle
         # identities cannot change in mid-flight.
         source = _build_working_cloud(
@@ -929,15 +933,46 @@ def _build_soft_supernova(
                     (delta_x / radius_x) ** 2 + (delta_y / radius_y) ** 2
                 )
                 particle_id = original_y * sub_width + original_x
-                if progress >= 0.36:
-                    appearance_start = 0.66 + 0.055 * _stable_hash(
-                        particle_id,
-                        64.7,
-                    )
+                if progress >= SUPERNOVA_CORE_START:
+                    if progress < SUPERNOVA_REFORM_START:
+                        core_growth = _smoothstep(
+                            max(
+                                0.0,
+                                min(
+                                    1.0,
+                                    (progress - SUPERNOVA_CORE_START) / 0.11,
+                                ),
+                            )
+                        )
+                        reveal_radius = SUPERNOVA_CORE_RADIUS * core_growth
+                    else:
+                        expansion = _smoothstep(
+                            max(
+                                0.0,
+                                min(
+                                    1.0,
+                                    (progress - SUPERNOVA_REFORM_START)
+                                    / (
+                                        SUPERNOVA_REFORM_END
+                                        - SUPERNOVA_REFORM_START
+                                    ),
+                                ),
+                            )
+                        )
+                        reveal_radius = SUPERNOVA_CORE_RADIUS + expansion
+                    # A soft radial edge makes the same moving ingest field
+                    # appear first at its origin, hold there, and then expand
+                    # continuously to the full sphere. No separate seed layer
+                    # is swapped out when the rest of the particles arrive.
+                    reveal_feather = 0.04
                     appearance = _smoothstep(
                         max(
                             0.0,
-                            min(1.0, (progress - appearance_start) / 0.18),
+                            min(
+                                1.0,
+                                (reveal_radius - radial + reveal_feather)
+                                / reveal_feather,
+                            ),
                         )
                     )
                     if appearance <= 0.12:

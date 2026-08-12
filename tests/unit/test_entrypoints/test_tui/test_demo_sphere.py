@@ -563,7 +563,7 @@ def test_dot_sphere_remembered_state_has_highlighted_node() -> None:
     assert frame.caption == "found the matching memory"
 
 
-def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
+def test_celebrating_supernova_seeds_the_center_and_restores_the_sphere() -> None:
     recalled = build_dot_sphere(
         width=41,
         height=19,
@@ -598,15 +598,22 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
         state_key="celebrating",
         state_phase=0.2,
     )
-    empty_frames = [
+    post_burst_blank = build_dot_sphere(
+        width=41,
+        height=19,
+        phase=0.93,
+        state_key="celebrating",
+        state_phase=0.3,
+    )
+    core_frames = [
         build_dot_sphere(
             width=41,
             height=19,
             phase=0.93,
             state_key="celebrating",
-            state_phase=empty_phase,
+            state_phase=core_phase,
         )
-        for empty_phase in (0.3, 0.5, 0.67)
+        for core_phase in (0.4, 0.5, 0.64)
     ]
     emerging = build_dot_sphere(
         width=41,
@@ -663,7 +670,19 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
     assert [(cell.x, cell.y, cell.glyph) for cell in drifted.cells] != [
         (cell.x, cell.y, cell.glyph) for cell in scattered.cells
     ]
-    assert all(not empty.cells for empty in empty_frames)
+    assert not post_burst_blank.cells
+    for core in core_frames:
+        assert 0 < len(core.cells) < len(start.cells) * 0.2
+        assert all(
+            math.hypot(cell.x - center_x, (cell.y - center_y) * 2) < 6.5
+            for cell in core.cells
+        )
+    core_styles = {cell.style for cell in core_frames[1].cells}
+    assert "#F5EDDC" in core_styles
+    assert core_styles - {"#F5EDDC", "#24231E"}
+    assert [(cell.x, cell.y, cell.glyph) for cell in core_frames[1].cells] != [
+        (cell.x, cell.y, cell.glyph) for cell in core_frames[2].cells
+    ]
     assert 0 < len(emerging.cells) < len(restored.cells)
     assert [(cell.x, cell.y, cell.glyph, cell.style) for cell in restored.cells] == [
         (cell.x, cell.y, cell.glyph, cell.style) for cell in next_ingest.cells
