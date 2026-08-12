@@ -589,14 +589,14 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.28,
+        state_phase=0.16,
     )
     drifted = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.4,
+        state_phase=0.2,
     )
     empty_frames = [
         build_dot_sphere(
@@ -606,14 +606,14 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
             state_key="celebrating",
             state_phase=empty_phase,
         )
-        for empty_phase in (0.53, 0.67, 0.78)
+        for empty_phase in (0.3, 0.5, 0.67)
     ]
     emerging = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.8,
+        state_phase=0.72,
     )
     restored = build_dot_sphere(
         width=41,

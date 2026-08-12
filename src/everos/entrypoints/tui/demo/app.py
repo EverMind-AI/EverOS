@@ -54,7 +54,7 @@ SPHERE_STAGE_SECONDS = 3.0
 SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
 SPHERE_TRANSITION_SECONDS = 0.35
 SPHERE_TRANSITION_TICKS = round(SPHERE_FPS * SPHERE_TRANSITION_SECONDS)
-SPHERE_SUPERNOVA_CYCLE_SECONDS = 12.0
+SPHERE_SUPERNOVA_CYCLE_SECONDS = 8.0
 SPHERE_SUPERNOVA_CYCLE_TICKS = round(
     SPHERE_FPS * SPHERE_SUPERNOVA_CYCLE_SECONDS
 )
@@ -62,6 +62,14 @@ SPHERE_SUPERNOVA_CYCLE_TICKS = round(
 # The four pipeline stages shown in the trace header. They line up with the four
 # core sphere states, so the active word can highlight in sync with the sphere.
 TRACE_STAGES = ("ingest", "extract", "index", "recall")
+SPHERE_IDLE_STATES = (
+    "booting",
+    "ingesting",
+    "extracting",
+    "indexing",
+    "recalling",
+    "celebrating",
+)
 
 # Words a user can type in the input box to quit back to the terminal.
 QUIT_COMMANDS = frozenset({"quit", "exit", ":q", "/quit", "/exit"})
@@ -91,6 +99,17 @@ def _sphere_state_phase(state: str, state_tick: int) -> float:
     return min(1.0, state_tick / SPHERE_STAGE_TICKS)
 
 
+def _idle_sphere_state(tick: int) -> str:
+    """Give celebration its full cycle while other idle states use 3 seconds."""
+
+    regular_state_ticks = (len(SPHERE_IDLE_STATES) - 1) * SPHERE_STAGE_TICKS
+    cycle_ticks = regular_state_ticks + SPHERE_SUPERNOVA_CYCLE_TICKS
+    cycle_tick = tick % cycle_ticks
+    if cycle_tick < regular_state_ticks:
+        return SPHERE_IDLE_STATES[cycle_tick // SPHERE_STAGE_TICKS]
+    return SPHERE_IDLE_STATES[-1]
+
+
 class DotSphereWidget(Static):
     """Animated dot sphere that represents EverOS memory activity."""
 
@@ -101,14 +120,7 @@ class DotSphereWidget(Static):
     }
     """
 
-    STATES = (
-        "booting",
-        "ingesting",
-        "extracting",
-        "indexing",
-        "recalling",
-        "celebrating",
-    )
+    STATES = SPHERE_IDLE_STATES
 
     class StageChanged(Message):
         """Posted when the sphere enters a different trace stage."""
@@ -175,7 +187,7 @@ class DotSphereWidget(Static):
         if self._driven_state is not None:
             state = self._driven_state
         else:
-            state = self.STATES[(self._tick // SPHERE_STAGE_TICKS) % len(self.STATES)]
+            state = _idle_sphere_state(self._tick)
         if self._rendered_state is None:
             self._rendered_state = state
         elif state != self._rendered_state:
@@ -221,7 +233,7 @@ class DotSphereWidget(Static):
                 previous_frame,
                 frame,
                 eased_progress,
-                background=EVEROS_BLACK,
+                background=EVEROS_SURFACE,
             )
             self._transition_tick += 1
             if self._transition_tick >= SPHERE_TRANSITION_TICKS:

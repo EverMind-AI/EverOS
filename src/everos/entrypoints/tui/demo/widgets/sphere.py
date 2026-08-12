@@ -843,7 +843,7 @@ def _build_soft_supernova(
         width,
         height,
     )
-    animation_time = progress * math.tau * 3.6
+    animation_time = progress * math.tau * 2.4
 
     contraction = _smoothstep(min(1.0, progress / 0.035))
     contraction_release = 1 - _smoothstep(
@@ -911,15 +911,15 @@ def _build_soft_supernova(
                     (delta_x / radius_x) ** 2 + (delta_y / radius_y) ** 2
                 )
                 particle_id = original_y * sub_width + original_x
-                if progress >= 0.54:
-                    appearance_start = 0.755 + 0.055 * _stable_hash(
+                if progress >= 0.36:
+                    appearance_start = 0.66 + 0.055 * _stable_hash(
                         particle_id,
                         64.7,
                     )
                     appearance = _smoothstep(
                         max(
                             0.0,
-                            min(1.0, (progress - appearance_start) / 0.13),
+                            min(1.0, (progress - appearance_start) / 0.18),
                         )
                     )
                     if appearance <= 0.12:
@@ -1035,11 +1035,11 @@ def _build_soft_supernova(
                     )
                 )
 
-                fade_start = 0.34 + 0.06 * _stable_hash(
+                fade_start = 0.14 + 0.04 * _stable_hash(
                     particle_id,
                     91.6,
                 )
-                fade_duration = 0.12 + 0.04 * speed_hash
+                fade_duration = 0.1 + 0.04 * speed_hash
                 fade_raw = max(
                     0.0,
                     min(1.0, (progress - fade_start) / fade_duration),
