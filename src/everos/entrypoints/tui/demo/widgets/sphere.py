@@ -30,8 +30,6 @@ BRAILLE_DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),
     (0x08, 0x10, 0x20, 0x80),
 )
-RIBBON_LANES = 10
-RIBBON_SEGMENTS = 96
 WORKING_ORBITS_PER_RADIUS = 0.55
 WORKING_SAMPLES_PER_RADIUS = 1.6
 WORKING_MIN_ORBITS = 14
@@ -39,8 +37,6 @@ WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
 SOLVING_BACKGROUND_DENSITY = 0.19
 SOLVING_SIGNAL_COUNT = 5
-# Braille adaptation of Thinking Orbs' MIT-licensed "composing" ribbon:
-# https://github.com/Jakubantalik/thinking-orbs
 CONFETTI_POINT_COUNT = 150
 CONFETTI_GLYPHS = (".", "+", "*", "x")
 CONFETTI_STYLES = (
@@ -150,7 +146,14 @@ def build_dot_sphere(
             phase=phase,
             state=state,
         )
-    if state.key in {"booting", "ingesting"}:
+    if state.key in {
+        "booting",
+        "ingesting",
+        "indexing",
+        "recalling",
+        "remembered",
+        "source",
+    }:
         return _build_working_cloud(
             width=width,
             height=height,
@@ -165,117 +168,13 @@ def build_dot_sphere(
             state=state,
         )
 
-    sub_width = width * 2
-    sub_height = height * 4
-    sub_center_x = (sub_width - 1) / 2
-    sub_center_y = (sub_height - 1) / 2
-    radius_x = max(1.0, sub_center_x - 6)
-    radius_y = max(1.0, (sub_center_y - 4) * 1.05)
-    animation_time = phase * math.tau
-    camera_tilt = 0.3
-    band_tilt = 0.55
-    sin_camera, cos_camera = math.sin(camera_tilt), math.cos(camera_tilt)
-    sin_band, cos_band = math.sin(band_tilt), math.cos(band_tilt)
-    wave_scale = {
-        "booting": 0.8,
-        "ingesting": 1.0,
-        "extracting": 1.2,
-        "indexing": 0.75,
-        "recalling": 1.0,
-        "remembered": 0.6,
-        "source": 0.6,
-    }[state.key]
-
-    masks: dict[tuple[int, int], int] = {}
-    depths: dict[tuple[int, int], float] = {}
-    highlighted_positions: set[tuple[int, int]] = set()
-    for lane in range(RIBBON_LANES):
-        lane_offset = (lane - (RIBBON_LANES - 1) / 2) * 0.075
-        for segment in range(RIBBON_SEGMENTS):
-            angle = (segment / RIBBON_SEGMENTS) * math.tau
-            undulation = wave_scale * (
-                0.13 * math.sin(angle * 3 - animation_time * 1.7 + lane * 0.22)
-                + 0.055 * math.sin(angle * 5 + animation_time * 1.1)
-            )
-            offset = lane_offset + undulation
-
-            x3 = math.cos(angle)
-            y3 = cos_band * math.sin(angle) - sin_band * offset
-            z3 = sin_band * math.sin(angle) + cos_band * offset
-            length = math.sqrt(x3 * x3 + y3 * y3 + z3 * z3)
-            x3 = x3 / length * 0.9
-            y3 = y3 / length * 0.9
-            z3 = z3 / length * 0.9
-
-            y_projected = y3 * cos_camera - z3 * sin_camera
-            depth = y3 * sin_camera + z3 * cos_camera
-            vertical_breath = wave_scale * (
-                0.065 + 0.045 * math.sin(angle * 3 - animation_time * 1.7 + lane * 0.08)
-            )
-            y_projected += math.copysign(vertical_breath, y_projected)
-            sub_x = round(sub_center_x + x3 * radius_x)
-            sub_y = round(sub_center_y - y_projected * radius_y)
-            if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
-                continue
-            _add_braille_dot(
-                masks=masks,
-                depths=depths,
-                sub_x=sub_x,
-                sub_y=sub_y,
-                z=depth,
-            )
-
-    if state.key in {"recalling", "remembered", "source"}:
-        target_ratios = (
-            ((0.72, 0.28), (0.63, 0.37), (0.78, 0.44), (0.57, 0.24))
-            if state.key == "recalling"
-            else ((0.72, 0.28),)
-        )
-        for target_x, target_y in target_ratios:
-            available = (
-                position for position in masks if position not in highlighted_positions
-            )
-            active_target = min(
-                available,
-                key=lambda position: (
-                    (position[0] - (width - 1) * target_x) ** 2
-                    + (position[1] - (height - 1) * target_y) ** 2
-                ),
-            )
-            highlighted_positions.add(active_target)
-
-    cells = []
-    for (x, y), mask in masks.items():
-        highlighted = (x, y) in highlighted_positions
-        if highlighted and state.key == "recalling":
-            style = EVEROS_CYAN
-        elif highlighted:
-            style = EVEROS_YELLOW
-        else:
-            style = _style_for_depth(depths[(x, y)], state)
-        cells.append(
-            DotCell(
-                x=x,
-                y=y,
-                z=depths[(x, y)],
-                glyph=chr(BRAILLE_BASE + mask),
-                style=style,
-                highlighted=highlighted,
-            )
-        )
-
-    return DotSphereFrame(
-        width=width,
-        height=height,
-        state=state,
-        cells=tuple(sorted(cells, key=lambda cell: (cell.y, cell.x))),
-    )
+    raise AssertionError(f"unhandled sphere state: {state.key}")
 
 
 def _build_working_cloud(
     *, width: int, height: int, phase: float, state: SphereState
 ) -> DotSphereFrame:
-    """Render Working as a dense sphere whose particles follow coherent flows."""
+    """Render a full orbital sphere with state-specific white particles."""
 
     sub_width, sub_height, center_x, center_y, radius_x, radius_y = _sphere_geometry(
         width, height
@@ -387,16 +286,48 @@ def _build_working_cloud(
                     active_depths.get(position, -1.0),
                 )
 
+    highlighted_positions: set[tuple[int, int]] = set()
+    if state.key in {"recalling", "remembered", "source"}:
+        target_ratios = (
+            ((0.72, 0.28), (0.63, 0.37), (0.78, 0.44), (0.57, 0.24))
+            if state.key == "recalling"
+            else ((0.72, 0.28),)
+        )
+        for target_x, target_y in target_ratios:
+            available = (
+                position
+                for position in masks
+                if position not in highlighted_positions and depths[position] > -0.15
+            )
+            highlighted_positions.add(
+                min(
+                    available,
+                    key=lambda position: (
+                        (position[0] - (width - 1) * target_x) ** 2
+                        + (position[1] - (height - 1) * target_y) ** 2
+                    ),
+                )
+            )
+
     cells = []
     for (x, y), mask in masks.items():
         active_depth = active_depths.get((x, y))
-        if active_depth is not None and state.key == "ingesting":
+        target_highlighted = (x, y) in highlighted_positions
+        if target_highlighted and state.key == "recalling":
+            style = EVEROS_CYAN
+        elif target_highlighted:
+            style = EVEROS_YELLOW
+        elif state.key == "indexing" and depths[(x, y)] > 0.3:
+            # Preserve the old Index behavior: the organized front layer turns
+            # white, now projected onto the complete orbital sphere.
+            style = EVEROS_CYAN
+        elif active_depth is not None and state.key == "ingesting":
             style = _style_for_active_particle(active_depth, allow_white=True)
         elif active_depth is not None:
             style = _style_for_active_particle(active_depth, allow_white=False)
         else:
             style = _style_for_ghost_depth(depths[(x, y)])
-        highlighted = active_depth is not None and style == EVEROS_CYAN
+        highlighted = target_highlighted or style == EVEROS_CYAN
         cells.append(
             DotCell(
                 x=x,

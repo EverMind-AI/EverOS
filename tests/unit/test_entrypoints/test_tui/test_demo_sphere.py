@@ -11,34 +11,39 @@ from everos.entrypoints.tui.demo.widgets.sphere import (
 )
 
 
-def test_dot_sphere_forms_dense_hollow_particle_ribbon() -> None:
-    frame = build_dot_sphere(width=41, height=19, phase=0.0, state_key="indexing")
+def test_pipeline_states_form_complete_particle_spheres() -> None:
+    for state_key in ("ingesting", "extracting", "indexing", "recalling"):
+        frame = build_dot_sphere(
+            width=41,
+            height=19,
+            phase=0.0,
+            state_key=state_key,
+        )
 
-    assert frame.width == 41
-    assert frame.height == 19
-    assert frame.caption == "organizing memory for fast recall"
-    assert len(frame.cells) >= 110
+        assert frame.width == 41
+        assert frame.height == 19
+        assert len(frame.cells) >= 300
 
-    center_x = (frame.width - 1) / 2
-    center_y = (frame.height - 1) / 2
-    radius_x = center_x
-    radius_y = center_y
-    for cell in frame.cells:
-        normalized = ((cell.x - center_x) / radius_x) ** 2 + (
-            (cell.y - center_y) / radius_y
-        ) ** 2
-        assert normalized <= 1.08
+        center_x = (frame.width - 1) / 2
+        center_y = (frame.height - 1) / 2
+        radius_x = center_x
+        radius_y = center_y
+        for cell in frame.cells:
+            normalized = ((cell.x - center_x) / radius_x) ** 2 + (
+                (cell.y - center_y) / radius_y
+            ) ** 2
+            assert normalized <= 1.08
 
-    center_cells = [
-        cell
-        for cell in frame.cells
-        if abs(cell.x - center_x) < frame.width * 0.06
-        and abs(cell.y - center_y) < frame.height * 0.1
-    ]
-    assert not center_cells
+        center_cells = [
+            cell
+            for cell in frame.cells
+            if abs(cell.x - center_x) < frame.width * 0.08
+            and abs(cell.y - center_y) < frame.height * 0.12
+        ]
+        assert len(center_cells) >= 20
 
 
-def test_dot_sphere_keeps_particle_ribbon_inside_terminal_frame() -> None:
+def test_dot_sphere_keeps_complete_sphere_inside_terminal_frame() -> None:
     frame = build_dot_sphere(width=37, height=17, phase=0.0, state_key="indexing")
     row_spans = _row_spans(frame)
 
@@ -48,8 +53,8 @@ def test_dot_sphere_keeps_particle_ribbon_inside_terminal_frame() -> None:
     assert row_spans[frame.height // 2] >= 28
 
 
-def test_working_and_extracting_keep_a_round_outer_shell_through_cycle() -> None:
-    for state_key in ("booting", "extracting"):
+def test_all_pipeline_states_keep_a_round_outer_shell_through_cycle() -> None:
+    for state_key in ("ingesting", "extracting", "indexing", "recalling"):
         occupied_widths = []
         occupied_heights = []
         for phase in (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
@@ -97,7 +102,7 @@ def test_processing_states_match_the_unchanged_particle_density() -> None:
 
 
 def test_processing_particle_density_adapts_to_terminal_size() -> None:
-    for state_key in ("booting", "ingesting", "extracting"):
+    for state_key in ("ingesting", "extracting", "indexing", "recalling"):
         dot_counts = []
         for width, height in ((25, 11), (41, 19), (61, 27)):
             frame = build_dot_sphere(
@@ -116,77 +121,61 @@ def test_processing_particle_density_adapts_to_terminal_size() -> None:
 
 def test_processing_states_share_the_same_adaptive_outer_size() -> None:
     for width, height in ((25, 11), (37, 17), (41, 19), (61, 27)):
-        ingesting = build_dot_sphere(
+        reference = build_dot_sphere(
             width=width,
             height=height,
             phase=0.25,
             state_key="ingesting",
         )
-        extracting = build_dot_sphere(
-            width=width,
-            height=height,
-            phase=0.25,
-            state_key="extracting",
-        )
-
-        assert _frame_extents(ingesting) == _frame_extents(extracting)
-
-    indexing = build_dot_sphere(
-        width=41,
-        height=19,
-        phase=0.25,
-        state_key="indexing",
-    )
-    ingesting = build_dot_sphere(
-        width=41,
-        height=19,
-        phase=0.25,
-        state_key="ingesting",
-    )
-    assert _frame_extents(ingesting) == _frame_extents(indexing)
+        for state_key in ("extracting", "indexing", "recalling"):
+            frame = build_dot_sphere(
+                width=width,
+                height=height,
+                phase=0.25,
+                state_key=state_key,
+            )
+            assert _frame_extents(reference) == _frame_extents(frame)
 
 
-def test_ingesting_and_extracting_keep_the_same_outer_position_through_cycle() -> None:
+def test_pipeline_states_keep_the_same_outer_position_through_cycle() -> None:
     for phase in (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
-        ingesting = build_dot_sphere(
+        reference = build_dot_sphere(
             width=41,
             height=19,
             phase=phase,
             state_key="ingesting",
         )
-        extracting = build_dot_sphere(
-            width=41,
-            height=19,
-            phase=phase,
-            state_key="extracting",
-        )
+        for state_key in ("extracting", "indexing", "recalling"):
+            frame = build_dot_sphere(
+                width=41,
+                height=19,
+                phase=phase,
+                state_key=state_key,
+            )
+            assert _frame_extents(reference) == _frame_extents(frame)
 
-        assert _frame_extents(ingesting) == _frame_extents(extracting)
 
-
-def test_ingesting_and_extracting_keep_comparable_default_size_density() -> None:
+def test_pipeline_states_keep_comparable_default_size_density() -> None:
     for phase in (0.0, 0.5, 1.0, 1.5, 1.8):
-        ingesting = build_dot_sphere(
+        reference = build_dot_sphere(
             width=37,
             height=17,
             phase=phase,
             state_key="ingesting",
         )
-        extracting = build_dot_sphere(
-            width=37,
-            height=17,
-            phase=phase,
-            state_key="extracting",
+        reference_density = sum(
+            _braille_subdot_count(cell.glyph) for cell in reference.cells
         )
-        ingesting_density = sum(
-            _braille_subdot_count(cell.glyph) for cell in ingesting.cells
-        )
-        extracting_density = sum(
-            _braille_subdot_count(cell.glyph) for cell in extracting.cells
-        )
-
-        assert ingesting_density * 0.88 <= extracting_density
-        assert extracting_density <= ingesting_density * 1.12
+        for state_key in ("extracting", "indexing", "recalling"):
+            frame = build_dot_sphere(
+                width=37,
+                height=17,
+                phase=phase,
+                state_key=state_key,
+            )
+            density = sum(_braille_subdot_count(cell.glyph) for cell in frame.cells)
+            assert reference_density * 0.88 <= density
+            assert density <= reference_density * 1.12
 
 
 def test_working_reference_uses_dark_paths_and_bright_moving_particles() -> None:
@@ -205,7 +194,7 @@ def test_working_reference_uses_dark_paths_and_bright_moving_particles() -> None
 
 
 def test_processing_states_make_near_particles_larger_than_far_particles() -> None:
-    for state_key in ("ingesting", "extracting"):
+    for state_key in ("ingesting", "extracting", "indexing", "recalling"):
         frame = build_dot_sphere(
             width=41,
             height=19,
@@ -308,22 +297,25 @@ def test_dot_sphere_stays_continuous_past_old_phase_wrap() -> None:
     )
 
 
-def test_dot_sphere_keeps_center_void_during_breathing_cycle() -> None:
-    for phase in (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
-        frame = build_dot_sphere(
-            width=41,
-            height=19,
-            phase=phase,
-            state_key="indexing",
-        )
-        center_x = (frame.width - 1) / 2
-        center_y = (frame.height - 1) / 2
+def test_pipeline_states_keep_a_filled_center_during_animation_cycle() -> None:
+    for state_key in ("ingesting", "extracting", "indexing", "recalling"):
+        for phase in (0.0, 0.25, 0.5, 0.75):
+            frame = build_dot_sphere(
+                width=41,
+                height=19,
+                phase=phase,
+                state_key=state_key,
+            )
+            center_x = (frame.width - 1) / 2
+            center_y = (frame.height - 1) / 2
 
-        assert not any(
-            abs(cell.x - center_x) < frame.width * 0.04
-            and abs(cell.y - center_y) < frame.height * 0.08
-            for cell in frame.cells
-        )
+            center_cells = [
+                cell
+                for cell in frame.cells
+                if abs(cell.x - center_x) < frame.width * 0.08
+                and abs(cell.y - center_y) < frame.height * 0.12
+            ]
+            assert len(center_cells) >= 20
 
 
 def test_working_and_ingesting_share_particle_motion_but_not_color() -> None:
@@ -554,11 +546,17 @@ def test_ingesting_and_indexing_use_different_white_proportions() -> None:
 
 
 def test_recalling_highlights_several_white_memory_nodes() -> None:
-    frame = build_dot_sphere(width=41, height=19, phase=0.25, state_key="recalling")
+    for phase in (0.0, 0.5, 1.0, 1.5, 2.0):
+        frame = build_dot_sphere(
+            width=41,
+            height=19,
+            phase=phase,
+            state_key="recalling",
+        )
 
-    highlighted = [cell for cell in frame.cells if cell.highlighted]
-    assert len(highlighted) == 4
-    assert {cell.style for cell in highlighted} == {"#F5EDDC"}
+        highlighted = [cell for cell in frame.cells if cell.highlighted]
+        assert len(highlighted) == 4
+        assert {cell.style for cell in highlighted} == {"#F5EDDC"}
 
 
 def _row_spans(frame: DotSphereFrame) -> dict[int, int]:
