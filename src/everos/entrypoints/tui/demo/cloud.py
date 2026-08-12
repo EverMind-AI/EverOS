@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -59,6 +60,8 @@ PROFILE_SCORE_BIAS = 0.08
 # this score we report an honest miss instead of an absurd answer. Tuned from
 # observed scores: clearly-irrelevant queries top out ~0.48, real hits >= 0.50.
 MIN_RELEVANCE_SCORE = 0.5
+CURRENT_MEMORY_MATCH_THRESHOLD = 0.28
+CURRENT_MEMORY_PREFERENCE_MARGIN = 0.08
 # The just-flushed memory needs a moment to land in the index. Searching
 # immediately returns a stale ranking (older memories that are already indexed),
 # which is why a "store X then recall X" round could come back with an unrelated
@@ -263,11 +266,19 @@ def search_recall(
             timeout_seconds=timeout_seconds,
         )
         story = _best_recall_story(memory, query, search, user_id=user_id)
-        if story is not None and (best is None or story.score > best.score):
+        if story is not None and (
+            best is None
+            or _story_priority(story, memory) > _story_priority(best, memory)
+        ):
             best = story
-        # Any positive score means indexing has produced a ranked result; stop
-        # polling. Whether it counts as a hit is decided by the relevance floor.
-        if best is not None and best.score > 0.0:
+        # An older memory can already have a positive score while the memory
+        # flushed in this round is still entering the index. Stop only once the
+        # answer actually resembles the current memory; otherwise keep polling.
+        if (
+            best is not None
+            and best.score > 0.0
+            and _is_current_recall(best, memory)
+        ):
             break
         if attempt < search_attempts - 1:
             time.sleep(search_interval_seconds)
@@ -332,9 +343,7 @@ def _best_recall_story(
     if not isinstance(data, dict):
         return None
 
-    profile_score = -1.0
-    profile_answer = ""
-    profile_source = ""
+    candidates: list[tuple[str, str, str, float, float, bool]] = []
     for profile in _as_dicts(data.get("profiles")):
         profile_data = profile.get("profile_data")
         text = _string_field(
@@ -343,40 +352,52 @@ def _best_recall_story(
         if not text:
             continue
         score = _float_field(profile, "score")
-        if score > profile_score:
-            profile_score = score
-            profile_answer = _clean_profile_text(text)
-            profile_source = f"profile:{_string_field(profile, 'id')[:12] or 'live'}"
+        answer = _clean_profile_text(text)
+        candidates.append(
+            (
+                answer,
+                f"profile:{_string_field(profile, 'id')[:12] or 'live'}",
+                "",
+                score,
+                _memory_match_score(memory, answer),
+                True,
+            )
+        )
 
-    episode_score = -1.0
-    episode_answer = ""
-    episode_source = ""
-    episode_fact = ""
     for episode in _as_dicts(data.get("episodes")):
         answer, episode_id, fact_id = _episode_answer(episode, memory)
         score = _episode_score(episode)
-        if score > episode_score:
-            episode_score = score
-            episode_answer = answer
-            episode_source = f"episode:{episode_id}"
-            episode_fact = f"fact:{fact_id}"
-
-    # Prefer the concise profile answer unless an episode clearly out-scores it:
-    # profiles read as a direct one-line answer, episodes as a verbose summary.
-    use_profile = profile_answer and profile_score + PROFILE_SCORE_BIAS >= episode_score
-    if use_profile:
-        best_answer, best_source, best_fact = profile_answer, profile_source, ""
-    elif episode_answer:
-        best_answer, best_source, best_fact = (
-            episode_answer,
-            episode_source,
-            episode_fact,
+        candidates.append(
+            (
+                answer,
+                f"episode:{episode_id}",
+                f"fact:{fact_id}",
+                score,
+                _memory_match_score(memory, answer),
+                False,
+            )
         )
-    else:
+
+    if not candidates:
         return None
-    # Report the strongest signal so the relevance floor never demotes a real hit
-    # to a miss just because we displayed the (near-tied) concise profile answer.
-    best_score = max(profile_score, episode_score, 0.0)
+
+    # Keep the existing concise-profile bias as the default ranking, but let a
+    # candidate that clearly matches this round's memory override a stale hit.
+    default = max(
+        candidates,
+        key=lambda candidate: candidate[3]
+        + (PROFILE_SCORE_BIAS if candidate[5] else 0.0),
+    )
+    current = max(candidates, key=lambda candidate: (candidate[4], candidate[3]))
+    selected = default
+    if (
+        current[4] >= CURRENT_MEMORY_MATCH_THRESHOLD
+        and current[4] >= default[4] + CURRENT_MEMORY_PREFERENCE_MARGIN
+    ):
+        selected = current
+    best_answer, best_source, best_fact = selected[:3]
+    # Preserve the strongest platform relevance signal for the existing floor.
+    best_score = max(candidate[3] for candidate in candidates)
 
     return DemoStory(
         owner=user_id,
@@ -386,6 +407,77 @@ def _best_recall_story(
         source_filename=best_source,
         fact_filename=best_fact,
         score=best_score,
+    )
+
+
+def _story_priority(story: DemoStory, memory: str) -> tuple[float, float]:
+    """Prefer a result tied to this round before comparing platform scores."""
+
+    return _memory_match_score(memory, story.answer), story.score
+
+
+def _is_current_recall(story: DemoStory, memory: str) -> bool:
+    """Return whether polling has likely reached this round's indexed memory."""
+
+    if _memory_match_score(memory, story.answer) >= CURRENT_MEMORY_MATCH_THRESHOLD:
+        return True
+    # Episode text may be translated or paraphrased beyond cheap lexical
+    # matching. It is still safe to accept unless its polarity contradicts the
+    # current memory; stale profiles remain the main reason to keep polling.
+    return story.source_filename.startswith("episode:") and _has_negation(
+        memory
+    ) == _has_negation(story.answer)
+
+
+def _memory_match_score(memory: str, answer: str) -> float:
+    """Estimate whether a recalled answer belongs to the just-stored memory."""
+
+    memory_normalized = _normalize_match_text(memory)
+    answer_normalized = _normalize_match_text(answer)
+    if not memory_normalized or not answer_normalized:
+        return 0.0
+    if len(answer_normalized) >= 2 and answer_normalized in memory_normalized:
+        return 1.0
+    if len(memory_normalized) >= 2 and memory_normalized in answer_normalized:
+        return 1.0
+
+    memory_features = _match_features(memory)
+    answer_features = _match_features(answer)
+    if not memory_features or not answer_features:
+        return 0.0
+    overlap = len(memory_features & answer_features) / len(memory_features)
+    if _has_negation(memory) != _has_negation(answer):
+        overlap *= 0.35
+    return overlap
+
+
+def _normalize_match_text(text: str) -> str:
+    return "".join(re.findall(r"[a-z0-9\u4e00-\u9fff]+", text.lower()))
+
+
+def _match_features(text: str) -> set[str]:
+    features = {
+        word
+        for word in re.findall(r"[a-z0-9]+", text.lower())
+        if len(word) > 2 and word not in {"the", "and", "that", "this", "you", "user"}
+    }
+    for sequence in re.findall(r"[\u4e00-\u9fff]+", text):
+        if len(sequence) == 1:
+            features.add(sequence)
+        else:
+            features.update(
+                sequence[index : index + 2] for index in range(len(sequence) - 1)
+            )
+    if _has_negation(text):
+        features.add("__negation__")
+    return features
+
+
+def _has_negation(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in ("不", "没", "讨厌", "not ", "n't", "dislike", "hate")
     )
 
 

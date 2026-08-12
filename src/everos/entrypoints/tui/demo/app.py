@@ -48,7 +48,7 @@ DEFAULT_DEMO_ROUNDS = 3
 
 # Sphere animation cadence. Each named state (and its highlighted trace word)
 # dwells for SPHERE_STAGE_SECONDS so a viewer can read the stage it represents.
-SPHERE_FPS = 12
+SPHERE_FPS = 24
 SPHERE_STAGE_SECONDS = 3.0
 SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
 
@@ -90,8 +90,6 @@ class DotSphereWidget(Static):
         "extracting",
         "indexing",
         "recalling",
-        "remembered",
-        "source",
         "celebrating",
     )
 
@@ -148,7 +146,9 @@ class DotSphereWidget(Static):
         return max(13, frame_width), max(7, frame_height)
 
     def _advance(self) -> None:
-        self._phase = (self._phase + 0.025) % 1.0
+        # Keep time monotonic. Wrapping at 1.0 made the non-integer wave
+        # frequencies jump to a different shape every few seconds.
+        self._phase += 0.3 / SPHERE_FPS
         self._tick += 1
         if self._driven_state is not None:
             state = self._driven_state
@@ -395,11 +395,13 @@ class EverOSDemoApp(App[None]):
         #   "query"   -> ask one question (recalls -> an answer)
         # the "*ing" variants mean a cloud call is in flight; "done" -> cap hit.
         self._conversation_phase = "memory"
+        self._current_memory = ""
         self._round = 0
         self._lights = _initial_lights()
         self._log: list[tuple[str, str]] = []
         self._history_chars = 0
         self._saved_pct: int | None = None
+        self._recall_celebration_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
@@ -605,6 +607,7 @@ class EverOSDemoApp(App[None]):
         # Stored. Move to step 2 and invite the question — still no answer yet.
         # The sphere stays pinned at the last stored stage (indexing) until a
         # question actually recalls; it is not reset here on purpose.
+        self._current_memory = memory
         self.action_replay()
         self._conversation_phase = "query"
         self.query_one("#console-prompt", Static).update(_prompt_query_text())
@@ -618,7 +621,7 @@ class EverOSDemoApp(App[None]):
             story = await anyio.to_thread.run_sync(
                 partial(
                     cloud.search_recall,
-                    query,
+                    self._current_memory,
                     query,
                     base_url=base_url,
                     user_id=user_id,
@@ -674,8 +677,13 @@ class EverOSDemoApp(App[None]):
             )
         )
         self.action_replay()
-        # The sphere holds at "recalling" (recall light is lit); the next round's
-        # store reset is what hands it back to the idle loop.
+        # Hold the white recall targets long enough to read, then celebrate.
+        # There is no intermediate yellow remembered/source state.
+        if self._lights.get("recall") == "hit":
+            self._recall_celebration_timer = self.set_timer(
+                SPHERE_STAGE_SECONDS,
+                self._celebrate_recall,
+            )
         self._round += 1
         if self._round >= self._max_rounds:
             self._enter_done(_quota_guidance_text())
@@ -692,11 +700,19 @@ class EverOSDemoApp(App[None]):
         self._sync_sphere_to_rail()
 
     def _reset_round_lights(self) -> None:
+        if self._recall_celebration_timer is not None:
+            self._recall_celebration_timer.stop()
+            self._recall_celebration_timer = None
         self._lights.update(
             conversation="idle", facts="idle", index="idle", recall="idle"
         )
         self.query_one("#signal-rail", Static).update(_signal_rail_text(self._lights))
         self._sync_sphere_to_rail()
+
+    def _celebrate_recall(self) -> None:
+        self._recall_celebration_timer = None
+        if self._lights.get("recall") == "hit":
+            self.query_one(DotSphereWidget).drive_state("celebrating")
 
     def _set_light(self, key: str, state: str) -> None:
         self._lights[key] = state

@@ -259,6 +259,65 @@ def test_search_recall_prefers_higher_scored_profile_over_episode() -> None:
     assert story.source_filename == "profile:pr1"
 
 
+def test_search_recall_waits_for_current_memory_instead_of_stale_profile() -> None:
+    calls = 0
+
+    def fake_request(*_: object, **__: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        stale_profile = {
+            "id": "old-food",
+            "score": 0.68,
+            "profile_data": {"embed_text": "food preference: 我爱吃草莓"},
+        }
+        if calls == 1:
+            return {"data": {"profiles": [stale_profile], "episodes": []}}
+        return {
+            "data": {
+                "profiles": [stale_profile],
+                "episodes": [
+                    {
+                        "id": "current-durian",
+                        "score": 0.56,
+                        "atomic_facts": [
+                            {
+                                "id": "fact-durian",
+                                "atomic_fact": "我不爱吃榴莲",
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+    story = cloud.search_recall(
+        "我不爱吃榴莲",
+        "我不爱吃什么",
+        base_url="https://api.test",
+        user_id="u",
+        api_key="k",
+        request_json=fake_request,
+        search_attempts=2,
+        search_interval_seconds=0.0,
+        settle_seconds=0.0,
+    )
+
+    assert calls == 2
+    assert story is not None
+    assert story.answer == "我不爱吃榴莲"
+    assert story.source_filename == "episode:current-durian"
+
+
+def test_current_memory_match_penalizes_opposite_preference() -> None:
+    memory = "我不爱吃榴莲"
+
+    current = cloud._memory_match_score(memory, "用户不喜欢吃榴莲")
+    stale = cloud._memory_match_score(memory, "我爱吃草莓")
+
+    assert current >= cloud.CURRENT_MEMORY_MATCH_THRESHOLD
+    assert current > stale
+
+
 def test_search_recall_below_relevance_floor_is_a_miss() -> None:
     # An off-topic query still gets a best-but-weak candidate from the platform;
     # below the relevance floor we must report a miss, not an absurd answer.

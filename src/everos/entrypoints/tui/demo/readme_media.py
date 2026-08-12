@@ -110,12 +110,12 @@ async def render_media(out_dir: Path) -> tuple[Path, Path]:
 
     await anyio.Path(out_dir).mkdir(parents=True, exist_ok=True)
     screenshot = out_dir / "everos-demo-tui-screenshot.svg"
-    remembered_index = DotSphereWidget.STATES.index("remembered")
-    remembered = FramePlan(
-        state=DotSphereWidget.STATES[remembered_index],
-        phase=remembered_index / len(DotSphereWidget.STATES),
+    recall_index = DotSphereWidget.STATES.index("recalling")
+    recalled = FramePlan(
+        state=DotSphereWidget.STATES[recall_index],
+        phase=recall_index / len(DotSphereWidget.STATES),
     )
-    await _export_frame(screenshot, remembered, terminal_size=TERMINAL_SIZE)
+    await _export_frame(screenshot, recalled, terminal_size=TERMINAL_SIZE)
 
     plan = build_frame_plan(DotSphereWidget.STATES)
     frame_paths: list[Path] = []

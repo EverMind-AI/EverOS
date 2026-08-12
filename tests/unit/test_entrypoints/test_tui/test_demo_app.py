@@ -100,8 +100,10 @@ def test_demo_tui_sphere_renders_round_in_terminal_cells() -> None:
     assert SPHERE_FRAME_HEIGHT == 17
 
 
-def test_demo_tui_celebrates_after_source_reveal() -> None:
-    assert DotSphereWidget.STATES[-2:] == ("source", "celebrating")
+def test_demo_tui_celebrates_directly_after_recall() -> None:
+    assert DotSphereWidget.STATES[-2:] == ("recalling", "celebrating")
+    assert "remembered" not in DotSphereWidget.STATES
+    assert "source" not in DotSphereWidget.STATES
     assert set(DotSphereWidget.STATES).issubset(SPHERE_STATES)
 
 
@@ -263,6 +265,17 @@ async def test_sphere_tracks_furthest_lit_rail_stage() -> None:
         assert sphere._driven_state is None
 
 
+async def test_successful_recall_goes_directly_to_celebration() -> None:
+    app = EverOSDemoApp(interactive=True)
+    async with app.run_test():
+        sphere = app.query_one(DotSphereWidget)
+        app._set_light("recall", "hit")
+        assert sphere._driven_state == "recalling"
+
+        app._celebrate_recall()
+        assert sphere._driven_state == "celebrating"
+
+
 def test_ctrl_c_is_a_priority_quit_binding() -> None:
     quit_keys = {
         binding.key
@@ -415,7 +428,7 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
 
     from everos.entrypoints.tui.demo import cloud
 
-    searched: list[str] = []
+    searched: list[tuple[str, str]] = []
 
     monkeypatch.setattr(cloud, "add_memory", lambda *_, **__: "task-1")
     monkeypatch.setattr(cloud, "wait_task", lambda *_, **__: None)
@@ -425,7 +438,7 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
         memory: str, query: str, *, base_url: str, user_id: str, **_: object
     ) -> DemoStory:
         assert base_url == "http://server.test"
-        searched.append(query)
+        searched.append((memory, query))
         return _story(memory, query, f"recalled<{query}>")
 
     monkeypatch.setattr(cloud, "search_recall", fake_search)
@@ -455,7 +468,7 @@ async def test_demo_tui_store_step_has_no_answer_then_ask_answers(monkeypatch) -
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert searched == ["我喜欢吃什么"]
+        assert searched == [("我喜欢吃杨梅", "我喜欢吃什么")]
         assert app._story.query == "我喜欢吃什么"
         assert app._story.answer == "recalled<我喜欢吃什么>"
         assert "Yosemite" not in app._story.answer  # BUG 305 stays fixed
