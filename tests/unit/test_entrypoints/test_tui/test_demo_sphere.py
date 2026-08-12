@@ -606,14 +606,14 @@ def test_celebrating_supernova_scatters_fades_and_restores_the_sphere() -> None:
             state_key="celebrating",
             state_phase=empty_phase,
         )
-        for empty_phase in (0.56, 0.67, 0.78)
+        for empty_phase in (0.53, 0.67, 0.78)
     ]
     emerging = build_dot_sphere(
         width=41,
         height=19,
         phase=0.93,
         state_key="celebrating",
-        state_phase=0.85,
+        state_phase=0.8,
     )
     restored = build_dot_sphere(
         width=41,

@@ -25,6 +25,7 @@ EVEROS_GOLD_LIGHT = "#DDA21E"
 EVEROS_CYAN = "#F5EDDC"
 EVEROS_GREEN = "#D8CDAF"
 EVEROS_ORANGE = "#C09525"
+EVEROS_FIELD_BACKGROUND = "#24231E"
 BRAILLE_BASE = 0x2800
 BRAILLE_DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),
@@ -911,7 +912,7 @@ def _build_soft_supernova(
                 )
                 particle_id = original_y * sub_width + original_x
                 if progress >= 0.54:
-                    appearance_start = 0.79 + 0.06 * _stable_hash(
+                    appearance_start = 0.755 + 0.055 * _stable_hash(
                         particle_id,
                         64.7,
                     )
@@ -921,10 +922,10 @@ def _build_soft_supernova(
                             min(1.0, (progress - appearance_start) / 0.13),
                         )
                     )
-                    if appearance <= 0.02:
+                    if appearance <= 0.12:
                         continue
                     style = _blend_hex_color(
-                        "#1D1C18",
+                        EVEROS_FIELD_BACKGROUND,
                         cell.style,
                         appearance,
                     )
@@ -952,10 +953,10 @@ def _build_soft_supernova(
                 )
                 launch = 1 - (1 - launch_raw) ** 3
 
-                origin_angle = math.atan2(delta_y, delta_x)
-                scatter_angle = origin_angle + (
-                    _stable_hash(particle_id, 31.2) - 0.5
-                ) * math.pi * 0.9
+                # Decouple the launch direction from the particle's original
+                # place on the sphere. A radial correlation turns the burst
+                # into a larger circular shell instead of a chaotic release.
+                scatter_angle = math.tau * _stable_hash(particle_id, 31.2)
                 scatter_distance = 0.93 * math.sqrt(
                     _stable_hash(particle_id, 57.8)
                 )
@@ -1044,7 +1045,7 @@ def _build_soft_supernova(
                     min(1.0, (progress - fade_start) / fade_duration),
                 )
                 visibility = 1 - _smoothstep(fade_raw)
-                if visibility <= 0.02:
+                if visibility <= 0.12:
                     continue
                 wave = (
                     max(0.0, 1 - abs(radial - wave_radius) / 0.09)
@@ -1063,7 +1064,11 @@ def _build_soft_supernova(
                     else EVEROS_YELLOW_PALE
                 )
                 style = _blend_hex_color(cell.style, glow_target, glow)
-                style = _blend_hex_color(style, "#1D1C18", 1 - visibility)
+                style = _blend_hex_color(
+                    style,
+                    EVEROS_FIELD_BACKGROUND,
+                    1 - visibility,
+                )
                 add_particle(
                     sub_x=sub_x,
                     sub_y=sub_y,
@@ -1106,7 +1111,7 @@ def _build_soft_supernova(
                     trail_y = round(sub_y - math.sin(travel_angle) * distance)
                     trail_style = _blend_hex_color(
                         style,
-                        "#1D1C18",
+                        EVEROS_FIELD_BACKGROUND,
                         min(
                             0.94,
                             0.22
