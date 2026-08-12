@@ -136,7 +136,7 @@ After a few rounds the demo points you at configuring your own keys (`everos
 init`, then `everos demo --live`).
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
+  <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
 For the looping showroom view used in README media, run:

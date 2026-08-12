@@ -135,7 +135,7 @@ everos demo
 会引导你配置自己的 key（`everos init`，然后 `everos demo --live`）。
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
+  <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
 README 媒体使用的循环 showroom view 可以这样运行：
