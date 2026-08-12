@@ -54,6 +54,10 @@ SPHERE_STAGE_SECONDS = 3.0
 SPHERE_STAGE_TICKS = round(SPHERE_FPS * SPHERE_STAGE_SECONDS)
 SPHERE_TRANSITION_SECONDS = 0.35
 SPHERE_TRANSITION_TICKS = round(SPHERE_FPS * SPHERE_TRANSITION_SECONDS)
+SPHERE_SUPERNOVA_CYCLE_SECONDS = 7.0
+SPHERE_SUPERNOVA_CYCLE_TICKS = round(
+    SPHERE_FPS * SPHERE_SUPERNOVA_CYCLE_SECONDS
+)
 
 # The four pipeline stages shown in the trace header. They line up with the four
 # core sphere states, so the active word can highlight in sync with the sphere.
@@ -75,6 +79,16 @@ def _state_to_stage(state_key: str) -> int:
     """Map a sphere state to its trace-stage index (-1 = no stage highlighted)."""
 
     return _STATE_TO_STAGE.get(state_key, -1)
+
+
+def _sphere_state_phase(state: str, state_tick: int) -> float:
+    """Return a one-shot phase for stages and a seamless loop for celebration."""
+
+    if state == "celebrating":
+        return (state_tick % SPHERE_SUPERNOVA_CYCLE_TICKS) / (
+            SPHERE_SUPERNOVA_CYCLE_TICKS - 1
+        )
+    return min(1.0, state_tick / SPHERE_STAGE_TICKS)
 
 
 class DotSphereWidget(Static):
@@ -169,12 +183,13 @@ class DotSphereWidget(Static):
             self._transition_tick = 0
             self._state_tick = 0
         frame_width, frame_height = self._frame_size()
+        state_phase = _sphere_state_phase(state, self._state_tick)
         frame = build_dot_sphere(
             width=frame_width,
             height=frame_height,
             phase=self._phase,
             state_key=state,
-            state_phase=min(1.0, self._state_tick / SPHERE_STAGE_TICKS),
+            state_phase=state_phase,
         )
         if self._transition_from_state is not None:
             previous_frame = build_dot_sphere(

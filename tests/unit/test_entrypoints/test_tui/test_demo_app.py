@@ -7,6 +7,7 @@ import pytest
 from everos.entrypoints.tui.demo.app import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
+    SPHERE_SUPERNOVA_CYCLE_TICKS,
     TERMINAL_CELL_HEIGHT_RATIO,
     TRACE_STAGES,
     DotSphereWidget,
@@ -19,6 +20,7 @@ from everos.entrypoints.tui.demo.app import (
     _recall_proof_text,
     _signal_rail_text,
     _source_tree_text,
+    _sphere_state_phase,
     _state_to_stage,
 )
 from everos.entrypoints.tui.demo.data import DemoStory
@@ -224,6 +226,18 @@ def test_state_to_stage_maps_sphere_states_to_trace_words() -> None:
     assert _state_to_stage("indexing") == 2
     assert _state_to_stage("recalling") == 3
     assert _state_to_stage("booting") == -1
+
+
+def test_supernova_phase_repeats_after_one_complete_cycle() -> None:
+    assert _sphere_state_phase("celebrating", 0) == 0.0
+    assert _sphere_state_phase(
+        "celebrating",
+        SPHERE_SUPERNOVA_CYCLE_TICKS - 1,
+    ) == 1.0
+    assert _sphere_state_phase(
+        "celebrating",
+        SPHERE_SUPERNOVA_CYCLE_TICKS,
+    ) == 0.0
 
 
 def test_query_answer_bar_keeps_both_labels() -> None:

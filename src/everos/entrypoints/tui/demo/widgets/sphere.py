@@ -839,25 +839,47 @@ def _build_soft_supernova(
         width,
         height,
     )
+    animation_time = phase * math.tau
 
-    if progress < 0.14:
-        contraction = _smoothstep(progress / 0.14)
+    if progress < 0.1:
+        contraction = _smoothstep(progress / 0.1)
         scale_x = 1 - 0.1 * contraction
         scale_y = 1 - 0.075 * contraction
-        burst = 0.0
+        explosion = 0.0
+    elif progress < 0.42:
+        burst_input = (progress - 0.1) / 0.32
+        explosion = 1 - (1 - burst_input) ** 3
+        scale_x = 0.9 + 0.4 * explosion
+        scale_y = 0.925 + 0.355 * explosion
+    elif progress < 0.64:
+        explosion = 1.0
+        scale_x = 1.3
+        scale_y = 1.28
+    elif progress < 0.92:
+        reassembly = _smoothstep((progress - 0.64) / 0.28)
+        explosion = 1 - reassembly
+        scale_x = 1 + 0.3 * explosion
+        scale_y = 1 + 0.28 * explosion
     else:
-        burst_input = max(0.0, min(1.0, (progress - 0.14) / 0.38))
-        burst = 1 - (1 - burst_input) ** 3
-        scale_x = 0.9 + 0.34 * burst
-        scale_y = 0.925 + 0.215 * burst
+        explosion = 0.0
+        scale_x = 1.0
+        scale_y = 1.0
 
-    flash = max(0.0, 1 - abs(progress - 0.15) / 0.075)
-    fade = 0.76 * _smoothstep(max(0.0, (progress - 0.68) / 0.32))
-    wave_progress = max(0.0, min(1.0, (progress - 0.14) / 0.44))
+    flash = max(0.0, 1 - abs(progress - 0.12) / 0.065)
+    dim_out = _smoothstep(max(0.0, (progress - 0.54) / 0.14))
+    brighten_in = _smoothstep(max(0.0, (progress - 0.84) / 0.16))
+    fade = 0.48 * dim_out * (1 - brighten_in)
+    wave_progress = max(0.0, min(1.0, (progress - 0.1) / 0.38))
     wave_radius = 0.08 + 1.02 * (1 - (1 - wave_progress) ** 2)
-    fragmentation = _smoothstep(max(0.0, (progress - 0.2) / 0.48))
-    trails_visible = _smoothstep(max(0.0, (progress - 0.18) / 0.18)) * (
-        1 - _smoothstep(max(0.0, (progress - 0.76) / 0.2))
+    wave_strength = 1 - _smoothstep(max(0.0, (progress - 0.48) / 0.1))
+    fragmentation = explosion * _smoothstep(
+        max(0.0, (progress - 0.18) / 0.22)
+    )
+    scatter_out = _smoothstep(max(0.0, (progress - 0.26) / 0.2))
+    scatter_in = 1 - _smoothstep(max(0.0, (progress - 0.66) / 0.26))
+    scatter_mix = scatter_out * scatter_in
+    trails_visible = _smoothstep(max(0.0, (progress - 0.14) / 0.16)) * (
+        1 - _smoothstep(max(0.0, (progress - 0.68) / 0.18))
     )
 
     masks: dict[tuple[int, int], int] = {}
@@ -907,30 +929,46 @@ def _build_soft_supernova(
                 particle_id = original_y * sub_width + original_x
                 speed_hash = _stable_hash(particle_id, 44.1)
                 spark_hash = _stable_hash(particle_id, 19.7)
-                particle_boost = burst * 0.08 * (speed_hash - 0.35)
+                particle_boost = explosion * 0.08 * (speed_hash - 0.35)
                 if spark_hash > 0.86:
                     particle_boost += (
-                        burst * 0.12 * ((spark_hash - 0.86) / 0.14)
+                        explosion * 0.12 * ((spark_hash - 0.86) / 0.14)
                     )
                 tangent = (
                     _stable_hash(particle_id, 83.7) - 0.5
                 ) * 2.4 * fragmentation
-                sub_x = round(
+                radial_x = (
                     center_x
                     + delta_x * (scale_x + particle_boost)
                     - math.sin(angle) * tangent
                 )
-                sub_y = round(
+                radial_y = (
                     center_y
                     + delta_y * (scale_y + particle_boost * 0.65)
                     + math.cos(angle) * tangent
                 )
+                target_x = (
+                    _stable_hash(particle_id, 31.2) * (sub_width - 1)
+                    + 1.4 * math.sin(animation_time * 0.22 + particle_id * 0.13)
+                )
+                target_y = (
+                    _stable_hash(particle_id, 57.8) * (sub_height - 1)
+                    + 1.4 * math.cos(animation_time * 0.19 + particle_id * 0.17)
+                )
+                target_mix = scatter_mix
+                sub_x = round(radial_x + (target_x - radial_x) * target_mix)
+                sub_y = round(radial_y + (target_y - radial_y) * target_mix)
                 wave = (
                     max(0.0, 1 - abs(radial - wave_radius) / 0.09)
-                    if progress > 0.14
+                    * wave_strength
+                    if progress > 0.1
                     else 0.0
                 )
-                glow = min(0.92, flash * 0.82 + wave * 0.58)
+                twinkle = scatter_mix * max(
+                    0.0,
+                    math.sin(animation_time * 0.72 + particle_id * 0.41),
+                )
+                glow = min(0.92, flash * 0.82 + wave * 0.58 + twinkle * 0.22)
                 glow_target = (
                     EVEROS_CYAN
                     if cell.highlighted or (flash > 0 and radial < 0.32)
@@ -949,10 +987,14 @@ def _build_soft_supernova(
                 if spark_hash <= 0.82 or trails_visible <= 0:
                     continue
                 trail_count = 2 if spark_hash > 0.92 else 1
+                travel_angle = math.atan2(
+                    (sub_y - center_y) / radius_y,
+                    (sub_x - center_x) / radius_x,
+                )
                 for trail_step in range(1, trail_count + 1):
                     distance = trail_step * (1.0 + trails_visible * 1.7)
-                    trail_x = round(sub_x - math.cos(angle) * distance)
-                    trail_y = round(sub_y - math.sin(angle) * distance)
+                    trail_x = round(sub_x - math.cos(travel_angle) * distance)
+                    trail_y = round(sub_y - math.sin(travel_angle) * distance)
                     trail_style = _blend_hex_color(
                         style,
                         "#1D1C18",
