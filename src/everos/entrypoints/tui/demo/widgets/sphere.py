@@ -37,6 +37,8 @@ WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
 SOLVING_BACKGROUND_DENSITY = 0.11
 SOLVING_SIGNAL_COUNT = 9
+SOLVING_SIGNAL_TRAIL_STEPS = 3
+SOLVING_SIGNAL_TRAIL_GAP = 0.06
 SHARED_EDGE_INNER_RADIUS = 0.72
 SHARED_EDGE_DENSITY = 0.29
 STAGE_INTERIOR_RADIUS = 0.69
@@ -548,48 +550,56 @@ def _build_solving_network(
     # graph. Reaching a node therefore leads into the next edge instead of
     # respawning elsewhere, matching the reference's surface traversal.
     for signal in range(SOLVING_SIGNAL_COUNT):
-        signal_clock = animation_time * 0.46 + signal / SOLVING_SIGNAL_COUNT
-        segment = math.floor(signal_clock)
+        head_clock = animation_time * 0.46 + signal / SOLVING_SIGNAL_COUNT
         seed = round((signal + 0.5) * node_count / SOLVING_SIGNAL_COUNT) % node_count
-        route = _signal_route_edge(
-            adjacency=adjacency,
-            seed=seed,
-            segment=segment,
-            signal=signal,
-        )
-        if route is None:
-            continue
-        start_index, end_index = route
-        progress = signal_clock - math.floor(signal_clock)
-        start_x, start_y, start_z = projected_nodes[start_index]
-        end_x, end_y, end_z = projected_nodes[end_index]
-        sub_x = round(start_x + (end_x - start_x) * progress)
-        sub_y = round(start_y + (end_y - start_y) * progress)
-        depth = start_z + (end_z - start_z) * progress
-        for offset_x, offset_y in _particle_offsets_for_depth(depth, pulse=True):
-            signal_x = sub_x + offset_x
-            signal_y = sub_y + offset_y
-            if not _inside_sphere_projection(
-                signal_x,
-                signal_y,
-                center_x,
-                center_y,
-                radius_x,
-                radius_y,
-            ):
+        for trail_step in range(SOLVING_SIGNAL_TRAIL_STEPS):
+            signal_clock = max(
+                0.0,
+                head_clock - trail_step * SOLVING_SIGNAL_TRAIL_GAP,
+            )
+            segment = math.floor(signal_clock)
+            route = _signal_route_edge(
+                adjacency=adjacency,
+                seed=seed,
+                segment=segment,
+                signal=signal,
+            )
+            if route is None:
                 continue
-            _add_braille_dot(
-                masks=masks,
-                depths=depths,
-                sub_x=signal_x,
-                sub_y=signal_y,
-                z=depth,
-            )
-            position = (signal_x // 2, signal_y // 4)
-            signal_depths[position] = max(
+            start_index, end_index = route
+            progress = signal_clock - math.floor(signal_clock)
+            start_x, start_y, start_z = projected_nodes[start_index]
+            end_x, end_y, end_z = projected_nodes[end_index]
+            sub_x = round(start_x + (end_x - start_x) * progress)
+            sub_y = round(start_y + (end_y - start_y) * progress)
+            depth = start_z + (end_z - start_z) * progress
+            for offset_x, offset_y in _particle_offsets_for_depth(
                 depth,
-                signal_depths.get(position, -1.0),
-            )
+                pulse=trail_step == 0,
+            ):
+                signal_x = sub_x + offset_x
+                signal_y = sub_y + offset_y
+                if not _inside_sphere_projection(
+                    signal_x,
+                    signal_y,
+                    center_x,
+                    center_y,
+                    radius_x,
+                    radius_y,
+                ):
+                    continue
+                _add_braille_dot(
+                    masks=masks,
+                    depths=depths,
+                    sub_x=signal_x,
+                    sub_y=signal_y,
+                    z=depth,
+                )
+                position = (signal_x // 2, signal_y // 4)
+                signal_depths[position] = max(
+                    depth,
+                    signal_depths.get(position, -1.0),
+                )
 
     shared_edge_positions = _replace_with_shared_outer_shell(
         masks=masks,
@@ -1055,15 +1065,15 @@ def _style_for_network_edge(depth: float, visibility: float) -> str:
 
     depth_ratio = (depth + 1) / 2
     ink = visibility * (0.55 + 0.45 * depth_ratio)
-    if depth > 0.48 and ink > 0.22:
+    if depth > 0.42 and ink > 0.17:
         return EVEROS_YELLOW
-    if ink > 0.34:
+    if ink > 0.27:
         return EVEROS_GOLD_LIGHT
-    if ink > 0.22:
+    if ink > 0.17:
         return EVEROS_GOLD_WARM
-    if ink > 0.12:
+    if ink > 0.09:
         return EVEROS_GOLD_MID
-    if ink > 0.06:
+    if ink > 0.04:
         return EVEROS_GOLD_DARK
     return EVEROS_GOLD_DEEP
 

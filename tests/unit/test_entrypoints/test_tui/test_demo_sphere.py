@@ -415,7 +415,7 @@ def test_extracting_uses_solving_network_with_internal_sparks() -> None:
     )
     highlighted = [cell for cell in frame.cells if cell.highlighted]
     assert len(frame.cells) >= 120
-    assert len(highlighted) >= 5
+    assert len(highlighted) >= 12
     highlighted_styles = {cell.style for cell in highlighted}
     assert "#F5EDDC" in highlighted_styles
     assert highlighted_styles <= {
