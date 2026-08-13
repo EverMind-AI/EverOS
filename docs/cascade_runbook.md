@@ -131,22 +131,67 @@ everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
 
-> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the LanceDB tables. A running daemon holds
-> cached table handles that would keep pointing at (and writing to) the
-> dropped dataset, corrupting the rebuild. This is the one cascade
-> command that is **not** safe to run alongside a live server.
+> **Stop the `everos server` and other mutating cascade commands first.**
+> Unlike `cascade sync`, rebuild **drops and recreates** the LanceDB tables.
+> A running daemon or CLI writer holds cached table handles that would keep
+> pointing at the dropped dataset. Current servers and `sync`, `fix --apply`,
+> and `backfill` hold the shared projection lifecycle lock for their complete
+> LanceDB lifetime. Rebuild requires the exclusive side plus the legacy OME
+> lock, and refuses to start while any such process is active. During an
+> upgrade, do not launch an older binary concurrently with rebuild: an old
+> process does not participate in the projection-lock protocol until its OME
+> guard has been acquired.
 
 What it does, in order:
 
-1. **Drops** every business LanceDB table (`drop_business_tables`) and
-   evicts them from the connection cache.
-2. **Recreates** them empty from the current schema + FTS indexes
-   (`ensure_business_indexes`).
-3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
-   md file re-enqueues as `added` on the next scan.
-4. **Re-scans + drains** (`sync_once`): re-embeds and re-inserts every
-   md entry.
+1. **Establishes the exclusion precondition** described above. If either the
+   projection lifecycle lock or legacy OME lock is not free, rebuild exits
+   before changing the marker, queue, or LanceDB tables.
+2. **Atomically publishes `REBUILDING` for storage generation 2** before
+   opening the stores or performing any destructive work. This invalidates
+   a previously valid `READY` marker before a crash can expose a partial
+   rebuild.
+3. **Clears** the cascade queue (`md_change_state.reset_all`) so every md
+   file re-enqueues as `added` on the next scan.
+4. **Drops** every business LanceDB table (`drop_business_tables`) and
+   evicts it from the connection cache.
+5. **Recreates** the tables from the current schema and builds the FTS
+   indexes (`ensure_business_indexes`).
+6. **Re-scans and drains** (`sync_once`, followed by additional drains
+   while work remains): re-embeds and re-inserts every md entry.
+7. **Requires a clean completion state**: `pending == 0`,
+   `failed_retryable == 0`, and `failed_permanent == 0`. If any count is
+   nonzero, rebuild fails and leaves the marker as `REBUILDING`.
+8. **Atomically publishes `READY(2)`** only after all completion checks
+   pass. Only then does the command print `rebuild complete`.
+
+If the process crashes, is interrupted, or encounters an error after step 2,
+the marker remains `REBUILDING`. The API server and mutating cascade commands
+fail closed rather than serving or changing a partial index. Correct the
+underlying error and rerun `everos cascade rebuild` with the server stopped;
+the rebuild recovery path deliberately does not require a `READY` marker.
+
+### Storage-generation gate on startup
+
+Generation 2 changes the value-level identity stored in LanceDB row primary
+keys. A schema check cannot distinguish generation-1 keys from generation-2
+keys, so startup validates `.index/lancedb/.storage_identity.json` before it
+opens LanceDB or runs schema/index migrations.
+
+Startup and mutating cascade commands acquire the shared projection lifecycle
+lock before checking the marker and keep it until their LanceDB handles close.
+They accept only `READY(2)` and refuse to proceed when the marker is:
+
+- missing on a memory root that contains source markdown or LanceDB artifacts;
+- malformed or contains unknown fields or JSON types;
+- `READY` for any generation other than 2; or
+- `REBUILDING`, including after an interrupted or failed rebuild.
+
+A marker-less root is initialized directly as `READY(2)` only when it is
+provably fresh: it has neither source markdown nor LanceDB artifacts. For every
+blocked state above, stop the server and rerun `everos cascade rebuild`. The
+read-only `cascade status` and `cascade fix` listing remain available through
+SQLite so operators can inspect the queue without opening LanceDB.
 
 It deliberately **skips `verify_business_schemas`** — the drift it
 recovers from would otherwise trip that guard on startup before the

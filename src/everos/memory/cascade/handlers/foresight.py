@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.lancedb import Foresight, ParentType, foresight_repo
 
 from ._common import (
@@ -86,7 +87,12 @@ class ForesightHandler(BaseDailyLogHandler):
             " ".join(self._deps.tokenizer.tokenize(evidence)) if evidence else None
         )
         return Foresight(
-            id=f"{owner_id}_{entry.entry_id}",
+            id=daily_log_storage_id(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=owner_id,
+                entry_id=entry.entry_id,
+            ),
             entry_id=entry.entry_id,
             owner_id=owner_id,
             owner_type=owner_type,

@@ -156,9 +156,8 @@ def _q(value: str) -> str:
 
     LanceDB has no parameterised query API; predicates are strings.
     Doubling the quote (``'`` → ``''``) is the SQL-standard way to keep
-    a literal single quote inside a single-quoted string. everos's PK
-    convention (``<owner_id>_<entry_id>``) never carries quotes — this
-    is defensive.
+    a literal single quote inside a single-quoted string. Current storage keys
+    never carry quotes; this remains defensive for generic callers.
     """
     return value.replace("'", "''")
 
@@ -663,8 +662,8 @@ class LanceRepoBase[T: BaseLanceTable]:
 
         Uses LanceDB scalar filter ``<id_field> = '<id_value>'``. Single
         quotes in ``id_value`` are doubled to avoid breaking the SQL-like
-        predicate; everos's PK convention is ``<owner_id>_<entry_id>``
-        which never contains quotes, so the escape is defensive.
+        predicate. Current storage keys never contain quotes, so the escape is
+        defensive for them and required for arbitrary ``id_field`` callers.
         """
         async with self._deadline(_READ_TIMEOUT_SECONDS, "get_by_id"):
             table = await self._table()

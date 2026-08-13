@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -47,11 +47,17 @@ from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.lancedb import (
+    ProjectionLockUnavailableError,
     dispose_connection,
     drop_business_tables,
     ensure_business_indexes,
     get_connection,
+    mark_storage_identity_ready,
+    mark_storage_identity_rebuilding,
+    projection_rebuild_lock,
+    projection_server_lock,
     verify_business_schemas,
+    verify_storage_identity_ready,
 )
 from everos.infra.persistence.sqlite import (
     dispose_engine,
@@ -61,7 +67,6 @@ from everos.infra.persistence.sqlite import (
 from everos.memory.cascade import (
     CascadeOrchestrator,
     match_kind,
-    ome_lock_is_free,
 )
 
 logger = get_logger(__name__)
@@ -136,7 +141,11 @@ _VERBOSE_OPTION_HELP = (
 
 @asynccontextmanager
 async def _runtime(  # type: ignore[no-untyped-def]
-    *, verify: bool = True, ensure: bool = True
+    *,
+    verify: bool = True,
+    ensure: bool = True,
+    identity_gate: bool = True,
+    lifecycle_lock: bool = True,
 ):
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
@@ -160,18 +169,48 @@ async def _runtime(  # type: ignore[no-untyped-def]
     Rebuild recreates the tables and their indexes itself after dropping,
     so skipping the pre-drop pass loses nothing.
     """
+    async with AsyncExitStack() as stack:
+        if lifecycle_lock:
+            # Every mutating CLI path participates in the same projection
+            # lifecycle protocol as the API server. Acquire the shared side
+            # before checking READY and retain it until both stores are closed,
+            # so an offline rebuild cannot race a writer that already passed
+            # the generation gate.
+            await stack.enter_async_context(
+                projection_server_lock(MemoryRoot.resolve())
+            )
+        try:
+            if identity_gate:
+                # Gate before opening either store or running schema/index migrations.
+                # A legacy or interrupted projection must not be mutated by setup.
+                await verify_storage_identity_ready()
+            engine = get_engine()
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLModel.metadata.create_all)
+            await get_connection()
+            if verify:
+                await verify_business_schemas()
+            if ensure:
+                await ensure_business_indexes()
+            yield
+        finally:
+            await dispose_connection()
+            await dispose_engine()
+
+
+@asynccontextmanager
+async def _sqlite_runtime():  # type: ignore[no-untyped-def]
+    """Open only queue metadata for read-only status/failure inspection.
+
+    This deliberately does not open or migrate LanceDB, so diagnostics remain
+    available in REBUILDING state without bypassing the projection gate.
+    """
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    await get_connection()
-    if verify:
-        await verify_business_schemas()
-    if ensure:
-        await ensure_business_indexes()
     try:
         yield
     finally:
-        await dispose_connection()
         await dispose_engine()
 
 
@@ -221,18 +260,21 @@ def sync(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
+        rel: str | None = None
+        spec = None
+        if path is not None:
+            rel = _resolve_relative(path)
+            spec = match_kind(rel)
+            if spec is None:
+                typer.echo(
+                    f"error: path does not match any registered cascade kind: {rel}",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+
         async with _runtime():
             orchestrator = _build_orchestrator()
-            if path is not None:
-                rel = _resolve_relative(path)
-                spec = match_kind(rel)
-                if spec is None:
-                    typer.echo(
-                        f"error: path does not match any registered cascade "
-                        f"kind: {rel}",
-                        err=True,
-                    )
-                    raise typer.Exit(code=1)
+            if rel is not None and spec is not None:
                 await md_change_state_repo.force_enqueue(rel, spec.name)
                 typer.echo(f"force-enqueued {rel} (kind={spec.name})")
             processed = await orchestrator.sync_once()
@@ -260,7 +302,7 @@ def status(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime():
+        async with _sqlite_runtime():
             summary = await md_change_state_repo.queue_summary()
             lag = max(0, summary.max_lsn - summary.last_processed_lsn)
             typer.echo("queue:")
@@ -316,7 +358,8 @@ def fix(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime():
+        runtime = _runtime() if apply else _sqlite_runtime()
+        async with runtime:
             rows = await md_change_state_repo.list_failed()
             if not rows:
                 typer.echo("no failed rows")
@@ -472,18 +515,6 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
-    if not ome_lock_is_free():
-        typer.echo(
-            "error: a server (or another exclusive CLI phase) is running on "
-            "this memory root.\n"
-            "  cascade rebuild drops and recreates the LanceDB tables; a live "
-            "daemon holds cached\n"
-            "  table handles and would keep writing to the dropped dataset. "
-            "Stop `everos server`\n"
-            "  first, then re-run.",
-            err=True,
-        )
-        raise typer.Exit(code=3)
     if not yes:
         typer.confirm(
             "Drop all LanceDB business tables and re-index from markdown? "
@@ -491,39 +522,86 @@ def rebuild(
             abort=True,
         )
 
+    memory_root = MemoryRoot.resolve()
+
     async def _run() -> None:
-        # verify=False: the on-disk schema may be exactly what we're here
-        # to fix; the startup guard would abort before we could rebuild.
-        # ensure=False: the pre-drop migration pass would raise on exactly
-        # the damage we are here to repair (see _runtime).
-        async with _runtime(verify=False, ensure=False):
-            # Reset the queue FIRST so every crash window converges on
-            # "queue pending → next scan re-indexes". Doing it after the
-            # drop leaves a window where a crash yields empty tables with
-            # a fully-`done` queue: nothing re-indexes, the schema guard
-            # passes, and the deployment comes up silently empty — the
-            # exact state this command exists to avoid.
-            cleared = await md_change_state_repo.reset_all()
-            typer.echo(f"reset {cleared} cascade queue row(s)")
-            dropped = await drop_business_tables()
-            typer.echo(
-                f"dropped {len(dropped)} LanceDB table(s): "
-                f"{', '.join(dropped) or '(none)'}"
-            )
-            # Recreate the tables (current schema) + FTS indexes.
-            await ensure_business_indexes()
-            # Re-scan + drain: re-embed and re-insert every md entry.
-            orchestrator = _build_orchestrator()
-            processed = await orchestrator.sync_once()
-            typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
+        # Acquire both exclusions before publishing REBUILDING. The projection
+        # lock excludes current servers/rebuilds; the retained OME portalocker
+        # detects an already-running older server which holds its legacy guard.
+        async with projection_rebuild_lock(memory_root):
+            memory_root.ensure()
+            # Publish REBUILDING before opening LanceDB or SQLite. Any failure
+            # after this point must leave startup blocked until recovery succeeds.
+            mark_storage_identity_rebuilding(memory_root)
+
+            # verify=False: the on-disk schema may be exactly what we're here
+            # to fix; the startup guard would abort before we could rebuild.
+            # ensure=False: the pre-drop migration pass would raise on exactly
+            # the damage we are here to repair (see _runtime).
+            async with _runtime(
+                verify=False,
+                ensure=False,
+                identity_gate=False,
+                lifecycle_lock=False,
+            ):
+                # Reset the queue FIRST so every crash window converges on
+                # "queue pending → next scan re-indexes". Doing it after the
+                # drop leaves a window where a crash yields empty tables with
+                # a fully-`done` queue: nothing re-indexes, the schema guard
+                # passes, and the deployment comes up silently empty — the
+                # exact state this command exists to avoid.
+                cleared = await md_change_state_repo.reset_all()
+                typer.echo(f"reset {cleared} cascade queue row(s)")
+                dropped = await drop_business_tables()
+                typer.echo(
+                    f"dropped {len(dropped)} LanceDB table(s): "
+                    f"{', '.join(dropped) or '(none)'}"
+                )
+                # Recreate the tables (current schema) + FTS indexes.
+                await ensure_business_indexes()
+                # Re-scan + drain: re-embed and re-insert every md entry.
+                orchestrator = _build_orchestrator()
+                processed = await orchestrator.sync_once()
+                summary = await orchestrator.queue_summary()
+                while summary.pending:
+                    drained = await orchestrator.drain_once()
+                    if drained == 0:
+                        break
+                    processed += drained
+                    summary = await orchestrator.queue_summary()
+                if (
+                    summary.pending
+                    or summary.failed_retryable
+                    or summary.failed_permanent
+                ):
+                    raise RuntimeError(
+                        "cascade rebuild incomplete: "
+                        f"pending={summary.pending}, "
+                        f"failed_retryable={summary.failed_retryable}, "
+                        f"failed_permanent={summary.failed_permanent}. "
+                        "The storage identity remains REBUILDING; correct the "
+                        "failed inputs and rerun `everos cascade rebuild`."
+                    )
+                mark_storage_identity_ready(memory_root)
+                typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
 
     try:
         asyncio.run(_run())
+    except ProjectionLockUnavailableError as exc:
+        typer.echo(
+            "error: a server, rebuild, or exclusive OME phase is running on "
+            "this memory root.\n"
+            "  cascade rebuild did not modify the storage generation or index. "
+            f"Lock detail: {exc}\n"
+            "  Stop `everos server` or the conflicting command, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=3) from None
     except KeyboardInterrupt:
         typer.echo(
-            "\ninterrupted — the cascade queue is reset, so re-running "
-            "`everos cascade rebuild` (or starting the server) resumes the "
-            "re-index from where it stopped.",
+            "\ninterrupted; the storage identity remains REBUILDING. Re-run "
+            "`everos cascade rebuild --yes`. The server will refuse to start "
+            "until a rebuild completes.",
             err=True,
         )
         raise typer.Exit(code=130) from None

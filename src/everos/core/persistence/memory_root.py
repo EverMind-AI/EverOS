@@ -32,6 +32,8 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
+from everos.core.scope_ids import validate_app_id, validate_project_id
+
 # ── app / project directory-name convention ──────────────────────────────────
 #
 # A memory root is partitioned by ``<app>/<project>`` *before* the user-visible
@@ -53,11 +55,13 @@ _DEFAULT_PROJECT_DIR = "default_project"
 
 def app_dir_name(app_id: str) -> str:
     """Map an ``app_id`` to its on-disk directory name."""
+    validate_app_id(app_id)
     return _DEFAULT_APP_DIR if app_id == _DEFAULT_SCOPE_ID else app_id
 
 
 def project_dir_name(project_id: str) -> str:
     """Map a ``project_id`` to its on-disk directory name."""
+    validate_project_id(project_id)
     return _DEFAULT_PROJECT_DIR if project_id == _DEFAULT_SCOPE_ID else project_id
 
 

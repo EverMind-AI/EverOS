@@ -17,6 +17,7 @@ import pytest
 
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
+from everos.core.persistence.lancedb.row_id import user_profile_storage_id
 from everos.infra.persistence.lancedb import UserProfile
 from everos.infra.persistence.markdown import ProfileWriter, UserProfileFrontmatter
 from everos.memory.cascade.handlers import HandlerDeps, UserProfileHandler
@@ -113,7 +114,11 @@ async def test_first_pass_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.skipped == 0
     row = fake_repo.upserts[0][0]
-    assert row.id == "u_alice"
+    assert row.id == user_profile_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+    )
     assert row.owner_id == "u_alice"
     assert row.owner_type == "user"
     assert row.summary.startswith("Alice")
@@ -234,9 +239,14 @@ async def test_handle_deleted_drops_row(
     )
     handler = _handler(memory_root)
     await handler.handle_added_or_modified(md_path)
-    assert "u_alice" in fake_repo.rows
+    row_id = user_profile_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u_alice",
+    )
+    assert row_id in fake_repo.rows
 
     outcome = await handler.handle_deleted(md_path)
     assert outcome.deleted == 1
     assert fake_repo.deletes == [md_path]
-    assert "u_alice" not in fake_repo.rows
+    assert row_id not in fake_repo.rows

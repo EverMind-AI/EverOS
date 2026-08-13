@@ -5,9 +5,11 @@ Path: ``agents/<scope_id>/skills/skill_<name>/SKILL.md`` (plus sibling
 the frontmatter contract).
 
 Skills are *named entities* rather than daily-log entries: the
-LanceDB primary key is ``<owner_id>_<skill_name>`` (no date / seq).
-Upserts replace the file wholesale; the cascade daemon recomputes the
-``content`` index column by concatenating ``SKILL.md`` body with every
+LanceDB primary key is the generation-2 length-prefixed encoding of
+``(app_id, project_id, owner_id, skill_name)`` (no date / seq). The
+historical public wire id remains ``<owner_id>_<skill_name>``. Upserts
+replace the file wholesale; the cascade daemon recomputes the ``content``
+index column by concatenating ``SKILL.md`` body with every
 ``references/*.md`` sibling.
 
 Five directory-shape ClassVars pin the layout in one place so the

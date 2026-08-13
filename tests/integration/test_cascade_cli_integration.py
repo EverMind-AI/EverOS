@@ -18,6 +18,7 @@ import asyncio
 import datetime as _dt
 import re
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,9 @@ from typer.testing import CliRunner
 from everos.config import load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.infra.persistence.lancedb import dispose_connection
+from everos.infra.persistence.lancedb.projection_lock import (
+    ProjectionLockUnavailableError,
+)
 from everos.infra.persistence.sqlite import dispose_engine
 
 
@@ -268,9 +272,11 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
         cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
     )
 
-    # Contrast: a normal command boots via _runtime() → verify trips on the drift.
+    # Read-only status uses SQLite only, so operators can inspect the queue even
+    # while the LanceDB projection is drifted or requires a rebuild.
     status_result = CliRunner().invoke(cascade_mod.app, ["status"])
-    assert status_result.exit_code != 0
+    assert status_result.exit_code == 0
+    assert "queue:" in status_result.stdout
     asyncio.run(_dispose_all())
 
     # rebuild skips verify, recreates the table, and re-indexes md.
@@ -293,11 +299,17 @@ def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
 
     It drops and recreates the LanceDB tables; a live daemon holds cached
     table handles and would keep writing to the dropped dataset, leaving a
-    corrupted rebuild plus a permanent-failure backlog. Detection reuses the
-    OME jobstore lock that ``backfill`` already gates on, and the exit code
-    matches backfill's ``3`` (SERVER_RUNNING).
+    corrupted rebuild plus a permanent-failure backlog. Detection uses the
+    retained projection/OME rebuild lock, and the exit code matches
+    backfill's ``3`` (SERVER_RUNNING).
     """
-    monkeypatch.setattr(cascade_mod, "ome_lock_is_free", lambda: False)
+
+    @asynccontextmanager
+    async def unavailable(_root):  # type: ignore[no-untyped-def]
+        raise ProjectionLockUnavailableError("OME exclusive lock is held")
+        yield
+
+    monkeypatch.setattr(cascade_mod, "projection_rebuild_lock", unavailable)
 
     result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
 

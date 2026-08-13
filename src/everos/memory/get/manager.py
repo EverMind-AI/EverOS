@@ -23,6 +23,12 @@ from typing import TYPE_CHECKING, Any
 from everos.component.utils.datetime import to_display_tz
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.lancedb.row_id import (
+    agent_skill_wire_id,
+    daily_log_wire_id,
+    user_profile_storage_id,
+    user_profile_wire_id,
+)
 
 from .dto import (
     GetAgentCaseItem,
@@ -94,7 +100,11 @@ class GetManager:
                     count=len(items),
                 )
             case GetMemoryType.PROFILE:
-                profiles = await self._fetch_profile(req.owner_id)
+                profiles = await self._fetch_profile(
+                    req.owner_id,
+                    app_id=req.app_id,
+                    project_id=req.project_id,
+                )
                 data = GetData(
                     profiles=profiles,
                     total_count=len(profiles),
@@ -140,7 +150,7 @@ class GetManager:
     @staticmethod
     def _shape_episode(row: Episode) -> GetEpisodeItem:
         return GetEpisodeItem(
-            id=row.id,
+            id=daily_log_wire_id(owner_id=row.owner_id, entry_id=row.entry_id),
             user_id=row.owner_id,
             app_id=row.app_id,
             project_id=row.project_id,
@@ -156,7 +166,7 @@ class GetManager:
     @staticmethod
     def _shape_agent_case(row: AgentCase) -> GetAgentCaseItem:
         return GetAgentCaseItem(
-            id=row.id,
+            id=daily_log_wire_id(owner_id=row.owner_id, entry_id=row.entry_id),
             agent_id=row.owner_id,
             app_id=row.app_id,
             project_id=row.project_id,
@@ -171,7 +181,7 @@ class GetManager:
     @staticmethod
     def _shape_agent_skill(row: AgentSkill) -> GetAgentSkillItem:
         return GetAgentSkillItem(
-            id=row.id,
+            id=agent_skill_wire_id(owner_id=row.owner_id, name=row.name),
             agent_id=row.owner_id,
             app_id=row.app_id,
             project_id=row.project_id,
@@ -185,7 +195,13 @@ class GetManager:
 
     # ── Profile ──────────────────────────────────────────────────────
 
-    async def _fetch_profile(self, owner_id: str) -> list[GetProfileItem]:
+    async def _fetch_profile(
+        self,
+        owner_id: str,
+        *,
+        app_id: str,
+        project_id: str,
+    ) -> list[GetProfileItem]:
         """Fetch the owner's single profile row from the ``user_profile``
         LanceDB table (kept in sync with ``users/<id>/user.md`` by cascade).
 
@@ -197,7 +213,12 @@ class GetManager:
         """
         if not owner_id:
             return []
-        row = await self._profile.get_by_id(owner_id)
+        storage_id = user_profile_storage_id(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+        )
+        row = await self._profile.get_by_id(storage_id)
         if row is None:
             logger.debug("get_profile_miss", owner_id=owner_id)
             return []
@@ -209,7 +230,7 @@ class GetManager:
         }
         return [
             GetProfileItem(
-                id=row.id,
+                id=user_profile_wire_id(owner_id=row.owner_id),
                 user_id=row.owner_id,
                 app_id=row.app_id,
                 project_id=row.project_id,

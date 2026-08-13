@@ -42,6 +42,11 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.component.embedding import get_embedding_capability
 from everos.config import load_settings
+from everos.core.persistence.lancedb.row_id import (
+    agent_skill_storage_id,
+    daily_log_storage_id,
+    user_profile_storage_id,
+)
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence.lancedb import (
     AgentCase,
@@ -149,7 +154,19 @@ async def _seed_atomic_facts(rows: list[dict[str, Any]]) -> list[AtomicFact]:
 
 
 async def _seed_user_profiles(rows: list[dict[str, Any]]) -> list[UserProfile]:
-    profiles = [UserProfile.model_validate(r) for r in rows]
+    profiles = [
+        UserProfile.model_validate(
+            {
+                **row,
+                "id": user_profile_storage_id(
+                    app_id=str(row.get("app_id") or "default"),
+                    project_id=str(row.get("project_id") or "default"),
+                    owner_id=str(row["owner_id"]),
+                ),
+            }
+        )
+        for row in rows
+    ]
     await user_profile_repo.add(profiles)
     # profile table has no FTS — no index rebuild needed.
     return profiles
@@ -212,7 +229,12 @@ def _agent_case(
     intent = task_intent if task_intent is not None else f"intent {entry}"
     appr = approach if approach is not None else f"approach {entry}"
     return AgentCase(
-        id=f"{owner}_{entry}",
+        id=daily_log_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id=owner,
+            entry_id=entry,
+        ),
         entry_id=entry,
         owner_id=owner,
         owner_type="agent",
@@ -244,7 +266,12 @@ def _agent_skill(
     desc = description if description is not None else f"desc {name}"
     body = content if content is not None else f"content {name}"
     return AgentSkill(
-        id=f"{owner}_{name}",
+        id=agent_skill_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id=owner,
+            name=name,
+        ),
         owner_id=owner,
         owner_type="agent",
         name=name,
@@ -255,7 +282,7 @@ def _agent_skill(
         confidence=0.9,
         maturity_score=0.7,
         source_case_ids=(
-            list(source_case_ids) if source_case_ids is not None else [f"{owner}_ac_1"]
+            list(source_case_ids) if source_case_ids is not None else ["ac_1"]
         ),
         md_path=f"agents/{owner}/skills/{name}/SKILL.md",
         content_sha256="abc",
@@ -580,7 +607,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
     surface it on its own; the bridge is the path that does, and LLM
     rerank keeps it because the topic is genuinely relevant.
     """
-    case_id_with_owner = "a_bridge_ac_1"  # mirrors AgentCase.id = "<owner>_<entry_id>"
+    logical_case_id = "ac_1"
     case_intent = "refactor authentication middleware"
     case_approach = "split provider lookup from session decode"
     # Skill is the *generalised lesson* from this case — same domain (auth /
@@ -619,7 +646,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
                 owner="a_bridge",
                 description=skill_desc,
                 content=skill_body,
-                source_case_ids=[case_id_with_owner],
+                source_case_ids=[logical_case_id],
                 vector=skill_vec,
             ),
         ]
@@ -639,7 +666,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
 
     case_ids = [c["id"] for c in data["agent_cases"]]
     skill_ids = [s["id"] for s in data["agent_skills"]]
-    assert case_id_with_owner in case_ids, (
+    assert f"a_bridge_{logical_case_id}" in case_ids, (
         f"case should match the query directly; got {case_ids}"
     )
     assert "a_bridge_graphql_resolver_patterns" in skill_ids, (

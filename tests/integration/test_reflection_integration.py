@@ -33,6 +33,7 @@ from everos.core.persistence import (
     open_lancedb_connection,
 )
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
@@ -222,6 +223,95 @@ async def _teardown_sqlite() -> None:
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fact_deprecation_isolated_by_project(
+    memory_root: MemoryRoot,
+) -> None:
+    """Deprecating a fact in one project must not mutate its scoped sibling."""
+    conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
+    try:
+        table = await conn.create_table("atomic_fact", schema=AtomicFact)
+        fact_repo = _AtomicFactRepo(table=table)
+
+        owner_id = "u_shared"
+        parent_id = "ep_shared"
+        entry_id = "af_20260610_0001"
+        app_id = "app_shared"
+        project_a = "project_a"
+        project_b = "project_b"
+        timestamp = _dt.datetime(2026, 6, 10, 10, 0, tzinfo=_dt.UTC)
+
+        fact_a = _make_lance_fact(
+            entry_id=entry_id,
+            owner_id=owner_id,
+            fact="Project A fact",
+            parent_id=parent_id,
+            timestamp=timestamp,
+        ).model_copy(
+            update={
+                "id": daily_log_storage_id(
+                    app_id=app_id,
+                    project_id=project_a,
+                    owner_id=owner_id,
+                    entry_id=entry_id,
+                ),
+                "app_id": app_id,
+                "project_id": project_a,
+            }
+        )
+        fact_b = _make_lance_fact(
+            entry_id=entry_id,
+            owner_id=owner_id,
+            fact="Project B fact",
+            parent_id=parent_id,
+            timestamp=timestamp,
+        ).model_copy(
+            update={
+                "id": daily_log_storage_id(
+                    app_id=app_id,
+                    project_id=project_b,
+                    owner_id=owner_id,
+                    entry_id=entry_id,
+                ),
+                "app_id": app_id,
+                "project_id": project_b,
+            }
+        )
+        await fact_repo.add([fact_a, fact_b])
+
+        orchestrator = ReflectionOrchestrator(
+            cluster_repo=object(),
+            episode_store=object(),
+            atomic_fact_store=fact_repo,
+            episode_writer=object(),
+            report_repo=object(),
+            reflector=object(),
+            embedder=object(),
+        )
+        update_count = await orchestrator._deprecate_lance_facts(
+            parent_ids={parent_id},
+            owner_id=owner_id,
+            app_id=app_id,
+            project_id=project_a,
+            merged_entry_id="ep_merged",
+        )
+
+        assert update_count == 1
+        rows_a = await fact_repo.find_where(
+            f"owner_id = '{owner_id}' AND parent_id = '{parent_id}' "
+            f"AND app_id = '{app_id}' AND project_id = '{project_a}'"
+        )
+        rows_b = await fact_repo.find_where(
+            f"owner_id = '{owner_id}' AND parent_id = '{parent_id}' "
+            f"AND app_id = '{app_id}' AND project_id = '{project_b}'"
+        )
+        assert len(rows_a) == len(rows_b) == 1
+        assert rows_a[0].deprecated_by == "ep_merged"
+        assert rows_b[0].deprecated_by is None
+    finally:
+        conn.close()
 
 
 @pytest.mark.asyncio

@@ -252,8 +252,9 @@ def _episode_to_entry_body(
     back so the LanceDB ``episode`` row keeps its back-link to the source.
 
     The md entry's ``entry_id`` (managed by the chassis writer) is the
-    single source of *entry* identity; cascade derives a global episode
-    id from ``<owner_id>_<entry_id>`` on the fly.
+    single source of *entry* identity. Cascade derives an app/project-scoped
+    storage key, while response shaping preserves the historical
+    ``<owner_id>_<entry_id>`` wire id.
     """
     ts_iso = (
         to_iso_format(from_timestamp(episode.timestamp))

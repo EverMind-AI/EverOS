@@ -18,6 +18,7 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
+from everos.core.persistence.lancedb.row_id import agent_skill_storage_id
 from everos.infra.persistence.lancedb import AgentSkill
 from everos.infra.persistence.markdown import AgentSkillWriter
 from everos.memory.cascade.handlers import AgentSkillHandler, HandlerDeps
@@ -152,7 +153,12 @@ async def test_handle_added_or_modified_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     row = fake_repo.upserts[0][0]
-    assert row.id == "a1_contract_scan"
+    assert row.id == agent_skill_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="a1",
+        name="contract_scan",
+    )
     assert row.owner_id == "a1"
     assert row.owner_type == "agent"
     assert row.name == "contract_scan"
@@ -201,7 +207,7 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
 ) -> None:
     """User edits SKILL.md frontmatter.name; the LanceDB row id changes.
 
-    skill_id is derived from ``frontmatter.name`` (``<owner_id>_<name>``).
+    skill_id is derived from the complete app/project/owner/name identity.
     When the user edits the name in place — common when refining a skill
     title without moving the file — the new id differs from the old, so
     a plain ``upsert([new_row])`` would leave the old row behind and a
@@ -217,7 +223,13 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
         )
     )
     await handler.handle_added_or_modified(md_path)
-    assert fake_repo.rows == {"a1_old_name": fake_repo.rows["a1_old_name"]}
+    old_id = agent_skill_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="a1",
+        name="old_name",
+    )
+    assert fake_repo.rows == {old_id: fake_repo.rows[old_id]}
 
     # Second pass: simulate the user editing frontmatter.name in place
     # (md_path unchanged, only the name field flips).
@@ -230,10 +242,16 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 1
     # Old id is gone, new id is present, exactly one row survives.
-    assert list(fake_repo.rows.keys()) == ["a1_new_name"]
+    new_id = agent_skill_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="a1",
+        name="new_name",
+    )
+    assert list(fake_repo.rows.keys()) == [new_id]
     # The sweep predicate references the *new* id with the same md_path.
     assert fake_repo.predicate_deletes == [
-        f"md_path = '{md_path}' AND id != 'a1_new_name'"
+        f"md_path = '{md_path}' AND id != '{new_id}'"
     ]
 
 

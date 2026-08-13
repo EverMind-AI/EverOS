@@ -136,6 +136,19 @@ def test_get_request_rejects_invalid_sort_order() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [("app_id", "default_app"), ("project_id", "default_project")],
+)
+def test_get_request_rejects_reserved_scope_aliases(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        GetRequest(
+            user_id="u1",
+            memory_type=GetMemoryType.EPISODE,
+            **{field: value},
+        )
+
+
 # ── owner_type × memory_type pairing ─────────────────────────────────────
 
 

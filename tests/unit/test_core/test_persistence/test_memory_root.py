@@ -87,6 +87,16 @@ def test_user_visible_dirs_named_scope(tmp_path: Path) -> None:
     assert mr.knowledge_dir("claude_code", "oss") == base / "knowledge"
 
 
+def test_reserved_default_directory_aliases_are_rejected(tmp_path: Path) -> None:
+    """Caller scope ids cannot alias the reserved default directories."""
+    mr = MemoryRoot(tmp_path)
+
+    with pytest.raises(ValueError, match="reserved app"):
+        mr.users_dir("default_app", "project")
+    with pytest.raises(ValueError, match="reserved project"):
+        mr.users_dir("app", "default_project")
+
+
 def test_dotfile_paths(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path)
     assert mr.index_dir == tmp_path / ".index"

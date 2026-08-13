@@ -519,6 +519,33 @@ async def test_pathsafe_rejects_traversal_in_body(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "params",
+    [{"app_id": "default_app"}, {"project_id": "default_project"}],
+)
+async def test_knowledge_query_rejects_reserved_scope_aliases(
+    client: AsyncClient,
+    params: dict[str, str],
+) -> None:
+    resp = await client.get("/api/v1/knowledge/documents", params=params)
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [{"app_id": "default_app"}, {"project_id": "default_project"}],
+)
+async def test_knowledge_body_rejects_reserved_scope_aliases(
+    client: AsyncClient,
+    scope: dict[str, str],
+) -> None:
+    resp = await client.post(
+        "/api/v1/knowledge/search",
+        json={"query": "hello", **scope},
+    )
+    assert resp.status_code == 422
+
+
 # ── _parse_upload: binary file rejection ────────────────────────────────────
 
 

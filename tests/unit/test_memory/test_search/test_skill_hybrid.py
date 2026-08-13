@@ -95,8 +95,8 @@ class TestSearchAgentSkillsHybridRerank:
 
         assert len(result) == 2
         assert all(isinstance(item, SearchAgentSkillItem) for item in result)
-        assert result[0].id == "s1"
-        assert result[1].id == "s2"
+        assert result[0].id == "agent_a_skill_s1"
+        assert result[1].id == "agent_a_skill_s2"
 
     async def test_reranker_receives_skill_instruction_and_shaped_passages(
         self,

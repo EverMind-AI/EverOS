@@ -21,6 +21,11 @@ from typing import Any
 
 import pytest
 
+from everos.core.persistence.lancedb.row_id import (
+    agent_skill_storage_id,
+    daily_log_storage_id,
+    user_profile_storage_id,
+)
 from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
@@ -95,7 +100,9 @@ def _ts(day: int = 1) -> _dt.datetime:
 
 def _episode_row(entry: str) -> Episode:
     return Episode(
-        id=f"u1_{entry}",
+        id=daily_log_storage_id(
+            app_id="default", project_id="default", owner_id="u1", entry_id=entry
+        ),
         entry_id=entry,
         owner_id="u1",
         owner_type="user",
@@ -116,7 +123,9 @@ def _episode_row(entry: str) -> Episode:
 
 def _agent_case_row(entry: str) -> AgentCase:
     return AgentCase(
-        id=f"a1_{entry}",
+        id=daily_log_storage_id(
+            app_id="default", project_id="default", owner_id="a1", entry_id=entry
+        ),
         entry_id=entry,
         owner_id="a1",
         owner_type="agent",
@@ -138,7 +147,9 @@ def _agent_case_row(entry: str) -> AgentCase:
 
 def _agent_skill_row(name: str) -> AgentSkill:
     return AgentSkill(
-        id=f"a1_{name}",
+        id=agent_skill_storage_id(
+            app_id="default", project_id="default", owner_id="a1", name=name
+        ),
         owner_id="a1",
         owner_type="agent",
         name=name,
@@ -157,7 +168,9 @@ def _agent_skill_row(name: str) -> AgentSkill:
 
 def _user_profile_row(owner: str = "u1") -> UserProfile:
     return UserProfile(
-        id=owner,
+        id=user_profile_storage_id(
+            app_id="default", project_id="default", owner_id=owner
+        ),
         owner_id=owner,
         owner_type="user",
         app_id="default",
@@ -301,8 +314,10 @@ async def test_profile_hit_shapes_row_into_item(
     item = resp.data.profiles[0]
     assert item.id == "u1"
     assert item.user_id == "u1"
-    # KV fetch keys on owner_id.
-    assert profile_repo.last_id == "u1"
+    # KV fetch keys on the complete app/project/owner partition.
+    assert profile_repo.last_id == user_profile_storage_id(
+        app_id="default", project_id="default", owner_id="u1"
+    )
     # json buckets are decoded back into structured profile_data.
     assert item.profile_data["summary"] == "u1 loves climbing in Yosemite"
     assert item.profile_data["explicit_info"] == [

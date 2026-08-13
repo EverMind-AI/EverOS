@@ -29,6 +29,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from everos.core.scope_ids import AppId, ProjectId
 from everos.memory.search import FilterNode
 
 
@@ -69,8 +70,8 @@ class GetRequest(BaseModel):
     agent_id: str | None = Field(default=None, min_length=1)
     """Memory owner — provide ``user_id`` for ``episode`` / ``profile`` or
     ``agent_id`` for ``agent_case`` / ``agent_skill``; exactly one must be set."""
-    app_id: str = "default"
-    project_id: str = "default"
+    app_id: AppId = "default"
+    project_id: ProjectId = "default"
     """App / project scope (default ``"default"``). Pinned into the query
     ``where`` so a listing never crosses into another space's rows."""
     memory_type: GetMemoryType

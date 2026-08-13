@@ -38,6 +38,7 @@ import asyncio
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.lancedb import Episode, ParentType, episode_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
@@ -102,7 +103,12 @@ class EpisodeHandler(BaseDailyLogHandler):
         tokens = self._deps.tokenizer.tokenize(tokenize_source)
 
         return Episode(
-            id=f"{owner_id}_{entry.entry_id}",
+            id=daily_log_storage_id(
+                app_id=app_id,
+                project_id=project_id,
+                owner_id=owner_id,
+                entry_id=entry.entry_id,
+            ),
             entry_id=entry.entry_id,
             owner_id=owner_id,
             owner_type=owner_type,

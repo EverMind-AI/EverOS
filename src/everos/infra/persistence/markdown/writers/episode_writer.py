@@ -35,8 +35,8 @@ class EpisodeWriter(BaseDailyWriter):
     ``append_entry`` / ``append_entries`` come from
     :class:`BaseDailyWriter`; the ``entry_id`` (``ep_<YYYYMMDD>_<NNNN>``)
     is the in-file identity allocated under the per-path lock. Callers
-    can derive a globally-unique id from ``(owner_id, entry_id)``
-    without persisting any algo-side uuid.
+    retain the stable public identity ``(owner_id, entry_id)``. Cascade derives
+    a separate app/project-scoped storage key for LanceDB.
     """
 
     schema = EpisodeDailyFrontmatter

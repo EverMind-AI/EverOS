@@ -42,6 +42,7 @@ import anyio
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader
+from everos.core.persistence.lancedb.row_id import agent_skill_storage_id
 from everos.infra.persistence.lancedb import AgentSkill, agent_skill_repo
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 
@@ -112,7 +113,12 @@ class AgentSkillHandler(Handler):
         )
 
         # Skip when an existing row has the same digest.
-        skill_id = f"{owner_id}_{name}"
+        skill_id = agent_skill_storage_id(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+            name=name,
+        )
         prior = await agent_skill_repo.get_by_id(skill_id)
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(

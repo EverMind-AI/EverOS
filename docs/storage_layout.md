@@ -21,6 +21,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 ```
 <memory-root>/                              default ~/.everos
 │
+├── .projection.lock                       shared server/CLI vs exclusive rebuild lifecycle lock
 ├── <app_id>/                               user-visible; "default" → default_app
 │   └── <project_id>/                       "default" → default_project
 │       ├── users/
@@ -50,6 +51,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │   │   ├── ome.aps.db                    APScheduler jobstore (split to avoid lock contention)
 │   │   └── ome.db.lock                   OME single-engine guard (portalocker)
 │   └── lancedb/
+│       ├── .storage_identity.json         READY/REBUILDING storage-key generation gate
 │       └── <kind>.lance/                one directory per LanceDB table
 │
 ├── ome.toml                             user-editable OME strategy overrides (hot-reloaded)
@@ -61,6 +63,11 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 > from that durable queue, not a log file. (`MemoryRoot` also exposes a
 > `.lock` anchor for the `memory_root_lock` primitive; there is no
 > `.cascade.log` / `.manifest.json`.)
+
+`.projection.lock` is retained in shared mode by API servers and mutating
+cascade commands, and in exclusive mode by `cascade rebuild`. The storage
+identity marker is published as `READY(2)` only after a complete rebuild;
+missing, malformed, stale, or `REBUILDING` state blocks normal writers.
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
@@ -179,6 +186,7 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 │                           (system tables: md_change_state, memcell,
 │                            unprocessed_buffer, conversation_status, cluster)
 └── lancedb/
+    ├── .storage_identity.json  fail-closed storage-key generation marker
     └── <kind>.lance/      one Arrow table per business kind — the per-kind
                             rows (text / vector / tokens / metadata) live here
 ```
@@ -191,19 +199,21 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).
 - **LanceDB** ([`infra/persistence/lancedb/tables/`](../src/everos/infra/persistence/lancedb/tables/))
-  holds the per-kind business rows, keyed `<owner_id>_<entry_id>` (so
-  cross-table joins use `(owner_id, entry_id)`); each table's `Vector(N)`
-  dimension matches the embedding model output.
+  holds the per-kind business rows. Owner-scoped tables use an opaque,
+  injective storage key over app, project, owner, and the type-specific
+  logical id. Logical references remain in their explicit columns; each
+  table's `Vector(N)` dimension matches the embedding model output.
 
 Episode and AtomicFact LanceDB tables carry a `deprecated_by: str | None`
 column. When an episode is superseded by a Reflection merge,
 `deprecated_by` is set to the merged episode's entry_id. Search filters
 automatically exclude rows where `deprecated_by IS NOT NULL`.
 
-Both layers are **fully derivable from markdown** — wipe `.index/`
-and the in-process cascade subsystem re-builds everything by scanning the
-user-visible tree (the durable `md_change_state` SQLite queue covers
-crash-recovery replay).
+LanceDB business rows are a rebuildable projection of markdown. SQLite is not
+fully disposable: it also contains `unprocessed_buffer` messages that have not
+yet become markdown. Do not wipe `.index/` or `.index/lancedb` manually.
+Use `everos cascade rebuild`, which preserves SQLite state, resets the durable
+queue, rebuilds LanceDB, and publishes the required storage-identity marker.
 
 ## 6. Atomic write semantics
 

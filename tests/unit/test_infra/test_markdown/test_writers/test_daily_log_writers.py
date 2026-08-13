@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AgentCaseWriter,
@@ -256,7 +257,12 @@ async def test_atomic_fact_writer_output_feeds_handler(
     row = await handler._build_row(
         owner_id="u1", owner_type="user", md_path=rel, entry=pe
     )
-    assert row.id == f"u1_{eid.format()}"
+    assert row.id == daily_log_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u1",
+        entry_id=eid.format(),
+    )
     assert row.fact == "Alice prefers Italian."
     assert row.parent_id == "mc_1"
     assert row.sender_ids == ["u1"]

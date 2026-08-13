@@ -37,6 +37,11 @@ from .lancedb_manager import dispose_connection as dispose_connection
 from .lancedb_manager import drop_tables as _drop_tables
 from .lancedb_manager import get_connection as get_connection
 from .lancedb_manager import get_table as get_table
+from .projection_lock import (
+    ProjectionLockUnavailableError as ProjectionLockUnavailableError,
+)
+from .projection_lock import projection_rebuild_lock as projection_rebuild_lock
+from .projection_lock import projection_server_lock as projection_server_lock
 from .repos import agent_case_repo as agent_case_repo
 from .repos import agent_skill_repo as agent_skill_repo
 from .repos import atomic_fact_repo as atomic_fact_repo
@@ -44,6 +49,19 @@ from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
 from .repos import knowledge_topic_repo as knowledge_topic_repo
 from .repos import user_profile_repo as user_profile_repo
+from .storage_identity import (
+    StorageIdentityMigrationRequiredError as StorageIdentityMigrationRequiredError,
+)
+from .storage_identity import (
+    ensure_storage_identity_ready as ensure_storage_identity_ready,
+)
+from .storage_identity import mark_storage_identity_ready as mark_storage_identity_ready
+from .storage_identity import (
+    mark_storage_identity_rebuilding as mark_storage_identity_rebuilding,
+)
+from .storage_identity import (
+    read_storage_identity_state as read_storage_identity_state,
+)
 from .tables import AgentCase as AgentCase
 from .tables import AgentSkill as AgentSkill
 from .tables import AtomicFact as AtomicFact
@@ -355,6 +373,22 @@ async def verify_business_schemas() -> None:
             )
 
 
+async def verify_storage_identity_ready(*, initialize_empty: bool = True) -> None:
+    """Require a ready marker for the current storage-key generation.
+
+    A missing marker is accepted only for a provably empty affected index,
+    which is the fresh-install case. Any existing row without a marker is
+    treated as legacy data and requires an offline cascade rebuild.
+    """
+    memory_root = MemoryRoot.resolve()
+    if not initialize_empty and read_storage_identity_state(memory_root) is None:
+        raise StorageIdentityMigrationRequiredError(
+            "LanceDB storage identity marker is missing. "
+            "Run `everos cascade rebuild` with the server stopped."
+        )
+    ensure_storage_identity_ready(memory_root)
+
+
 async def drop_business_tables() -> list[str]:
     """Drop every business LanceDB table; return the names dropped.
 
@@ -377,6 +411,8 @@ __all__ = [
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",
     "ParentType",
+    "ProjectionLockUnavailableError",
+    "StorageIdentityMigrationRequiredError",
     "UserProfile",
     "agent_case_repo",
     "agent_skill_repo",
@@ -384,13 +420,20 @@ __all__ = [
     "dispose_connection",
     "drop_business_tables",
     "ensure_business_indexes",
+    "ensure_storage_identity_ready",
     "episode_repo",
     "foresight_repo",
     "get_connection",
     "get_table",
     "knowledge_topic_repo",
+    "mark_storage_identity_ready",
+    "mark_storage_identity_rebuilding",
     "migrate_fts_indexes",
     "migrate_table_schemas",
+    "projection_rebuild_lock",
+    "projection_server_lock",
+    "read_storage_identity_state",
     "user_profile_repo",
     "verify_business_schemas",
+    "verify_storage_identity_ready",
 ]

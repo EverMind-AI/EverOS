@@ -23,6 +23,7 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.lancedb import AgentCase
 from everos.infra.persistence.markdown import AgentCaseWriter
 from everos.memory.cascade.handlers import HandlerDeps
@@ -162,7 +163,12 @@ async def test_added_entry_builds_the_agent_track_row(
     row = fake_repo.upserts[0][0]
     assert row.owner_id == _AGENT
     assert row.owner_type == "agent"
-    assert row.id.startswith(f"{_AGENT}_")
+    assert row.id == daily_log_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id=_AGENT,
+        entry_id=row.entry_id,
+    )
     assert row.session_id == "s1"
     assert row.parent_type == "memcell"
     assert row.parent_id == "mc_case_parent"

@@ -20,6 +20,7 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot, StructuredEntry
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.memory.cascade.handlers import (
     AgentCaseHandler,
     AtomicFactHandler,
@@ -111,7 +112,12 @@ async def test_atomic_fact_build_row_maps_inline_and_section(tmp_path) -> None: 
             sections={"Fact": "the user prefers dark mode"},
         ),
     )
-    assert row.id == "u1_af_20260514_0001"
+    assert row.id == daily_log_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u1",
+        entry_id="af_20260514_0001",
+    )
     assert row.fact == "the user prefers dark mode"
     assert row.fact_tokens == "the user prefers dark mode"
     assert row.parent_id == "mc_1"

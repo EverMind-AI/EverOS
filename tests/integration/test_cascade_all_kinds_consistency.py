@@ -323,3 +323,75 @@ async def test_md_lance_strict_consistency_per_kind(
         )
     finally:
         await orchestrator.stop()
+
+
+async def test_issue_320_same_owner_entry_survives_across_projects(
+    cascade_runtime: MemoryRoot,
+) -> None:
+    """Distinct project scopes must not overwrite the same daily entry id."""
+    memory_root = cascade_runtime
+    orchestrator = CascadeOrchestrator(
+        memory_root=memory_root,
+        tokenizer=build_tokenizer(),
+        config=CascadeConfig(
+            scan_interval_seconds=60.0,
+            worker_batch_size=20,
+            worker_max_retry=1,
+            worker_poll_interval_seconds=0.05,
+            worker_retry_backoff_seconds=0.0,
+        ),
+    )
+    await orchestrator.start()
+    await asyncio.sleep(0.3)
+
+    try:
+        writer = EpisodeWriter(root=memory_root)
+        owner_id = "u_issue_320"
+        bucket = _dt.date(2026, 7, 1)
+        entry_ids: list[str] = []
+
+        for project_id, content in (
+            ("project-a-test", "project A memory"),
+            ("project-b-test", "project B memory"),
+        ):
+            entry_id = await writer.append_entry(
+                owner_id,
+                inline={
+                    "owner_id": owner_id,
+                    "session_id": f"session-{project_id}",
+                    "timestamp": "2026-07-01T12:00:00+00:00",
+                    "parent_id": f"parent-{project_id}",
+                    "sender_ids": [owner_id],
+                },
+                sections={"Content": content},
+                date=bucket,
+                app_id="demo-app",
+                project_id=project_id,
+            )
+            entry_ids.append(entry_id.format())
+            md_path = (
+                f"demo-app/{project_id}/users/{owner_id}/episodes/episode-2026-07-01.md"
+            )
+            await _wait_path_done(md_path)
+
+        assert entry_ids[0] == entry_ids[1]
+        entry_id = entry_ids[0]
+        row_a = await episode_repo.find_by_owner_entry(
+            owner_id,
+            entry_id,
+            app_id="demo-app",
+            project_id="project-a-test",
+        )
+        row_b = await episode_repo.find_by_owner_entry(
+            owner_id,
+            entry_id,
+            app_id="demo-app",
+            project_id="project-b-test",
+        )
+
+        assert row_a is not None
+        assert row_b is not None
+        assert row_a.episode == "project A memory"
+        assert row_b.episode == "project B memory"
+    finally:
+        await orchestrator.stop()

@@ -28,7 +28,7 @@ class UserProfile(BaseLanceTable):
     # No BM25 columns: profile recall is KV-by-owner today.
 
     id: str
-    """PK = ``owner_id`` (one row per user)."""
+    """Opaque storage PK scoped by app, project, and owner."""
 
     owner_id: str
     owner_type: str

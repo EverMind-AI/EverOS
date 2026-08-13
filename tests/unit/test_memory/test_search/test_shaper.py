@@ -24,7 +24,12 @@ def _ts(year: int = 2026) -> _dt.datetime:
     return _dt.datetime(year, 1, 1, tzinfo=_dt.UTC)
 
 
-def _episode_candidate(*, id: str = "alice_ep_1", score: float = 0.9) -> Candidate:
+def _episode_candidate(
+    *,
+    id: str = "storage:episode:1",
+    entry_id: str = "ep_1",
+    score: float = 0.9,
+) -> Candidate:
     return Candidate(
         id=id,
         score=score,
@@ -32,6 +37,7 @@ def _episode_candidate(*, id: str = "alice_ep_1", score: float = 0.9) -> Candida
         metadata={
             "owner_id": "alice",
             "owner_type": "user",
+            "entry_id": entry_id,
             "session_id": "sess_a",
             "timestamp": _ts(),
             "sender_ids": ["alice", "assistant_1"],
@@ -44,12 +50,13 @@ def _episode_candidate(*, id: str = "alice_ep_1", score: float = 0.9) -> Candida
 
 def _agent_case_candidate() -> Candidate:
     return Candidate(
-        id="agent_a_case_1",
+        id="storage:case:1",
         score=0.8,
         source="keyword",
         metadata={
             "owner_id": "agent_a",
             "owner_type": "agent",
+            "entry_id": "case_1",
             "session_id": "sess_a",
             "timestamp": _ts(),
             "task_intent": "Draft a follow-up email",
@@ -62,7 +69,7 @@ def _agent_case_candidate() -> Candidate:
 
 def _agent_skill_candidate() -> Candidate:
     return Candidate(
-        id="agent_a_skill_1",
+        id="storage:skill:1",
         score=0.7,
         source="keyword",
         metadata={
@@ -105,17 +112,20 @@ def test_shape_episode_drops_when_timestamp_missing() -> None:
 
 
 def test_shape_episode_attaches_facts() -> None:
-    facts = [
-        shape_atomic_fact_from_candidate(
-            Candidate(
-                id="f1",
-                score=0.5,
-                source="other",
-                metadata={"fact": "Alice prefers oat milk"},
-            )
+    fact = shape_atomic_fact_from_candidate(
+        Candidate(
+            id="storage:fact:1",
+            score=0.5,
+            source="other",
+            metadata={
+                "owner_id": "alice",
+                "entry_id": "af_1",
+                "fact": "Alice prefers oat milk",
+            },
         )
-    ]
-    item = shape_episode_from_candidate(_episode_candidate(), atomic_facts=facts)
+    )
+    assert fact is not None
+    item = shape_episode_from_candidate(_episode_candidate(), atomic_facts=[fact])
     assert item is not None
     assert len(item.atomic_facts) == 1
     assert item.atomic_facts[0].content == "Alice prefers oat milk"
@@ -127,6 +137,7 @@ def test_shape_episode_attaches_facts() -> None:
 def test_shape_agent_case_basic() -> None:
     item = shape_agent_case_from_candidate(_agent_case_candidate())
     assert item is not None
+    assert item.id == "agent_a_case_1"
     assert item.agent_id == "agent_a"
     assert item.task_intent == "Draft a follow-up email"
     assert item.quality_score == 0.92
@@ -142,6 +153,7 @@ def test_shape_agent_case_drops_when_owner_type_wrong() -> None:
 def test_shape_agent_skill_basic() -> None:
     item = shape_agent_skill_from_candidate(_agent_skill_candidate())
     assert item is not None
+    assert item.id == "agent_a_contract_redline"
     assert item.name == "contract_redline"
     assert item.maturity_score == 0.5
     assert item.source_case_ids == ["agent_a_case_1"]
@@ -158,6 +170,7 @@ def _scored_episode(eid: str, score: float) -> ScoredItem:
         metadata={
             "owner_id": "alice",
             "owner_type": "user",
+            "entry_id": eid,
             "session_id": "s1",
             "timestamp": _ts(),
             "sender_ids": ["alice"],
@@ -174,7 +187,11 @@ def _scored_fact(fid: str, parent: str, score: float) -> ScoredItem:
         score=score,
         item_type="atomic_fact",
         parent_episode_id=parent,
-        metadata={"fact": f"fact text {fid}"},
+        metadata={
+            "owner_id": "alice",
+            "entry_id": fid,
+            "fact": f"fact text {fid}",
+        },
     )
 
 
@@ -186,9 +203,9 @@ def test_reshape_hybrid_nests_facts_under_kept_episode() -> None:
     ]
     out = reshape_hybrid_output(scored, episode_pool={})
     assert len(out) == 1
-    assert out[0].id == "ep_1"
+    assert out[0].id == "alice_ep_1"
     # Facts sorted descending by score.
-    assert [f.id for f in out[0].atomic_facts] == ["f_1", "f_2"]
+    assert [f.id for f in out[0].atomic_facts] == ["alice_f_1", "alice_f_2"]
 
 
 def test_reshape_hybrid_backfills_evicted_episode_from_pool() -> None:
@@ -198,14 +215,14 @@ def test_reshape_hybrid_backfills_evicted_episode_from_pool() -> None:
         _scored_episode("ep_1", 0.7),
         _scored_fact("f_a", "ep_2", 0.95),
     ]
-    pool_episode = _episode_candidate(id="ep_2", score=0.0)
+    pool_episode = _episode_candidate(id="ep_2", entry_id="ep_2", score=0.0)
     out = reshape_hybrid_output(scored, episode_pool={"ep_2": pool_episode})
     assert len(out) == 2
     # Output sorted by score descending — ep_2 takes fact's max score (0.95).
-    assert out[0].id == "ep_2"
+    assert out[0].id == "alice_ep_2"
     assert out[0].score == 0.95
     assert len(out[0].atomic_facts) == 1
-    assert out[1].id == "ep_1"
+    assert out[1].id == "alice_ep_1"
 
 
 def test_reshape_hybrid_drops_orphan_facts_with_no_pool_parent() -> None:

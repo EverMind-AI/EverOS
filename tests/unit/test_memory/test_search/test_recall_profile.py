@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from everos.core.persistence.lancedb.row_id import user_profile_storage_id
 from everos.infra.persistence.lancedb import (
     UserProfile,
     lancedb_manager,
@@ -24,15 +25,21 @@ from everos.memory.search.recall.profile import ProfileRecaller
 def _profile_row(
     *,
     owner_id: str,
+    app_id: str = "default",
+    project_id: str = "default",
     summary: str = "summary text",
     explicit_info: list | None = None,
     implicit_traits: list | None = None,
     profile_timestamp_ms: int = 1_700_000_000_000,
 ) -> UserProfile:
     return UserProfile(
-        id=owner_id,
+        id=user_profile_storage_id(
+            app_id=app_id, project_id=project_id, owner_id=owner_id
+        ),
         owner_id=owner_id,
         owner_type="user",
+        app_id=app_id,
+        project_id=project_id,
         summary=summary,
         explicit_info_json=json.dumps(explicit_info or [], ensure_ascii=False),
         implicit_traits_json=json.dumps(implicit_traits or [], ensure_ascii=False),
@@ -64,7 +71,9 @@ async def test_fetch_returns_dto_when_row_exists() -> None:
         ]
     )
 
-    items = await ProfileRecaller().fetch("u_alice")
+    items = await ProfileRecaller().fetch(
+        "u_alice", app_id="default", project_id="default"
+    )
     assert len(items) == 1
     item = items[0]
     assert item.id == "u_alice"
@@ -78,7 +87,9 @@ async def test_fetch_returns_dto_when_row_exists() -> None:
 
 
 async def test_fetch_returns_empty_when_row_missing() -> None:
-    items = await ProfileRecaller().fetch("u_cold_start")
+    items = await ProfileRecaller().fetch(
+        "u_cold_start", app_id="default", project_id="default"
+    )
     assert items == []
 
 
@@ -86,7 +97,7 @@ async def test_fetch_returns_empty_for_blank_owner() -> None:
     """Blank ``owner_id`` short-circuits — never hit LanceDB with an
     empty-string PK (which would otherwise return any row whose id was
     persisted as the empty string)."""
-    items = await ProfileRecaller().fetch("")
+    items = await ProfileRecaller().fetch("", app_id="default", project_id="default")
     assert items == []
 
 
@@ -97,7 +108,9 @@ async def test_fetch_isolates_by_owner() -> None:
             _profile_row(owner_id="u_bob", summary="Bob"),
         ]
     )
-    bob_items = await ProfileRecaller().fetch("u_bob")
+    bob_items = await ProfileRecaller().fetch(
+        "u_bob", app_id="default", project_id="default"
+    )
     assert len(bob_items) == 1
     assert bob_items[0].profile_data["summary"] == "Bob"
 
@@ -108,7 +121,9 @@ async def test_fetch_tolerates_malformed_json_columns() -> None:
     await user_profile_repo.upsert(
         [
             UserProfile(
-                id="u_broken",
+                id=user_profile_storage_id(
+                    app_id="default", project_id="default", owner_id="u_broken"
+                ),
                 owner_id="u_broken",
                 owner_type="user",
                 summary="ok",
@@ -121,8 +136,38 @@ async def test_fetch_tolerates_malformed_json_columns() -> None:
         ]
     )
 
-    items = await ProfileRecaller().fetch("u_broken")
+    items = await ProfileRecaller().fetch(
+        "u_broken", app_id="default", project_id="default"
+    )
     assert len(items) == 1
     assert items[0].profile_data["explicit_info"] == []
     assert items[0].profile_data["implicit_traits"] == []
     assert items[0].profile_data["summary"] == "ok"
+
+
+async def test_fetch_isolates_same_owner_across_projects() -> None:
+    await user_profile_repo.upsert(
+        [
+            _profile_row(
+                owner_id="u_same",
+                app_id="app_a",
+                project_id="project_a",
+                summary="Project A",
+            ),
+            _profile_row(
+                owner_id="u_same",
+                app_id="app_a",
+                project_id="project_b",
+                summary="Project B",
+            ),
+        ]
+    )
+
+    items = await ProfileRecaller().fetch(
+        "u_same", app_id="app_a", project_id="project_b"
+    )
+
+    assert len(items) == 1
+    assert items[0].id == "u_same"
+    assert items[0].project_id == "project_b"
+    assert items[0].profile_data["summary"] == "Project B"

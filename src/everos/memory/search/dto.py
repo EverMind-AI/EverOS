@@ -27,6 +27,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from everos.core.scope_ids import AppId, ProjectId
+
 
 class SearchMethod(StrEnum):
     """Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."""
@@ -72,8 +74,8 @@ class SearchRequest(BaseModel):
     """Memory owner — provide ``user_id`` for user-memory (episodes /
     profiles) or ``agent_id`` for agent-memory (cases / skills); exactly
     one must be set."""
-    app_id: str = "default"
-    project_id: str = "default"
+    app_id: AppId = "default"
+    project_id: ProjectId = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB
     ``where`` so a search never crosses into another space's rows."""
     query: str = Field(min_length=1)

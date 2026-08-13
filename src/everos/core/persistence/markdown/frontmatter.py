@@ -293,10 +293,11 @@ class SkillPathMixin:
         filesystem the same pair simply stays two independent skills.
 
         Because ``AgentSkillWriter.write_main`` is a full-file replace and
-        the LanceDB primary key is ``f"{agent_id}_{sanitized_name}"``, a
-        collision means the later skill silently overwrites the earlier
-        one — its accumulated ``source_case_ids``, ``maturity_score``, and
-        body are lost, not merged.
+        both the public identity and scoped LanceDB storage key derive from
+        ``(agent_id, sanitized_name)``, a collision means the later skill
+        silently overwrites the earlier one. Its accumulated
+        ``source_case_ids``, ``maturity_score``, and body are lost, not
+        merged.
 
         This is deliberate, not an oversight — but not because a collision
         "usually reads as an intended update". ``_persist_skill`` sanitizes
