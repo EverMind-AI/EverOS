@@ -152,6 +152,13 @@ demo/memcell_outputs/
 
 # macOS
 .DS_Store
+
+# Office temporary lock files
+~$*
+
+# AI agent tooling (local agent skills/config, not part of the project)
+.agents/
+AGENTS.md
 *.duckdb
 
 

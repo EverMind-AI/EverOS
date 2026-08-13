@@ -111,13 +111,21 @@ Before configuring a provider or starting the server, run:
 everos demo
 ```
 
-The command asks for one memory and one recall question, then opens a
-full-screen terminal visualizer. It is hardcoded and local to the CLI: it does
-not need an API key, start or call the EverOS server, or change anything in the
-real memory workflow below.
+The full-screen terminal UI has an input box: type something EverOS should
+remember, then ask a question that recalls it. No API key or server setup is
+needed. Each round lets you watch the memory move through the real lifecycle:
+ingest -> extract -> index -> recall.
+
+The particle sphere changes with each stage, then bursts across the memory
+field and fades away. A small core of yellow and white particles keeps moving
+at the center, then expands smoothly into the next round. See
+[docs/everos-demo.md](docs/everos-demo.md) for the complete experience. Type
+`/` to see the commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime.
+After a few rounds the demo points you at configuring your own keys (`everos
+init`, then `everos demo --live`).
 
 <p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
+  <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
 Press `r` to replay and `q` to quit. For a non-interactive preview, use

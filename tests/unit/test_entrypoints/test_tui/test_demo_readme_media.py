@@ -103,7 +103,7 @@ async def test_export_frame_freezes_animation_before_rendering_requested_state(
     await _export_frame(path, FramePlan(state="booting", phase=0.0))
 
     svg = html.unescape(path.read_text()).replace("\xa0", " ")
-    assert "forming local memory field" in svg
+    assert "working..." in svg
     assert "ingesting conversation dots" not in svg
 
 

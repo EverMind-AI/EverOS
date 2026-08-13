@@ -2,28 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import re
 
-import pytest
 import typer
 from rich.panel import Panel
 from typer.testing import CliRunner
 
 from everos.entrypoints.cli.commands import demo as demo_command
-from everos.entrypoints.tui.demo.data import build_demo_story
+from everos.entrypoints.tui.demo import cloud
+from everos.entrypoints.tui.demo.data import DemoStory
 
 
-def test_demo_help_exposes_cinematic_mode() -> None:
-    app = typer.Typer()
-    demo_command.register(app)
-
-    result = CliRunner().invoke(app, ["demo", "--help"], terminal_width=120)
-
-    assert result.exit_code == 0
-    assert "--cinematic" in _strip_ansi(result.stdout)
-
-
-def test_demo_help_exposes_live_mode() -> None:
+def test_demo_help_exposes_all_modes() -> None:
     app = typer.Typer()
     demo_command.register(app)
 
@@ -31,47 +22,25 @@ def test_demo_help_exposes_live_mode() -> None:
 
     help_text = _strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert "--live" in help_text
-    assert "--server-url" in help_text
+    for flag in ("--cinematic", "--live", "--cloud", "--server-url", "--verbose"):
+        assert flag in help_text
 
 
-def test_collect_playable_story_prompts_for_memory_then_query(monkeypatch) -> None:
-    prompts: list[tuple[str, str]] = []
-    replies = iter(
-        [
-            "I keep my Monday design review notes in Notion.",
-            "Where are my Monday review notes?",
-        ]
+def test_demo_configures_requested_log_level(monkeypatch) -> None:
+    configured: list[bool] = []
+    monkeypatch.setattr(
+        demo_command,
+        "configure_cli_logging",
+        lambda *, verbose: configured.append(verbose),
     )
+    monkeypatch.setattr(demo_command, "_print_plain_demo", lambda: None)
+    app = typer.Typer()
+    demo_command.register(app)
 
-    def fake_prompt(label: str, *, default: str) -> str:
-        prompts.append((label, default))
-        return next(replies)
+    result = CliRunner().invoke(app, ["--plain", "--verbose"])
 
-    monkeypatch.setattr(demo_command.typer, "prompt", fake_prompt)
-
-    story = demo_command._collect_playable_story()
-
-    assert [label for label, _ in prompts] == [
-        "Give EverOS one thing to remember",
-        "Ask EverOS to recall it",
-    ]
-    assert story.memory == "I keep my Monday design review notes in Notion."
-    assert story.query == "Where are my Monday review notes?"
-
-
-def test_interactive_demo_checks_textual_before_prompt(monkeypatch) -> None:
-    def fail_load_tui() -> object:
-        raise typer.Exit(code=1)
-
-    def fail_prompt(*_: object, **__: object) -> str:
-        pytest.fail("demo prompted before checking TUI availability")
-
-    monkeypatch.setattr(demo_command, "_load_run_demo_tui", fail_load_tui)
-    monkeypatch.setattr(demo_command.typer, "prompt", fail_prompt)
-
-    with pytest.raises(typer.Exit):
-        demo_command._run_interactive_demo(cinematic=False)
+    assert result.exit_code == 0
+    assert configured == [True]
 
 
 def test_plain_demo_uses_poster_gold_brand_primary(monkeypatch) -> None:
@@ -102,9 +71,13 @@ def test_plain_demo_prints_custom_story(monkeypatch) -> None:
     monkeypatch.setattr(demo_command, "Console", FakeConsole)
 
     demo_command._print_plain_demo(
-        build_demo_story(
-            "I keep my Monday design review notes in Notion.",
-            "Where are my Monday review notes?",
+        DemoStory(
+            owner="you",
+            memory="I keep my Monday design review notes in Notion.",
+            query="Where are my Monday review notes?",
+            answer="In Notion.",
+            source_filename="episode-demo.md",
+            fact_filename="atomic_fact-demo.md",
         )
     )
 
@@ -114,74 +87,65 @@ def test_plain_demo_prints_custom_story(monkeypatch) -> None:
     assert "episode-demo.md" in printed_text
 
 
-def test_live_demo_flow_calls_server_and_builds_story() -> None:
-    story = build_demo_story(
-        "I love climbing in Yosemite every spring.",
-        "Where do I like to climb?",
+def test_launch_interactive_defaults_to_cloud_with_unique_identity(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        demo_command,
+        "_load_run_demo_tui",
+        lambda: lambda **kwargs: captured.update(kwargs),
     )
-    calls: list[tuple[str, str, dict[str, object] | None]] = []
+    monkeypatch.delenv(cloud.CLOUD_DEMO_SERVER_URL_ENV, raising=False)
+    monkeypatch.setenv(cloud.CLOUD_DEMO_KEY_ENV, "demo-key")
 
-    def fake_request(
-        method: str,
-        path: str,
-        *,
-        base_url: str,
-        json_body: dict[str, object] | None = None,
-        timeout_seconds: float,
-    ) -> dict[str, object]:
-        calls.append((method, path, json_body))
-        assert base_url == "http://server.test"
-        assert timeout_seconds == 3.0
-        if path == "/health":
-            return {"status": "ok"}
-        if path == "/api/v2/memory/add":
-            return {"message_count": 1, "status": "accumulated"}
-        if path == "/api/v2/memory/flush":
-            return {"message_count": 1, "status": "extracted"}
-        if path == "/api/v2/memory/search":
-            return {
-                "data": {
-                    "episodes": [
-                        {
-                            "id": "alice_ep_20260623_0001",
-                            "episode": "Alice loves climbing in Yosemite every spring.",
-                            "summary": "Alice climbs in Yosemite every spring.",
-                            "subject": "Yosemite climbing",
-                            "score": 0.82,
-                            "atomic_facts": [
-                                {
-                                    "id": "alice_af_20260623_0001",
-                                    "content": (
-                                        "Alice loves climbing in Yosemite every spring."
-                                    ),
-                                    "score": 0.91,
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        raise AssertionError(f"unexpected request: {method} {path}")
-
-    live_story = demo_command._run_live_demo_flow(
-        story,
-        base_url="http://server.test",
-        request_json=fake_request,
-        timeout_seconds=3.0,
+    demo_command._launch_interactive_demo(
+        live=False, server_url=cloud.LIVE_DEMO_SERVER_URL
     )
 
-    assert [path for _, path, _ in calls] == [
-        "/health",
-        "/api/v2/memory/add",
-        "/api/v2/memory/flush",
-        "/api/v2/memory/search",
-    ]
-    add_body = calls[1][2]
-    assert add_body is not None
-    assert add_body["session_id"] == "everos-demo-live"
-    assert live_story.answer == "Alice loves climbing in Yosemite every spring."
-    assert live_story.source_filename == "episode:alice_ep_20260623_0001"
-    assert live_story.fact_filename == "fact:alice_af_20260623_0001"
+    assert captured["interactive"] is True
+    assert captured["base_url"] == cloud.CLOUD_API_BASE_URL
+    assert str(captured["session_id"]).startswith("everos-demo-")
+    assert str(captured["user_id"]).startswith("everos_demo_")
+    assert captured["api_key"] == "demo-key"  # optional direct-test override
+
+
+def test_launch_interactive_live_uses_own_cloud_key(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        demo_command,
+        "_load_run_demo_tui",
+        lambda: lambda **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.delenv(cloud.CLOUD_DEMO_SERVER_URL_ENV, raising=False)
+    monkeypatch.setenv(cloud.CLOUD_USER_KEY_ENV, "user-key")
+
+    demo_command._launch_interactive_demo(
+        live=True, server_url=cloud.LIVE_DEMO_SERVER_URL
+    )
+
+    # --live bypasses the public relay and hits the platform with the user's key.
+    assert captured["base_url"] == cloud.CLOUD_PLATFORM_API_BASE_URL
+    assert captured["api_key"] == "user-key"
+    assert str(captured["session_id"]).startswith("everos-demo-")
+
+
+def test_loading_demo_tui_disables_kitty_keys_for_ime_compatibility(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv(demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV, raising=False)
+
+    demo_command._load_run_demo_tui()
+
+    assert os.environ[demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV] == "1"
+
+
+def test_loading_demo_tui_preserves_explicit_kitty_key_override(monkeypatch) -> None:
+    monkeypatch.setenv(demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV, "0")
+
+    demo_command._load_run_demo_tui()
+
+    assert os.environ[demo_command.TEXTUAL_DISABLE_KITTY_KEY_ENV] == "0"
 
 
 def _strip_ansi(value: str) -> str:

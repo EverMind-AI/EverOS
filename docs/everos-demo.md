@@ -1,8 +1,8 @@
 # EverOS Demo
 
-`everos demo` is a local educational TUI. It helps new users feel the memory
-lifecycle before they configure API keys, start the server, or write real
-memory through the API.
+`everos demo` is an interactive TUI that lets new users feel the memory
+lifecycle — type a memory, ask for it back, watch EverOS recall it — before they
+configure their own API keys.
 
 ## Run It
 
@@ -10,48 +10,51 @@ memory through the API.
 everos demo
 ```
 
-The command asks for one memory and one recall question, then opens a
-full-screen terminal UI. The visual flow is deterministic and local to the CLI:
-conversation -> memory sphere -> recall -> source proof -> confetti.
+This opens a full-screen terminal UI with an input box. Type something EverOS
+should remember, then ask a question that recalls it. No API key or server setup
+is needed for the default demo.
 
-For non-interactive shells or a copyable preview, use:
+Each round runs the memory lifecycle and visualizes its four stages:
+
+1. **Ingest** receives what you want EverOS to remember.
+2. **Extract** identifies the useful memory inside the conversation.
+3. **Index** prepares that memory for retrieval.
+4. **Recall** finds it again when you ask a related question.
+
+The same particle sphere flows continuously across all four stages. At the end,
+the particles burst across the memory field and fade away. A small core of
+yellow and white particles keeps moving at the center, then expands smoothly as
+the next ingest cycle begins.
+
+If the demo service is temporarily unavailable or the trial limit is reached,
+the UI explains what happened and points you toward running with your own key.
+It never fabricates a memory result.
+
+## Run It With Your Own Cloud Key
+
+Get a key from <https://everos.evermind.ai/api-keys>, then:
+
+```bash
+export EVEROS_CLOUD_API_KEY=<your-key>
+everos demo --live
+```
+
+`--live` bypasses the relay and runs the same flow directly against the platform
+with your own key.
+
+## Static Previews
+
+For non-interactive shells or a copyable preview (no input box, no network):
 
 ```bash
 everos demo --plain
 ```
 
-For the looping showroom view used by README media, use:
+For the looping showroom view used by README media:
 
 ```bash
 everos demo --cinematic
 ```
-
-## Run It Against A Server
-
-After `everos init` and `everos server start`, run:
-
-```bash
-everos demo --live
-```
-
-Live mode keeps the same TUI, but the memory lifecycle is backed by real
-server calls:
-
-1. `GET /health`
-2. `POST /api/v2/memory/add`
-3. `POST /api/v2/memory/flush`
-4. `POST /api/v2/memory/search`
-
-If your server is not running on `http://127.0.0.1:8000`, pass
-`--server-url <url>`.
-
-## What It Does Not Do
-
-By default, `everos demo` does not connect to the EverOS server, call LLM
-providers, or write production memory files. It is intentionally hardcoded so
-users can try the experience before configuring the full runtime. Use
-`everos demo --live` when you want the same visual flow backed by a running
-server.
 
 ## Source Layout
 
@@ -60,8 +63,9 @@ because the public command is still `everos demo`.
 
 The TUI implementation lives under `src/everos/entrypoints/tui/demo/`:
 
-- `app.py` renders the Textual app.
-- `data.py` builds the deterministic demo story.
+- `app.py` renders the Textual app and drives the interactive rounds.
+- `cloud.py` runs the demo memory requests (`add -> flush -> search`).
+- `data.py` holds the static showcase story for `--plain` / `--cinematic`.
 - `widgets/sphere.py` builds the memory sphere frames.
 - `readme_media.py` renders README media.
 
