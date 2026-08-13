@@ -22,6 +22,7 @@ from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactReader,
     AtomicFactWriter,
+    EpisodeWriter,
     ForesightReader,
     ForesightWriter,
 )
@@ -32,6 +33,79 @@ def memory_root(tmp_path: Path) -> MemoryRoot:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     return mr
+
+
+@pytest.mark.parametrize(
+    "app_id, project_id",
+    [
+        ("app", "Project-A"),
+        ("DEFAULT_APP", "project"),
+        (".index", "project"),
+        (".tmp", "project"),
+    ],
+)
+async def test_episode_writer_rejects_nonportable_scope_before_writing(
+    memory_root: MemoryRoot,
+    app_id: str,
+    project_id: str,
+) -> None:
+    writer = EpisodeWriter(memory_root)
+
+    with pytest.raises(ValueError):
+        await writer.append_entry(
+            "u1",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-15T10:00:00+00:00",
+                "parent_id": "mc_1",
+                "sender_ids": ["u1"],
+            },
+            sections={"Content": "must not be written"},
+            date=_dt.date(2026, 5, 15),
+            app_id=app_id,
+            project_id=project_id,
+        )
+
+    assert list(memory_root.root.rglob("*.md")) == []
+
+
+async def test_episode_writer_rejects_case_alias_without_changing_existing_scope(
+    memory_root: MemoryRoot,
+) -> None:
+    writer = EpisodeWriter(memory_root)
+    kwargs = {
+        "inline": {
+            "owner_id": "u1",
+            "session_id": "s1",
+            "timestamp": "2026-05-15T10:00:00+00:00",
+            "parent_id": "mc_1",
+            "sender_ids": ["u1"],
+        },
+        "date": _dt.date(2026, 5, 15),
+        "app_id": "app",
+    }
+    await writer.append_entry(
+        "u1",
+        sections={"Content": "preserved"},
+        project_id="project-a",
+        **kwargs,
+    )
+
+    with pytest.raises(ValueError):
+        await writer.append_entry(
+            "u1",
+            sections={"Content": "must not overwrite"},
+            project_id="Project-A",
+            **kwargs,
+        )
+
+    files = list(memory_root.root.rglob("episode-*.md"))
+    assert len(files) == 1
+    parsed = await MarkdownReader.read(files[0])
+    assert len(parsed.entries) == 1
+    assert "preserved" in parsed.body
+    assert "must not overwrite" not in parsed.body
 
 
 # ── AtomicFact ────────────────────────────────────────────────────────────

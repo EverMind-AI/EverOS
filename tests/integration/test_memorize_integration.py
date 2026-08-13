@@ -259,6 +259,10 @@ def _episode_paths(tmp_path: Path) -> list[Path]:
     return sorted(base.rglob("episode-*.md"))
 
 
+def _markdown_paths(tmp_path: Path) -> list[Path]:
+    return sorted(tmp_path.rglob("*.md"))
+
+
 # ---------------------------------------------------------------------------
 # Happy path baseline
 # ---------------------------------------------------------------------------
@@ -299,6 +303,26 @@ async def test_chat_baseline_two_msgs_one_cell(
     body = md_files[0].read_text()
     assert "Test Subject" in body
     assert "Test body" in body
+
+
+async def test_direct_memorize_invalid_scope_has_no_persistence_side_effects(
+    tmp_path: Path,
+    memorize_env: Callable[..., Any],
+) -> None:
+    await memorize_env(mode="chat", fake_llm=_make_fake_llm())
+    payload = {
+        "session_id": "invalid_scope",
+        "app_id": "DEFAULT_APP",
+        "project_id": "project-a",
+        "messages": [_user("must not persist", 1_700_000_000_000)],
+    }
+
+    with pytest.raises(ValueError):
+        await memorize(payload)
+
+    assert _buffer_count(tmp_path) == 0
+    assert _memcell_rows(tmp_path) == []
+    assert _markdown_paths(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------

@@ -149,6 +149,25 @@ def test_get_request_rejects_reserved_scope_aliases(field: str, value: str) -> N
         )
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("project_id", "Project-A"),
+        ("app_id", "DEFAULT_APP"),
+        ("app_id", ".index"),
+        ("app_id", "x" * 129),
+        ("project_id", "safe\n"),
+    ],
+)
+def test_get_request_rejects_nonportable_scopes(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        GetRequest(
+            user_id="u1",
+            memory_type=GetMemoryType.EPISODE,
+            **{field: value},
+        )
+
+
 # ── owner_type × memory_type pairing ─────────────────────────────────────
 
 

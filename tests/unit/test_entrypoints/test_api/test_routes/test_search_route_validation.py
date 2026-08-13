@@ -120,6 +120,28 @@ async def test_radius_above_one_returns_422(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("app_id", "DEFAULT_APP"),
+        ("app_id", ".index"),
+        ("project_id", "Project-A"),
+        ("project_id", "default_project"),
+    ],
+)
+async def test_nonportable_scope_returns_422(
+    client: AsyncClient,
+    field: str,
+    value: str,
+) -> None:
+    """Filesystem scope aliases are rejected by the public route."""
+    resp = await client.post(
+        "/api/v1/memory/search",
+        json=_body(**{field: value}),
+    )
+    assert resp.status_code == 422
+
+
 # ── service.compile_filters 422 ───────────────────────────────────────
 
 

@@ -30,8 +30,9 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 ### 1. Markdown as Source of Truth
 
 ```
-delete all LanceDB / SQLite files → can rebuild from md
-delete any md file               → memory is gone
+delete LanceDB through cascade rebuild → extracted memory is re-indexed from md
+delete SQLite                           → buffered and coordination state is lost
+delete any md file                      → extracted memory content is gone
 ```
 
 User trust comes from physical visibility — the user can `cat` / `vim` / `grep` their own memory at any time.

@@ -36,6 +36,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import anyio
 import typer
 from sqlmodel import SQLModel
 
@@ -54,6 +55,7 @@ from everos.infra.persistence.lancedb import (
     get_connection,
     mark_storage_identity_ready,
     mark_storage_identity_rebuilding,
+    projection_bootstrap_lock,
     projection_rebuild_lock,
     projection_server_lock,
     verify_business_schemas,
@@ -153,8 +155,9 @@ async def _runtime(  # type: ignore[no-untyped-def]
     does. They are **per-process**: a running daemon has its own
     connection and table-handle cache, so read/write traffic interleaves
     safely, but a change to the table *set* made here (drop / recreate)
-    is invisible to the daemon's cached handles — which is why
-    ``rebuild`` refuses to run while a server holds the OME lock.
+    is invisible to the daemon's cached handles. ``rebuild`` therefore takes
+    the exclusive projection lifecycle lock and the legacy OME lock before it
+    changes any projection state.
 
     ``verify=False`` skips :func:`verify_business_schemas` — required by
     ``cascade rebuild``, whose whole purpose is to recover from a table
@@ -168,21 +171,51 @@ async def _runtime(  # type: ignore[no-untyped-def]
     happen — the recovery path dying on the damage it was invoked to fix.
     Rebuild recreates the tables and their indexes itself after dropping,
     so skipping the pre-drop pass loses nothing.
+
+    Normal runtimes acquire locks in the fixed order projection shared, then
+    bootstrap exclusive. The bootstrap lock covers only marker, connection,
+    schema, and index initialization; the shared lock remains held through the
+    command body and store disposal. ``lifecycle_lock=False`` bypasses both
+    locks for rebuild, which already owns the exclusive projection lock.
     """
     async with AsyncExitStack() as stack:
+        memory_root = MemoryRoot.resolve()
         if lifecycle_lock:
             # Every mutating CLI path participates in the same projection
             # lifecycle protocol as the API server. Acquire the shared side
             # before checking READY and retain it until both stores are closed,
             # so an offline rebuild cannot race a writer that already passed
             # the generation gate.
-            await stack.enter_async_context(
-                projection_server_lock(MemoryRoot.resolve())
-            )
-        try:
+            await stack.enter_async_context(projection_server_lock(memory_root))
+        cleanup_completed = False
+
+        async def dispose_stores(*, preserve_active_exception: bool = False) -> None:
+            """Attempt both disposals, optionally preserving an earlier error."""
+
+            async def dispose_with_retry(operation):  # type: ignore[no-untyped-def]
+                try:
+                    await operation()
+                except BaseException:
+                    await operation()
+
+            first_disposal_error: BaseException | None = None
+            try:
+                await dispose_with_retry(dispose_connection)
+            except BaseException as exc:
+                first_disposal_error = exc
+            try:
+                await dispose_with_retry(dispose_engine)
+            except BaseException as exc:
+                if first_disposal_error is None:
+                    first_disposal_error = exc
+            if first_disposal_error is not None and not preserve_active_exception:
+                raise first_disposal_error
+
+        async def initialize() -> None:
             if identity_gate:
-                # Gate before opening either store or running schema/index migrations.
-                # A legacy or interrupted projection must not be mutated by setup.
+                # Gate before opening either store or running schema/index
+                # migrations. A legacy or interrupted projection must not be
+                # mutated by setup.
                 await verify_storage_identity_ready()
             engine = get_engine()
             async with engine.begin() as conn:
@@ -192,10 +225,30 @@ async def _runtime(  # type: ignore[no-untyped-def]
                 await verify_business_schemas()
             if ensure:
                 await ensure_business_indexes()
+
+        try:
+            if lifecycle_lock:
+                # The shared lock is already held. Serialize bootstrap only,
+                # then release this exclusive lock before running the command.
+                async with projection_bootstrap_lock(memory_root):
+                    try:
+                        await initialize()
+                    except BaseException:
+                        # A waiting process cannot observe partial bootstrap
+                        # while this process still has open store handles. Both
+                        # disposals are attempted, but the initialization error
+                        # remains the reported failure if cleanup also fails.
+                        with anyio.CancelScope(shield=True):
+                            await dispose_stores(preserve_active_exception=True)
+                        cleanup_completed = True
+                        raise
+            else:
+                await initialize()
             yield
         finally:
-            await dispose_connection()
-            await dispose_engine()
+            if not cleanup_completed:
+                with anyio.CancelScope(shield=True):
+                    await dispose_stores()
 
 
 @asynccontextmanager
@@ -496,24 +549,25 @@ def rebuild(
 ) -> None:
     """Rebuild the LanceDB index from markdown (recover from schema drift).
 
-    **Stop the ``everos server`` first** — this is the one cascade command
+    **Stop every ``everos server`` first** — this is the one cascade command
     that is not safe alongside a live daemon. It drops and recreates the
-    tables, and the daemon's cached table handles would keep writing to
-    the dropped dataset; the command refuses to start while a server holds
-    the OME lock.
+    tables, and a daemon's cached table handles would keep writing to the
+    dropped dataset. The command refuses to start while a current process
+    holds the projection lock or an older server holds the legacy OME lock.
 
     Drops every business LanceDB table and re-indexes all md from
     scratch. Markdown is the source of truth, so no memory content is
     lost, and this is the safe recovery from a drifted / corrupt
     index (e.g. the ``verify_business_schemas`` startup failure):
 
-    - unlike ``rm -rf ~/.everos/.index/lancedb``, it re-populates
-      already-indexed entries (that command leaves the cascade queue
-      marked ``done``, so nothing re-indexes and the index comes back
-      empty);
-    - unlike ``rm -rf ~/.everos/.index``, it preserves SQLite state that
-      is NOT rebuildable from md — notably ``unprocessed_buffer``
-      (messages received but not yet extracted).
+    - do not remove ``~/.everos/.index/lancedb`` manually: that also removes
+      the storage-generation marker, so an existing root fails closed;
+    - do not remove ``~/.everos/.index``: it also deletes SQLite state that
+      is NOT rebuildable from md, notably ``unprocessed_buffer`` (messages
+      received but not yet extracted);
+    - after generation 2 has been published, do not run an older EverOS binary
+      against the root. If that happened, rerun this rebuild with the current
+      binary before restarting.
     """
     if not yes:
         typer.confirm(

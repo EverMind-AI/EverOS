@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from everos.core.scope_ids import (
     PATH_SAFE_CHARSET,
+    SCOPE_ID_CHARSET,
     AppId,
     PathSafeId,
     ProjectId,
@@ -57,8 +58,9 @@ class ContentItemDTO(BaseModel):
 
 class MessageItemDTO(BaseModel):
     # ``sender_id`` becomes ``owner_id`` and then a directory segment on the
-    # episode write path, so it carries the same path-safety guard as
-    # ``app_id`` / ``project_id`` (charset whitelist + ``.``/``..`` rejection).
+    # episode write path, so it retains its historical path-safety guard
+    # (charset whitelist + ``.``/``..`` rejection). App/project scopes apply
+    # an additional lowercase portability contract independently.
     sender_id: PathSafeId = Field(
         ...,
         min_length=1,
@@ -87,13 +89,13 @@ class MemorizeAddRequest(BaseModel):
         default="default",
         min_length=1,
         max_length=128,
-        pattern=PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
     project_id: ProjectId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
     messages: list[MessageItemDTO] = Field(..., min_length=1, max_length=500)
 
@@ -109,13 +111,13 @@ class MemorizeFlushRequest(BaseModel):
         default="default",
         min_length=1,
         max_length=128,
-        pattern=PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
     project_id: ProjectId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
 
 

@@ -8,9 +8,9 @@ Single root directory holding all persisted memory:
         knowledge/   global shared knowledge
 
     System-managed (dotfile prefix, hidden by default in ls / Finder):
-        .index/             derived indexes (rebuildable from markdown)
-            sqlite/         system.db (+ WAL/SHM), ome.db, ome.aps.db
-            lancedb/        LanceDB tables
+        .index/             runtime state (do not delete manually)
+            sqlite/         coordination, buffer, and OME state
+            lancedb/        rebuildable LanceDB projection
         .tmp/               atomic-write staging directory
         .lock               single-process lock anchor (created on demand by
                             ``memory_root_lock``)
@@ -38,10 +38,14 @@ from everos.core.scope_ids import validate_app_id, validate_project_id
 #
 # A memory root is partitioned by ``<app>/<project>`` *before* the user-visible
 # scope dirs (``agents`` / ``users`` / ``knowledge``), so memory for different
-# (app, project) pairs never shares a directory. The reserved id ``"default"``
+# (app, project) pairs do not share a directory in the managed layout. As with
+# any filesystem-backed contract, operators must not add symlink aliases. The
+# reserved id ``"default"``
 # materialises as ``default_app`` / ``default_project`` on disk (rather than a
 # bare ``default``) so a default space is visually distinct from a user-named
-# directory; every other id maps to itself.
+# directory; every other accepted id maps to itself. App/project validators use
+# a lowercase portable filesystem grammar and reserve runtime-owned names so
+# this raw mapping remains injective across common local filesystems.
 #
 # The mapping is symmetric: the cascade path parser reverses it (see
 # :func:`app_id_from_dir`) to recover the ids from an on-disk path. The write
@@ -67,12 +71,14 @@ def project_dir_name(project_id: str) -> str:
 
 def app_id_from_dir(dir_name: str) -> str:
     """Inverse of :func:`app_dir_name` — recover the ``app_id`` from a dir name."""
-    return _DEFAULT_SCOPE_ID if dir_name == _DEFAULT_APP_DIR else dir_name
+    app_id = _DEFAULT_SCOPE_ID if dir_name == _DEFAULT_APP_DIR else dir_name
+    return validate_app_id(app_id)
 
 
 def project_id_from_dir(dir_name: str) -> str:
     """Inverse of :func:`project_dir_name` — recover the ``project_id``."""
-    return _DEFAULT_SCOPE_ID if dir_name == _DEFAULT_PROJECT_DIR else dir_name
+    project_id = _DEFAULT_SCOPE_ID if dir_name == _DEFAULT_PROJECT_DIR else dir_name
+    return validate_project_id(project_id)
 
 
 @dataclass(frozen=True, init=False)
@@ -161,7 +167,7 @@ class MemoryRoot:
 
     @property
     def index_dir(self) -> Path:
-        """``<root>/.index/`` — derived index root."""
+        """``<root>/.index/`` — system-managed runtime-state root."""
         return self.root / ".index"
 
     @property

@@ -93,12 +93,12 @@ def mark_storage_identity_ready(memory_root: MemoryRoot) -> None:
 
 
 def ensure_storage_identity_ready(memory_root: MemoryRoot) -> None:
-    """Require READY(current generation), initializing only a fresh root.
+    """Require READY(current generation), initializing only an empty projection.
 
     A missing marker is safe only when there is no source markdown and no
     existing LanceDB artifact. This prevents a legacy projection, or a source
-    tree awaiting its first generation-2 rebuild, from being mistaken for a
-    new installation.
+    tree awaiting its first generation-2 rebuild, from being mistaken for an
+    empty projection. Retained SQLite state is outside this marker's scope.
     """
     state = read_storage_identity_state(memory_root)
     if state is None:
@@ -120,11 +120,12 @@ def ensure_storage_identity_ready(memory_root: MemoryRoot) -> None:
 
 def _projection_is_provably_empty(memory_root: MemoryRoot) -> bool:
     root = memory_root.root
-    if root.exists():
-        for source_path in root.rglob("*.md"):
-            relative = source_path.relative_to(root)
-            if relative.parts and relative.parts[0] not in {".index", ".tmp"}:
-                return False
+    # Any markdown makes a marker-less root non-empty. App identifiers now
+    # reject the system-managed ``.index`` / ``.tmp`` namespaces, but a
+    # legacy or manually created source file there must still fail closed
+    # rather than be mistaken for a fresh installation.
+    if root.exists() and any(root.rglob("*.md")):
+        return False
 
     lancedb_dir = memory_root.lancedb_dir
     if not lancedb_dir.exists():

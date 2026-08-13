@@ -3,8 +3,9 @@
 How `everos` lays out a memory-root on disk: directory tree, file
 naming, frontmatter chassis, and entry-id encoding.
 
-The contents are the **source of truth**; SQLite and LanceDB are
-derived indexes that can be rebuilt from markdown alone.
+Markdown is the **source of truth for extracted memory content**. LanceDB is a
+rebuildable projection. SQLite also contains coordination and in-flight state,
+including buffered messages, that cannot be reconstructed from markdown alone.
 
 ## 1. Memory-root tree
 
@@ -13,10 +14,13 @@ default location is `~/.everos/`; override via the `EVEROS_ROOT`
 env var or `--root` on the CLI.
 
 Memory is partitioned by **`<app_id>/<project_id>`** *before* the
-user-visible scope dirs, so different `(app, project)` spaces never share
-a directory. The reserved id `"default"` materialises as `default_app` /
-`default_project` on disk. The scope is encoded **in the path**, not in
-the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
+user-visible scope dirs. In the managed layout, without operator-created
+symlink aliases, different accepted `(app, project)` spaces do not share a
+directory. App and project identifiers use a portable lowercase filesystem
+grammar; uppercase and reserved system names are rejected before path
+construction. The reserved id `"default"` materialises as `default_app` /
+`default_project` on disk. The scope is encoded **in the path**, not in the
+frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 
 ```
 <memory-root>/                              default ~/.everos
@@ -44,7 +48,8 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │               └── scripts/                  (optional)
 │       └── knowledge/                                user-visible (shared / global)
 │
-├── .index/                              system-managed, rebuildable (gitignore)
+├── .index/                              system-managed runtime state (gitignore)
+│   ├── .projection.bootstrap.lock        serializes first-time marker/schema/index setup
 │   ├── sqlite/
 │   │   ├── system.db                    state / cascade queue (md_change_state) / buffer / audit / LSN  (+ -wal / -shm)
 │   │   ├── ome.db                        Offline Memory Engine state
@@ -65,9 +70,13 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 > `.cascade.log` / `.manifest.json`.)
 
 `.projection.lock` is retained in shared mode by API servers and mutating
-cascade commands, and in exclusive mode by `cascade rebuild`. The storage
-identity marker is published as `READY(2)` only after a complete rebuild;
-missing, malformed, stale, or `REBUILDING` state blocks normal writers.
+cascade commands, and in exclusive mode by `cascade rebuild`. First-time
+marker, schema, and index setup is serialized by a separate bootstrap lock.
+The storage-identity marker is published as `READY(2)` after a successful
+rebuild or when a marker-less root has neither source markdown nor LanceDB
+artifacts. Retained SQLite state is separate and still requires the upgrade
+audit described in the cascade runbook. Missing, malformed, stale, or
+`REBUILDING` state blocks normal writers.
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
@@ -174,10 +183,12 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
 > appear across two different `user_id`s (each user has its own daily file).
-> Cross-table joins must therefore key on **`(scope_id, entry_id)`**
-> rather than `entry_id` alone — see SQLite/LanceDB tables that follow.
+> Cross-table joins must therefore key on **`(app_id, project_id, owner_id,
+> entry_id)`** rather than `entry_id` alone. LanceDB uses a separate opaque,
+> injective storage key for this complete identity while public response IDs
+> retain their historical shape.
 
-## 5. SQLite + LanceDB derived indexes
+## 5. SQLite runtime state + LanceDB projection
 
 ```
 .index/

@@ -3,6 +3,8 @@
 Normal servers hold a shared lock for the complete LanceDB lifespan. An
 offline rebuild requires the exclusive side of the same lock, so it cannot
 invalidate or replace tables while a current server has open table handles.
+After taking the shared side, servers and mutating CLI commands briefly take
+an exclusive bootstrap lock to serialize marker, schema, and index setup.
 
 Rebuild also holds the OfflineEngine's existing portalocker anchor. That
 second lock detects an already-running older server which predates the
@@ -28,6 +30,7 @@ from everos.core.persistence import MemoryRoot
 logger = get_logger(__name__)
 
 _PROJECTION_LOCK_NAME = ".projection.lock"
+_PROJECTION_BOOTSTRAP_LOCK_NAME = ".projection.bootstrap.lock"
 _POLL_INTERVAL_SECONDS = 0.25
 _SERVER_LOCK_TIMEOUT_SECONDS = 1800.0
 
@@ -39,6 +42,11 @@ class ProjectionLockUnavailableError(RuntimeError):
 def projection_lock_path(memory_root: MemoryRoot) -> Path:
     """Return the stable shared/exclusive projection-lock anchor."""
     return memory_root.root / _PROJECTION_LOCK_NAME
+
+
+def projection_bootstrap_lock_path(memory_root: MemoryRoot) -> Path:
+    """Return the exclusive projection-bootstrap lock anchor."""
+    return memory_root.index_dir / _PROJECTION_BOOTSTRAP_LOCK_NAME
 
 
 def ome_lock_path(memory_root: MemoryRoot) -> Path:
@@ -65,6 +73,35 @@ async def projection_server_lock(
         blocking=True,
         timeout_seconds=timeout_seconds,
         label="projection shared",
+    ):
+        yield
+
+
+@asynccontextmanager
+async def projection_bootstrap_lock(
+    memory_root: MemoryRoot,
+    *,
+    timeout_seconds: float | None = _SERVER_LOCK_TIMEOUT_SECONDS,
+) -> AsyncIterator[None]:
+    """Serialize projection bootstrap after acquiring the shared lock.
+
+    Callers must acquire :func:`projection_server_lock` first and retain it
+    while this lock is held. The fixed order is therefore projection shared,
+    then bootstrap exclusive. It prevents concurrent fresh processes from
+    racing marker publication, connection creation, schema verification, or
+    index creation while still allowing their steady-state runtimes to
+    coexist after bootstrap completes.
+
+    Rebuild deliberately does not acquire this lock. Its exclusive projection
+    lock excludes every correctly ordered bootstrap before any destructive
+    work starts.
+    """
+    async with _portalocker_lock(
+        projection_bootstrap_lock_path(memory_root),
+        flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+        blocking=True,
+        timeout_seconds=timeout_seconds,
+        label="projection bootstrap exclusive",
     ):
         yield
 
@@ -165,6 +202,8 @@ def _open_lock_handle(path: Path) -> TextIO:
 __all__ = [
     "ProjectionLockUnavailableError",
     "ome_lock_path",
+    "projection_bootstrap_lock",
+    "projection_bootstrap_lock_path",
     "projection_lock_path",
     "projection_rebuild_lock",
     "projection_server_lock",

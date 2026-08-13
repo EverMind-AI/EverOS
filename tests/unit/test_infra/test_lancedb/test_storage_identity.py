@@ -42,6 +42,22 @@ def test_existing_source_without_marker_fails_closed(tmp_path: Path) -> None:
     assert not marker_path(root).exists()
 
 
+@pytest.mark.parametrize("managed_dir", [".index", ".tmp"])
+def test_markerless_root_with_markdown_in_managed_namespace_fails_closed(
+    tmp_path: Path,
+    managed_dir: str,
+) -> None:
+    root = MemoryRoot(tmp_path)
+    source = tmp_path / managed_dir / "legacy-source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# existing memory\n", encoding="utf-8")
+
+    with pytest.raises(StorageIdentityMigrationRequiredError, match="missing"):
+        ensure_storage_identity_ready(root)
+
+    assert not marker_path(root).exists()
+
+
 def test_existing_lancedb_artifact_without_marker_fails_closed(tmp_path: Path) -> None:
     root = MemoryRoot(tmp_path)
     artifact = root.lancedb_dir / "episode.lance/data/legacy.lance"

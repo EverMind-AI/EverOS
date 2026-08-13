@@ -40,6 +40,7 @@ from .lancedb_manager import get_table as get_table
 from .projection_lock import (
     ProjectionLockUnavailableError as ProjectionLockUnavailableError,
 )
+from .projection_lock import projection_bootstrap_lock as projection_bootstrap_lock
 from .projection_lock import projection_rebuild_lock as projection_rebuild_lock
 from .projection_lock import projection_server_lock as projection_server_lock
 from .repos import agent_case_repo as agent_case_repo
@@ -228,9 +229,9 @@ async def migrate_table_schemas() -> None:
     ``vector=None`` (soft-dependency embedding) into a still NOT-NULL
     column and every row would silently fail. Recovery escalates from
     a plain restart (transient hiccup) to ``everos cascade rebuild``,
-    which re-indexes from md (the SoT) *and* re-enqueues every file —
-    unlike deleting the index dir, which leaves the queue ``done`` and
-    yields an empty index.
+    which re-indexes from md (the SoT) *and* re-enqueues every file.
+    Manually deleting the LanceDB directory also removes the required storage
+    generation marker, so current startup fails closed for an existing root.
     """
     logger = get_logger(__name__)
     memory_root = MemoryRoot.resolve()
@@ -276,10 +277,10 @@ async def migrate_table_schemas() -> None:
                 f"filesystem or LanceDB-side hiccup may resolve. (2) If "
                 f"the error persists, run `everos cascade rebuild` (with "
                 f"the server stopped) — it re-indexes from source markdown "
-                f"and preserves un-extracted buffered messages. Do NOT "
-                f"just delete `{memory_root.lancedb_dir}`: that leaves the "
-                f"cascade queue marked done, so nothing re-indexes and the "
-                f"index comes back empty."
+                f"and preserves un-extracted buffered messages. Do NOT just "
+                f"delete `{memory_root.lancedb_dir}` manually: that also "
+                f"removes the storage-generation marker, so current startup "
+                f"fails closed for an existing root."
             )
 
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -324,9 +325,9 @@ async def verify_business_schemas() -> None:
     turns that into a clean startup error pointing the user at the
     recovery path (``everos cascade rebuild`` — re-indexes from md,
     preserving un-extracted buffered messages; see
-    ``docs/cascade_runbook.md``). A bare ``rm -rf`` of the index dir is
-    *not* the recovery — it leaves the cascade queue marked ``done`` so
-    nothing re-indexes and the index comes back empty.
+    ``docs/cascade_runbook.md``). Manually removing the LanceDB directory is
+    not the recovery because it removes the required storage-generation
+    marker; current startup then fails closed for an existing root.
 
     Both dimensions are checked against ``schema.to_arrow_schema()`` —
     the exact schema ``get_table`` builds the table from, so a healthy
@@ -430,6 +431,7 @@ __all__ = [
     "mark_storage_identity_rebuilding",
     "migrate_fts_indexes",
     "migrate_table_schemas",
+    "projection_bootstrap_lock",
     "projection_rebuild_lock",
     "projection_server_lock",
     "read_storage_identity_state",

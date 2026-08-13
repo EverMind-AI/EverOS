@@ -235,8 +235,11 @@ Your extracted memory is a normal Markdown file under the memory root:
     └── lancedb/
 ```
 
-Markdown is canonical; SQLite and LanceDB are derived indexes. You can read,
-edit, diff, and version the memory files without a database client.
+Markdown is canonical for extracted memory, and LanceDB is its rebuildable
+search projection. SQLite also contains buffered and coordination state that is
+not reconstructable from markdown. You can read, edit, diff, and version the
+memory files without a database client, but should use `cascade rebuild` rather
+than deleting `.index` manually.
 
 ## Upgrade capabilities when you need them
 

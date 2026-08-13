@@ -546,6 +546,45 @@ async def test_knowledge_body_rejects_reserved_scope_aliases(
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"project_id": "Project-A"},
+        {"app_id": "DEFAULT_APP"},
+        {"app_id": ".index"},
+        {"app_id": ".tmp"},
+        {"project_id": "safe\n"},
+    ],
+)
+async def test_knowledge_query_rejects_nonportable_scopes(
+    client: AsyncClient,
+    params: dict[str, str],
+) -> None:
+    resp = await client.get("/api/v1/knowledge/documents", params=params)
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"project_id": "Project-A"},
+        {"app_id": "DEFAULT_APP"},
+        {"app_id": ".index"},
+        {"app_id": ".tmp"},
+        {"project_id": "safe\n"},
+    ],
+)
+async def test_knowledge_body_rejects_nonportable_scopes(
+    client: AsyncClient,
+    scope: dict[str, str],
+) -> None:
+    resp = await client.post(
+        "/api/v1/knowledge/search",
+        json={"query": "hello", **scope},
+    )
+    assert resp.status_code == 422
+
+
 # ── _parse_upload: binary file rejection ────────────────────────────────────
 
 

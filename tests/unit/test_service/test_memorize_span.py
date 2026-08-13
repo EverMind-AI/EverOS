@@ -65,3 +65,27 @@ async def test_flush_emits_memory_flush_span(_patch: InMemorySpanExporter) -> No
     force_flush()
     names = {s.name for s in _patch.get_finished_spans()}
     assert "everos.memory.flush" in names
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("app_id", "DEFAULT_APP"),
+        ("app_id", ".index"),
+        ("project_id", "Project-A"),
+        ("project_id", "default_project"),
+    ],
+)
+async def test_direct_memorize_rejects_invalid_scope_before_side_effects(
+    _patch: InMemorySpanExporter,
+    field: str,
+    value: str,
+) -> None:
+    payload = {"session_id": "s1", "messages": [], field: value}
+
+    with pytest.raises(ValueError):
+        await mm.memorize(payload)
+
+    mm._memorize_locked.assert_not_awaited()
+    force_flush()
+    assert _patch.get_finished_spans() == ()

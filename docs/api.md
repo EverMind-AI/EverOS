@@ -138,7 +138,7 @@ storage. This is the same rule users see when reading rendered output:
 
 #### Other conventions
 
-- **Server-generated IDs** follow `<owner>_<kind>_<YYYYMMDD>_<NNN>`,
+- **Public response IDs** follow `<owner>_<kind>_<YYYYMMDD>_<NNN>`,
   e.g. `alice_ep_20260528_00000001` for an episode, `alice_af_...`
   for an atomic fact. See
   [storage_layout.md §4](storage_layout.md) for the encoding.
@@ -156,6 +156,20 @@ for the agent track). The default scope materialises on disk as
 added only for the literal id `"default"` so the default space stays
 visually distinct from user-named scopes).
 
+Scope identifiers are lowercase because they are used as raw directory
+segments. Rejecting case variants prevents two logical scopes from resolving
+to the same directory on case-insensitive filesystems.
+
+This is a stricter contract than earlier releases. Before upgrading an existing
+root, audit both its scope directories and retained SQLite state for uppercase,
+reserved, trailing-dot, or device-name scopes. If any exist, do not start the
+new binary or run `cascade rebuild` yet. This release has no general supported
+in-place scope-name migration. Use a fresh-root markdown import or a separately
+reviewed, deployment-specific migration that updates paths and retained SQLite
+state together. Rebuild only reconstructs LanceDB; it does not rewrite retained
+SQLite scope values. See the
+[cascade runbook](cascade_runbook.md#legacy-nonconforming-scope-names).
+
 A `/search` or `/get` query never crosses scopes — different
 `(app_id, project_id)` pairs are isolated.
 
@@ -166,8 +180,14 @@ Both fields share the same validation:
 | Type | `string` |
 | Default | `"default"` |
 | Length | 1–128 chars |
-| Charset | `^[a-zA-Z0-9_.-]+$` |
-| Rejected literals | `"."` and `".."` (path-traversal guard) |
+| Charset | `^[a-z0-9_.@+-]+$` |
+| Rejected literals | `"."`, `".."`, trailing dots, Windows device names, and reserved storage/configuration names |
+
+For `app_id`, the reserved storage/configuration names are `.index`, `.tmp`,
+`.lock`, `.projection.lock`, `default_app`, `everos.toml`, and `ome.toml`.
+For `project_id`, `default_project` is reserved. These restrictions apply only
+to app and project scopes; sender and owner identifiers retain their existing
+mixed-case validation contract.
 
 ## Errors
 

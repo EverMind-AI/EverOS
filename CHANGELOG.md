@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **App and project scope identifiers now use a portable lowercase filesystem
+  contract.** Values are limited to 1–128 lowercase ASCII letters, digits,
+  underscore, dot, hyphen, `@`, or `+`. Trailing dots, Windows device names,
+  default-directory aliases, and runtime-owned app names are rejected with HTTP
+  422. Public response IDs and sender/owner validation remain unchanged.
+  Existing roots containing nonconforming scope names require coordinated
+  migration of both source directories and retained scoped SQLite state before
+  upgrade; `cascade rebuild` does not perform that name migration.
+- **LanceDB row identity is now scoped by app, project, and owner.** Existing
+  roots with conforming scope names require an offline
+  `everos cascade rebuild --yes`. A storage-generation marker, lifecycle locks,
+  and serialized bootstrap keep legacy or incomplete projections fail-closed.
+
+### Fixed
+
+- Prevented owner-local memory identifiers in separate projects from
+  overwriting each other in LanceDB. The repair covers episodes, atomic facts,
+  foresights, agent cases, agent skills, and user profiles while retaining the
+  historical public response identifiers.
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on
