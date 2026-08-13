@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import KnowledgeTopic
@@ -94,6 +94,18 @@ class _FakeSqliteRepo:
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _stub_embedding_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KnowledgeTopicHandler fetches the embedder lazily via
+    ``get_embedding_capability()`` — patch the process-wide singleton so
+    the handler returns a real (stub) vector."""
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
 
 
 @pytest.fixture
@@ -177,7 +189,6 @@ def _handler(memory_root: MemoryRoot) -> KnowledgeTopicHandler:
     return KnowledgeTopicHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )

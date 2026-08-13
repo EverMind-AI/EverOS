@@ -1,4 +1,4 @@
-"""POST /api/v1/memory/search — hybrid retrieval endpoint.
+"""POST /api/v2/memory/search — hybrid retrieval endpoint.
 
 Thin adapter: validate the request DTO, dispatch to the service layer,
 return the envelope verbatim. ``request_id`` is generated inside the
@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from everos.memory.search import SearchRequest, SearchResponse
 from everos.service import search
 
-router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/search", response_model=SearchResponse)

@@ -16,7 +16,7 @@ from everos.core.persistence.memory_root import MemoryRoot
 
 
 def _default_jobstore_path() -> Path:
-    return MemoryRoot.default().ome_db
+    return MemoryRoot.resolve().ome_db
 
 
 class CounterOverride(BaseModel):
@@ -82,7 +82,7 @@ class OMEConfig(BaseModel):
         default_factory=_default_jobstore_path,
         description="SQLite DB path holding OME's own state (run records, "
         "counter store, idle store). Defaults to "
-        "``MemoryRoot.default().ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
+        "``MemoryRoot.resolve().ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
     )
     aps_jobstore_path: Path | None = Field(
         default=None,
@@ -109,6 +109,35 @@ class OMEConfig(BaseModel):
             "0 disables retries.",
         ),
     ] = 1
+    retry_backoff_base_seconds: Annotated[
+        float,
+        Field(
+            ge=0.0,
+            description=(
+                "Base seconds for exponential retry backoff (sleep between "
+                "attempts). attempt N waits base * 2**(N-1), capped at "
+                "retry_backoff_cap_seconds, plus up to retry_jitter_seconds "
+                "of random jitter. 0.0 disables backoff."
+            ),
+        ),
+    ] = 1.0
+    retry_backoff_cap_seconds: Annotated[
+        float,
+        Field(
+            ge=0.0,
+            description="Upper bound on the exponential backoff sleep before jitter.",
+        ),
+    ] = 10.0
+    retry_jitter_seconds: Annotated[
+        float,
+        Field(
+            ge=0.0,
+            description=(
+                "Uniform [0, retry_jitter_seconds] noise added to each "
+                "backoff sleep to spread retry storms."
+            ),
+        ),
+    ] = 0.5
     max_records_per_strategy: Annotated[
         int,
         Field(
@@ -126,6 +155,25 @@ class OMEConfig(BaseModel):
             "fresh run_id.",
         ),
     ] = 1800
+    crash_recovery_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run ``OfflineEngine._run_crash_recovery`` on ``engine.start()``. "
+            "Default ``True`` — the primary server engine "
+            "(``service.memorize._get_engine``) needs to resume its own "
+            "prior sessions' RUNNING work after a crash / restart. "
+            "Set to ``False`` for one-shot engines that share the jobstore "
+            "path (e.g. ``memory.cascade._backfill._build_cluster_engine`` "
+            "and ``_build_skill_engine``). Those engines register only the "
+            "Phase 2/3 subset of strategies; if they ran crash recovery on "
+            "startup they would re-enqueue the server's stale RUNNING rows "
+            "into their own APS scheduler, whose registry doesn't know "
+            "those strategy names — causing the re-enqueued event to be "
+            "permanently lost via ``KeyError`` at dispatch time. The "
+            "server's stale rows stay in ``run_record`` untouched; the "
+            "next server restart resumes them normally."
+        ),
+    )
     config_path: Path | None = Field(
         default=None,
         description="Path to ome.toml for per-strategy overrides. None "

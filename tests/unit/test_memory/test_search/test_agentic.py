@@ -71,11 +71,24 @@ class _StubEpisodeRecaller:
     async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
         return list(self._all_docs)
 
+    async def sparse_recall_as_child(self, *_: Any, **__: Any) -> list[Candidate]:
+        return []
+
+    async def dense_recall_subject_as_child(
+        self, *_: Any, **__: Any
+    ) -> list[Candidate]:
+        return []
+
     async def fetch_by_parent_ids(
         self, parent_ids: Sequence[str], where: str
     ) -> list[Candidate]:
         """Returns Candidate with id=episode_id (real LanceDB id)."""
         return [self._by_parent[p] for p in parent_ids if p in self._by_parent]
+
+    async def fetch_by_entry_ids(
+        self, entry_ids: Sequence[str], where: str
+    ) -> list[Candidate]:
+        return [self._by_parent[e] for e in entry_ids if e in self._by_parent]
 
     async def fetch_all_for_owner(self, where: str) -> list[Candidate]:
         """Returns Candidate with id=memcell_id and metadata['episode_id']."""
@@ -213,6 +226,8 @@ async def test_agentic_search_wires_benchmark_hyperparams(
             "What did Alice eat?",
             owner_id="alice",
             where="owner_id = 'alice' AND owner_type = 'user'",
+            app_id="test_app",
+            project_id="test_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
             embed_query_fn=fake_embed,
@@ -252,6 +267,8 @@ async def test_agentic_search_loads_user_memory_clusters(
             "q",
             owner_id="alice",
             where="owner_id = 'alice' AND owner_type = 'user'",
+            app_id="bench_app",
+            project_id="bench_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
             embed_query_fn=fake_embed,
@@ -260,7 +277,12 @@ async def test_agentic_search_loads_user_memory_clusters(
             top_k=10,
         )
 
-    mock_list.assert_called_once_with("alice", "user_memory")
+    mock_list.assert_called_once_with(
+        "alice",
+        "user_memory",
+        app_id="bench_app",
+        project_id="bench_proj",
+    )
 
 
 async def test_agentic_search_shapes_candidates_with_episode_id(
@@ -290,6 +312,8 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
             "What did Alice eat?",
             owner_id="alice",
             where="owner_id = 'alice' AND owner_type = 'user'",
+            app_id="test_app",
+            project_id="test_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
             embed_query_fn=fake_embed,
@@ -342,3 +366,73 @@ def test_restore_shaper_metadata_reverts_bridged_fields() -> None:
     assert isinstance(restored["timestamp"], _dt.datetime)
     assert restored["timestamp"] == original
     assert restored["episode"] == "x"
+
+
+async def test_agentic_emits_recall_and_rank_spans(
+    ep_recaller: _StubEpisodeRecaller,
+    fact_recaller: _StubFactRecaller,
+    clusters: list[Cluster],
+) -> None:
+    """The agentic recall closures (base_retrieve) and the cross-encoder
+    rerank_fn emit everos.search.recall / everos.search.rank spans. Driven
+    by a fake aagentic_retrieve that actually invokes both callbacks — the
+    same way the real everalgo driver does — so the assertion is
+    deterministic and independent of everalgo's loop internals."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    async def exercising_driver(
+        query: str, *, base_retrieve: Any, rerank_fn: Any, **_: Any
+    ) -> tuple[list[Candidate], AgenticDecision]:
+        cands = await base_retrieve(query, 10)  # -> cluster_scoped -> hybrid_full
+        # Real driver reranks the recalled hits; feed a non-empty list so the
+        # cross-encoder rerank actually runs (empty input short-circuits).
+        await rerank_fn(query, cands or [_mc_candidate("mc_r", "ep_r")])
+        return [], AgenticDecision(is_multi_round=False)
+
+    async def fake_embed(q: str) -> list[float]:
+        return [0.1, 0.2, 0.3, 0.4]
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        with (
+            patch("everos.memory.search.agentic.aagentic_retrieve", exercising_driver),
+            patch(
+                "everos.memory.search.agentic.cluster_repo.list_for_owner",
+                AsyncMock(return_value=clusters),
+            ),
+        ):
+            await search_episodes_agentic(
+                "What did Alice eat?",
+                owner_id="alice",
+                where="owner_id = 'alice'",
+                app_id="test_app",
+                project_id="test_proj",
+                episode_recaller=ep_recaller,
+                atomic_fact_recaller=fact_recaller,
+                embed_query_fn=fake_embed,
+                reranker=_StubReranker(),
+                llm=FakeLLMClient(responses=[]),
+                top_k=10,
+            )
+        force_flush()
+    finally:
+        shutdown_tracing()
+
+    names = {s.name for s in exporter.get_finished_spans()}
+    assert "everos.search.recall" in names
+    assert "everos.search.rank" in names

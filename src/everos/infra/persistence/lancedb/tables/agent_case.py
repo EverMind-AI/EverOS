@@ -1,6 +1,6 @@
 """LanceDB ``agent_case`` table schema.
 
-Field set per 17_lancedb_tables_design.md §3.4. Each row records one
+Field set for the agent-case LanceDB row. Each row records one
 task an agent worked on: intent, approach, optional pivotal insight,
 and a quality score. A MemCell extracted on the agent's own execution
 log yields at most one AgentCase.
@@ -81,4 +81,4 @@ class AgentCase(BaseLanceTable):
     session_id / timestamp / parent_id) is NOT in the hash. See
     :attr:`AgentCaseHandler.content_change_keys`."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

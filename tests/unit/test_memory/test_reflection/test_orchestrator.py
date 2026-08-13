@@ -434,3 +434,52 @@ def test_ts_to_ms_datetime() -> None:
 def test_ts_to_ms_int_passthrough() -> None:
     """int -> int passthrough."""
     assert _ts_to_ms(1717200000000) == 1717200000000
+
+
+async def test_call_reflector_emits_consolidate_generation_span() -> None:
+    """_call_reflector wraps the reflector call in an everos.reflect.consolidate
+    generation span (token usage lands here via the LLM client wrapper)."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    reflector = MagicMock()
+    reflector.areflect = AsyncMock(
+        return_value=_FakeAlgoResult(
+            owner_id=None, episode="merged", subject="s", timestamp=1717200000000
+        )
+    )
+    orch = _build_orchestrator(reflector=reflector)
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        result = await orch._call_reflector(
+            episodes=[_make_episode_row()],
+            merged_entry_ids=[],
+            is_update=False,
+            owner_id="u_alice",
+        )
+        force_flush()
+    finally:
+        shutdown_tracing()
+
+    assert result is not None
+    spans = {s.name: s for s in exporter.get_finished_spans()}
+    assert "everos.reflect.consolidate" in spans
+    assert (
+        spans["everos.reflect.consolidate"].attributes["langfuse.observation.type"]
+        == "generation"
+    )

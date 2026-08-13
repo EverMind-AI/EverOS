@@ -21,18 +21,29 @@ writers must match):
 
 ``sections``:
 
-- ``Subject`` (optional): one-line topic.
+- ``Subject`` (optional): one-line topic — embedded into
+  ``subject_vector`` and appended to the BM25 tokenization source.
 - ``Summary`` (optional): condensed narrative.
 - ``Content``: full episode narrative — fed to the embedder AND the
   tokenizer for the ``episode_tokens`` BM25 field.
+
+Embedding is a soft dependency: when unavailable, both ``vector`` and
+``subject_vector`` are written as ``None`` and the row stays
+BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
 
+import asyncio
+
+from everos.component.embedding import get_embedding_capability
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb import Episode, ParentType, episode_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
+
+logger = get_logger(__name__)
 
 
 class EpisodeHandler(BaseDailyLogHandler):
@@ -66,8 +77,30 @@ class EpisodeHandler(BaseDailyLogHandler):
     ) -> Episode:
         s = entry.structured
         text = s.sections.get("Content", "").strip()
-        tokens = self._deps.tokenizer.tokenize(text)
-        vector = await self._deps.embedder.embed(text)
+        subject_text = s.sections.get("Subject", "").strip()
+
+        # Embed content and subject concurrently; skip subject embed when absent.
+        capability = get_embedding_capability()
+        if subject_text:
+            vector, subject_vector = await asyncio.gather(
+                capability.embed_or_none(text),
+                capability.embed_or_none(subject_text),
+            )
+        else:
+            vector = await capability.embed_or_none(text)
+            subject_vector = None
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=entry.entry_id,
+                reason="embedding_capability_unavailable",
+            )
+
+        # BM25 tokenization covers both body and subject keywords.
+        tokenize_source = f"{text} {subject_text}" if subject_text else text
+        tokens = self._deps.tokenizer.tokenize(tokenize_source)
+
         return Episode(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,
@@ -87,4 +120,5 @@ class EpisodeHandler(BaseDailyLogHandler):
             md_path=md_path,
             content_sha256=entry.content_sha256,
             vector=vector,
+            subject_vector=subject_vector,
         )

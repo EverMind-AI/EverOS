@@ -86,6 +86,27 @@ def _reset_locks() -> None:
     _reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _embed_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force embedding capability to ``available=True`` for the whole file.
+
+    ``ReflectionOrchestrator.run()`` reads
+    ``get_embedding_capability().available`` at body entry and no-ops when
+    the capability is unavailable. The autouse fixture in
+    ``tests/conftest.py`` seeds a ``Capability(provider=None)`` for
+    hermeticity; every test here needs the orchestrator body to execute,
+    so override with a real (stub) provider — the orchestrator itself is
+    constructed with the same ``_StubEmbedder`` for its actual embed
+    calls.
+    """
+    from everos.component.embedding import EmbeddingCapability
+    from everos.component.embedding import accessor as acc
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
+
+
 @pytest.fixture
 def memory_root(tmp_path: Path) -> MemoryRoot:
     mr = MemoryRoot(tmp_path)
@@ -182,7 +203,7 @@ async def _setup_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the sqlite_manager singleton and create_all tables."""
     from everos.infra.persistence.sqlite import sqlite_manager
 
-    if sqlite_manager._engine is not None:  # noqa: SLF001
+    if sqlite_manager._engine is not None:
         await sqlite_manager.dispose_engine()
     monkeypatch.setattr(sqlite_manager, "_engine", None, raising=False)
     monkeypatch.setattr(sqlite_manager, "_session_factory", None, raising=False)
@@ -194,7 +215,7 @@ async def _setup_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
 async def _teardown_sqlite() -> None:
     from everos.infra.persistence.sqlite import sqlite_manager
 
-    if sqlite_manager._engine is not None:  # noqa: SLF001
+    if sqlite_manager._engine is not None:
         await sqlite_manager.dispose_engine()
 
 
@@ -219,10 +240,10 @@ async def test_reflection_init_merges_cluster_episodes(
         - Report.merged_entry_id matches the new cluster member's member_id
         - Atomic facts for source episodes are deprecated
     """
-    # -- Redirect MemoryRoot.default() to tmp_path.
+    # -- Redirect MemoryRoot.resolve() to tmp_path.
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
@@ -434,7 +455,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
     """
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
@@ -671,7 +692,7 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
     """
     monkeypatch.setattr(
         MemoryRoot,
-        "default",
+        "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")

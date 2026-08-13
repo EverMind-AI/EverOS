@@ -113,17 +113,43 @@ class _ClusterRepo(RepoBase[Cluster]):
         self,
         member_type: str,
         member_id: str,
+        *,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
     ) -> str | None:
-        """Reverse lookup: ``(member_type, member_id) → cluster_id``.
+        """Reverse lookup: ``(member_type, member_id) → cluster_id`` scoped
+        to ``(app_id, project_id, owner_id)``.
 
-        Returns ``None`` when the entity is not yet attached to any cluster.
-        Backed by ``ix_cluster_member_reverse`` so it is O(log N).
+        ``member_id`` (e.g. episode ``entry_id`` like
+        ``ep_20260517_00000001``) is only per-owner unique — see
+        ``core/persistence/markdown/entries.py``: "Cross-user uniqueness
+        is handled at the database layer via a composite
+        ``<user_id>_<entry_id>`` field; it is not encoded into the
+        EntryId string itself." Without the scope filter, two owners
+        writing on the same day would share ``entry_id`` and either
+        collide on the reverse index (false hit → the second owner's
+        row silently drops from a cluster it was never part of) or find
+        a foreign cluster.
+
+        Filter cascades: reverse index on ``(member_type, member_id)``
+        narrows to O(k) rows where k = number of owners sharing that
+        entry_id (usually 1), then the join to :class:`Cluster` filters
+        by scope. ``Cluster`` already carries ``app_id / project_id /
+        owner_id`` as of the initial schema.
+
+        Returns ``None`` when the entity is not attached to a cluster
+        under the specified scope.
         """
         async with session_scope(self._factory) as s:
             stmt = (
                 select(ClusterMember.cluster_id)
+                .join(Cluster, Cluster.cluster_id == ClusterMember.cluster_id)
                 .where(ClusterMember.member_type == member_type)
                 .where(ClusterMember.member_id == member_id)
+                .where(Cluster.app_id == app_id)
+                .where(Cluster.project_id == project_id)
+                .where(Cluster.owner_id == owner_id)
                 .limit(1)
             )
             return (await s.execute(stmt)).scalar_one_or_none()

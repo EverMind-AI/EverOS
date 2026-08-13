@@ -25,7 +25,6 @@ def compile_filters_for_get(
     owner_type: str,
     app_id: str = "default",
     project_id: str = "default",
-    exclude_deprecated: bool = True,
 ) -> str:
     """Compile ``/get`` filters via the shared ``compile_filters`` path.
 
@@ -38,5 +37,4 @@ def compile_filters_for_get(
         owner_type=owner_type,
         app_id=app_id,
         project_id=project_id,
-        exclude_deprecated=exclude_deprecated,
     )

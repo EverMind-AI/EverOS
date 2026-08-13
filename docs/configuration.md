@@ -164,12 +164,6 @@ everos init --root /data/everos
 | `threshold` | float | `0.65` | Cosine similarity threshold for clustering (0–1). |
 | `time_window_days` | float | `7.0` | Max age gap between cluster members. |
 
-### `[search]`
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `vector_strategy` | string | `"maxsim_atomic"` | Vector retrieval path: `maxsim_atomic` (finer-grained) or `episode` (legacy). |
-
 ### `[knowledge]`
 
 | Field | Type | Default | Description |

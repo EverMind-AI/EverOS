@@ -2,7 +2,7 @@
 
 End-to-end orchestration:
 
-    POST /api/v1/memory/add { session_id, messages[] }
+    POST /api/v2/memory/add { session_id, messages[] }
         → ingest.process → IngestResult
         → _boundary.prepare_cells(mode=settings.memorize.mode) → cells
         → asyncio.gather(
@@ -30,7 +30,8 @@ from pydantic import BaseModel
 
 from everos.component.llm import get_llm_client
 from everos.config import load_settings
-from everos.core.observability.logging import get_logger
+from everos.core.context import resolve_request_id
+from everos.core.observability.tracing import memory_span
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
@@ -53,8 +54,6 @@ from everos.memory.strategies import (
 )
 from everos.service._boundary import prepare_cells
 from everos.service._session_lock import get_session_lock
-
-logger = get_logger(__name__)
 
 
 class MemorizeResult(BaseModel):
@@ -83,7 +82,7 @@ def _config_root() -> Path:
 def _get_episode_writer() -> EpisodeWriter:
     global _episode_writer
     if _episode_writer is None:
-        _episode_writer = EpisodeWriter(MemoryRoot.default())
+        _episode_writer = EpisodeWriter(MemoryRoot.resolve())
     return _episode_writer
 
 
@@ -113,14 +112,55 @@ def _get_agent_pipeline() -> AgentMemoryPipeline:
     return _agent_pipeline
 
 
+_STRATEGIES_ALWAYS = (
+    extract_atomic_facts,
+    extract_foresight,
+    extract_agent_case,
+    extract_user_profile,
+)
+"""LLM-only strategies — no embed dependency, always registered."""
+
+_STRATEGIES_REQUIRE_EMBED = (
+    trigger_skill_clustering,
+    extract_agent_skill,
+    trigger_profile_clustering,
+    reflect_episodes,
+)
+"""Strategies whose body re-embeds or consumes a re-embedded cluster.
+
+All are registered unconditionally; each guards its own body via
+:func:`everos.component.embedding.get_embedding_capability` at execution
+time. When capability is unavailable the strategy no-ops (logged at
+debug level) rather than raising deep inside its body.
+
+Why body-guard: the capability singleton at
+:mod:`everos.component.embedding.accessor` is process-wide and never
+invalidated at runtime — a tier upgrade (Tier 1 → Tier 2 by editing
+everos.toml) is applied only after a server restart. Body-guard is
+NOT a hot-reload mechanism; it exists for defensive degradation so
+that direct-emit paths (unit tests, future features that bypass the
+upstream clustering gate) still fail cleanly instead of crashing
+inside recall.
+"""
+
+
 def _get_engine() -> OfflineEngine:
     """Return the singleton OfflineEngine; constructed + registered on first call.
+
+    All strategies (both always-on and embed-requiring) are registered
+    unconditionally. Embed-requiring strategies guard their own bodies
+    with :func:`everos.component.embedding.get_embedding_capability`.
+
+    Tier changes require a server restart to take effect: the accessor's
+    cached capability is not invalidated at runtime. Body-guard keeps
+    dispatches clean when capability was absent at start; it does not
+    substitute for restart on config changes.
 
     Lifecycle (start/stop) is wired by ``OmeLifespanProvider``.
     """
     global _ome_engine
     if _ome_engine is None:
-        root = MemoryRoot.default()
+        root = MemoryRoot.resolve()
         jobstore_path = root.ome_db
         jobstore_path.parent.mkdir(parents=True, exist_ok=True)
         engine = OfflineEngine(
@@ -129,14 +169,8 @@ def _get_engine() -> OfflineEngine:
                 config_path=root.ome_config,
             )
         )
-        engine.register(extract_atomic_facts)
-        engine.register(extract_foresight)
-        engine.register(extract_agent_case)
-        engine.register(trigger_skill_clustering)
-        engine.register(extract_agent_skill)
-        engine.register(trigger_profile_clustering)
-        engine.register(extract_user_profile)
-        engine.register(reflect_episodes)
+        for strategy in (*_STRATEGIES_ALWAYS, *_STRATEGIES_REQUIRE_EMBED):
+            engine.register(strategy)
         _ome_engine = engine
     return _ome_engine
 
@@ -170,14 +204,25 @@ async def memorize(
     boundary_cfg = settings.boundary_detection
     session_id = payload["session_id"]
 
-    async with asyncio.timeout(settings.memorize.session_lock_timeout_seconds):
-        async with get_session_lock(session_id):
-            return await _memorize_locked(
-                payload,
-                mode=mode,
-                boundary_cfg=boundary_cfg,
-                is_final=is_final,
-            )
+    span_name = "everos.memory.flush" if is_final else "everos.memory.add"
+    with memory_span(
+        span_name,
+        observation_type="span",
+        session_id=session_id,
+        metadata={
+            "mode": mode,
+            "is_final": is_final,
+            "request_id": resolve_request_id(),
+        },
+    ):
+        async with asyncio.timeout(settings.memorize.session_lock_timeout_seconds):
+            async with get_session_lock(session_id):
+                return await _memorize_locked(
+                    payload,
+                    mode=mode,
+                    boundary_cfg=boundary_cfg,
+                    is_final=is_final,
+                )
 
 
 async def _memorize_locked(
@@ -189,15 +234,19 @@ async def _memorize_locked(
 ) -> MemorizeResult:
     """Inner critical section — runs under the per-session lock."""
     ingested = await ingest_process(payload)
-    boundary = await prepare_cells(
-        ingested,
-        mode=mode,
-        is_final=is_final,
-        llm_client=get_llm_client(),
-        prompt_loader=_get_prompt_loader(),
-        hard_token_limit=boundary_cfg.hard_token_limit,
-        hard_msg_limit=boundary_cfg.hard_msg_limit,
-    )
+    # Boundary detection runs an LLM (everalgo detect_boundaries). Wrap it in a
+    # generation span so its token usage lands on a GENERATION observation
+    # (costed by Langfuse) instead of the SPAN-typed request root (dropped).
+    with memory_span("everos.memcell.boundary", observation_type="generation"):
+        boundary = await prepare_cells(
+            ingested,
+            mode=mode,
+            is_final=is_final,
+            llm_client=get_llm_client(),
+            prompt_loader=_get_prompt_loader(),
+            hard_token_limit=boundary_cfg.hard_token_limit,
+            hard_msg_limit=boundary_cfg.hard_msg_limit,
+        )
 
     if not boundary.cells:
         # Nothing went past the boundary stage — no pipelines to dispatch.

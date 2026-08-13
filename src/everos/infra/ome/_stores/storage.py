@@ -1,6 +1,6 @@
 """OME SQLite storage — schema initialization + connection factory.
 
-Single file (default ``MemoryRoot.default().ome_db`` ≡
+Single file (default ``MemoryRoot.resolve().ome_db`` ≡
 ``<memory-root>/.index/sqlite/ome.db``). Holds 3 OME-managed tables
 (counter_store / idle_store / run_record); APS jobstore table is created
 by APScheduler itself when its SQLAlchemyJobStore connects.

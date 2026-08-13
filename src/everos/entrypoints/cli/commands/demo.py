@@ -18,6 +18,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
 from everos.entrypoints.tui.demo.widgets.sphere import (
@@ -60,8 +61,15 @@ def register(parent: typer.Typer) -> None:
             "--server-url",
             help="Override the EverOS Cloud API base URL.",
         ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose",
+            "-v",
+            help="Emit INFO-level lifecycle logs (default: WARNING only).",
+        ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
+        configure_cli_logging(verbose=verbose)
         if plain or not sys.stdout.isatty():
             _print_plain_demo()
             return

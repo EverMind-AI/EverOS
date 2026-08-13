@@ -157,17 +157,6 @@ def _reset_lancedb_write_locks() -> None:
     LanceRepoBase._reset_locks_for_tests()
 
 
-@pytest.fixture(autouse=True)
-def _reset_knowledge_embedding_singleton() -> None:
-    """Reset the lazy embedding and reranker singletons in service.knowledge."""
-    import everos.service.knowledge as _kmod
-
-    for attr in ("_embedding", "_reranker"):
-        setattr(_kmod, attr, None)
-    for attr in ("_embedding_resolved", "_reranker_resolved"):
-        setattr(_kmod, attr, False)
-
-
 @pytest.fixture
 async def cascade_runtime(
     tmp_path: Path,
@@ -188,22 +177,36 @@ async def cascade_runtime(
     await ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
 
     await dispose_connection()
     await dispose_engine()
 
 
 def _build_orchestrator(
+    monkeypatch: pytest.MonkeyPatch,
     memory_root: MemoryRoot,
     embedder: _StubEmbedder,
     *,
     scan_interval: float = 60.0,
 ) -> CascadeOrchestrator:
-    """Factory for a tight-polling cascade orchestrator."""
+    """Factory for a tight-polling cascade orchestrator.
+
+    ``KnowledgeTopicHandler`` fetches the embedder lazily via
+    ``get_embedding_capability()`` rather than through the orchestrator
+    — patch the process-wide singleton so cascade never hits the fake
+    network target set up by ``cascade_runtime``.
+    """
+    import everos.component.embedding.accessor as acc
+    import everos.component.rerank.accessor as rerank_acc
+    from everos.component.embedding import EmbeddingCapability
+    from everos.component.rerank import RerankCapability
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
+    reranker = _StubReranker()
+    monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=reranker))
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=embedder,
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=scan_interval,
@@ -274,11 +277,12 @@ async def _create_test_document(
 
 async def test_create_document_end_to_end(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Full pipeline: create -> md -> cascade -> SQLite + LanceDB."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -366,17 +370,12 @@ async def test_create_document_end_to_end(
 
 async def test_search_finds_ingested_topic(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Keyword search finds topics after cascade indexing."""
-    import everos.service.knowledge as _kmod
-
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    _kmod._embedding = embedder
-    _kmod._embedding_resolved = True
-    _kmod._reranker = _StubReranker()
-    _kmod._reranker_resolved = True
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -404,17 +403,12 @@ async def test_search_finds_ingested_topic(
 
 async def test_search_include_content(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """include_content flag controls whether content is populated."""
-    import everos.service.knowledge as _kmod
-
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    _kmod._embedding = embedder
-    _kmod._embedding_resolved = True
-    _kmod._reranker = _StubReranker()
-    _kmod._reranker_resolved = True
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -451,17 +445,12 @@ async def test_search_include_content(
 
 async def test_search_score_threshold_filters(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """score_threshold filters out low-scoring results."""
-    import everos.service.knowledge as _kmod
-
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    _kmod._embedding = embedder
-    _kmod._embedding_resolved = True
-    _kmod._reranker = _StubReranker()
-    _kmod._reranker_resolved = True
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -493,17 +482,12 @@ async def test_search_score_threshold_filters(
 
 async def test_search_app_project_isolation(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Documents in different app/project scopes are isolated in search."""
-    import everos.service.knowledge as _kmod
-
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    _kmod._embedding = embedder
-    _kmod._embedding_resolved = True
-    _kmod._reranker = _StubReranker()
-    _kmod._reranker_resolved = True
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -597,6 +581,7 @@ async def test_search_app_project_isolation(
 
 async def test_delete_document_end_to_end(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Manual directory removal + scanner detects deletion -> cleanup.
 
@@ -608,6 +593,7 @@ async def test_delete_document_end_to_end(
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
+        monkeypatch,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -677,13 +663,126 @@ async def test_delete_document_end_to_end(
         await orchestrator.stop()
 
 
+async def test_delete_document_cleans_up_after_downgrade(
+    cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tier 3 → Tier 1 downgrade must not strand knowledge state.
+
+    Regression guard for PR #361 review blocker B3. Previously
+    ``cascade.registry.build_handlers`` gated the two knowledge
+    handlers off as an atomic pair when embed OR rerank went missing.
+    On a Tier 3 → Tier 1 downgrade, ``service.knowledge.delete_document``
+    ``shutil.rmtree``'d the md directory, the scanner enqueued
+    ``deleted`` rows for every md — and the worker marked every one
+    ``failed(retryable=False)`` because no handler was registered
+    for the kind. Phantom SQLite / LanceDB rows lingered forever;
+    ``GET /documents`` kept listing them; ``cascade fix`` could not
+    recover.
+
+    The fix registers both knowledge handlers unconditionally. This
+    test seeds a document with both capabilities available, simulates
+    a full downgrade by pointing both accessor singletons at
+    ``provider=None``, calls ``delete_document`` and asserts the
+    entire md + SQLite + LanceDB state clears and no permanent
+    failures accrue.
+    """
+    import everos.component.embedding.accessor as embed_acc
+    import everos.component.rerank.accessor as rerank_acc
+    from everos.component.embedding import EmbeddingCapability
+    from everos.component.rerank import RerankCapability
+
+    memory_root = cascade_runtime
+    embedder = _StubEmbedder()
+    orchestrator = _build_orchestrator(
+        monkeypatch,
+        memory_root,
+        embedder,
+        scan_interval=2.0,
+    )
+    await orchestrator.start()
+    await asyncio.sleep(0.3)
+
+    try:
+        # ── Tier 3 seed: capabilities available, full index. ────────
+        doc_id = "d_downgrd001"
+        await _create_test_document(memory_root, doc_id=doc_id)
+        await _wait_lance_rows(doc_id, expected=2, deadline=20.0)
+        await _wait_drain(deadline=20.0)
+
+        assert await knowledge_document_repo.get_by_doc_id(doc_id) is not None
+        assert await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id) == 2
+
+        # ── Simulate downgrade: both capabilities unavailable. ──────
+        # Point the process-wide singletons the handlers read at
+        # ``provider=None``. ``embed_or_none`` returns ``None`` and
+        # ``handle_deleted`` never touches embed/rerank at all.
+        monkeypatch.setattr(
+            embed_acc, "_capability", EmbeddingCapability(provider=None)
+        )
+        monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=None))
+
+        # ── Delete through the service (bypass HTTP for test speed).
+        # ``delete_document`` rmtree's the md dir; scanner picks up
+        # the missing files and enqueues ``deleted`` rows for both
+        # kinds; worker must drain them cleanly.
+        del_result = await delete_document(
+            doc_id=doc_id,
+            app_id="default",
+            project_id="default",
+        )
+        assert del_result.doc_id == doc_id
+        assert del_result.deleted_topics == 2
+
+        knowledge_dir = memory_root.knowledge_dir()
+        doc_dir = knowledge_dir / "Sports" / f"Olympics_Plan_{doc_id}"
+        assert not doc_dir.exists(), "delete_document should have removed the md dir"
+
+        # ── Wait for cascade to drain the deletes. ──────────────────
+        await _wait_lance_rows(doc_id, expected=0, deadline=20.0)
+        await _wait_drain(deadline=20.0)
+
+        # ── LanceDB clean. ──────────────────────────────────────────
+        table = await get_table(KnowledgeTopic.TABLE_NAME, KnowledgeTopic)
+        assert await table.count_rows(filter=f"doc_id = '{doc_id}'") == 0
+
+        # ── SQLite topic rows gone. ─────────────────────────────────
+        assert await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id) == 0
+
+        # ── SQLite document row gone (may need a scanner retry after
+        # topic deletes clear the FK dependency). ───────────────────
+        async with asyncio.timeout(15.0):
+            while True:
+                row = await knowledge_document_repo.get_by_doc_id(doc_id)
+                if row is None:
+                    break
+                await asyncio.sleep(0.2)
+        assert await knowledge_document_repo.get_by_doc_id(doc_id) is None
+
+        # ── No permanent failures in md_change_state. ───────────────
+        # This is the load-bearing assertion: with the gate in place,
+        # every ``deleted`` row would land here as failed_permanent.
+        summary = await md_change_state_repo.queue_summary()
+        assert summary.failed_permanent == 0, (
+            f"downgrade + delete produced permanent failures: {summary}"
+        )
+        assert summary.failed_retryable == 0, (
+            f"downgrade + delete produced retryable failures: {summary}"
+        )
+
+    finally:
+        await orchestrator.stop()
+
+
 async def test_delete_idempotent(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Deleting an already-deleted (or nonexistent) document is a no-op."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
+        monkeypatch,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -729,11 +828,13 @@ async def test_delete_idempotent(
 
 async def test_replace_document_end_to_end(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Replace = delete old + create new with same doc_id."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
     orchestrator = _build_orchestrator(
+        monkeypatch,
         memory_root,
         embedder,
         scan_interval=2.0,
@@ -852,11 +953,12 @@ async def test_replace_document_end_to_end(
 
 async def test_patch_title_updates_metadata(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """patch_document updates the title in SQLite without touching topics."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -890,11 +992,12 @@ async def test_patch_title_updates_metadata(
 
 async def test_patch_category_updates_sqlite(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """patch_document with category_id updates the document row (SQLite-only MVP)."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
-    orchestrator = _build_orchestrator(memory_root, embedder)
+    orchestrator = _build_orchestrator(monkeypatch, memory_root, embedder)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -941,14 +1044,20 @@ async def test_get_nonexistent_document_raises(
 
 async def test_search_empty_query_returns_empty(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty query string returns empty results (no crash)."""
-    import everos.service.knowledge as _kmod
+    import everos.component.embedding.accessor as embed_acc
+    import everos.component.rerank.accessor as rerank_acc
+    from everos.component.embedding import EmbeddingCapability
+    from everos.component.rerank import RerankCapability
 
-    _kmod._embedding = _StubEmbedder()
-    _kmod._embedding_resolved = True
-    _kmod._reranker = _StubReranker()
-    _kmod._reranker_resolved = True
+    monkeypatch.setattr(
+        embed_acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
+    monkeypatch.setattr(
+        rerank_acc, "_capability", RerankCapability(provider=_StubReranker())
+    )
 
     result = await search_knowledge(
         query="",

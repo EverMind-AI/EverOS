@@ -6,7 +6,8 @@ candidate list; the manager's job is to:
 
 * honour the ``owner_type`` hard partition,
 * run KEYWORD as sparse-only and leave ``atomic_facts`` empty,
-* run VECTOR as dense-only (and refuse when no embedding is wired),
+* run VECTOR via MaxSim (ANN atomic_facts -> max-pool -> resolve episodes)
+  and refuse when no embedding is wired,
 * let HYBRID run without an LLM by default; require LLM only when the
   caller sets ``enable_llm_rerank=True``,
 * refuse AGENTIC when reranker / LLM prerequisites are missing,
@@ -22,6 +23,11 @@ from typing import Any, ClassVar
 import pytest
 from everalgo.types import Candidate, FactCandidate
 
+import everos.component.embedding.accessor as embedding_accessor
+import everos.component.rerank.accessor as rerank_accessor
+from everos.component.embedding import EmbeddingCapability
+from everos.component.rerank import RerankCapability
+from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 
@@ -263,6 +269,23 @@ def _agent_req(
     return SearchRequest(agent_id="agent_a", query="hi", method=method, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _capabilities_available_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_validate_components`` gates on the process-wide capability
+    singletons, independent of whatever ``embedding=`` / ``reranker=``
+    this module's stub manager was built with. Default both to available
+    so dispatch tests (which drive availability through ``_StubEmbedding``
+    / ``_StubReranker`` instead) aren't skewed by real host settings; the
+    handful of component-guard tests below override this explicitly.
+    """
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=object())
+    )
+    monkeypatch.setattr(
+        rerank_accessor, "_capability", RerankCapability(provider=object())
+    )
+
+
 # ── KEYWORD: user owner ────────────────────────────────────────────────
 
 
@@ -280,6 +303,50 @@ async def test_user_keyword_returns_episodes_only() -> None:
     assert resp.data.agent_cases == []
     assert resp.data.agent_skills == []
     assert resp.data.profiles == []
+
+
+async def test_recall_hit_emitted_only_for_calibrated_methods(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """recall_hit is meaningful only for calibrated-score methods (HYBRID LR
+    / AGENTIC rerank). For KEYWORD (unbounded BM25) the code must emit
+    top_score but NOT a hit verdict — a fixed 0.6 threshold against an
+    unbounded score is an always-hit signal that inflates the dashboard."""
+    import everos.memory.search.manager as mgr_mod
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(mgr_mod, "current_trace_ids", lambda: ("t" * 32, "s" * 16))
+    monkeypatch.setattr(mgr_mod, "emit_recall_scores", lambda **kw: calls.append(kw))
+
+    # KEYWORD: raw BM25 score well above the threshold, but uncalibrated.
+    kw_mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=7.5)])
+    await kw_mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    assert len(calls) == 1
+    assert calls[0]["method"] == "keyword"
+    assert calls[0]["top_score"] == 7.5
+    assert calls[0]["hit"] is None  # no hit verdict for an uncalibrated method
+
+    # HYBRID: calibrated LR score → a real boolean hit verdict is emitted.
+    calls.clear()
+    hy_mgr = _build_manager(embedding=_StubEmbedding())
+    await hy_mgr.search(_user_req(method=SearchMethod.HYBRID))
+    assert len(calls) == 1
+    assert calls[0]["method"] == "hybrid"
+    assert isinstance(calls[0]["hit"], bool)
+
+
+async def test_search_uses_propagated_request_id_when_bound() -> None:
+    """When a request id is bound upstream (middleware), ``search`` reuses it
+    instead of minting a fresh one, so the response id matches the trace."""
+    from everos.core.context import reset_request_id, set_request_id
+
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+    token = set_request_id("deadbeef" * 4)
+    try:
+        resp = await mgr.search(_user_req())
+        assert resp.request_id == "deadbeef" * 4
+    finally:
+        reset_request_id(token)
 
 
 async def test_user_keyword_leaves_atomic_facts_empty() -> None:
@@ -330,86 +397,6 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     assert "owner_type = 'user'" in recaller.last_where
 
 
-# ── VECTOR: requires embedding ────────────────────────────────────────
-
-
-async def test_vector_method_requires_embedding() -> None:
-    mgr = _build_manager()  # embedding=None by default
-    with pytest.raises(RuntimeError, match="embedding"):
-        await mgr.search(_user_req(method=SearchMethod.VECTOR))
-
-
-async def test_vector_method_runs_dense_only_with_embedding() -> None:
-    mgr = _build_manager(
-        episode_sparse=[_episode_row("should_not_appear")],
-        episode_dense=[_episode_row("ep_dense")],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
-    assert [e.id for e in resp.data.episodes] == ["ep_dense"]
-
-
-async def test_vector_radius_filter_drops_below_threshold() -> None:
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.3),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, radius=0.5))
-    assert [e.id for e in resp.data.episodes] == ["ep_high"]
-
-
-async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
-    """``top_k=-1`` without an explicit radius gets the project default 0.5.
-
-    Mirrors enterprise's auto-floor behaviour — unlimited mode must not
-    return arbitrarily low-similarity tail.
-    """
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.3),  # below default 0.5 → dropped
-            _episode_row("ep_mid", score=0.55),  # above default → kept
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
-    assert [e.id for e in resp.data.episodes] == ["ep_mid", "ep_high"]
-
-
-async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
-    """Caller-supplied radius (even ``0.0``) wins over the unlimited default."""
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1, radius=0.1))
-    # 0.1 threshold keeps both rows (the default 0.5 would have dropped ep_low).
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
-
-
-async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
-    """``top_k > 0`` without a radius applies no threshold — truncation handles tail."""
-    mgr = _build_manager(
-        episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
-        ],
-        embedding=_StubEmbedding(),
-    )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=10))
-    # No radius default in normal mode → both kept.
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
-
-
-# ── VECTOR + maxsim_atomic strategy ─────────────────────────────────────
-
-
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
     """Atomic-fact candidate emitted by ``AtomicFactRecaller.dense_recall``."""
     return Candidate(
@@ -428,18 +415,142 @@ def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
     )
 
 
-async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
+# ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
+
+
+async def test_embed_query_rejects_a_width_that_disagrees_with_dim() -> None:
+    """A provider returning a width other than its declared ``dim`` must fail
+    at the embed step, not inside LanceDB.
+
+    Sending a mismatched query vector into the engine surfaces as an opaque
+    ``ValueError: Invalid input, No vector column found to match…`` only after
+    the query has been set up — 13-14s per request in a soak run, as an
+    unhandled 500 with a ~6k-line traceback. Here it is microseconds and a
+    named error. ``ConfigurationError`` (server-side) rather than
+    ``InvalidInputError``: callers only ever send query *text*, so the width is
+    entirely our provider's doing.
+    """
+    from everos.core.errors import ConfigurationError
+
+    class _LyingEmbedding(_StubEmbedding):
+        async def embed(self, text: str) -> list[float]:
+            return [0.0] * (self.dim // 2)  # declares dim, returns half of it
+
+    mgr = _build_manager(embedding=_LyingEmbedding(dim=8))
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        await mgr._embed_query("anything")
+
+    msg = str(excinfo.value)
+    assert "4-dimension" in msg, msg
+    assert "dim=8" in msg, msg
+
+
+async def test_vector_method_requires_embedding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``vector_strategy=maxsim_atomic`` should ANN atomic_facts → max-pool by
-    episode entry_id → resolve to episode, ordering episodes by the
-    per-episode maximum fact score."""
-    from everos.config.settings import load_settings
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
+    )
+    mgr = _build_manager()  # embedding=None by default
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
+        await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert excinfo.value.provider == "embedding"
+    assert excinfo.value.feature == "vector"
 
-    monkeypatch.setenv("EVEROS_SEARCH__VECTOR_STRATEGY", "maxsim_atomic")
-    load_settings.cache_clear()
-    # Two episodes; each has two atomic facts under it. The max fact score
-    # per memcell is what should end up as the episode's score.
+
+async def test_vector_method_returns_episodes_via_maxsim() -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("should_not_appear")],
+        episode_dense=[_episode_row("ep_dense")],
+        atomic_fact_dense=[
+            _atomic_fact_row("f1", parent_id="ep_dense", score=0.85),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
+    assert [e.id for e in resp.data.episodes] == ["ep_dense"]
+
+
+async def test_vector_radius_filter_drops_below_threshold() -> None:
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, radius=0.5))
+    assert [e.id for e in resp.data.episodes] == ["ep_high"]
+
+
+async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
+    """``top_k=-1`` without an explicit radius gets the project default 0.5.
+
+    Mirrors enterprise's auto-floor behaviour — unlimited mode must not
+    return arbitrarily low-similarity tail.
+    """
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_mid"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),  # below 0.5
+            _atomic_fact_row("f_mid", parent_id="ep_mid", score=0.55),  # above 0.5
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
+    # Ordered by max-pooled fact score descending.
+    assert [e.id for e in resp.data.episodes] == ["ep_high", "ep_mid"]
+
+
+async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
+    """Caller-supplied radius (even ``0.0``) wins over the unlimited default."""
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1, radius=0.1))
+    # 0.1 threshold keeps both rows (the default 0.5 would have dropped ep_low).
+    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+
+
+async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
+    """``top_k > 0`` without a radius applies no threshold — truncation handles tail."""
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=10))
+    # No radius default in normal mode -> both kept.
+    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+
+
+async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
+    """ANN atomic_facts -> max-pool by episode entry_id -> resolve to
+    episode, ordering episodes by the per-episode maximum fact score."""
     mgr = _build_manager(
         episode_dense=[
             _episode_row("ep_A", memcell_id="mc_A"),
@@ -460,14 +571,8 @@ async def test_vector_maxsim_atomic_max_pools_facts_to_episodes(
     assert eps[1].score == pytest.approx(0.75)
 
 
-async def test_vector_maxsim_atomic_returns_empty_when_no_facts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No fact recall → no memcells to score → empty episode list."""
-    from everos.config.settings import load_settings
-
-    monkeypatch.setenv("EVEROS_SEARCH__VECTOR_STRATEGY", "maxsim_atomic")
-    load_settings.cache_clear()
+async def test_vector_returns_empty_when_no_facts() -> None:
+    """No fact recall -> no episodes to score -> empty episode list."""
     mgr = _build_manager(
         episode_dense=[_episode_row("ep_A", memcell_id="mc_A")],
         atomic_fact_dense=[],
@@ -480,10 +585,15 @@ async def test_vector_maxsim_atomic_returns_empty_when_no_facts(
 # ── HYBRID / AGENTIC: prerequisite errors ──────────────────────────────
 
 
-async def test_hybrid_requires_embedding() -> None:
+async def test_hybrid_requires_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
+    )
     mgr = _build_manager()
-    with pytest.raises(RuntimeError, match="embedding"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    assert excinfo.value.provider == "embedding"
+    assert excinfo.value.feature == "user_hybrid"
 
 
 async def test_hybrid_does_not_require_llm_by_default() -> None:
@@ -496,16 +606,22 @@ async def test_hybrid_does_not_require_llm_by_default() -> None:
 
 
 async def test_hybrid_requires_llm_when_enable_llm_rerank_true() -> None:
-    """Setting ``enable_llm_rerank=True`` makes the LLM mandatory."""
+    """Setting ``enable_llm_rerank=True`` makes the LLM mandatory. The
+    guard raises the same :class:`ProviderNotConfiguredError` -> 422 as
+    the embedding / rerank branches (unified provider-missing vocabulary)."""
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="enable_llm_rerank"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.HYBRID, enable_llm_rerank=True))
+    assert excinfo.value.provider == "llm"
+    assert excinfo.value.feature == "user_hybrid"
+    assert excinfo.value.alternative_hint is not None
+    assert "enable_llm_rerank" in excinfo.value.alternative_hint
 
 
 async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
-    """HYBRID episode path: hierarchy pipeline (RRF -> MaxSim -> merge -> eviction).
+    """HYBRID episode path: heap-expand pipeline (RRF -> LR -> expansion).
 
-    ep_1 has a fact scoring higher than the RRF score -> fact evicts episode.
+    ep_1 has a fact scoring higher than its LR score -> fact evicts episode.
     ep_2 has no facts -> episode emitted as-is.
     """
     ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
@@ -531,21 +647,33 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
     assert ep1_result.atomic_facts[0].id == "f1"
 
 
-async def test_agentic_requires_reranker_and_llm() -> None:
+async def test_agentic_requires_reranker_and_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="rerank provider"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    assert excinfo.value.provider == "rerank"
+    assert excinfo.value.feature == "agentic_search"
 
 
-async def test_agent_hybrid_requires_reranker_without_llm_rerank() -> None:
+async def test_agent_hybrid_requires_reranker_without_llm_rerank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``owner_type='agent'`` + HYBRID + ``enable_llm_rerank=False`` reaches
     the skill cross-encoder lane (``skill_hybrid``: rrf → cross-encoder),
     so a missing rerank provider must fail-fast with a config hint rather
     than crash deep inside the rerank callback.
     """
+    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(RuntimeError, match="rerank provider"):
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_agent_req(method=SearchMethod.HYBRID))
+    assert excinfo.value.provider == "rerank"
+    assert excinfo.value.feature == "agent_hybrid"
+    assert excinfo.value.alternative_hint is not None
+    assert "enable_llm_rerank" in excinfo.value.alternative_hint
 
 
 async def test_agent_hybrid_with_llm_rerank_does_not_need_reranker() -> None:
@@ -565,7 +693,9 @@ async def test_agent_hybrid_with_llm_rerank_does_not_need_reranker() -> None:
 class _StubReranker:
     """Minimal reranker stub — returns trivial scores."""
 
-    async def rerank(self, query: str, documents: Sequence[str]) -> list[Any]:
+    async def rerank(
+        self, query: str, documents: Sequence[str], **kwargs: Any
+    ) -> list[Any]:
         from everos.component.rerank.protocol import RerankResult
 
         return [RerankResult(index=i, score=1.0) for i in range(len(documents))]
@@ -932,3 +1062,230 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     # The bridged skill inherits the matched case's score (0.85 from c1).
     by_id = {c.id: c for c in seen_skill_dense["dense"]}
     assert by_id["s_bridged"].score == pytest.approx(0.85)
+
+
+async def test_search_emits_memory_search_span() -> None:
+    """search() opens an everos.memory.search retriever span carrying the
+    langfuse.* attribute contract (observation type / user id / metadata)."""
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import (
+        force_flush,
+        init_tracing,
+        shutdown_tracing,
+    )
+
+    exporter = InMemorySpanExporter()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    try:
+        mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+        await mgr.search(_user_req())
+        force_flush()
+        spans = {s.name: s for s in exporter.get_finished_spans()}
+        assert "everos.memory.search" in spans
+        attrs = spans["everos.memory.search"].attributes
+        assert attrs["langfuse.observation.type"] == "retriever"
+        assert attrs["langfuse.user.id"] == "alice"
+        assert attrs["langfuse.trace.metadata.owner_type"] == "user"
+        assert list(attrs["langfuse.trace.tags"]) == ["everos", "memory"]
+    finally:
+        shutdown_tracing()
+
+
+# ── Search sub-span decomposition (recall + rank phases) ────────────────
+
+
+@pytest.fixture
+def _search_spans():  # type: ignore[no-untyped-def]
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from everos.config.settings import ObservabilitySettings
+    from everos.core.observability.tracing import init_tracing, shutdown_tracing
+
+    exporter = InMemorySpanExporter()
+    shutdown_tracing()
+    init_tracing(
+        ObservabilitySettings(enabled=True, endpoint="http://collector.invalid"),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    yield exporter
+    shutdown_tracing()
+
+
+def _span_index(exporter: Any) -> dict[str, Any]:
+    from everos.core.observability.tracing import force_flush
+
+    force_flush()
+    return {s.name: s for s in exporter.get_finished_spans()}
+
+
+async def test_keyword_user_emits_recall_no_rank(_search_spans: Any) -> None:
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    spans = _span_index(_search_spans)
+    assert "everos.search.recall" in spans
+    assert "everos.search.rank" not in spans
+    # recall nests under the search span (one trace).
+    tid = spans["everos.memory.search"].context.trace_id
+    assert spans["everos.search.recall"].context.trace_id == tid
+    assert spans["everos.search.recall"].parent is not None
+
+
+async def test_hybrid_user_emits_recall_and_rank(_search_spans: Any) -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")], embedding=_StubEmbedding()
+    )
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    spans = _span_index(_search_spans)
+    assert "everos.search.recall" in spans
+    assert "everos.search.rank" in spans
+
+
+async def test_keyword_agent_emits_recall_no_rank(_search_spans: Any) -> None:
+    mgr = _build_manager(case_sparse=[_case_row("c1")], skill_sparse=[_skill_row("s1")])
+    await mgr.search(_agent_req(method=SearchMethod.KEYWORD))
+    spans = _span_index(_search_spans)
+    assert "everos.search.recall" in spans
+    assert "everos.search.rank" not in spans
+
+
+async def test_hybrid_agent_emits_recall_and_rank(_search_spans: Any) -> None:
+    mgr = _build_manager(
+        case_sparse=[_case_row("c1")],
+        skill_sparse=[_skill_row("s1")],
+        embedding=_StubEmbedding(),
+        reranker=_StubReranker(),
+    )
+    await mgr.search(_agent_req(method=SearchMethod.HYBRID))
+    spans = _span_index(_search_spans)
+    assert "everos.search.recall" in spans
+    assert "everos.search.rank" in spans
+
+
+async def test_search_emits_top_score_without_hit_for_keyword(
+    _search_spans: Any,
+) -> None:
+    """KEYWORD sets everos.search.top_score (max item score) but NOT
+    everos.search.hit — an unbounded BM25 score forced through a fixed
+    threshold would be a misleading always-hit verdict."""
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=0.75)])
+    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert attrs["everos.search.top_score"] == pytest.approx(0.75)
+    assert "everos.search.hit" not in attrs
+
+
+async def test_search_emits_hit_when_calibrated_above_threshold(
+    _search_spans: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HYBRID is calibrated ([0, 1]) so a top score >= recall_hit_threshold
+    (default 0.6) sets everos.search.hit = True on the retriever span."""
+    import everos.memory.search.manager as mgr_mod
+
+    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.9)
+    mgr = _build_manager(embedding=_StubEmbedding())
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert attrs["everos.search.top_score"] == pytest.approx(0.9)
+    assert attrs["everos.search.hit"] is True
+
+
+async def test_search_hit_false_when_calibrated_below_threshold(
+    _search_spans: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import everos.memory.search.manager as mgr_mod
+
+    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.3)
+    mgr = _build_manager(embedding=_StubEmbedding())
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert attrs["everos.search.top_score"] == pytest.approx(0.3)
+    assert attrs["everos.search.hit"] is False
+
+
+async def test_search_top_score_zero_without_hit_for_keyword(
+    _search_spans: Any,
+) -> None:
+    mgr = _build_manager()  # no candidates
+    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert attrs["everos.search.top_score"] == pytest.approx(0.0)
+    assert "everos.search.hit" not in attrs
+
+
+async def test_search_enqueues_recall_scores(
+    _search_spans: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When tracing is active, search hands the top score to the score sink
+    with the retriever span's trace_id (032x) + observation_id (016x).
+    KEYWORD is uncalibrated so hit is None, which is what makes the sink
+    report it as recall_top_score_raw and push no recall_hit."""
+    import everos.memory.search.manager as mgr_mod
+
+    captured: dict[str, Any] = {}
+
+    def fake_emit(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(mgr_mod, "emit_recall_scores", fake_emit)
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1", score=0.75)])
+    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+
+    assert captured["top_score"] == pytest.approx(0.75)
+    assert captured["hit"] is None
+    assert captured["method"] == "keyword"
+    assert len(captured["trace_id"]) == 32
+    assert len(captured["observation_id"]) == 16
+
+
+async def test_search_captures_query_when_content_on(_search_spans: Any) -> None:
+    from everos.core.observability.tracing import set_capture_content
+
+    set_capture_content(True)
+    try:
+        mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+        await mgr.search(_user_req(method=SearchMethod.KEYWORD))  # query="hi"
+    finally:
+        set_capture_content(False)
+    import json
+
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert json.loads(attrs["langfuse.observation.input"])["query"] == "hi"
+
+
+async def test_search_captures_returned_hits_when_content_on(
+    _search_spans: Any,
+) -> None:
+    """capture_content on → the search span records the returned hit ids
+    (episodes/agent_cases/agent_skills), not just the query."""
+    from everos.core.observability.tracing import set_capture_content
+
+    set_capture_content(True)
+    try:
+        mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+        await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    finally:
+        set_capture_content(False)
+    import json
+
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    out = json.loads(attrs["langfuse.observation.output"])
+    assert out["episodes"] == ["ep_1"]
+    assert out["agent_cases"] == [] and out["agent_skills"] == []
+
+
+async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
+    mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+    await mgr.search(_user_req(method=SearchMethod.KEYWORD))
+    attrs = _span_index(_search_spans)["everos.memory.search"].attributes
+    assert "langfuse.observation.input" not in attrs

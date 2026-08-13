@@ -87,6 +87,15 @@ async def cascade_runtime(
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
+    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
+    # rather than through ``CascadeOrchestrator`` — patch the process-wide
+    # singleton so cascade never hits the fake network target above.
+    import everos.component.embedding.accessor as acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
     await dispose_connection()
     await dispose_engine()
     engine = get_engine()
@@ -94,7 +103,7 @@ async def cascade_runtime(
         await conn.run_sync(SQLModel.metadata.create_all)
     await ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
     await dispose_connection()
     await dispose_engine()
 
@@ -215,12 +224,12 @@ _KIND_CASES: list[_DailyLogKindCase] = [
 
 async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
     async with asyncio.timeout(deadline):
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None:
                 break
             await asyncio.sleep(0.05)
-        while True:  # noqa: ASYNC110 - polling cascade state
+        while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
                 break
@@ -237,7 +246,6 @@ async def test_md_lance_strict_consistency_per_kind(
     memory_root = cascade_runtime
     orchestrator = CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,

@@ -1,43 +1,44 @@
 ---
 name: new-branch
-description: Create a branch following the project's GitFlow Lite model
+description: Create a GitHub branch from main with the project naming convention
 ---
 
 # /new-branch
 
-Cut a new branch under the GitFlow Lite model.
+Cut a new branch for the GitHub repository.
 
 ## Branch model
 
 ```
-master  = released / stable (tagged on release; protected)
-dev     = integration branch (protected)
-feat/*  = cut from dev  → PR → merge into dev
-fix/*   = cut from dev  → PR → merge into dev
-hotfix/* = cut from master → merge into master AND synced into dev (double merge)
-release  = dev → master + tag on master (no separate release branch)
+main       = default and protected branch
+feat/*     = feature work
+fix/*      = bug fixes
+docs/*     = documentation-only changes
+ci/*       = CI, build, and developer-experience changes
+chore/*    = repository maintenance
+refactor/* = behavior-preserving code structure changes
 ```
 
 ## Steps
 
-1. Ask (or infer) the change type: `feat`, `fix`, or `hotfix`.
-2. Pick the parent:
-   - `feat/*`, `fix/*` → branch from **`dev`**.
-   - `hotfix/*` → branch from **`master`**.
-3. Update the parent first:
+1. Ask (or infer) the change type: `feat`, `fix`, `docs`, `ci`, `chore`, or
+   `refactor`.
+2. Update `main` first:
    ```bash
-   git checkout <parent>
+   git checkout main
    git pull --ff-only
    ```
-4. Create the branch with a kebab-case slug:
+3. Create the branch with a kebab-case slug:
    ```bash
-   git checkout -b feat/<short-slug>
+   git checkout -b <type>/<short-slug>
    ```
-5. For a `hotfix`, remember it must later merge into **both** `master` and `dev`.
+4. Keep the branch scoped to one purpose and open a pull request back to
+   `main`.
 
 ## Naming
 
-- `feat/add-agentic-rerank`, `fix/empty-profile-crash`, `hotfix/lancedb-conn-leak`.
+- `feat/add-agentic-rerank`, `fix/empty-profile-crash`,
+  `docs/quickstart-config`, `ci/check-github-docs`.
 - Lowercase, hyphen-separated, no spaces, concise.
 
-Never commit directly to `master` or `dev` — always via a branch + PR.
+Never commit directly to `main` — always use a branch and pull request.

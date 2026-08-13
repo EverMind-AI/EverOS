@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 
 from sqlalchemy import asc, delete, desc, func, select
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from everos.component.utils.datetime import get_utc_now
@@ -67,20 +67,6 @@ class TopicUpsertPayload:
     content: str
     content_labels: str | None
     md_path: str
-
-
-def _apply_document_fields(
-    row: KnowledgeDocumentRow, payload: DocumentUpsertPayload
-) -> None:
-    """Copy payload fields onto an existing SQLAlchemy row."""
-    row.app_id = payload.app_id
-    row.project_id = payload.project_id
-    row.category_id = payload.category_id
-    row.title = payload.title
-    row.summary = payload.summary
-    row.source_name = payload.source_name
-    row.source_type = payload.source_type
-    row.md_path = payload.md_path
 
 
 class _KnowledgeDocumentRepo(RepoBase[KnowledgeDocumentRow]):
@@ -200,59 +186,34 @@ class _KnowledgeDocumentRepo(RepoBase[KnowledgeDocumentRow]):
     async def upsert_from_handler(self, payload: DocumentUpsertPayload) -> None:
         """Insert or update a document row from the cascade handler.
 
-        Use SQLite's atomic ``ON CONFLICT`` form rather than a
-        load-mutate-commit cycle. Category moves can produce concurrent
-        cascade events for the old and new ``index.md`` paths; an ORM row
-        loaded before a delete can otherwise raise ``StaleDataError`` on
-        flush.
+        Uses SQLite ``INSERT ... ON CONFLICT DO UPDATE`` to avoid the
+        ``StaleDataError`` that occurs when a concurrent cascade handler
+        deletes the row between a ``get`` and ``commit``.
         """
+        now = get_utc_now()
+        values = {
+            **dataclasses.asdict(payload),
+            "created_at": now,
+            "updated_at": now,
+        }
+        stmt = sqlite_insert(KnowledgeDocumentRow).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["doc_id"],
+            set_={
+                "app_id": stmt.excluded.app_id,
+                "project_id": stmt.excluded.project_id,
+                "category_id": stmt.excluded.category_id,
+                "title": stmt.excluded.title,
+                "summary": stmt.excluded.summary,
+                "source_name": stmt.excluded.source_name,
+                "source_type": stmt.excluded.source_type,
+                "md_path": stmt.excluded.md_path,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
         async with session_scope(self._factory) as s:
-            now = get_utc_now()
-            values = {
-                **dataclasses.asdict(payload),
-                "created_at": now,
-                "updated_at": now,
-            }
-            stmt = insert(KnowledgeDocumentRow).values(**values)
-            update_fields = {
-                key: values[key]
-                for key in (
-                    "app_id",
-                    "project_id",
-                    "category_id",
-                    "title",
-                    "summary",
-                    "source_name",
-                    "source_type",
-                    "md_path",
-                    "updated_at",
-                )
-            }
-            await s.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=["doc_id"],
-                    set_=update_fields,
-                )
-            )
+            await s.execute(stmt)
             await s.commit()
-
-
-def _apply_topic_fields(row: KnowledgeTopicRow, payload: TopicUpsertPayload) -> None:
-    """Copy payload fields onto an existing SQLAlchemy row."""
-    row.doc_id = payload.doc_id
-    row.app_id = payload.app_id
-    row.project_id = payload.project_id
-    row.category_id = payload.category_id
-    row.topic_index = payload.topic_index
-    row.topic_name = payload.topic_name
-    row.topic_path = payload.topic_path
-    row.depth = payload.depth
-    row.parent_node_id = payload.parent_node_id
-    row.children_node_ids = payload.children_node_ids
-    row.summary = payload.summary
-    row.content = payload.content
-    row.content_labels = payload.content_labels
-    row.md_path = payload.md_path
 
 
 class _KnowledgeTopicRepo(RepoBase[KnowledgeTopicRow]):
@@ -316,25 +277,38 @@ class _KnowledgeTopicRepo(RepoBase[KnowledgeTopicRow]):
     async def upsert_from_handler(self, payload: TopicUpsertPayload) -> None:
         """Insert or update a topic row from the cascade handler.
 
-        Checks by ``node_id`` (PK). If the row exists, all mutable
-        columns are overwritten and ``updated_at`` bumps. If not, a
-        fresh row is inserted with both ``created_at`` and
-        ``updated_at`` set to now.
+        Uses SQLite ``INSERT ... ON CONFLICT DO UPDATE`` to avoid
+        ``StaleDataError`` from concurrent cascade handlers.
         """
+        now = get_utc_now()
+        values = {
+            **dataclasses.asdict(payload),
+            "created_at": now,
+            "updated_at": now,
+        }
+        stmt = sqlite_insert(KnowledgeTopicRow).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["node_id"],
+            set_={
+                "doc_id": stmt.excluded.doc_id,
+                "app_id": stmt.excluded.app_id,
+                "project_id": stmt.excluded.project_id,
+                "category_id": stmt.excluded.category_id,
+                "topic_index": stmt.excluded.topic_index,
+                "topic_name": stmt.excluded.topic_name,
+                "topic_path": stmt.excluded.topic_path,
+                "depth": stmt.excluded.depth,
+                "parent_node_id": stmt.excluded.parent_node_id,
+                "children_node_ids": stmt.excluded.children_node_ids,
+                "summary": stmt.excluded.summary,
+                "content": stmt.excluded.content,
+                "content_labels": stmt.excluded.content_labels,
+                "md_path": stmt.excluded.md_path,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
         async with session_scope(self._factory) as s:
-            existing = await s.get(KnowledgeTopicRow, payload.node_id)
-            now = get_utc_now()
-            if existing is not None:
-                _apply_topic_fields(existing, payload)
-                existing.updated_at = now
-                s.add(existing)
-            else:
-                row = KnowledgeTopicRow(
-                    **dataclasses.asdict(payload),
-                    created_at=now,
-                    updated_at=now,
-                )
-                s.add(row)
+            await s.execute(stmt)
             await s.commit()
 
 

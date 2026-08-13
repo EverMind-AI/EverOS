@@ -18,6 +18,8 @@ md contract:
 ``sections``:
 
 - ``TaskIntent``: short intent statement (embedded + BM25 primary).
+  Embedding is a soft dependency: when unavailable, ``vector`` is
+  written as ``None`` and the row stays BM25/scalar-searchable only.
 - ``Approach``: step-by-step approach (BM25 secondary field via
   ``approach_tokens``, **not** fed to the embedder — the
   retrieval anchor is task_intent).
@@ -26,10 +28,14 @@ md contract:
 
 from __future__ import annotations
 
+from everos.component.embedding import get_embedding_capability
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb import AgentCase, ParentType, agent_case_repo
 
 from ._common import require_float, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
+
+logger = get_logger(__name__)
 
 
 class AgentCaseHandler(BaseDailyLogHandler):
@@ -62,7 +68,14 @@ class AgentCaseHandler(BaseDailyLogHandler):
         key_insight = (s.sections.get("KeyInsight") or "").strip() or None
         intent_tokens = self._deps.tokenizer.tokenize(task_intent)
         approach_tokens = self._deps.tokenizer.tokenize(approach)
-        vector = await self._deps.embedder.embed(task_intent)
+        vector = await get_embedding_capability().embed_or_none(task_intent)
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=entry.entry_id,
+                reason="embedding_capability_unavailable",
+            )
         return AgentCase(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,

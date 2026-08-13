@@ -19,7 +19,7 @@ async def test_lifespan_starts_and_stops_engine(
     svc = importlib.import_module("everos.service.memorize")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / "ome.toml").write_text("# test\n")
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
@@ -29,7 +29,7 @@ async def test_lifespan_starts_and_stops_engine(
 
     engine = await provider.startup(app)
     assert engine is not None
-    assert engine._started is True  # noqa: SLF001 — test introspection
+    assert engine._started is True
 
     await provider.shutdown(app)
-    assert engine._started is False  # noqa: SLF001
+    assert engine._started is False

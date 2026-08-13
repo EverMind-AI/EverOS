@@ -84,10 +84,23 @@ async def cascade_runtime(
     await ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
 
     await dispose_connection()
     await dispose_engine()
+
+
+def _patch_embedding_capability(
+    monkeypatch: pytest.MonkeyPatch, embedder: _StubEmbedder
+) -> None:
+    """EpisodeHandler fetches the embedder lazily via
+    ``get_embedding_capability()`` — patch the process-wide singleton so
+    cascade never hits the fake network target set up by ``cascade_runtime``.
+    """
+    import everos.component.embedding.accessor as acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
 
 
 async def _poll(condition, *, deadline_seconds: float = 10.0, interval: float = 0.05):  # type: ignore[no-untyped-def]
@@ -107,13 +120,14 @@ async def _poll(condition, *, deadline_seconds: float = 10.0, interval: float = 
 
 async def test_append_to_md_propagates_to_lancedb(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Happy path: writer append → watcher → state row → worker → LanceDB."""
     memory_root = cascade_runtime
     embedder = _StubEmbedder()
+    _patch_embedding_capability(monkeypatch, embedder)
     orchestrator = CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=embedder,
         tokenizer=build_tokenizer(),
         # Tight worker poll so the test wraps in seconds, not minutes.
         # Scanner interval kept long so the watcher path is the one
@@ -188,12 +202,13 @@ async def test_append_to_md_propagates_to_lancedb(
 
 async def test_delete_md_wipes_lancedb_row(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Append + drain, then ``unlink`` the md and watch the row evaporate."""
     memory_root = cascade_runtime
+    _patch_embedding_capability(monkeypatch, _StubEmbedder())
     orchestrator = CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,

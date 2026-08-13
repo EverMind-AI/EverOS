@@ -1,0 +1,200 @@
+# Publishes to PyPI via Trusted Publishing (OIDC) — no stored token — and then
+# drafts the matching GitHub Release page from CHANGELOG.md.
+# Fires on a version tag (vX.Y.Z, plus PEP 440 pre-releases vX.Y.ZrcN / aN / bN).
+# The `release` environment gates the upload behind manual approval; configure
+# required reviewers under Settings → Environments → release.
+#
+# One-time setup on PyPI (project owner, cannot be done from CI):
+#   PyPI → project `everos` → Settings → Publishing → add a GitHub trusted
+#   publisher: owner=EverMind-AI, repo=EverOS, workflow=release.yml,
+#   environment=release.
+name: Release
+
+on:
+  push:
+    tags:
+      # vX.Y.Z plus PEP 440 pre-release/dev suffixes (rc1 / a1 / b1 / .dev1).
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build + publish to PyPI
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # Guard: the tag must match the package version, so a mistyped tag can't
+      # publish the wrong release.
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "(.+)"/\1/')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag != pyproject version $pkg"
+            exit 1
+          fi
+
+      - name: Build + smoke-test the package
+        run: make package # builds sdist+wheel into dist/ and import-smokes it
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The notes page is a separate job so the publish job above keeps
+  # `contents: read` next to its OIDC token. It runs only after PyPI accepted
+  # the upload — a release page for a version nobody can install is worse than
+  # no page. The release is left as a DRAFT: the CHANGELOG section gives the
+  # body, but the lead summary that opens every EverOS release page is written
+  # by a human, who then clicks Publish.
+  github-release:
+    name: draft the GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # the whole tag list, to name the previous release
+
+      - name: Build the notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, subprocess, sys
+
+          tag = os.environ["TAG"]
+          version = tag[1:]
+          # vX.Y.Z is stable; anything with a PEP 440 suffix (rc1 / a1 / b1 /
+          # .dev1) is a pre-release and must never become /releases/latest.
+          prerelease = re.fullmatch(r"\d+\.\d+\.\d+", version) is None
+
+          src = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(
+              # Stops at the next version heading, at the link-reference block
+              # that closes the file, or at EOF.
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]: |\Z)",
+              src,
+              re.S | re.M,
+          )
+          if match is None and not prerelease:
+              # A stable release with no CHANGELOG entry is a mistake in the
+              # release PR, not something to paper over with an empty page.
+              print(f"::error::CHANGELOG.md has no '## [{version}]' section")
+              sys.exit(1)
+
+          if match is None:
+              body = f"Pre-release build of `{version}`. See CHANGELOG.md on the tag.\n"
+          else:
+              # Demote the Keep-a-Changelog `### Added` group headings to `##`,
+              # matching how every earlier EverOS release page is structured.
+              body = re.sub(r"^### ", "## ", match.group(1).strip(), flags=re.M) + "\n"
+
+          # Every EverOS release page since 1.1.3 closes with an Upgrade
+          # section: the pip line, then whatever this release needs a reader to
+          # know before upgrading, then the compare link. The prose comes from
+          # an `### Upgrade` group in the CHANGELOG section — written in the
+          # release PR, where it gets reviewed — and is lifted out here so the
+          # boilerplate can be wrapped around it instead of colliding with it.
+          upgrade = ""
+          found = re.search(r"^## Upgrade\n(.*?)(?=^## |\Z)", body, re.S | re.M)
+          if found is not None:
+              upgrade = found.group(1).strip()
+              body = (body[: found.start()] + body[found.end() :]).rstrip() + "\n"
+
+          tags = subprocess.run(
+              ["git", "tag", "--list", "v*", "--sort=-v:refname"],
+              capture_output=True, text=True, check=True,
+          ).stdout.split()
+          previous = None
+          if tag in tags:
+              previous = next(
+                  (t for t in tags[tags.index(tag) + 1:] if re.fullmatch(r"v\d+\.\d+\.\d+", t)),
+                  None,
+              )
+
+          body += "\n## Upgrade\n\n```bash\npip install --upgrade everos   # or: uv sync\n```\n"
+          if upgrade:
+              body += f"\n{upgrade}\n"
+          if previous is not None:
+              compare = f"https://github.com/{os.environ['REPO']}/compare/{previous}...{tag}"
+              body += f"\n**Full changelog:** [{previous}...{tag}]({compare})\n"
+
+          notes = pathlib.Path(os.environ["RUNNER_TEMP"]) / "notes.md"
+          notes.write_text(body, encoding="utf-8")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"RELEASE_VERSION={version}\n")
+              env.write(f"RELEASE_NOTES={notes}\n")
+              env.write(f"RELEASE_PRERELEASE={'true' if prerelease else 'false'}\n")
+          PY
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Find an existing release through the LIST endpoint: the by-tag
+          # endpoint is published-only, so the Actions token cannot see a draft
+          # through it (cli/cli#3037) and a re-run would 422 on create. Replace
+          # a stale draft (deleting a draft keeps the git tag); never touch a
+          # release someone already published.
+          rel="$(gh api "repos/$REPO/releases?per_page=100" \
+            --jq "map(select(.tag_name == \"$TAG\"))[0] // {}")"
+          id="$(printf '%s' "$rel" | jq -r '.id // empty')"
+          draft="$(printf '%s' "$rel" | jq -r '.draft // false')"
+
+          if [ -n "$id" ] && [ "$draft" != "true" ]; then
+            echo "Release $TAG is already published; leaving it alone."
+            echo "Release $TAG already published: https://github.com/$REPO/releases/tag/$TAG" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -n "$id" ]; then
+            gh api -X DELETE "repos/$REPO/releases/$id"
+          fi
+
+          # Written as `if`, not `cond && assign`: the runner's shell is
+          # `bash -e`, where a false test at the head of an AND-OR list fails
+          # the whole step.
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            flags="--prerelease --latest=false"
+          else
+            flags="--latest"
+          fi
+          # $flags is deliberately unquoted — it carries two words.
+          draft_url="$(gh release create "$TAG" \
+            --draft $flags \
+            --title "EverOS $RELEASE_VERSION" \
+            --notes-file "$RELEASE_NOTES")"
+
+          # A draft lives at releases/tag/untagged-<hash> and keeps serving that
+          # stale page after publication, with no redirect to the real tag. Print
+          # both URLs so nobody shares the draft one by copying the address bar.
+          {
+            echo "### Release $TAG (draft)"
+            echo ""
+            echo "Write the lead summary in the draft, then click **Publish**."
+            echo ""
+            echo "- Draft (temporary, do not share): $draft_url"
+            echo "- Public URL once published: https://github.com/$REPO/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"

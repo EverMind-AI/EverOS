@@ -17,7 +17,7 @@ import datetime as _dt
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot, StructuredEntry
 from everos.memory.cascade.handlers import (
@@ -47,12 +47,23 @@ class _StubEmbedder(EmbeddingProvider):
         return [await self.embed(t) for t in texts]
 
 
+@pytest.fixture(autouse=True)
+def _stub_embedding_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handlers fetch the embedder lazily via ``get_embedding_capability()``
+    rather than through :class:`HandlerDeps` — patch the process-wide
+    singleton so ``_build_row`` returns a real (stub) vector."""
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
+
+
 def _deps(tmp_path) -> HandlerDeps:  # type: ignore[no-untyped-def]
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     return HandlerDeps(
         memory_root=mr,
-        embedder=_StubEmbedder(),
         tokenizer=_StubTokenizer(),
     )
 

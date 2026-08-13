@@ -24,6 +24,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
+from everos.core.observability.tracing import current_traceparent
 from everos.infra.ome._background.config_reloader import ConfigReloader
 from everos.infra.ome._background.crash_recovery import scan_and_resume
 from everos.infra.ome._background.idle_scanner import IdleScanner
@@ -91,12 +92,15 @@ async def _runner_entry(
     event_topic: str,
     event_payload: str,
     max_retries_snapshot: int,
+    traceparent: str = "",
 ) -> None:
     """Module-level APS jobstore callback for a single run.
 
     Looks the engine up by id and hands off to
     :meth:`OfflineEngine.dispatch_run`. Pickle-safe (no closures, no
-    bound methods captured into APS jobstore args).
+    bound methods captured into APS jobstore args). ``traceparent`` defaults
+    to "" so crash-recovered jobs enqueued before this field existed still
+    unpack (they simply root their own trace).
     """
     engine = _ENGINES.get(engine_id)
     if engine is None:
@@ -112,6 +116,7 @@ async def _runner_entry(
         event_topic=event_topic,
         event_payload=event_payload,
         max_retries_snapshot=max_retries_snapshot,
+        traceparent=traceparent,
     )
 
 
@@ -285,7 +290,8 @@ class OfflineEngine:
             self._idle_event.set()
             self._launch_scheduler()
             _ENGINES[self._engine_id] = self
-            await self._run_crash_recovery()
+            if self._config.crash_recovery_enabled:
+                await self._run_crash_recovery()
             self._register_scheduled_jobs()
             self._start_config_reloader()
             self._started = True
@@ -313,6 +319,7 @@ class OfflineEngine:
             run_record_store=self._run_record_store,
             engine_sem=self._engine_sem,
             emit_hook=self._dispatch_event,
+            config=self._config,
             on_dead_letter=self._on_dead_letter,
             engine=self,
         )
@@ -340,6 +347,13 @@ class OfflineEngine:
 
     async def _run_crash_recovery(self) -> None:
         """Scan ``run_record`` for stale RUNNING rows and re-enqueue them.
+
+        Runs on :meth:`start` when :attr:`OMEConfig.crash_recovery_enabled`
+        is ``True`` (default). One-shot engines that register a subset of
+        strategies (backfill Phase 2/3) opt out via
+        ``crash_recovery_enabled=False`` to avoid re-enqueueing the
+        server's stale rows into their own scheduler, whose registry
+        doesn't contain those strategy names.
 
         Treats rows whose ``started_at`` is older than
         ``crash_recovery_timeout_seconds`` as crashes from a previous
@@ -601,7 +615,7 @@ class OfflineEngine:
         *,
         event: BaseEvent | None = None,
         force: bool = False,
-    ) -> None:
+    ) -> tuple[BaseEvent, list[tuple[StrategyMeta, str]]]:
         """Manually trigger one strategy.
 
         - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``
@@ -611,6 +625,14 @@ class OfflineEngine:
         Routes through :meth:`EventDispatcher.dispatch` with
         ``strategy_filter=name`` so the same three-gate logic is applied
         as for engine-driven dispatch.
+
+        Returns:
+            Tuple of ``(event, routes)``:
+                - ``event``: the event that was dispatched (either supplied
+                  or the engine-generated ``ManualTick``).
+                - ``routes``: the ``(meta, run_id)`` pairs that were
+                  enqueued. Empty list when every dispatch gate rejected
+                  the strategy.
         """
         if not self._started:
             raise OMEError("trigger_manual: engine not started")
@@ -623,6 +645,7 @@ class OfflineEngine:
         )
         for meta, run_id in routes:
             self._enqueue_run(meta, event, run_id)
+        return event, routes
 
     def _enqueue_run(self, meta: StrategyMeta, event: BaseEvent, run_id: str) -> None:
         """Add a one-shot APScheduler job that hands the event to Runner.
@@ -644,6 +667,10 @@ class OfflineEngine:
             else self._config.max_retries
         )
         event_topic = type(event).topic()
+        # Capture the triggering request's trace context (if any) here — this
+        # runs synchronously in the caller's task, so its span is still active.
+        # Carried as a pickle-safe string across the APScheduler boundary.
+        traceparent = current_traceparent() or ""
         self._on_run_enqueued()
         try:
             self._scheduler.add_job(
@@ -657,6 +684,7 @@ class OfflineEngine:
                     event_topic,
                     event.model_dump_json(),
                     max_retries_snapshot,
+                    traceparent,
                 ],
                 id=run_id,
                 replace_existing=False,
@@ -700,6 +728,7 @@ class OfflineEngine:
         event_topic: str,
         event_payload: str,
         max_retries_snapshot: int,
+        traceparent: str | None = None,
     ) -> None:
         """APS jobstore callback target for one strategy run.
 
@@ -724,6 +753,7 @@ class OfflineEngine:
                 event,
                 run_id=run_id,
                 max_retries_snapshot=max_retries_snapshot,
+                traceparent=traceparent,
             )
         finally:
             self._on_run_completed()

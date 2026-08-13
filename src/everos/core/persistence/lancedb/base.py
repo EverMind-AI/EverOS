@@ -68,8 +68,7 @@ class BaseLanceTable(LanceModel):
     is OFF. FTS *does* keep lightweight English-aware normalisation
     (``lower_case`` / ``stem`` / ``ascii_folding``) as a belt-and-
     braces layer on the same English tokens that survive jieba.
-    See ``17_lancedb_tables_design.md`` §2.4.1 and
-    :meth:`ensure_fts_indexes` below for the exact knobs."""
+    See :meth:`ensure_fts_indexes` below for the exact knobs."""
 
     created_at: dt.datetime = Field(default_factory=get_utc_now)
     updated_at: dt.datetime = Field(default_factory=get_utc_now)
@@ -105,11 +104,28 @@ class BaseLanceTable(LanceModel):
         )
 
     @classmethod
-    async def ensure_fts_indexes(cls, table: AsyncTable) -> None:
+    async def ensure_fts_indexes(
+        cls, table: AsyncTable, *, replace: bool = False
+    ) -> None:
         """Create FTS indexes on every column in :attr:`BM25_FIELDS`.
 
         Idempotent: columns that already have an index are skipped, so
-        this is safe to call on every startup. The FTS config is fixed
+        this is safe to call on every startup.
+
+        ``replace=True`` rebuilds each column's index in place instead of
+        skipping it — used by :meth:`LanceRepoBase.rebuild_indexes`, which
+        needs a fresh index but must never leave the column *without* one.
+        Dropping first would do that, and a BM25 query in that window does not
+        degrade — it raises ``Cannot perform full text search unless an
+        INVERTED index has been created`` (measured; vector search does fall
+        back to a flat scan, FTS does not). Since the recall legs are gathered
+        without ``return_exceptions``, that window turns into a 500 on the
+        whole search request. ``create_index(replace=True)`` is atomic: 49
+        concurrent queries across 3 replaces saw 0 failures, and it collapses
+        the live fragment set exactly as drop+create does (7 index files back
+        to 4, measured).
+
+        The FTS config is fixed
         to the app-layer pre-tokenisation + LanceDB normalisation
         convention (designed for **multilingual mixed content**):
 
@@ -127,7 +143,16 @@ class BaseLanceTable(LanceModel):
           filtering and a divided source of truth.
         - ``ascii_folding=True`` — strips diacritics (é→e) on Latin
           characters; no-op on CJK.
-        - ``with_position=True`` — enables phrase queries.
+        - ``with_position=False`` — everos does OR-mode BM25 recall
+          (``MatchQuery`` clauses; see ``search.recall.base.build_or_query``),
+          never phrase queries, so token positions are never read.
+          Building the position posting List is therefore pure overhead
+          **and** triggers a ``Max offset exceeds length of values``
+          offset-overflow crash inside lance's compaction once the
+          position lists grow large (upstream lance-format/lance#7653).
+          That crash blocks ``optimize()`` — including version cleanup —
+          so the index dir grows unbounded until the disk fills. Keeping
+          positions off avoids both the overhead and the crash.
 
         Subclasses normally do not need to override this — declaring
         :attr:`BM25_FIELDS` is enough.
@@ -137,12 +162,13 @@ class BaseLanceTable(LanceModel):
         indices = await table.list_indices()
         indexed_cols = {col for idx in indices for col in (idx.columns or [])}
         for field in cls.BM25_FIELDS:
-            if field in indexed_cols:
+            if field in indexed_cols and not replace:
                 continue
             await table.create_index(
                 column=field,
+                replace=replace,
                 config=FTS(
-                    with_position=True,
+                    with_position=False,
                     base_tokenizer="whitespace",
                     lower_case=True,
                     stem=True,

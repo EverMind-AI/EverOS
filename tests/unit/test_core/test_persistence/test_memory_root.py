@@ -9,7 +9,7 @@ import pytest
 from everos.core.persistence import MemoryRoot
 
 
-def test_default_returns_home_everos(
+def test_resolve_returns_home_everos(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("EVEROS_ROOT", raising=False)
@@ -17,7 +17,7 @@ def test_default_returns_home_everos(
     from everos.config import load_settings
 
     load_settings.cache_clear()
-    mr = MemoryRoot.default()
+    mr = MemoryRoot.resolve()
     assert mr.root == (Path.home() / ".everos").resolve()
 
 
@@ -25,13 +25,37 @@ def test_default_from_everos_root_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "custom"))
-    mr = MemoryRoot.default()
+    mr = MemoryRoot.resolve()
     assert mr.root == (tmp_path / "custom").resolve()
 
 
-def test_default_explicit_root(tmp_path: Path) -> None:
-    mr = MemoryRoot.default(explicit_root=str(tmp_path / "explicit"))
+def test_resolve_explicit_root(tmp_path: Path) -> None:
+    mr = MemoryRoot.resolve(explicit_root=str(tmp_path / "explicit"))
     assert mr.root == (tmp_path / "explicit").resolve()
+
+
+def test_default_alias_is_backward_compatible(tmp_path: Path) -> None:
+    """``MemoryRoot.default()`` was renamed to ``resolve()`` in the
+    embed-soft-dependency release. External v1.2.0 callers may still
+    invoke the old name — the alias keeps them working (with a
+    DeprecationWarning) instead of failing with AttributeError.
+    """
+    with pytest.warns(DeprecationWarning, match="renamed to MemoryRoot.resolve"):
+        mr = MemoryRoot.default(explicit_root=str(tmp_path / "compat"))
+    assert mr.root == (tmp_path / "compat").resolve()
+
+
+def test_default_alias_matches_resolve(tmp_path: Path) -> None:
+    """The alias must produce an object equal to what ``resolve()``
+    would produce — different code paths but identical semantics."""
+    import warnings
+
+    explicit = str(tmp_path / "same")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        via_alias = MemoryRoot.default(explicit_root=explicit)
+    via_resolve = MemoryRoot.resolve(explicit_root=explicit)
+    assert via_alias.root == via_resolve.root
 
 
 def test_accepts_str_path(tmp_path: Path) -> None:

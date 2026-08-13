@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import Episode
@@ -91,6 +91,18 @@ def memory_root(tmp_path: Path) -> MemoryRoot:
 
 
 @pytest.fixture
+def stub_embedder(monkeypatch: pytest.MonkeyPatch) -> _StubEmbedder:
+    """EpisodeHandler fetches the embedder lazily via
+    ``get_embedding_capability()`` — patch the process-wide singleton to
+    this stub so tests can assert on ``.calls``."""
+    import everos.component.embedding.accessor as acc
+
+    embedder = _StubEmbedder()
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
+    return embedder
+
+
+@pytest.fixture
 def fake_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeEpisodeRepo:
     """Swap the class-level ``lance_repo`` on EpisodeHandler.
 
@@ -126,34 +138,34 @@ async def _write_one_entry(writer: EpisodeWriter, owner_id: str, body: str) -> s
     )
 
 
-def _build_handler(
-    memory_root: MemoryRoot,
-) -> tuple[EpisodeHandler, _StubEmbedder]:
-    embedder = _StubEmbedder()
+def _build_handler(memory_root: MemoryRoot) -> EpisodeHandler:
     deps = HandlerDeps(
         memory_root=memory_root,
-        embedder=embedder,
         tokenizer=_StubTokenizer(),
     )
-    return EpisodeHandler(deps), embedder
+    return EpisodeHandler(deps)
 
 
 # ── happy path ───────────────────────────────────────────────────────────
 
 
 async def test_added_entry_upserts_typed_row(
-    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+    memory_root: MemoryRoot,
+    fake_repo: _FakeEpisodeRepo,
+    stub_embedder: _StubEmbedder,
 ) -> None:
     writer = EpisodeWriter(memory_root)
     rel = await _write_one_entry(writer, "u1", "hello world")
 
-    handler, embedder = _build_handler(memory_root)
+    handler = _build_handler(memory_root)
+    embedder = stub_embedder
     outcome = await handler.handle_added_or_modified(rel)
 
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     assert outcome.skipped == 0
-    assert embedder.calls == 1
+    # Subject "Test" is present → two embed calls (content + subject).
+    assert embedder.calls == 2
     assert len(fake_repo.upserts) == 1
     row = fake_repo.upserts[0][0]
     assert row.owner_id == "u1"
@@ -165,22 +177,28 @@ async def test_added_entry_upserts_typed_row(
     assert row.parent_id == "mc_test_parent"
     assert row.parent_type == "memcell"
     assert row.episode == "hello world"
-    assert row.episode_tokens == "hello world"
+    # episode_tokens includes subject keywords appended after content tokens.
+    assert row.episode_tokens == "hello world Test"
     assert row.subject == "Test"
     assert row.md_path == rel
     assert row.entry_id.startswith("ep_")
     assert row.id == f"u1_{row.entry_id}"
     assert len(row.vector) == 1024
+    assert row.subject_vector is not None
+    assert len(row.subject_vector) == 1024
 
 
 async def test_unchanged_entry_is_skipped_no_embed_call(
-    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+    memory_root: MemoryRoot,
+    fake_repo: _FakeEpisodeRepo,
+    stub_embedder: _StubEmbedder,
 ) -> None:
     """Second handle run with no md change → skipped + no embed call."""
     writer = EpisodeWriter(memory_root)
     rel = await _write_one_entry(writer, "u1", "hello world")
 
-    handler, embedder = _build_handler(memory_root)
+    handler = _build_handler(memory_root)
+    embedder = stub_embedder
     await handler.handle_added_or_modified(rel)  # first pass populates fake repo
     fake_repo.upserts.clear()
     embedder.calls = 0
@@ -193,13 +211,16 @@ async def test_unchanged_entry_is_skipped_no_embed_call(
 
 
 async def test_modified_entry_reembeds(
-    memory_root: MemoryRoot, fake_repo: _FakeEpisodeRepo
+    memory_root: MemoryRoot,
+    fake_repo: _FakeEpisodeRepo,
+    stub_embedder: _StubEmbedder,
 ) -> None:
     """Changing the entry body bumps the sha → re-embed + upsert."""
     writer = EpisodeWriter(memory_root)
     rel = await _write_one_entry(writer, "u1", "original content")
 
-    handler, embedder = _build_handler(memory_root)
+    handler = _build_handler(memory_root)
+    embedder = stub_embedder
     await handler.handle_added_or_modified(rel)
     # Tamper with the row's stored sha so the next pass sees a mismatch.
     fake_repo.rows[0] = fake_repo.rows[0].model_copy(
@@ -211,7 +232,43 @@ async def test_modified_entry_reembeds(
     outcome = await handler.handle_added_or_modified(rel)
     assert outcome.upserted == 1
     assert outcome.skipped == 0
+    # Subject "Test" is present → two embed calls (content + subject).
+    assert embedder.calls == 2
+
+
+async def test_no_subject_skips_subject_embed(
+    memory_root: MemoryRoot,
+    fake_repo: _FakeEpisodeRepo,
+    stub_embedder: _StubEmbedder,
+) -> None:
+    """When Subject is absent, subject_vector is None; only one embed call is made."""
+    today = _dt.date(2026, 5, 14)
+    writer = EpisodeWriter(memory_root)
+    await writer.append_entry(
+        "u2",
+        inline={
+            "owner_id": "u2",
+            "session_id": "s2",
+            "timestamp": "2026-05-14T10:00:00+00:00",
+            "parent_type": "memcell",
+            "parent_id": "mc_no_subject",
+            "sender_ids": ["u2"],
+        },
+        sections={"Content": "content only"},
+        date=today,
+    )
+    rel = "default_app/default_project/users/u2/episodes/episode-2026-05-14.md"
+
+    handler = _build_handler(memory_root)
+    embedder = stub_embedder
+    outcome = await handler.handle_added_or_modified(rel)
+
+    assert outcome.upserted == 1
+    # No Subject → single embed call for content only.
     assert embedder.calls == 1
+    row = fake_repo.upserts[0][0]
+    assert row.subject_vector is None
+    assert row.episode_tokens == "content only"
 
 
 # ── deletion paths ───────────────────────────────────────────────────────
@@ -222,7 +279,7 @@ async def test_handle_deleted_wipes_md_path_rows(
 ) -> None:
     writer = EpisodeWriter(memory_root)
     rel = await _write_one_entry(writer, "u1", "hello")
-    handler, _embedder = _build_handler(memory_root)
+    handler = _build_handler(memory_root)
     await handler.handle_added_or_modified(rel)
     assert fake_repo.rows  # populated
 
@@ -249,7 +306,7 @@ async def test_missing_timestamp_raises_value_error(
     )
     rel = "default_app/default_project/users/u1/episodes/episode-2026-05-14.md"
 
-    handler, _embedder = _build_handler(memory_root)
+    handler = _build_handler(memory_root)
     with pytest.raises(ValueError, match="timestamp"):
         await handler.handle_added_or_modified(rel)
 

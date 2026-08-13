@@ -21,6 +21,9 @@ External usage (frontmatter schema chassis):
         KnowledgeScopedMixin, KnowledgeDocumentPathMixin,
         KnowledgeTopicPathMixin,
     )
+
+External usage (path safety):
+    from everos.core.persistence.markdown import sanitize_dirname
 """
 
 from .entries import Entry as Entry
@@ -42,6 +45,7 @@ from .frontmatter import UserScopedFrontmatter as UserScopedFrontmatter
 from .frontmatter import dump_frontmatter as dump_frontmatter
 from .frontmatter import parse_frontmatter as parse_frontmatter
 from .parsed import ParsedMarkdown as ParsedMarkdown
+from .path_safety import sanitize_dirname as sanitize_dirname
 from .reader import MarkdownReader as MarkdownReader
 from .writer import MarkdownWriter as MarkdownWriter
 
@@ -66,5 +70,6 @@ __all__ = [
     "parse_frontmatter",
     "parse_structured_entry",
     "render_structured_entry",
+    "sanitize_dirname",
     "split_entries",
 ]

@@ -147,7 +147,7 @@ Ruminer brings persistent memory to a browser agent so it can carry personal con
 
 #### EverMem Sync with EverOS
 
-One command to connect any AI coding CLI to EverMemOS long-term memory.
+One command to connect any AI coding CLI to EverOS long-term memory.
 
 [Code](https://github.com/nanxingw/EverMem)
 

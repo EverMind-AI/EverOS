@@ -52,7 +52,7 @@ class IdleScanner:
                         idle_seconds=self._trigger.idle_seconds,
                     )
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception(
                     "idle_emit_failed",
                     strategy_name=self._name,

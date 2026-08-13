@@ -1,0 +1,33 @@
+# Benchmark configuration — single source of truth.
+#
+# All parameters aligned with the upstream evaluation reference so that
+# benchmark numbers are directly comparable to published LoCoMo results.
+# BenchmarkConfig reads this file on every run.
+
+# --- EverOS server ---
+cascade_timeout = 7200                      # max seconds to wait for cascade + OME to complete
+batch_size = 25                             # messages per /add request (everos caps at 500)
+
+# --- Search ---
+methods = "agentic"                         # comma-separated: keyword, vector, hybrid, agentic
+top_k = 10                                  # episodes to retrieve per question
+eval_owner = "speaker_a"                    # which speaker's memory partition to query
+
+# --- Answer LLM ---
+answer_model = "gpt-4.1-mini"              # LLM for generating answers from retrieved context
+answer_temperature = 0.0                    # deterministic answers
+answer_max_tokens = 32768                   # max output tokens per answer call
+answer_timeout = 300.0                      # per-request socket timeout (seconds)
+answer_max_retries = 5                      # retry budget (HTTP + empty-response retries)
+
+# --- Judge LLM ---
+judge_model = "gpt-4o-mini"                # LLM judge for correctness evaluation
+judge_temperature = 0.0                     # deterministic judging
+judge_timeout = 300.0                       # per-request socket timeout (seconds)
+judge_max_retries = 5                       # retry budget
+judge_runs = 3                              # majority vote across N independent judge runs
+
+# --- Concurrency ---
+conversations_concurrency = 10                 # how many conversations run at the same time
+search_concurrency = 5                         # concurrent /search requests per conversation
+eval_concurrency = 20                          # concurrent answer/judge LLM calls per conversation

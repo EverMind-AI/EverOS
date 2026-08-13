@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 
-from everos.component.embedding import get_embedder
+from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
@@ -43,7 +43,7 @@ def _get_episode_writer() -> EpisodeWriter:
     """Return the lazily-initialised EpisodeWriter singleton."""
     global _episode_writer
     if _episode_writer is None:
-        _episode_writer = EpisodeWriter(root=MemoryRoot.default())
+        _episode_writer = EpisodeWriter(root=MemoryRoot.resolve())
     return _episode_writer
 
 
@@ -61,6 +61,22 @@ async def reflect_episodes(event: CronTick, ctx: StrategyContext) -> None:
         event: Cron tick event (unused; triggers the scheduled run).
         ctx: OME strategy context for emit and logging.
     """
+    # Body-guard: capability is checked here for defensive degradation.
+    # Reflection re-embeds merged narratives, so it cannot run without
+    # an embedder — silently no-op instead of raising deep inside the
+    # orchestrator. Tier upgrades require a server restart; this guard
+    # is not a hot-reload mechanism.
+    #
+    # ``debug`` level (not ``info``) is intentional; see the body-guard
+    # in :func:`everos.memory.strategies.trigger_profile_clustering` for
+    # the shared rationale (PR #361 round-3 review #8).
+    if not get_embedding_capability().available:
+        logger.debug(
+            "strategy_gated_off_embedding_unavailable",
+            strategy_name="reflect_episodes",
+        )
+        return
+
     # Deferred: avoid pulling LLM libs at module import time.
     from everalgo.user_memory import EpisodeReflector
 
@@ -71,7 +87,7 @@ async def reflect_episodes(event: CronTick, ctx: StrategyContext) -> None:
         episode_writer=_get_episode_writer(),
         report_repo=reflection_report_repo,
         reflector=EpisodeReflector(llm=get_llm_client()),
-        embedder=get_embedder(),
+        embedder=get_embedding_capability().require(),
     )
 
     owners = await cluster_repo.list_distinct_owners()

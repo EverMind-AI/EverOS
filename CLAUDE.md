@@ -38,18 +38,28 @@ Detailed: [docs/architecture.md](docs/architecture.md).
 ## Engineering practices
 
 - **Coding rules** auto-loaded from [.claude/rules/](.claude/rules/) (10 rules; the three always-loaded ones cover architecture / code-style / language-policy, the rest are path-scoped and load when Claude Code opens a matching file)
-- **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`
+- **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`, `/release`
 - **Project-level decisions** in [docs/](docs/) (low-frequency, human-judgment-required)
 - **Language policy**: the project targets a global audience — docs and code are English; CJK appears only in test fixtures and locale-suffixed mirrors. Scanned by `make check-cjk`.
 - **Datetime discipline**: never call `datetime.now()` / `time.time()` directly — use `everos.component.utils.datetime`. Enforced by `make check-datetime`.
 
-Engineering infrastructure overview: [docs/engineering.md](docs/engineering.md).
+Contributor engineering reference — build, test, CI gates, branch & commit conventions: [docs/engineering.md](docs/engineering.md).
 
 ## Branch strategy
 
-`master` = released stable (hidden); `dev` = integration; `feat/* fix/*` → dev; `hotfix/*` → master + dev (sync).
+`main` is the default and protected branch. Create scoped branches from
+`main` (`feat/*`, `fix/*`, `docs/*`, `ci/*`, `chore/*`, `refactor/*`) and open
+pull requests back to `main` after the required checks pass.
 
-See [docs/engineering.md](docs/engineering.md) for the full GitFlow Lite rationale.
+See [.claude/skills/new-branch/SKILL.md](.claude/skills/new-branch/SKILL.md)
+for the full branch workflow.
+
+## GitHub sync guard
+
+When refreshing this repository from an internal source archive, preserve
+GitHub-only contributor and automation files. Do not overwrite `CLAUDE.md`,
+`.claude/skills/*`, `CONTRIBUTING.md`, or `.github/*` workflow/template files
+without checking [docs/github-sync.md](docs/github-sync.md).
 
 ## Storage three-piece set
 
@@ -75,7 +85,7 @@ Algorithm assets (prompts, extractors) live in the separate [`everalgo`](https:/
 |---|---|
 | Understand architecture | [docs/architecture.md](docs/architecture.md) |
 | Understand storage choice | [docs/architecture.md](docs/architecture.md) (storage section) |
-| Engineering tooling overview | [docs/engineering.md](docs/engineering.md) |
+| Build, test, CI & conventions | [docs/engineering.md](docs/engineering.md) |
 | Add a new module | [.claude/rules/init-py-and-reexport.md](.claude/rules/init-py-and-reexport.md) |
 | Make a commit | use `/commit` |
 | Open a branch / PR | use `/new-branch` / `/pr` |

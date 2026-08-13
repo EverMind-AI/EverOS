@@ -225,6 +225,44 @@ async def test_fans_out_per_assistant_sender(
     assert matching[0]["fanout"] == 2
 
 
+async def test_emit_includes_approach_and_key_insight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1.2.3+ emitters populate the new case-body fields on AgentCaseExtracted."""
+    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    case = _algo_case(
+        task_intent="restore MongoDB replica",
+        approach="1. stop node  2. resync  3. verify",
+        quality_score=0.75,
+        key_insight="watch oplog lag",
+    )
+    with (
+        patch(
+            "everos.memory.strategies.extract_agent_case.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
+        ) as mock_cls,
+        patch(
+            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
+        ) as mock_wcls,
+    ):
+        mock_cls.return_value.aextract = AsyncMock(return_value=[case])
+        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
+        ctx = FakeStrategyContext()
+
+        await extract_agent_case(_event(), ctx)
+
+    emitted = [e for e in ctx.emitted if isinstance(e, AgentCaseExtracted)]
+    assert len(emitted) == 1
+    event = emitted[0]
+    assert event.approach == "1. stop node  2. resync  3. verify"
+    assert event.key_insight == "watch oplog lag"
+    assert event.task_intent == "restore MongoDB replica"
+    assert event.quality_score == 0.75
+
+
 async def test_omits_key_insight_section_when_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -40,7 +40,7 @@ import pytest
 from everalgo.clustering import Cluster as AlgoCluster
 from httpx import ASGITransport, AsyncClient
 
-from everos.component.embedding import get_embedder
+from everos.component.embedding import get_embedding_capability
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence.lancedb import (
@@ -96,21 +96,22 @@ async def client(
     async with _engine.begin() as _conn:
         await _conn.run_sync(_SQLModel.metadata.create_all)
 
-    # Search service: reset all lazy singletons so each test rebuilds
+    # Search service: reset the manager singleton so each test rebuilds
     # against the just-monkey-patched memory root + .env creds.
-    for attr in (
-        "_manager",
-        "_embedding",
-        "_reranker",
-        "_llm_client",
-    ):
-        setattr(search_service_mod, attr, None)
-    for attr in (
-        "_embedding_resolved",
-        "_rerank_resolved",
-        "_llm_resolved",
-    ):
-        setattr(search_service_mod, attr, False)
+    search_service_mod._manager = None
+
+    # Embedding / rerank / LLM route through their process-wide
+    # capability / singleton accessors — reset those directly so each
+    # test rebuilds against the just-monkey-patched memory root + .env
+    # creds (also covered by the autouse fixtures in
+    # ``tests/conftest.py``; kept explicit here for locality with the
+    # rest of this fixture's singleton reset).
+    embedding_acc = import_module("everos.component.embedding.accessor")
+    rerank_acc = import_module("everos.component.rerank.accessor")
+    llm_client_mod = import_module("everos.component.llm.client")
+    embedding_acc._capability = None
+    rerank_acc._capability = None
+    llm_client_mod._llm_client = None
 
     app = create_app(lifespan_providers=[])
     transport = ASGITransport(app=app)
@@ -155,35 +156,38 @@ async def _seed_user_profiles(rows: list[dict[str, Any]]) -> list[UserProfile]:
 
 
 async def _seed_user_memory_cluster(eps: list[dict], *, owner_id: str) -> None:
-    """Seed one ``user_memory`` cluster covering every memcell in ``eps``.
+    """Seed one ``user_memory`` cluster covering every episode in ``eps``.
 
     The AGENTIC episode path goes through ``acluster_retrieve`` (see
     ``memory/search/agentic.py``), which narrows hybrid candidates to the
-    union of cluster member memcell ids. Tests that exercise the AGENTIC
+    union of cluster member ids. Production user_memory clusters store
+    episode ``entry_id`` members (``member_type="episode"``; see
+    ``strategies/trigger_profile_clustering.py``), matching the entry_id
+    keying of ``fetch_all_for_owner``. Tests that exercise the AGENTIC
     method therefore need at least one cluster whose members cover the
-    seeded episodes' ``parent_id``s — otherwise ``cluster_scoped`` yields
+    seeded episodes' ``entry_id``s — otherwise ``cluster_scoped`` yields
     nothing and the agentic pipeline returns ``[]``.
 
     Centroid is embedded from one of the episode bodies via the live
     embedder; with a single cluster the cosine ranking against the query
     is trivial (only one candidate), so any reasonable anchor works.
     """
-    memcell_ids = list({ep["parent_id"] for ep in eps})
+    entry_ids = list({ep["entry_id"] for ep in eps})
     centroid_text = eps[0]["episode"]
-    centroid_vec = await get_embedder().embed(centroid_text)
+    centroid_vec = await get_embedding_capability().require().embed(centroid_text)
     await cluster_repo.upsert_with_members(
         AlgoCluster(
             id=mint_cluster_id(),
             centroid=np.asarray(centroid_vec, dtype=np.float32),
-            count=len(memcell_ids),
+            count=len(entry_ids),
             last_ts=int(time.time() * 1000),
             preview=[ep["episode"][:80] for ep in eps[:3]],
-            members=memcell_ids,
+            members=entry_ids,
         ),
         owner_id=owner_id,
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
 
@@ -352,10 +356,9 @@ async def test_vector_search_returns_episode_hits(
 ) -> None:
     """``method=vector`` embeds the query and ranks by cosine.
 
-    Seeds atomic_facts alongside episodes because the default
-    ``vector_strategy = "maxsim_atomic"`` (config/default.toml) walks
+    Seeds atomic_facts alongside episodes because the MaxSim path walks
     atomic_fact ANN → max-pool by parent_id → fetch episodes; an
-    episode-only corpus would return 0 hits under that strategy.
+    episode-only corpus would return 0 hits.
     """
     await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
     await _seed_atomic_facts(_facts_for_owner(search_seed, "caroline"))
@@ -419,35 +422,31 @@ async def test_agentic_search_returns_episode_hits(
 # ── Agent owner_type dispatch (separate path: agent_case + agent_skill) ─
 
 
-async def _seed_one_agent_corpus(
-    owner: str = "a1", *, use_real_embeddings: bool = False
-) -> None:
+async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     """Single seed used by the parametrized agent dispatch test.
 
     One case + one skill sharing surface tokens with the test query
     ("refactor authentication") so BM25 deterministically hits both
-    tables. Dense / agentic methods exercise the same rows and opt into
-    real embeddings so LanceDB's ``nearest_to`` can rank them (zero
-    vectors are undefined under cosine distance — the dense path returns
-    0 hits for them).
+    tables; dense / agentic methods exercise the same rows. Both rows
+    are embedded with the real embedder so LanceDB's ``nearest_to``
+    can rank them (zero vectors are undefined under cosine distance —
+    the dense path returns 0 hits for them).
     """
-    from everos.service.search import _get_embedding
-
     case_intent = "refactor authentication middleware"
     case_approach = "split provider lookup from session decode"
     skill_desc = "refactor authentication middleware reliably"
     skill_body = "step-by-step approach for auth refactors"
 
-    embedder = _get_embedding() if use_real_embeddings else None
+    embedder = get_embedding_capability().provider
     if embedder is not None:
         case_vec, skill_vec = await embedder.embed_batch(
             [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
         )
     else:
-        # Keyword-only default runs offline in CI; live dense variants
-        # pass real embeddings via ``use_real_embeddings=True``.
-        case_vec = [1.0, *([0.0] * 1023)]
-        skill_vec = [1.0, *([0.0] * 1023)]
+        # No embedder credentials → leave zeros; only keyword assertions
+        # will pass, vector/hybrid/agentic methods are skipped anyway.
+        case_vec = [0.0] * 1024
+        skill_vec = [0.0] * 1024
 
     await _seed_agent_cases(
         [
@@ -511,7 +510,7 @@ async def test_search_agent_dispatch_per_method(
     All methods must enforce the owner_type hard partition:
     ``episodes`` / ``profiles`` stay empty.
     """
-    await _seed_one_agent_corpus(use_real_embeddings=method != "keyword")
+    await _seed_one_agent_corpus()
 
     resp = await _post(
         client,
@@ -581,8 +580,6 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
     surface it on its own; the bridge is the path that does, and LLM
     rerank keeps it because the topic is genuinely relevant.
     """
-    from everos.service.search import _get_embedding
-
     case_id_with_owner = "a_bridge_ac_1"  # mirrors AgentCase.id = "<owner>_<entry_id>"
     case_intent = "refactor authentication middleware"
     case_approach = "split provider lookup from session decode"
@@ -598,7 +595,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
         "independently."
     )
 
-    embedder = _get_embedding()
+    embedder = get_embedding_capability().provider
     assert embedder is not None, "live_llm test requires a real embedder"
     case_vec, skill_vec = await embedder.embed_batch(
         [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
@@ -1076,27 +1073,28 @@ async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
     """
     eps = _eps_for_owner(search_seed, "caroline")
     await _seed_episodes(eps)
-    ep_parent_ids = {r["parent_id"] for r in eps}
+    ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_parent_ids
+        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
-    assert matching_facts, "seed should have at least one fact sharing a memcell"
+    assert matching_facts, "seed should have at least one fact bridging an episode"
     await _seed_atomic_facts(matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=5)
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["episodes"], "hybrid should return at least one episode"
-    # Whichever facts *do* get embedded must share parent_id with their
-    # host episode (the memcell-bridge invariant).
+    # Whichever facts *do* get embedded must bridge to their host episode
+    # via ``parent_id == episode.entry_id`` (the current fact-linkage
+    # invariant; see extract_atomic_facts).
     for ep in data["episodes"]:
         if not ep["atomic_facts"]:
             continue
-        host_parent = next((e["parent_id"] for e in eps if e["id"] == ep["id"]), None)
+        host_entry = next((e["entry_id"] for e in eps if e["id"] == ep["id"]), None)
         for fact in ep["atomic_facts"]:
             seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
             if seed_fact is not None:
-                assert seed_fact["parent_id"] == host_parent
+                assert seed_fact["parent_id"] == host_entry
 
 
 @pytest.mark.slow
@@ -1128,11 +1126,11 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
 
     eps = _eps_for_owner(search_seed, "caroline")
     await _seed_episodes(eps)
-    ep_parent_ids = {r["parent_id"] for r in eps}
+    ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
-        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_parent_ids
+        r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
-    assert matching_facts, "seed should have at least one fact sharing a memcell"
+    assert matching_facts, "seed should have at least one fact bridging an episode"
     await _seed_atomic_facts(matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=10)
@@ -1145,8 +1143,8 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
         "alpha=0 should let hierarchical eviction promote >=1 fact"
     )
 
-    # Memcell-bridge invariant — every attached fact's parent_id must
-    # match its host episode's parent_id.
+    # Fact-linkage invariant — every attached fact's parent_id must match
+    # its host episode's entry_id (current fact→episode bridge).
     eps_by_id = {e["id"]: e for e in eps}
     for ep in data["episodes"]:
         host = eps_by_id.get(ep["id"])
@@ -1155,7 +1153,7 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
         for fact in ep["atomic_facts"]:
             seed_fact = next((r for r in matching_facts if r["id"] == fact["id"]), None)
             if seed_fact is not None:
-                assert seed_fact["parent_id"] == host["parent_id"]
+                assert seed_fact["parent_id"] == host["entry_id"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1310,15 +1308,15 @@ async def test_vector_search_with_session_filter(
     recall query (not bypassed by the dense path). Half the seed gets
     a target session, half gets another; only target hits may come back.
 
-    The default ``vector_strategy = "maxsim_atomic"`` filters atomic_facts
-    first (then max-pools to episodes), so the per-episode session_id
-    mutation has to propagate to each fact via its parent memcell id —
-    otherwise the where clause drops every fact and recall returns 0.
+    The MaxSim path filters atomic_facts first (then max-pools to
+    episodes), so the per-episode session_id mutation has to propagate
+    to each fact via its parent memcell id — otherwise the where clause
+    drops every fact and recall returns 0.
     """
     base = _eps_for_owner(search_seed, "caroline")
     facts = _facts_for_owner(search_seed, "caroline")
     half = len(base) // 2
-    target_parent_ids = {r["parent_id"] for r in base[:half]}
+    target_parent_ids = {r["entry_id"] for r in base[:half]}
 
     await _seed_episodes(
         [{**r, "session_id": "sess_target"} for r in base[:half]]
@@ -1382,7 +1380,7 @@ async def test_agentic_search_with_timestamp_filter(
         [
             {
                 **f,
-                "parent_id": eps_post[i % len(eps_post)]["parent_id"],
+                "parent_id": eps_post[i % len(eps_post)]["entry_id"],
                 "timestamp": eps_post[i % len(eps_post)]["timestamp"],
             }
             for i, f in enumerate(facts)

@@ -31,7 +31,7 @@ def _get_writer() -> AtomicFactWriter:
     """Return the lazily-initialised AtomicFactWriter singleton."""
     global _writer
     if _writer is None:
-        _writer = AtomicFactWriter(root=MemoryRoot.default())
+        _writer = AtomicFactWriter(root=MemoryRoot.resolve())
     return _writer
 
 

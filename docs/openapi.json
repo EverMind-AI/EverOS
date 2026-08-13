@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.1.0"
+    "version": "1.2.3"
   },
   "paths": {
     "/health": {
@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness probe — returns ``{\"status\": \"ok\"}`` with HTTP 200.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -20,11 +20,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -226,7 +222,7 @@
           "ome"
         ],
         "summary": "Trigger",
-        "description": "Manually trigger a registered OME strategy and wait for completion.",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
         "operationId": "trigger_api_v1_ome_trigger_post",
         "requestBody": {
           "content": {
@@ -811,6 +807,766 @@
           }
         }
       }
+    },
+    "/api/v2/memory/add": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Add Memory",
+        "description": "Add messages into the user-memory + agent-memory pipelines.",
+        "operationId": "add_memory_api_v2_memory_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorizeAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_AddResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/flush": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Flush Memory",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\n[OSS-only] — cloud edition decides boundary timing server-side and\ndoes not expose this endpoint.",
+        "operationId": "flush_memory_api_v2_memory_flush_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorizeFlushRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_FlushResponseData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/search": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Post Search",
+        "description": "Hybrid retrieval across the configured memory backends.",
+        "operationId": "post_search_api_v2_memory_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/get": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Post Get",
+        "description": "Paginated listing over the requested ``memory_type``.",
+        "operationId": "post_get_api_v2_memory_get_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ome/trigger": {
+      "post": {
+        "tags": [
+          "ome"
+        ],
+        "summary": "Trigger",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
+        "operationId": "trigger_api_v2_ome_trigger_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/knowledge/documents": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Create Document Route",
+        "description": "Upload a new knowledge document.",
+        "operationId": "create_document_route_api_v2_knowledge_documents_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_document_route_api_v2_knowledge_documents_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List Documents Route",
+        "description": "Paginated document listing.",
+        "operationId": "list_documents_route_api_v2_knowledge_documents_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "created_at",
+                "updated_at",
+                "title"
+              ],
+              "type": "string",
+              "default": "created_at",
+              "title": "Sort By"
+            }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "desc",
+              "title": "Sort Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DocumentListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/knowledge/documents/{doc_id}": {
+      "put": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Replace Document Route",
+        "description": "Replace an existing knowledge document (atomic backup/restore on failure).",
+        "operationId": "replace_document_route_api_v2_knowledge_documents__doc_id__put",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^d_[a-f0-9]{12,32}$",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_replace_document_route_api_v2_knowledge_documents__doc_id__put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Delete Document Route",
+        "description": "Remove a knowledge document.",
+        "operationId": "delete_document_route_api_v2_knowledge_documents__doc_id__delete",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^d_[a-f0-9]{12,32}$",
+              "title": "Doc Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Document Route",
+        "description": "Fetch a single document with its topic list.",
+        "operationId": "get_document_route_api_v2_knowledge_documents__doc_id__get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^d_[a-f0-9]{12,32}$",
+              "title": "Doc Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DocumentDetailResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Patch Document Route",
+        "description": "Update mutable document metadata fields.",
+        "operationId": "patch_document_route_api_v2_knowledge_documents__doc_id__patch",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^d_[a-f0-9]{12,32}$",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DocumentPatchResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/knowledge/topics/{topic_id}": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Topic Route",
+        "description": "Fetch a single topic with full content.",
+        "operationId": "get_topic_route_api_v2_knowledge_topics__topic_id__get",
+        "parameters": [
+          {
+            "name": "topic_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^d_[a-f0-9]{12,32}_\\d+$",
+              "title": "Topic Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_TopicDetailResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/knowledge/search": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Search Knowledge Route",
+        "description": "Knowledge retrieval (keyword / vector / hybrid).",
+        "operationId": "search_knowledge_route_api_v2_knowledge_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_KnowledgeSearchResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/knowledge/categories": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List Categories Route",
+        "description": "List taxonomy categories from ``.taxonomy.md``.",
+        "operationId": "list_categories_route_api_v2_knowledge_categories_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_CategoryListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -890,6 +1646,59 @@
         ],
         "title": "Body_create_document_route_api_v1_knowledge_documents_post"
       },
+      "Body_create_document_route_api_v2_knowledge_documents_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\w",
+            "title": "Title"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "title"
+        ],
+        "title": "Body_create_document_route_api_v2_knowledge_documents_post"
+      },
       "Body_replace_document_route_api_v1_knowledge_documents__doc_id__put": {
         "properties": {
           "file": {
@@ -942,6 +1751,116 @@
           "title"
         ],
         "title": "Body_replace_document_route_api_v1_knowledge_documents__doc_id__put"
+      },
+      "Body_replace_document_route_api_v2_knowledge_documents__doc_id__put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\w",
+            "title": "Title"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "title"
+        ],
+        "title": "Body_replace_document_route_api_v2_knowledge_documents__doc_id__put"
+      },
+      "CascadeHealthBlock": {
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent"
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable"
+          },
+          "drain_consecutive_failures": {
+            "type": "integer",
+            "title": "Drain Consecutive Failures"
+          },
+          "unrecoverable_total": {
+            "type": "integer",
+            "title": "Unrecoverable Total"
+          },
+          "optimize_failure_streak": {
+            "type": "integer",
+            "title": "Optimize Failure Streak"
+          },
+          "prune_stale_seconds": {
+            "type": "number",
+            "title": "Prune Stale Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "reasons",
+          "pending",
+          "failed_permanent",
+          "failed_retryable",
+          "drain_consecutive_failures",
+          "unrecoverable_total",
+          "optimize_failure_streak",
+          "prune_stale_seconds"
+        ],
+        "title": "CascadeHealthBlock",
+        "description": "Readiness of the md → LanceDB projection (cascade) subsystem.\n\n``healthy`` reflects **operational** health only — drain loop alive,\noptimize not stuck, version cleanup (prune) not stalled — and is what\nalerting should watch. ``failed_permanent`` (md files awaiting\n``cascade fix``) is a normal data-quality backlog reported as an\ninformational count; it does **not** flip ``healthy``, otherwise the\nsignal would sit red forever."
       },
       "CategoryDTO": {
         "properties": {
@@ -1819,7 +2738,7 @@
           "memory_type"
         ],
         "title": "GetRequest",
-        "description": "Request body for ``POST /api/v1/memory/get``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager keeps using\n``owner_id`` / ``owner_type`` (the storage tables' columns); those\nare exposed as derived properties so the rename only affects the\nwire contract."
+        "description": "Request body for ``POST /api/v2/memory/get``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager keeps using\n``owner_id`` / ``owner_type`` (the storage tables' columns); those\nare exposed as derived properties so the rename only affects the\nwire contract."
       },
       "GetResponse": {
         "properties": {
@@ -1852,6 +2771,81 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthCapabilities": {
+        "properties": {
+          "llm": {
+            "type": "boolean",
+            "title": "Llm"
+          },
+          "embed": {
+            "type": "boolean",
+            "title": "Embed"
+          },
+          "rerank": {
+            "type": "boolean",
+            "title": "Rerank"
+          },
+          "multimodal_llm": {
+            "type": "boolean",
+            "title": "Multimodal Llm"
+          },
+          "parser": {
+            "type": "boolean",
+            "title": "Parser"
+          }
+        },
+        "type": "object",
+        "required": [
+          "llm",
+          "embed",
+          "rerank",
+          "multimodal_llm",
+          "parser"
+        ],
+        "title": "HealthCapabilities",
+        "description": "Availability flags for the five capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/HealthCapabilities"
+          },
+          "disabled_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Disabled Features"
+          },
+          "cascade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CascadeHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "capabilities",
+          "disabled_features"
+        ],
+        "title": "HealthResponse",
+        "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities``,\n``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``\nreturn type degrades the OpenAPI response to\n``additionalProperties: true``, which robs clients (and codegen) of\nany structure to lean on."
       },
       "KnowledgeSearchRequest": {
         "properties": {
@@ -2094,6 +3088,36 @@
           "content"
         ],
         "title": "MessageItemDTO"
+      },
+      "RunSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunSummary",
+        "description": "One strategy run within a trigger response."
       },
       "SearchAgentCaseItem": {
         "properties": {
@@ -2622,7 +3646,7 @@
           "enable_llm_rerank": {
             "type": "boolean",
             "title": "Enable Llm Rerank",
-            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hierarchy path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
+            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
           "filters": {
@@ -2642,7 +3666,7 @@
           "query"
         ],
         "title": "SearchRequest",
-        "description": "Request body for ``POST /api/v1/memory/search``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager + compile_filters keep\nusing ``owner_id`` / ``owner_type`` (the storage tables' columns);\nthose are exposed as derived properties so the rename only affects\nthe wire contract, not the internal recall plumbing."
+        "description": "Request body for ``POST /api/v2/memory/search``.\n\nCallers identify the memory owner via ``user_id`` XOR ``agent_id`` —\nexactly one must be set. Internally the manager + compile_filters keep\nusing ``owner_id`` / ``owner_type`` (the storage tables' columns);\nthose are exposed as derived properties so the rename only affects\nthe wire contract, not the internal recall plumbing."
       },
       "SearchResponse": {
         "properties": {
@@ -3001,7 +4025,7 @@
           "name"
         ],
         "title": "TriggerRequest",
-        "description": "Request body for ``POST /api/v1/ome/trigger``."
+        "description": "Request body for ``POST /api/v2/ome/trigger``."
       },
       "TriggerResponse": {
         "properties": {
@@ -3012,15 +4036,28 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "dispatched": {
+            "type": "integer",
+            "title": "Dispatched"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "type": "array",
+            "title": "Runs",
+            "default": []
           }
         },
         "type": "object",
         "required": [
           "status",
-          "name"
+          "name",
+          "dispatched"
         ],
         "title": "TriggerResponse",
-        "description": "Response body for ``POST /api/v1/ome/trigger``."
+        "description": "Response body for ``POST /api/v2/ome/trigger``.\n\n``status`` distinguishes three outcomes that were previously masked as\na single ``ok``:\n\n- ``ok``: at least one strategy was dispatched and all runs settled\n  within ``timeout``. Individual run outcomes are in ``runs`` (a\n  ``dead_letter`` there is still ``ok`` at this level — the strategy\n  *ran*, it just failed permanently).\n- ``timeout``: at least one strategy was dispatched but the engine did\n  not go idle within ``timeout``. Runs may be partially complete;\n  poll ``GET /health`` for cascade convergence separately.\n- ``not_dispatched``: no strategy was dispatched — the subscriber was\n  rejected by one of the dispatch gates (``_routes_to`` / ``enabled`` /\n  ``applies_to`` / ``Counter``). Common cause: forgetting\n  ``force=true`` on a strategy that is ``enabled=false`` in ome.toml."
       },
       "UnprocessedMessageDTO": {
         "properties": {

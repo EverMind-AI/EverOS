@@ -29,7 +29,7 @@ result is fully retrievable with the same `/search` stack.
 ## How it works
 
 ```
-POST /api/v1/memory/add
+POST /api/v2/memory/add
   messages[].content = [ ContentItem, ContentItem, ... ]
         │
         │  text items      → used verbatim
@@ -91,19 +91,19 @@ audio / HTML / email parsing is unaffected.
 
 ### Configure the multimodal LLM
 
-The parser uses its own LLM section, independent from `[llm]`. The model
-must accept OpenAI `image_url` parts. Configure these in `everos.toml`
-(under `[multimodal]`) or via env vars:
+The parser uses its own LLM section (`[multimodal]` in `everos.toml`),
+independent from `[llm]`. The model must accept OpenAI `image_url`
+parts. Fill in three fields in `everos.toml`:
 
-```bash
-EVEROS_MULTIMODAL__MODEL=google/gemini-3-flash-preview
-EVEROS_MULTIMODAL__API_KEY=<your key>
-EVEROS_MULTIMODAL__BASE_URL=https://openrouter.ai/api/v1
+```toml
+[multimodal]
+model    = "google/gemini-3-flash-preview"   # must support image_url parts
+base_url = "https://openrouter.ai/api/v1"
+api_key  = "<your key>"
 ```
 
-The default targets Gemini via OpenRouter so a single key covers both
-chat extraction and multimodal parsing. See
-[Configuration reference](#configuration-reference) for the full list.
+See [Configuration reference](#configuration-reference) for the full
+field list.
 
 ## Supported modalities
 
@@ -157,7 +157,7 @@ way — only the parsed text is.
 
 ```bash
 TS=$(($(date +%s) * 1000))     # v1 contract: timestamp in ms
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"mm-001\",
@@ -244,7 +244,7 @@ HTTP library:
 import httpx
 
 httpx.post(
-    "http://127.0.0.1:8000/api/v1/memory/add",
+    "http://127.0.0.1:8000/api/v2/memory/add",
     json={
         "session_id": "mm-001",
         "messages": [
@@ -264,17 +264,18 @@ httpx.post(
 
 ## Configuration reference
 
-All fields bind from the environment via the parent `Settings`
-(`EVEROS_MULTIMODAL__<FIELD>`) or the `[multimodal]` TOML section.
+All fields live under `[multimodal]` in `everos.toml`. Each can also
+be overridden via `EVEROS_MULTIMODAL__<FIELD>` env vars (useful for
+containers and CI).
 
-| Env var | Default | Meaning |
+| Field | Default | Meaning |
 |---|---|---|
-| `EVEROS_MULTIMODAL__MODEL` | `google/gemini-3-flash-preview` | Parsing model; must accept `image_url` parts |
-| `EVEROS_MULTIMODAL__API_KEY` | — | API key for the multimodal endpoint |
-| `EVEROS_MULTIMODAL__BASE_URL` | `None` | OpenAI-compatible base URL |
-| `EVEROS_MULTIMODAL__MAX_CONCURRENCY` | `4` | Cap on parallel multimodal calls within one extraction |
-| `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` | `52428800` (50 MiB) | Max size of a `file://` asset |
-| `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` | `[]` (any) | JSON list of allowlisted base dirs for `file://` URIs |
+| `model` | `google/gemini-3-flash-preview` | Parsing model; must accept `image_url` parts |
+| `base_url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
+| `api_key` | — (required) | API key for the endpoint above |
+| `max_concurrency` | `4` | Cap on parallel multimodal calls within one extraction |
+| `file_uri_max_bytes` | `52428800` (50 MiB) | Max size of a `file://` asset |
+| `file_uri_allow_dirs` | `[]` (any) | Allowlisted base dirs for `file://` URIs |
 
 ## Errors and limits
 
@@ -318,7 +319,7 @@ episodes and memory cells as text turns, every retrieval method works
 across multimodal-derived memory unchanged:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",

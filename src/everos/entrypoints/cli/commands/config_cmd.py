@@ -7,12 +7,27 @@ import os
 import typer
 
 from everos.config.settings import resolve_root
+from everos.entrypoints.cli._log_setup import configure_cli_logging
 
 app = typer.Typer(
     name="config",
     help="Configuration management",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def _config_callback(
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Emit INFO-level lifecycle logs (default: WARNING only).",
+    ),
+) -> None:
+    """Set log level before any config subcommand runs."""
+    configure_cli_logging(verbose=verbose)
+
 
 _SECRET_FIELDS = {"api_key"}
 

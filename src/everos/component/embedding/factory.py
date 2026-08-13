@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from everos.component.utils.config_hints import missing_config_error
 from everos.config import EmbeddingSettings
 
 from .openai_provider import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
-# Vector dim for the LanceDB index column — see ``17_lancedb_tables_design.md``.
+# Vector dim for the LanceDB index column.
 _DEFAULT_DIM = 1024
 
 
@@ -32,24 +33,17 @@ def build_embedding_provider(
         ValueError: If ``model``, ``api_key`` or ``base_url`` is unset.
     """
     if not settings.model:
-        raise ValueError(
-            "Embedding model is not configured "
-            "(set EVEROS_EMBEDDING__MODEL or [embedding] model in user toml)"
-        )
-    api_key = settings.api_key.get_secret_value() if settings.api_key else ""
-    if not api_key:
-        raise ValueError(
-            "Embedding api_key is not configured (set EVEROS_EMBEDDING__API_KEY)"
-        )
+        raise ValueError(missing_config_error("Embedding model", "embedding"))
+    if not settings.api_key or not settings.api_key.get_secret_value():
+        raise ValueError(missing_config_error("Embedding api_key", "embedding"))
     if not settings.base_url:
-        raise ValueError(
-            "Embedding base_url is not configured (set EVEROS_EMBEDDING__BASE_URL)"
-        )
+        raise ValueError(missing_config_error("Embedding base_url", "embedding"))
     return OpenAIEmbeddingProvider(
         model=settings.model,
-        api_key=api_key,
+        api_key=settings.api_key.get_secret_value(),
         base_url=settings.base_url,
         dim=dim,
+        dimensions=settings.dimensions,
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
         batch_size=settings.batch_size,

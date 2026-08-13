@@ -42,6 +42,7 @@ class StrategyTestHarness:
             config_watch=False,
             max_concurrent_runs=20,
             max_retries=1,
+            retry_backoff_base_seconds=0.0,
         )
         self._engine = OfflineEngine(config=cfg)
 
@@ -54,7 +55,7 @@ class StrategyTestHarness:
         try:
             await self._engine.stop()
         finally:
-            shutil.rmtree(self._tmpdir, ignore_errors=True)  # noqa: SLF001
+            shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def register(self, strategy: Strategy) -> None:
         """Register a :class:`Strategy` returned by ``@offline_strategy``.
@@ -96,7 +97,7 @@ class StrategyTestHarness:
         if not await self._engine.wait_idle(timeout=timeout):
             raise TimeoutError(
                 f"drain: engine still has "
-                f"{self._engine._active_runs} in-flight runs after {timeout}s"  # noqa: SLF001
+                f"{self._engine._active_runs} in-flight runs after {timeout}s"
             )
 
     async def list_runs(
@@ -113,7 +114,7 @@ class StrategyTestHarness:
         Returns:
             A list of RunRecord objects.
         """
-        return await self._engine._run_record_store.list_runs(  # noqa: SLF001
+        return await self._engine._run_record_store.list_runs(
             strategy_name=strategy_name,
             status=status,
         )

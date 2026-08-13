@@ -175,7 +175,7 @@ class BaseDailyWriter:
             frontmatter_updates = self._frontmatter_updates(
                 scope_id, bucket, next_count=base_count + len(items)
             )
-            await self._writer._append_entries_unlocked(  # noqa: SLF001
+            await self._writer._append_entries_unlocked(
                 path,
                 rendered,
                 frontmatter_updates=frontmatter_updates,
@@ -227,7 +227,7 @@ class BaseDailyWriter:
                     scope_id, bucket, next_count=count + 1
                 )
 
-            await self._writer._append_entries_unlocked(  # noqa: SLF001
+            await self._writer._append_entries_unlocked(
                 path,
                 [(entry_body, eid)],
                 frontmatter_updates=frontmatter_updates,

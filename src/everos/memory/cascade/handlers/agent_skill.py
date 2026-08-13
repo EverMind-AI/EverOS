@@ -27,7 +27,9 @@ md contract:
 
 Embedding source: ``name + "\\n" + description`` (mirrors opensource
 AgentSkillExtractor — name belongs in the retrieval anchor too,
-not just description).
+not just description). Embedding is a soft dependency: when
+unavailable, ``vector`` is written as ``None`` and the row stays
+BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ from typing import Any, ClassVar
 
 import anyio
 
+from everos.component.embedding import get_embedding_capability
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader
 from everos.infra.persistence.lancedb import AgentSkill, agent_skill_repo
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
@@ -45,6 +49,8 @@ from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
 from ._common import resolve_scope
 from .base import Handler
+
+logger = get_logger(__name__)
 
 
 class AgentSkillHandler(Handler):
@@ -140,7 +146,14 @@ class AgentSkillHandler(Handler):
         content_tokens = " ".join(self._deps.tokenizer.tokenize(content))
         # Embedding source: name + description joined (opensource parity).
         embed_text = "\n".join(s for s in [name, description] if s)
-        vector = await self._deps.embedder.embed(embed_text)
+        vector = await get_embedding_capability().embed_or_none(embed_text)
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=skill_id,
+                reason="embedding_capability_unavailable",
+            )
 
         row = AgentSkill(
             id=skill_id,

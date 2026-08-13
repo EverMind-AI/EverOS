@@ -54,18 +54,18 @@ cache_size_kb = 2048
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
 # Or set the field directly in this file (<root>/everos.toml).
-model = "gpt-4.1-mini"
-# api_key = ""
-# base_url = ""
+model = "openai/gpt-4.1-mini"
+api_key = ""
+base_url = "https://openrouter.ai/api/v1"
 
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
 # image / pdf / audio image_url parts. Override via env:
 #   EVEROS_MULTIMODAL__MODEL, EVEROS_MULTIMODAL__API_KEY, EVEROS_MULTIMODAL__BASE_URL
 model = "google/gemini-3-flash-preview"
+api_key = ""
+base_url = "https://openrouter.ai/api/v1"
 max_concurrency = 4
-# api_key = ""
-# base_url = ""
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.
@@ -75,11 +75,10 @@ max_concurrency = 4
 [embedding]
 # OpenAI-compatible embedding endpoint. Override via env:
 #   EVEROS_EMBEDDING__MODEL, EVEROS_EMBEDDING__API_KEY, EVEROS_EMBEDDING__BASE_URL
-# model / api_key / base_url have no shipped defaults — must be set
-# (env or user toml) before the embedding capability is used.
-# model     = "Qwen/Qwen3-Embedding-4B"
-# api_key   = ""
-# base_url  = "https://api.example.com/v1"
+# model and base_url ship with recommended defaults; api_key must be set.
+model     = "Qwen/Qwen3-Embedding-4B"
+api_key   = ""
+base_url  = "https://api.deepinfra.com/v1/openai"
 timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
@@ -92,17 +91,10 @@ max_concurrent  = 5
 # `provider` picks the request-shape:
 #   - "deepinfra" -> POST {base_url}/{model} (DeepInfra inference API)
 #   - "vllm"      -> POST {base_url}/rerank (OpenAI-compat rerank endpoint)
-#   - "dashscope" -> POST {base_url}/api/v1/services/rerank/text-rerank/text-rerank
-#                    (Aliyun Bailian native text-rerank; currently
-#                     "gte-rerank-v2", base_url "https://dashscope.aliyuncs.com")
-# Left unset, the factory infers the provider from the base_url host
-# (dashscope.aliyuncs.com -> dashscope, *.deepinfra.com -> deepinfra) and
-# falls back to "deepinfra" for unknown hosts. Set it explicitly to
-# override — required for self-hosted "vllm" on an arbitrary host.
-# provider = "deepinfra"
-# model     = "Qwen/Qwen3-Reranker-4B"
-# api_key   = ""
-# base_url  = "https://api.deepinfra.com/v1/inference"
+provider = "deepinfra"
+model     = "Qwen/Qwen3-Reranker-4B"
+api_key   = ""
+base_url  = "https://api.deepinfra.com/v1/inference"
 timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
@@ -112,16 +104,6 @@ max_concurrent  = 5
 # Passed through to ``everalgo.BoundaryDetector.adetect``.
 hard_token_limit = 65536
 hard_msg_limit = 500
-
-[search]
-# Vector retrieval strategy when SearchMethod.VECTOR is selected.
-#   "maxsim_atomic" (default): ANN over atomic_fact.vector (pool=top_k*20),
-#       max-pool the per-fact cosine by parent memcell, then reverse-resolve
-#       to episode rows. MaxSim over atomic facts; +0.6pp over the legacy
-#       episode-vector path on LoCoMo, at the cost of one extra LanceDB scan.
-#   "episode": single-vector ANN over episode.vector (legacy path).
-# Override via EVEROS_SEARCH__VECTOR_STRATEGY.
-vector_strategy = "maxsim_atomic"
 
 [memorize]
 # Conversation mode. Selects the boundary detector and which pipelines run:
@@ -162,3 +144,37 @@ session_lock_timeout_seconds = 360.0
 # Override via EVEROS_CLUSTERING__THRESHOLD, EVEROS_CLUSTERING__TIME_WINDOW_DAYS.
 threshold = 0.65
 time_window_days = 7.0
+
+
+[cascade]
+# Maintenance cadences (seconds). Deadlines that bound a hung call are not
+# here on purpose — they live next to the code they guard and are sized from
+# measurement, not preference.
+optimize_heartbeat_seconds = 60.0
+optimize_prune_interval_seconds = 300.0
+# Passed to LanceDB as cleanup_older_than. Only has to outlive an in-flight
+# read, but it also decides how long index files keep a manifest naming them:
+# under LanceDB's 7-day unverified window they then wait out the full 7 days.
+optimize_prune_retention_seconds = 60.0
+optimize_rebuild_interval_seconds = 43200.0
+
+[observability]
+# OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral
+# (Langfuse, an OTel Collector, or any OTLP backend). EverOS ships no vendor SDK.
+# Override via EVEROS_OBSERVABILITY__ENABLED, EVEROS_OBSERVABILITY__ENDPOINT, etc.
+enabled = false
+exporter = "otlp_http"          # "otlp_http" | "none"
+endpoint = ""                    # e.g. https://us.cloud.langfuse.com/api/public/otel/v1/traces
+service_name = "everos"
+sample_rate = 1.0                # 0.0 to 1.0
+# Privacy: false (default) = metadata only; true also emits query / extracted
+# memory / .md paths as span input/output (redacted + truncated).
+capture_content = false
+# Recall-quality scores pushed to Langfuse (Langfuse-specific REST, off the
+# OTLP stream). Only fires when langfuse_public_key/secret_key/host are set
+# (via everos.toml or EVEROS_OBSERVABILITY__LANGFUSE_* — secrets, not shipped here).
+# Score names: "recall_top_score" for the calibrated methods (HYBRID / AGENTIC,
+# [0, 1] and comparable), "recall_top_score_raw" for the uncalibrated ones
+# (KEYWORD BM25 / single-route VECTOR), plus "recall_hit" for calibrated only.
+emit_recall_scores = true
+recall_hit_threshold = 0.6       # only meaningful for calibrated methods

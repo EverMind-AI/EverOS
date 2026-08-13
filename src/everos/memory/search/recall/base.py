@@ -37,7 +37,7 @@ from everos.component.tokenizer import Tokenizer
 # is huge (1024 floats); ``_distance`` belongs to LanceDB's query engine
 # and is converted into ``score`` before the row leaves the recaller.
 _NOISE_COLUMNS: frozenset[str] = frozenset(
-    {"vector", "_distance", "_score", "created_at", "updated_at"}
+    {"vector", "subject_vector", "_distance", "_score", "created_at", "updated_at"}
 )
 
 

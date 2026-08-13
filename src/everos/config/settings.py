@@ -176,6 +176,7 @@ class EmbeddingSettings(BaseModel):
         EVEROS_EMBEDDING__MODEL
         EVEROS_EMBEDDING__API_KEY
         EVEROS_EMBEDDING__BASE_URL
+        EVEROS_EMBEDDING__DIMENSIONS
         EVEROS_EMBEDDING__TIMEOUT_SECONDS
         EVEROS_EMBEDDING__MAX_RETRIES
         EVEROS_EMBEDDING__BATCH_SIZE
@@ -185,10 +186,16 @@ class EmbeddingSettings(BaseModel):
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
+    dimensions: int | None = None
+    """API-level ``dimensions`` parameter for MRL-capable models.
+    When set, passed to the embedding API so the server truncates
+    with proper re-normalization. When ``None`` (default), the
+    parameter is omitted and client-side truncation to ``dim``
+    handles dimension alignment."""
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=5, ge=1)
+    max_concurrent: int = Field(default=50, ge=1)
 
 
 class RerankSettings(BaseModel):
@@ -197,16 +204,8 @@ class RerankSettings(BaseModel):
     Unlike LLM / embedding (single OpenAI-compatible shape), rerank API
     schemas differ between providers — DeepInfra uses ``POST {base_url}/
     {model}`` with a custom body, vLLM uses ``POST {base_url}/rerank``
-    with ``{model, query, documents}``, DashScope (Aliyun Bailian)
-    ``gte-rerank-v2`` uses ``POST {base_url}/api/v1/services/rerank/
-    text-rerank/text-rerank`` with a nested ``{model, input, parameters}``
-    body. ``provider`` picks which client implementation the factory builds.
-
-    ``provider`` defaults to ``None`` — the factory then infers it from
-    the ``base_url`` host (e.g. ``dashscope.aliyuncs.com`` → DashScope,
-    ``*.deepinfra.com`` → DeepInfra), falling back to ``"deepinfra"`` when
-    the host is unrecognized. Set ``provider`` explicitly to override the
-    inference (required for self-hosted ``vllm`` on an arbitrary host).
+    with ``{model, query, documents}``. ``provider`` picks which client
+    implementation the factory builds.
 
     Env binding:
         EVEROS_RERANK__PROVIDER
@@ -219,14 +218,14 @@ class RerankSettings(BaseModel):
         EVEROS_RERANK__MAX_CONCURRENT
     """
 
-    provider: Literal["deepinfra", "vllm", "dashscope"] | None = None
+    provider: Literal["deepinfra", "vllm", "dashscope"] = "deepinfra"
     model: str | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=5, ge=1)
+    max_concurrent: int = Field(default=50, ge=1)
 
 
 class BoundaryDetectionSettings(BaseModel):
@@ -274,28 +273,6 @@ class ClusteringSettings(BaseModel):
 
     threshold: float = Field(default=0.65, gt=0, le=1)
     time_window_days: float = Field(default=7.0, gt=0)
-
-
-class SearchSettings(BaseModel):
-    """Search-pipeline policy knobs.
-
-    ``vector_strategy`` selects the read path taken by
-    ``SearchMethod.VECTOR``:
-
-    - ``"maxsim_atomic"`` (default) — ANN over ``atomic_fact.vector``
-      (recall pool ``top_k * 20``, capped at 2000), max-pool the per-fact
-      cosine by parent memcell, then reverse-resolve the top memcells back
-      to episode rows. MaxSim over atomic facts; trades one extra LanceDB
-      scan for finer-grained semantic match on long episodes.
-    - ``"episode"`` — single-vector ANN over ``episode.vector`` (one vector
-      per episode = the embedded Content section). The legacy path; kept
-      so deployments can opt out via env.
-
-    Env binding:
-        EVEROS_SEARCH__VECTOR_STRATEGY={episode,maxsim_atomic}
-    """
-
-    vector_strategy: Literal["episode", "maxsim_atomic"] = "maxsim_atomic"
 
 
 class LanceDBSettings(BaseModel):
@@ -361,6 +338,43 @@ class LanceDBSettings(BaseModel):
     index_cache_size_bytes: int = 16 * 1024 * 1024
 
 
+class CascadeSettings(BaseModel):
+    """Cascade maintenance cadences.
+
+    These are *how often* each background job runs, not how long it is allowed
+    to take — the deadlines that bound a hung call stay as constants next to the
+    code they guard, sized from measurement, because a wrong value there either
+    masks a hang or manufactures failures.
+
+    ``optimize_heartbeat_seconds``:
+      Idle sweep that offers every kind to the optimizer, so an unindexed tail
+      left by a crash is merged even without new writes.
+
+    ``optimize_prune_interval_seconds``:
+      How often the heavy beat runs: reclaim the files of superseded dataset
+      versions. Raise it if the write-lock hold is disruptive, lower it if disk
+      transients are.
+
+    ``optimize_prune_retention_seconds``:
+      Passed straight to LanceDB as ``cleanup_older_than`` — versions replaced
+      longer ago than this become eligible for deletion. It only has to outlive
+      an in-flight read (sub-second). Shorter shrinks the transient footprint of
+      superseded data fragments, but note it also decides how long index files
+      keep a manifest that names them: below LanceDB's 7-day unverified window,
+      index files lose that reference and wait out the full 7 days.
+
+    ``optimize_rebuild_interval_seconds``:
+      Full index rebuild per kind, which collapses the active index fragment
+      count that every ``optimize()`` grows. Bounded by rebuild cost, not
+      correctness — a missed sweep only defers cleanup.
+    """
+
+    optimize_heartbeat_seconds: float = 60.0
+    optimize_prune_interval_seconds: float = 300.0
+    optimize_prune_retention_seconds: float = 60.0
+    optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
+
+
 class KnowledgeSearchSettings(BaseModel):
     """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
 
@@ -380,6 +394,53 @@ class KnowledgeSettings(BaseModel):
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
+class ObservabilitySettings(BaseModel):
+    """``[observability]`` — OpenTelemetry tracing export.
+
+    Off by default. When ``enabled`` is true a ``TracerProvider`` is built
+    once at startup and standard OTLP/HTTP spans are exported to
+    ``endpoint``. The signal is pure OpenTelemetry — vendor-neutral — so it
+    works with any OTLP backend (Langfuse, an OTel Collector, ...); EverOS
+    does not depend on any vendor SDK.
+
+    ``langfuse_*`` are convenience credentials for pushing recall-quality
+    *scores* to Langfuse (a Langfuse-specific REST call, independent of the
+    OTLP span stream). Leave unset for a pure vendor-neutral OTLP export.
+
+    Env binding:
+        EVEROS_OBSERVABILITY__ENABLED
+        EVEROS_OBSERVABILITY__EXPORTER
+        EVEROS_OBSERVABILITY__ENDPOINT
+        EVEROS_OBSERVABILITY__SERVICE_NAME
+        EVEROS_OBSERVABILITY__SAMPLE_RATE
+        EVEROS_OBSERVABILITY__LANGFUSE_PUBLIC_KEY / __LANGFUSE_SECRET_KEY
+        EVEROS_OBSERVABILITY__LANGFUSE_HOST
+        EVEROS_OBSERVABILITY__EMIT_RECALL_SCORES
+        EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD
+    """
+
+    enabled: bool = False
+    exporter: Literal["otlp_http", "none"] = "otlp_http"
+    endpoint: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    service_name: str = "everos"
+    sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Privacy: when False (default) spans carry metadata only — no query text,
+    # extracted memory, or .md paths. Set True to also emit request/response
+    # content as span input/output (redacted + truncated).
+    capture_content: bool = False
+
+    # Langfuse scores (recall-quality feedback) — optional, Langfuse-specific.
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str | None = None
+    emit_recall_scores: bool = True
+    # ``hit`` threshold: only meaningful for calibrated-score methods
+    # (HYBRID LR / rerank / agentic). Not bounded to [0, 1] because raw
+    # BM25 scores are unbounded; tune per method on the eval side.
+    recall_hit_threshold: float = 0.6
+
+
 class Settings(BaseSettings):
     """Top-level application settings."""
 
@@ -393,9 +454,10 @@ class Settings(BaseSettings):
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
     clustering: ClusteringSettings = ClusteringSettings()
-    search: SearchSettings = SearchSettings()
+    cascade: CascadeSettings = CascadeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
 
     model_config = SettingsConfigDict(
         env_prefix="EVEROS_",

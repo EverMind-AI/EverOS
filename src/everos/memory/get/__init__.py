@@ -1,7 +1,7 @@
 """memory.get — read path: paginated listing over LanceDB.
 
 This subpackage owns the dispatch + shape layer for ``POST
-/api/v1/memory/get``. Unlike :mod:`memory.search`, /get does no
+/api/v2/memory/get``. Unlike :mod:`memory.search`, /get does no
 ranking — it is a pure offset/limit + scalar-filter listing,
 partitioned by ``(owner_type, memory_type)``.
 

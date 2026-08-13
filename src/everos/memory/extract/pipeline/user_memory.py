@@ -13,13 +13,18 @@ Run inside ``service.memorize`` via ``asyncio.gather`` alongside
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.user_memory import EpisodeExtractor
 
 from everos.component.utils.datetime import from_timestamp, to_iso_format
+from everos.config import resolve_root
 from everos.core.observability.logging import get_logger
+from everos.core.observability.tracing import capture_output, memory_span
 from everos.memory import Episode, IngestResult, PipelineOutcome
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.prompt_slots import PromptLoader
@@ -33,6 +38,16 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _TRACK = "user_memory"
+_EXTRACT_MAX_RETRIES = 2
+_EXTRACT_RETRY_BACKOFF = 1.0
+
+
+def _root_relative(path: str) -> str:
+    """Path relative to the memory root, for telemetry (never the host abspath)."""
+    try:
+        return str(Path(path).relative_to(resolve_root()))
+    except ValueError:
+        return path
 
 
 class UserMemoryPipeline:
@@ -99,9 +114,29 @@ class UserMemoryPipeline:
             # than the per-user fan-out per the algo's docstring). Fan-out
             # is then md-only: every user sender owns a copy of the same
             # narrative under its own owner_id path.
-            algo_ep = await self._ep_ext.aextract(
-                cell, sender_id=None, prompt=episode_prompt
-            )
+            with memory_span(
+                "everos.extract",
+                observation_type="generation",
+                session_id=ingested.session_id,
+                metadata={
+                    "app_id": ingested.app_id,
+                    "project_id": ingested.project_id,
+                    "memcell_id": memcell_id,
+                },
+            ) as extract_span:
+                # Token usage is recorded onto this span by the LLM client
+                # wrapper when the extractor issues its chat() call.
+                #
+                # Retry on ValueError: everalgo raises ValueError when the
+                # LLM returns malformed JSON (e.g. OpenRouter partial
+                # response with finish_reason=stop). Transient — same input
+                # typically succeeds on retry. TODO: catch a typed
+                # ExtractionError once everalgo introduces one.
+                algo_ep = await _extract_with_retry(
+                    self._ep_ext, cell, episode_prompt, memcell_id
+                )
+                # Extracted memory text (only when capture_content is on).
+                capture_output(extract_span, algo_ep.episode)
             for sender_id in user_senders:
                 ep = Episode.from_algo(
                     algo_ep,
@@ -111,15 +146,24 @@ class UserMemoryPipeline:
                     parent_id=memcell_id,
                 )
                 inline, sections = _episode_to_entry_body(ep)
-                eid = await self._episode_writer.append_entry(
-                    ep.owner_id,
-                    inline=inline,
-                    sections=sections,
-                    app_id=ingested.app_id,
-                    project_id=ingested.project_id,
-                )
-                md_paths.append(
-                    str(
+                with memory_span(
+                    "everos.persist.markdown",
+                    observation_type="span",
+                    session_id=ingested.session_id,
+                    metadata={
+                        "owner_id": ep.owner_id,
+                        "app_id": ingested.app_id,
+                        "project_id": ingested.project_id,
+                    },
+                ) as persist_span:
+                    eid = await self._episode_writer.append_entry(
+                        ep.owner_id,
+                        inline=inline,
+                        sections=sections,
+                        app_id=ingested.app_id,
+                        project_id=ingested.project_id,
+                    )
+                    md_path = str(
                         self._episode_writer.path_for(
                             ep.owner_id,
                             eid.date,
@@ -127,7 +171,11 @@ class UserMemoryPipeline:
                             project_id=ingested.project_id,
                         )
                     )
-                )
+                    md_paths.append(md_path)
+                    # Written .md path, memory-root-relative (only when
+                    # capture_content is on) — never leak the host absolute
+                    # path to the telemetry backend.
+                    capture_output(persist_span, _root_relative(md_path))
                 await self._engine.emit(
                     EpisodeExtracted(
                         memcell_id=memcell_id,
@@ -243,3 +291,27 @@ def _episode_to_entry_body(
         sections["Summary"] = str(summary)
     sections["Content"] = episode.episode
     return inline, sections
+
+
+async def _extract_with_retry(
+    extractor: EpisodeExtractor,
+    cell: AlgoMemCell,
+    prompt: str | None,
+    memcell_id: str,
+) -> AlgoEpisode:
+    """Call everalgo episode extraction with retry on malformed LLM output."""
+    for attempt in range(_EXTRACT_MAX_RETRIES):
+        try:
+            return await extractor.aextract(cell, sender_id=None, prompt=prompt)
+        except ValueError as exc:
+            wait = _EXTRACT_RETRY_BACKOFF * (attempt + 1)
+            logger.warning(
+                "episode_extract_retry",
+                memcell_id=memcell_id,
+                attempt=attempt,
+                error=str(exc)[:200],
+                backoff_s=wait,
+            )
+            await asyncio.sleep(wait)
+    # Final attempt — a ValueError here propagates to the caller.
+    return await extractor.aextract(cell, sender_id=None, prompt=prompt)

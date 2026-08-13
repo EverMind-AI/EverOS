@@ -16,7 +16,7 @@ import pytest
 from everalgo.types import Candidate
 
 from everos.component.utils.datetime import get_utc_now
-from everos.core.errors import ConfigurationError
+from everos.core.errors import ProviderNotConfiguredError
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
 )
@@ -417,7 +417,7 @@ class TestSearchKnowledgeReturnFields:
 
 
 class TestSearchKnowledgeProviderRequired:
-    """Missing providers raise ConfigurationError (HTTP 500 CONFIGURATION_ERROR)."""
+    """Missing providers raise ProviderNotConfiguredError (HTTP 422)."""
 
     async def test_raises_without_embedding(self) -> None:
         mocks = _patch_stack()
@@ -426,7 +426,7 @@ class TestSearchKnowledgeProviderRequired:
             patch(f"{_MOD}._get_embedding", return_value=None),
             patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
             patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
-            pytest.raises(ConfigurationError, match="Embedding provider"),
+            pytest.raises(ProviderNotConfiguredError, match="embedding"),
         ):
             await search_knowledge(query="test", method="keyword")
 
@@ -437,6 +437,6 @@ class TestSearchKnowledgeProviderRequired:
             patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
             patch(f"{_MOD}._get_reranker", return_value=None),
             patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
-            pytest.raises(ConfigurationError, match="Rerank provider"),
+            pytest.raises(ProviderNotConfiguredError, match="rerank"),
         ):
             await search_knowledge(query="test", method="keyword")

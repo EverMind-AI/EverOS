@@ -34,8 +34,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
-from importlib import resources
+from importlib.resources import files
 from pathlib import Path
 
 import httpx
@@ -62,7 +63,7 @@ _MEMORIZE_SINGLETONS: tuple[str, ...] = (
 )
 
 # OME strategy modules carry module-level lazy singletons (``_writer`` /
-# ``_reader``) that capture ``MemoryRoot.default()`` at first call. They
+# ``_reader``) that capture ``MemoryRoot.resolve()`` at first call. They
 # survive across tests, so the second test writes its output to the
 # **first test's** tmp_path. Reset all of them per-test.
 _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -76,7 +77,7 @@ _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _reset_strategy_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Null every strategy ``_writer`` / ``_reader`` so the next test
-    rebuilds against its own ``MemoryRoot.default()`` (driven by the
+    rebuilds against its own ``MemoryRoot.resolve()`` (driven by the
     fresh ``EVEROS_ROOT`` env var set by the calling fixture).
     """
     for mod_name, attrs in _STRATEGY_SINGLETONS:
@@ -125,9 +126,6 @@ async def core_pipeline_runtime(
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
 
-    default_ome = resources.files("everos.config").joinpath("default_ome.toml")
-    (tmp_path / "ome.toml").write_text(default_ome.read_text(encoding="utf-8"))
-
     from everos.config import load_settings
 
     load_settings.cache_clear()
@@ -139,6 +137,14 @@ async def core_pipeline_runtime(
         monkeypatch.setattr(svc, attr, None, raising=False)
     monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
     _reset_strategy_singletons(monkeypatch)
+
+    # The full-app lifespan starts OME, whose config reloader requires an
+    # ``ome.toml`` in the memory root (normally created by ``everos init``).
+    # Provision the packaged default so the pipeline e2e can boot; OME
+    # strategies are code-registered (see api/lifespans/ome.py), so the
+    # default config is sufficient for extraction.
+    default_ome = files("everos.config") / "default_ome.toml"
+    shutil.copyfile(str(default_ome), str(tmp_path / "ome.toml"))
 
     yield tmp_path
 

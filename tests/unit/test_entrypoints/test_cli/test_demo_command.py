@@ -22,8 +22,25 @@ def test_demo_help_exposes_all_modes() -> None:
 
     help_text = _strip_ansi(result.stdout)
     assert result.exit_code == 0
-    for flag in ("--cinematic", "--live", "--cloud", "--server-url"):
+    for flag in ("--cinematic", "--live", "--cloud", "--server-url", "--verbose"):
         assert flag in help_text
+
+
+def test_demo_configures_requested_log_level(monkeypatch) -> None:
+    configured: list[bool] = []
+    monkeypatch.setattr(
+        demo_command,
+        "configure_cli_logging",
+        lambda *, verbose: configured.append(verbose),
+    )
+    monkeypatch.setattr(demo_command, "_print_plain_demo", lambda: None)
+    app = typer.Typer()
+    demo_command.register(app)
+
+    result = CliRunner().invoke(app, ["--plain", "--verbose"])
+
+    assert result.exit_code == 0
+    assert configured == [True]
 
 
 def test_plain_demo_uses_poster_gold_brand_primary(monkeypatch) -> None:

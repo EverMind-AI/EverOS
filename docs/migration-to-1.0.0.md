@@ -59,8 +59,8 @@ For new integrations:
 ## Benchmark Guidance
 
 The current LoCoMo reproduction path is documented in
-[locomo_benchmark.md](locomo_benchmark.md). The benchmark driver uses
-the 1.0.0 server API: add, flush, search, answer, and evaluate.
+[benchmarks/README.md](../benchmarks/README.md). The benchmark driver uses
+the server API: add, flush, search, answer, and evaluate.
 
 Old HyperMem / pre-1.0.0 evaluation pipeline reports should not be used
 as 1.0.0 bug reports unless they can be reproduced with the current

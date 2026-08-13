@@ -1,7 +1,7 @@
 """Tokenizer protocol.
 
-App-layer tokenisation gates every BM25-indexed field in LanceDB
-(``17_lancedb_tables_design.md`` §2.4.1): the source surface form lives
+App-layer tokenisation gates every BM25-indexed field in LanceDB:
+the source surface form lives
 in ``<field>`` while the space-joined token stream lives in
 ``<field>_tokens``, and the FTS index reads only the latter using a
 whitespace tokenizer. Keeping the tokenizer decision in the app layer

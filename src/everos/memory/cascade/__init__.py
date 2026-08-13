@@ -9,16 +9,21 @@ Public surface — what lifespan providers / CLI commands import:
 
 - :class:`CascadeOrchestrator` — composite owner; start / stop / sync.
 - :class:`CascadeConfig` — construction-time tuning knobs.
-- :class:`RecoverableError` / :class:`UnrecoverableError` — handler
-  contract for retry classification.
 - :data:`KIND_REGISTRY` / :func:`match_kind` — kind dispatch (also
   used by CLI ``cascade sync --path`` to resolve a single file's kind).
+- :class:`BackfillPhase` — dataclass shared between the memory-layer
+  phase runners and the CLI's ``PHASES`` copy. The concrete ``PHASES``
+  tuple and ``run_backfill`` orchestrator live in
+  ``everos.entrypoints.cli.commands._backfill_cmd`` (M11: the memory
+  layer must not depend on typer/click).
 """
 
-from .errors import CascadeError as CascadeError
-from .errors import RecoverableError as RecoverableError
-from .errors import UnrecoverableError as UnrecoverableError
+from ._backfill import BackfillPhase as BackfillPhase
+from ._backfill import BackfillPresenter as BackfillPresenter
+from ._backfill import NullBackfillPresenter as NullBackfillPresenter
+from ._backfill import ome_lock_is_free as ome_lock_is_free
 from .orchestrator import CascadeConfig as CascadeConfig
+from .orchestrator import CascadeHealth as CascadeHealth
 from .orchestrator import CascadeOrchestrator as CascadeOrchestrator
 from .registry import KIND_REGISTRY as KIND_REGISTRY
 from .registry import KindSpec as KindSpec
@@ -26,11 +31,13 @@ from .registry import match_kind as match_kind
 
 __all__ = [
     "KIND_REGISTRY",
+    "BackfillPhase",
+    "BackfillPresenter",
     "CascadeConfig",
-    "CascadeError",
+    "CascadeHealth",
     "CascadeOrchestrator",
     "KindSpec",
-    "RecoverableError",
-    "UnrecoverableError",
+    "NullBackfillPresenter",
     "match_kind",
+    "ome_lock_is_free",
 ]

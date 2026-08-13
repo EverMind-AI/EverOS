@@ -6,6 +6,7 @@ All imports are deferred so this module is safe to import without the extra.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from everos.core.errors import MultimodalNotEnabledError, UnsupportedModalityError
@@ -14,8 +15,22 @@ if TYPE_CHECKING:
     from everalgo.types import ParsedContent, RawFile
 
 
+@lru_cache(maxsize=1)
 def parser_available() -> bool:
-    """Whether ``everalgo.parser`` is importable."""
+    """Whether ``everalgo.parser`` is importable.
+
+    Memoised: the underlying ``import everalgo.parser`` pulls in heavy
+    PDF/Office dependencies (``pypdf``, ``python-docx``, ...) that would
+    block the event loop for hundreds of ms — unacceptable inside
+    ``async def health()`` on a liveness probe. First call at startup
+    (via :class:`ParserLifespanProvider`) pays the import cost off the
+    request path; subsequent calls hit the cache instantly.
+
+    The cache is process-wide. Tests that patch ``sys.modules`` to
+    swap the ``everalgo.parser`` module in or out must invoke
+    :meth:`parser_available.cache_clear` between assertions to avoid
+    cross-test contamination.
+    """
     try:
         import everalgo.parser  # noqa: F401
     except ImportError:

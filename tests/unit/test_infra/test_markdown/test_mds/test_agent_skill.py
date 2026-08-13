@@ -95,6 +95,75 @@ def test_skill_extra_fields_still_allowed() -> None:
     assert dumped["last_indexed_at"] == "2026-05-07T08:00:00Z"
 
 
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "../../../etc/passwd",
+        "skills/../../escape",
+        "a/b",
+        "a\\b",
+        "..",
+    ],
+)
+def test_skill_name_rejects_path_traversal(bad_name: str) -> None:
+    """Defence in depth: a hand-edited ``SKILL.md`` with a traversal-shaped
+    ``name`` is caught on parse rather than silently relocating the skill
+    on the next write (see :mod:`.frontmatter`'s ``skill_dir_name``, which
+    sanitizes the directory segment independently of this validator).
+    """
+    with pytest.raises(ValidationError, match="path separators"):
+        AgentSkillFrontmatter(**_kwargs(name=bad_name))  # type: ignore[arg-type]
+
+
+def test_skill_name_allows_cjk_and_spaces() -> None:
+    """Non-ASCII / whitespace names are legitimate — only traversal shapes
+    are rejected."""
+    fm = AgentSkillFrontmatter(**_kwargs(name="修复 Django 自动重载问题"))  # type: ignore[arg-type]
+    assert fm.name == "修复 Django 自动重载问题"
+
+
+@pytest.mark.parametrize(
+    "raw_name",
+    [
+        "..",
+        "../",
+        "/../",
+        ".",
+        "./",
+        "!!!",  # sanitizes to empty -> fallback
+        "a" * 200,  # truncation
+        "修复 Django 自动重载问题",  # CJK + space
+        "../" * 8 + "tmp/pwned",
+    ],
+)
+def test_frontmatter_accepts_presanitized_boundary_names(raw_name: str) -> None:
+    """Mirrors ``extract_agent_skill._persist_skill``'s write path: the
+    caller sanitizes ``skill_name`` via
+    :meth:`AgentSkillFrontmatter.sanitize_skill_name` *before* constructing
+    the frontmatter, so a traversal-shaped or degenerate LLM name never
+    reaches the validator above as a raw, unsanitized string — construction
+    succeeds and the resulting ``name`` is a single, non-degenerate
+    component, rather than raising and dead-lettering the extraction run
+    for a name the sanitizer would have handled safely anyway.
+
+    Covers the boundary family that a single long traversal payload does
+    not exercise: bare ``".."``, and inputs that strip down to ``".."`` or
+    ``"."`` once a leading/trailing separator is removed (``"." is a safe
+    character, so it is not itself stripped) — these are sanitizer
+    fixpoints, not just substrings, and are the exact inputs the fallback
+    in ``sanitize_dirname`` exists to catch.
+    """
+    sanitized = AgentSkillFrontmatter.sanitize_skill_name(raw_name)
+
+    assert "/" not in sanitized
+    assert "\\" not in sanitized
+    assert sanitized not in ("", ".", "..")
+
+    fm = AgentSkillFrontmatter(**_kwargs(name=sanitized))
+
+    assert fm.name == sanitized
+
+
 def test_skill_directory_shape_classvars() -> None:
     """Path-shape ClassVars pin the wiki layout for the writer/reader pair."""
     assert AgentSkillFrontmatter.SKILLS_CONTAINER_NAME == "skills"

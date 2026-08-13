@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![EverOS banner](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)
+![EverOS banner](https://github.com/user-attachments/assets/806e9d7f-c861-4b89-9141-11e38f8753e3)
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
@@ -25,7 +25,6 @@
 - [快速开始](#快速开始)
 - [使用场景](#使用场景)
 - [文档](#文档)
-- [Star 支持](#star-支持)
 - [EverMind 生态](#evermind-生态)
 - [参与贡献](#参与贡献)
 
@@ -89,25 +88,13 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 
 ## 快速开始
 
-> 目标：先体验 memory visualizer，然后启动 EverOS，写入一条真实记忆，
-> 再把它搜索回来。
+> 国内默认使用一个阿里云百炼 DashScope API Key，即可启动 EverOS、写入
+> 持久化记忆，并使用完整的文本检索能力。
 
-### 0. 前置条件
+### 前置条件
 
 - Python 3.12+
-- `everos demo` 不需要 API keys。
-- 如果要运行真正的 server-backed memory flow，中文默认推荐先在
-  [阿里云百炼控制台](https://bailian.console.aliyun.com/) 创建一个
-  DashScope API Key：
-
-| 能力 | 默认 Provider | 用途 | 填入这些 `.env` 字段 |
-| --- | --- | --- | --- |
-| Chat / extraction | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `LLM` | `EVEROS_LLM__API_KEY` |
-| Embedding | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `EMBEDDING` | `EVEROS_EMBEDDING__API_KEY` |
-| Re-rank | [阿里云百炼 / DashScope](https://bailian.console.aliyun.com/) | `RERANK` | `EVEROS_RERANK__API_KEY` |
-
-同一个 DashScope API Key 可以填到这三个 slot。多模态文件摄取仍通过
-`EVEROS_MULTIMODAL__*` 单独配置；如果只跑下面的文本记忆闭环，不需要先配置它。
+- 一个[阿里云百炼 DashScope API Key](https://bailian.console.aliyun.com/)
 
 ### 1. 安装
 
@@ -116,9 +103,9 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. 体验 Demo
+### 2. 先体验独立 Demo —— 不需要 Key
 
-在配置 API keys 或启动 server 之前，先运行：
+在配置 provider 或启动 server 之前，先运行：
 
 ```bash
 everos demo
@@ -138,49 +125,47 @@ everos demo
   <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
 </p>
 
-README 媒体使用的循环 showroom view 可以这样运行：
+按 `r` replay，按 `q` 退出。非交互式预览可以使用 `everos demo --plain`；
+循环 showroom view 可以使用 `everos demo --cinematic`。Visualizer 的范围见
+[docs/everos-demo.md](docs/everos-demo.md)。
 
-```bash
-everos demo --cinematic
-```
-
-如果 shell 不是 interactive，或者你只想看一个可复制的静态预览：
-
-```bash
-everos demo --plain
-```
-
-### 3. 配置
-
-生成一个 starter `.env` 文件，然后根据生成的注释填入对应的 API key 字段。
-中文 quick start 默认推荐使用
-[阿里云百炼控制台](https://bailian.console.aliyun.com/) 的 DashScope API Key
-配置 `LLM` / `EMBEDDING` / `RERANK` 三个核心能力。
+### 3. 初始化并配置百炼
 
 ```bash
 everos init
-# or, from a source checkout:
-cp .env.example .env
 ```
 
-`everos init` 默认写入 `./.env`。也可以使用 `everos init --xdg`
-写入 `${XDG_CONFIG_HOME:-~/.config}/everos/.env`。
+这个命令会创建 `~/.everos/everos.toml` 和 `~/.everos/ome.toml`。打开
+`~/.everos/everos.toml`，配置下面的百炼 provider。
 
-百炼三件套示例：
+在[百炼控制台](https://bailian.console.aliyun.com/)创建一个华北 2（北京）地域的
+DashScope API Key，并把同一个 Key 复用到三个文本 provider：
 
-```env
-EVEROS_LLM__MODEL=qwen-plus
-EVEROS_LLM__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_LLM__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```toml
+[llm]
+model = "qwen-plus"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-EVEROS_EMBEDDING__MODEL=text-embedding-v4
-EVEROS_EMBEDDING__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_EMBEDDING__BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+[embedding]
+model = "text-embedding-v4"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+dimensions = 1024
 
-EVEROS_RERANK__MODEL=gte-rerank-v2
-EVEROS_RERANK__API_KEY=<DASHSCOPE_API_KEY>
-EVEROS_RERANK__BASE_URL=https://dashscope.aliyuncs.com
+[rerank]
+provider = "dashscope"
+model = "gte-rerank-v2"
+api_key = "<DASHSCOPE_API_KEY>"
+base_url = "https://dashscope.aliyuncs.com"
 ```
+
+Embedding 会启用 vector 和 user-hybrid retrieval；DashScope rerank 会进一步
+启用 agentic search、默认 agent-hybrid search 和 Knowledge Wiki。共享 DashScope
+host 仍支持北京地域的 Key；生产环境可以换成对应地域与业务空间的百炼专属 host。
+
+如果希望更换 memory root，可以使用 `everos init --root <path>`。后续命令也要
+传入同一个 `--root <path>`。
 
 ### 4. 启动 EverOS
 
@@ -194,37 +179,22 @@ everos server start
 curl http://127.0.0.1:8000/health
 ```
 
-预期响应：
+确认响应里有 `"status":"ok"`。上面的百炼配置会显示 `llm`、`embed` 和
+`rerank` 三个文本 capability 均可用。
 
-```json
-{"status":"ok"}
-```
+### 5. 写入并搜索第一条记忆
 
-`everos server start` 会按以下顺序查找 `.env`：`--env-file <path>` →
-`./.env`（当前目录）→ `${XDG_CONFIG_HOME:-~/.config}/everos/.env` →
-`~/.everos/.env`。端点栈兼容 OpenAI protocol（OpenAI / OpenRouter /
-vLLM / Ollama / DeepInfra）。你可以覆盖生成的 `.env` 中的 `*__BASE_URL`
-来指向任意这些模型服务。
-
-现在可以把 demo 跑成真实 server flow。在第二个 terminal 里运行：
-
-```bash
-everos demo --live
-```
-
-Live demo mode 会连接正在运行的 server，并在打开同一个 memory sphere UI
-之前真实执行 `/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
-`/api/v1/memory/search`。如果 server 不在 `http://127.0.0.1:8000`，可以使用
-`--server-url <url>`。
-
-### 5. 试写第一条记忆
+> [!NOTE]
+> 业务接口位于 `/api/v2`。旧的 `/api/v1` 前缀仍然指向同一批 handler，已有集成
+> 不会受影响；但它只是兼容用的 legacy alias，未来的大版本可能移除 —— 新代码请
+> 直接使用 `/api/v2`。
 
 添加一个很小的 conversation：
 
 ```bash
 TS=$(($(date +%s)*1000))
 
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -237,10 +207,10 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   }"
 ```
 
-为了本地 demo，手动触发一次 extraction：
+在 session 结束时手动 flush 这条记忆：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
 ```
@@ -248,19 +218,20 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
 再把这条记忆搜索回来：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
+    "method": "hybrid",
     "top_k": 5
   }'
 ```
 
-响应里应该能看到 Yosemite 相关记忆。如果第一次搜索为空，稍等片刻再试；
-Markdown 会同步写入，本地索引会在后台追上。
+响应里应该能看到 Yosemite 相关记忆。完整百炼配置可以直接使用 hybrid search；
+也可以省略 `method` 字段，因为 API 默认就是 hybrid。
 
 > [!TIP]
 > **第一条记忆已经写入。**
@@ -268,11 +239,24 @@ Markdown 会同步写入，本地索引会在后台追上。
 > 并通过本地索引把它搜索回来。这就是 EverOS 的核心闭环。
 > 想看看 source of truth？打开 `~/.everos`，直接检查生成的 Markdown 文件。
 
-带完整响应和 Markdown 文件说明的 walkthrough 见 [QUICKSTART.md](QUICKSTART.md)。
+### 一个百炼 Key 可以使用哪些能力？
+
+| 配置 | 可用能力 |
+| --- | --- |
+| 百炼 `[llm]` + `[embedding]` + `[rerank]` | Keyword、vector、hybrid、agentic search；reflection、skill extraction、Knowledge Wiki |
+| 再添加 `[multimodal]` 和 parser extra | 图片、PDF、音频、Office 文件摄取 |
+
+`/health` 会列出缺失的可选能力。如果请求了尚未配置 provider 的功能，API 会
+返回明确的 HTTP 422。
+
+> [!NOTE]
+> `everos demo --live` 和步骤 2 的独立 Demo 不一样：它会连接正在运行的 server，
+> 并执行真实的 add / flush / search 流程。它使用 hybrid search，上面的完整百炼
+> 配置可以直接运行。
 
 ### 可选：摄取多模态文件
 
-如果要通过 `/api/v1/memory/add` 的 `content` items 摄取非文本内容
+如果要通过 `/api/v2/memory/add` 的 `content` items 摄取非文本内容
 （image / pdf / audio / office documents），安装可选 extra：
 
 ```bash
@@ -280,8 +264,8 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
 这会引入 `everalgo-parser`（包含用于 SVG 支持的 `[svg]` bundle，通过
-cairosvg）并接入多模态 LLM client（`.env` 中的 `EVEROS_MULTIMODAL__*`
-字段，默认通过 OpenRouter 使用 `google/gemini-3-flash-preview`）。
+cairosvg）。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
+OpenRouter 使用的 `google/gemini-3-flash-preview`。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
 `soffice`（LibreOffice 的 headless renderer），先把 `.doc` / `.docx` /
@@ -304,7 +288,7 @@ cd EverOS
 uv sync                              # creates ./.venv and installs deps
 source .venv/bin/activate            # or prefix commands with `uv run`
 everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 把百炼 DashScope API Key 填进 .env
+everos init                          # 把一个百炼 DashScope Key 配置到 ~/.everos/everos.toml
 
 everos --help
 make test
@@ -653,7 +637,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 - [docs/everos-demo.md](docs/everos-demo.md) - Demo 范围与 TUI 源码布局
 - [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、LanceDB 与 recall flow
 - [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
-- [docs/engineering.md](docs/engineering.md) - 工程与 CI tooling
+- [docs/engineering.md](docs/engineering.md) - 贡献者工程参考:构建、测试、CI 与规范
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 迁移说明
 - [CHANGELOG.md](CHANGELOG.md) - 发布记录
 - [CONTRIBUTING.md](CONTRIBUTING.md) - 如何贡献
@@ -665,25 +649,9 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 
 </div>
 
-## Star 支持
-
-如果 EverOS 对你的 Agent stack 有帮助，请 Star 这个仓库。它会帮助更多
-builders 发现这个项目，也会给 memory ecosystem 一个更强的信号，让它持续改进。
-
-### Star 趋势
-
-[![Star 趋势图](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
 ## EverMind 生态
 
-EverMind 是一个面向长期记忆、自进化 Agent 和记忆评测的开源生态。
+EverMind 是一个面向长期记忆、自进化 Agent、AI-native interfaces 和记忆评测的开源生态。
 
 <table>
 <tr>
@@ -692,6 +660,10 @@ EverMind 是一个面向长期记忆、自进化 Agent 和记忆评测的开源�
 <tr>
 <td><strong>Memory Runtime</strong></td>
 <td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - 本地记忆操作系统，以及有研究支撑的 Agent 和用户记忆 runtime。</td>
+</tr>
+<tr>
+<td><strong>Self-Improving Agent Harness</strong></td>
+<td><a href="https://github.com/EverMind-AI/Raven">Raven</a> - The Self-Improving Agent Harness，把记忆、主动性、上下文控制和 skill evolution 带进终端原生 Agent。</td>
 </tr>
 <tr>
 <td><strong>算法引擎</strong></td>

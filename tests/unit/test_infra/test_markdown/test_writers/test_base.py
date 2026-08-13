@@ -130,7 +130,7 @@ async def test_current_count_hook_can_be_overridden(root: MemoryRoot) -> None:
     class _ConstantCount(BaseDailyWriter):
         schema = _UserDemoFrontmatter
 
-        async def _current_count(self, path):  # noqa: ANN001
+        async def _current_count(self, path):
             return 41  # always claim 41 existing entries
 
     writer = _ConstantCount(root)
@@ -144,7 +144,7 @@ async def test_frontmatter_updates_hook_supplies_defaults(root: MemoryRoot) -> N
     class _WithDefaults(BaseDailyWriter):
         schema = _UserDemoFrontmatter
 
-        def _frontmatter_updates(self, scope_id, date, *, next_count):  # noqa: ANN001
+        def _frontmatter_updates(self, scope_id, date, *, next_count):
             return {
                 "user_id": scope_id,
                 "entry_count": next_count,
@@ -167,7 +167,7 @@ async def test_explicit_frontmatter_updates_skip_hook(root: MemoryRoot) -> None:
     class _WithDefaults(BaseDailyWriter):
         schema = _UserDemoFrontmatter
 
-        def _frontmatter_updates(self, scope_id, date, *, next_count):  # noqa: ANN001
+        def _frontmatter_updates(self, scope_id, date, *, next_count):
             return {"marker": "from-hook"}
 
     writer = _WithDefaults(root)

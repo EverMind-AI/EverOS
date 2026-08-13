@@ -1,4 +1,4 @@
-"""GetManager — top-level orchestrator for ``POST /api/v1/memory/get``.
+"""GetManager — top-level orchestrator for ``POST /api/v2/memory/get``.
 
 Hard partition by ``(owner_type, memory_type)`` (validated by
 :class:`GetRequest`):
@@ -21,8 +21,8 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from everos.component.utils.datetime import to_display_tz
+from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
-from everos.core.observability.tracing import gen_request_id
 
 from .dto import (
     GetAgentCaseItem,
@@ -68,7 +68,7 @@ class GetManager:
     # ── Public entry ─────────────────────────────────────────────────
 
     async def get(self, req: GetRequest) -> GetResponse:
-        request_id = gen_request_id()
+        request_id = resolve_request_id()
         descending = req.sort_order == "desc"
         where = compile_filters_for_get(
             req.filters,
@@ -76,7 +76,6 @@ class GetManager:
             owner_type=req.owner_type,
             app_id=req.app_id,
             project_id=req.project_id,
-            exclude_deprecated=req.memory_type == GetMemoryType.EPISODE,
         )
 
         match req.memory_type:
