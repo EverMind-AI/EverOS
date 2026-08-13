@@ -124,9 +124,7 @@ at the center, then expands smoothly into the next round. See
 After a few rounds the demo points you at configuring your own keys (`everos
 init`, then `everos demo --live`).
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
-</p>
+<https://github.com/user-attachments/assets/98cb8e1e-2ca8-4504-b0a6-0b9a040a0a5c>
 
 Press `r` to replay and `q` to quit. For a non-interactive preview, use
 `everos demo --plain`; for the looping showroom view, use

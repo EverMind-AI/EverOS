@@ -121,9 +121,7 @@ everos demo
 查看可用命令（`/replay`、`/live`、`/quit`）；`ctrl+c` 随时退出。几轮之后，demo
 会引导你配置自己的 key（`everos init`，然后 `everos demo --live`）。
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/e7b98cb7-7283-4638-8bb6-7341e4de1de7" alt="Animated EverOS demo preview showing a memory moving through ingest, extract, index, and recall" width="720">
-</p>
+<https://github.com/user-attachments/assets/98cb8e1e-2ca8-4504-b0a6-0b9a040a0a5c>
 
 按 `r` replay，按 `q` 退出。非交互式预览可以使用 `everos demo --plain`；
 循环 showroom view 可以使用 `everos demo --cinematic`。Visualizer 的范围见
