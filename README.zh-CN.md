@@ -105,27 +105,17 @@ uv pip install everos
 
 ### 2. 先体验独立 Demo —— 不需要 Key
 
-在配置 provider 或启动 server 之前，先运行：
+无需填写 API Key 或启动 server，只需一条命令即可快速体验 EverOS 如何保存并
+召回记忆：
 
 ```bash
 everos demo
 ```
 
-全屏 terminal UI 里带有一个输入框：先输入一件希望 EverOS 记住的事情，再提出
-一个能够召回它的问题。不需要 API key，也不需要提前启动 server。每一轮都能
-直观看到记忆经历完整流程：ingest -> extract -> index -> recall。
-
-粒子球会随四个阶段持续变化，随后散落到 memory field 并淡出；中心会先留下少量
-黄白粒子攒动，再由中心向外扩展成完整球体，进入下一轮。完整体验见
-[docs/everos-demo.md](docs/everos-demo.md)。输入 `/` 可以
-查看可用命令（`/replay`、`/live`、`/quit`）；`ctrl+c` 随时退出。几轮之后，demo
-会引导你配置自己的 key（`everos init`，然后 `everos demo --live`）。
+输入一条希望 EverOS 记住的信息，再提出相关问题，即可直观看到记忆经过
+ingest -> extract -> index -> recall 的完整流程。
 
 <https://github.com/user-attachments/assets/98cb8e1e-2ca8-4504-b0a6-0b9a040a0a5c>
-
-按 `r` replay，按 `q` 退出。非交互式预览可以使用 `everos demo --plain`；
-循环 showroom view 可以使用 `everos demo --cinematic`。Visualizer 的范围见
-[docs/everos-demo.md](docs/everos-demo.md)。
 
 ### 3. 初始化并配置百炼
 

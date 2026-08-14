@@ -105,31 +105,17 @@ uv pip install everos
 
 ### 2. Try the standalone demo — no key required
 
-Before configuring a provider or starting the server, run:
+No API key or server setup required—run one command to quickly experience how
+EverOS stores and recalls memory:
 
 ```bash
 everos demo
 ```
 
-The full-screen terminal UI has an input box: type something EverOS should
-remember, then ask a question that recalls it. No API key or server setup is
-needed. Each round lets you watch the memory move through the real lifecycle:
-ingest -> extract -> index -> recall.
-
-The particle sphere changes with each stage, then bursts across the memory
-field and fades away. A small core of yellow and white particles keeps moving
-at the center, then expands smoothly into the next round. See
-[docs/everos-demo.md](docs/everos-demo.md) for the complete experience. Type
-`/` to see the commands (`/replay`, `/live`, `/quit`); `ctrl+c` exits anytime.
-After a few rounds the demo points you at configuring your own keys (`everos
-init`, then `everos demo --live`).
+Enter something EverOS should remember, then ask a related question to watch
+the memory move through ingest -> extract -> index -> recall.
 
 <https://github.com/user-attachments/assets/98cb8e1e-2ca8-4504-b0a6-0b9a040a0a5c>
-
-Press `r` to replay and `q` to quit. For a non-interactive preview, use
-`everos demo --plain`; for the looping showroom view, use
-`everos demo --cinematic`. See [docs/everos-demo.md](docs/everos-demo.md) for
-the visualizer's scope.
 
 ### 3. Initialize and add your OpenRouter key
 
