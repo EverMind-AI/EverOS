@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from everos.entrypoints.tui.demo.widgets.sphere import (
+    BRAILLE_DOT_BITS,
     EXTRACT_BRANCH_COUNT,
     SHARED_EDGE_INNER_RADIUS,
     SPHERE_STATES,
@@ -56,6 +57,16 @@ def test_dot_sphere_keeps_complete_sphere_inside_terminal_frame() -> None:
     assert min(occupied_rows) >= 1
     assert max(occupied_rows) <= frame.height - 2
     assert row_spans[frame.height // 2] >= 28
+
+
+def test_dot_sphere_stays_round_inside_a_wide_terminal_frame() -> None:
+    frame = build_dot_sphere(width=57, height=23, phase=0.25, state_key="indexing")
+
+    left, right, top, bottom = _subdot_extents(frame)
+    subdot_width = right - left + 1
+    subdot_height = bottom - top + 1
+
+    assert 0.96 <= subdot_width / subdot_height <= 1.04
 
 
 def test_all_pipeline_states_keep_a_round_outer_shell_through_cycle() -> None:
@@ -791,6 +802,19 @@ def _row_spans(frame: DotSphereFrame) -> dict[int, int]:
 def _frame_extents(frame: DotSphereFrame) -> tuple[int, int, int, int]:
     xs = [cell.x for cell in frame.cells]
     ys = [cell.y for cell in frame.cells]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _subdot_extents(frame: DotSphereFrame) -> tuple[int, int, int, int]:
+    xs = []
+    ys = []
+    for cell in frame.cells:
+        mask = ord(cell.glyph) - 0x2800
+        for local_x, column in enumerate(BRAILLE_DOT_BITS):
+            for local_y, bit in enumerate(column):
+                if mask & bit:
+                    xs.append(cell.x * 2 + local_x)
+                    ys.append(cell.y * 4 + local_y)
     return min(xs), max(xs), min(ys), max(ys)
 
 

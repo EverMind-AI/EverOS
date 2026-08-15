@@ -843,6 +843,13 @@ def _build_soft_supernova(
             phase=phase + progress * 2.4,
             state=SPHERE_STATES["ingesting"],
         )
+    if progress <= 0.0:
+        return DotSphereFrame(
+            width=width,
+            height=height,
+            state=state,
+            cells=source.cells,
+        )
     sub_width, sub_height, center_x, center_y, radius_x, radius_y = _sphere_geometry(
         width,
         height,
@@ -1307,9 +1314,10 @@ def _sphere_geometry(
     sub_height = height * 4
     center_x = (sub_width - 1) / 2
     center_y = (sub_height - 1) / 2 + 1
-    radius_x = max(1.0, (center_x - 6) * 0.9)
-    radius_y = max(1.0, (center_y - 5) * 0.9)
-    return sub_width, sub_height, center_x, center_y, radius_x, radius_y
+    available_radius_x = center_x - 6
+    available_radius_y = center_y - 5
+    radius = max(1.0, min(available_radius_x, available_radius_y) * 0.92)
+    return sub_width, sub_height, center_x, center_y, radius, radius
 
 
 def _inside_sphere_projection(
