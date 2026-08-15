@@ -36,6 +36,7 @@ WORKING_SAMPLES_PER_RADIUS = 1.6
 WORKING_MIN_ORBITS = 14
 WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
+SPHERE_PERSPECTIVE_STRENGTH = 0.14
 SOLVING_BACKGROUND_DENSITY = 0.11
 SOLVING_SIGNAL_COUNT = 9
 SOLVING_SIGNAL_TRAIL_STEPS = 3
@@ -227,9 +228,16 @@ def _build_working_cloud(
         for sample in range(samples_per_orbit):
             angle = (sample / samples_per_orbit) * math.tau
             if orbit == 0:
-                sub_x = round(center_x + math.cos(angle) * radius_x)
-                sub_y = round(center_y - math.sin(angle) * radius_y)
                 normalized_depth = math.sin(angle + global_yaw) * 0.35
+                sub_x, sub_y = _project_sphere_point(
+                    math.cos(angle),
+                    math.sin(angle),
+                    normalized_depth,
+                    center_x=center_x,
+                    center_y=center_y,
+                    radius_x=radius_x,
+                    radius_y=radius_y,
+                )
             else:
                 point = _point_on_orbit(
                     basis_u,
@@ -239,9 +247,16 @@ def _build_working_cloud(
                     global_yaw,
                     camera_tilt,
                 )
-                sub_x = round(center_x + point[0] * radius_x)
-                sub_y = round(center_y - point[1] * radius_y)
                 normalized_depth = point[2] / orbit_radius
+                sub_x, sub_y = _project_sphere_point(
+                    point[0],
+                    point[1],
+                    normalized_depth,
+                    center_x=center_x,
+                    center_y=center_y,
+                    radius_x=radius_x,
+                    radius_y=radius_y,
+                )
             if 0 <= sub_x < sub_width and 0 <= sub_y < sub_height:
                 _add_braille_dot(
                     masks=masks,
@@ -264,9 +279,16 @@ def _build_working_cloud(
                 global_yaw,
                 camera_tilt,
             )
-            sub_x = round(center_x + point[0] * radius_x)
-            sub_y = round(center_y - point[1] * radius_y)
             normalized_depth = point[2] / orbit_radius
+            sub_x, sub_y = _project_sphere_point(
+                point[0],
+                point[1],
+                normalized_depth,
+                center_x=center_x,
+                center_y=center_y,
+                radius_x=radius_x,
+                radius_y=radius_y,
+            )
             if not (0 <= sub_x < sub_width and 0 <= sub_y < sub_height):
                 continue
             for offset_x, offset_y in _particle_offsets_for_depth(normalized_depth):
@@ -1380,10 +1402,17 @@ def _replace_with_shared_outer_shell(
             SHARED_EDGE_INNER_RADIUS + 0.01,
             min(0.985, radius),
         )
-        sub_x = round(center_x + math.cos(angle) * radius_x * radius)
-        sub_y = round(center_y - math.sin(angle) * radius_y * radius)
         hemisphere = 1.0 if _stable_hash(index, 17.9) >= 0.38 else -1.0
         depth = hemisphere * math.sqrt(max(0.0, 1 - radius * radius))
+        sub_x, sub_y = _project_sphere_point(
+            math.cos(angle) * radius,
+            math.sin(angle) * radius,
+            depth,
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        )
         _add_braille_dot(
             masks=shared_masks,
             depths=shared_depths,
@@ -1502,6 +1531,23 @@ def _point_on_orbit(
     )
     point = _rotate_around_axis(point, (0.0, 1.0, 0.0), yaw)
     return _rotate_around_axis(point, (1.0, 0.0, 0.0), tilt)
+
+
+def _project_sphere_point(
+    x: float,
+    y: float,
+    depth: float,
+    *,
+    center_x: float,
+    center_y: float,
+    radius_x: float,
+    radius_y: float,
+) -> tuple[int, int]:
+    scale = 1 + depth * SPHERE_PERSPECTIVE_STRENGTH
+    return (
+        round(center_x + x * radius_x * scale),
+        round(center_y - y * radius_y * scale),
+    )
 
 
 def _particle_offsets_for_depth(

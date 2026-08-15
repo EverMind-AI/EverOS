@@ -69,6 +69,40 @@ def test_dot_sphere_stays_round_inside_a_wide_terminal_frame() -> None:
     assert 0.96 <= subdot_width / subdot_height <= 1.04
 
 
+def test_dot_sphere_uses_perspective_to_read_as_a_sphere() -> None:
+    frame = build_dot_sphere(width=41, height=19, phase=0.25, state_key="booting")
+    _, _, center_x, center_y, radius_x, radius_y = _sphere_geometry(41, 19)
+
+    front_radii = [
+        _cell_projection_radius(
+            (cell.x, cell.y),
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        )
+        for cell in frame.cells
+        if cell.z > 0.55
+    ]
+    rear_radii = [
+        _cell_projection_radius(
+            (cell.x, cell.y),
+            center_x=center_x,
+            center_y=center_y,
+            radius_x=radius_x,
+            radius_y=radius_y,
+        )
+        for cell in frame.cells
+        if cell.z < -0.55
+    ]
+
+    assert front_radii
+    assert rear_radii
+    assert sum(front_radii) / len(front_radii) > (
+        sum(rear_radii) / len(rear_radii)
+    ) * 1.28
+
+
 def test_all_pipeline_states_keep_a_round_outer_shell_through_cycle() -> None:
     for state_key in ("ingesting", "extracting", "indexing", "recalling"):
         occupied_widths = []
