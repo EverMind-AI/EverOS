@@ -109,7 +109,11 @@ No API key or server setup required—run one command to quickly experience how
 EverOS stores and recalls memory:
 
 ```bash
+# If you installed EverOS as a package:
 everos demo
+
+# If you cloned or forked this repository and have not activated .venv:
+uv run everos demo
 ```
 
 Enter something EverOS should remember, then ask a related question to watch
@@ -273,11 +277,10 @@ sudo apt-get install -y libreoffice          # Debian / Ubuntu
 git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 uv sync                              # creates ./.venv and installs deps
-source .venv/bin/activate            # or prefix commands with `uv run`
-everos demo --plain                  # try the local educational demo; no API keys needed
-everos init                          # add one OpenRouter key to ~/.everos/everos.toml
+uv run everos demo --plain           # try the local educational demo; no API keys needed
+uv run everos init                   # add one OpenRouter key to ~/.everos/everos.toml
 
-everos --help
+uv run everos --help
 make test
 ```
 

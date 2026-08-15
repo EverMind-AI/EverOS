@@ -109,7 +109,11 @@ uv pip install everos
 召回记忆：
 
 ```bash
+# 如果你是通过 package 安装 EverOS：
 everos demo
+
+# 如果你是 fork/clone 这个仓库，且还没有激活 .venv：
+uv run everos demo
 ```
 
 输入一条希望 EverOS 记住的信息，再提出相关问题，即可直观看到记忆经过
@@ -274,11 +278,10 @@ sudo apt-get install -y libreoffice          # Debian / Ubuntu
 git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 uv sync                              # creates ./.venv and installs deps
-source .venv/bin/activate            # or prefix commands with `uv run`
-everos demo --plain                  # 先体验本地 educational demo；不需要 API keys
-everos init                          # 把一个百炼 DashScope Key 配置到 ~/.everos/everos.toml
+uv run everos demo --plain           # 先体验本地 educational demo；不需要 API keys
+uv run everos init                   # 把一个百炼 DashScope Key 配置到 ~/.everos/everos.toml
 
-everos --help
+uv run everos --help
 make test
 ```
 
