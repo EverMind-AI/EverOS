@@ -36,7 +36,7 @@ WORKING_SAMPLES_PER_RADIUS = 1.6
 WORKING_MIN_ORBITS = 14
 WORKING_MIN_SAMPLES = 52
 WORKING_PARTICLES_PER_ORBIT = 3
-SPHERE_PERSPECTIVE_STRENGTH = 0.14
+SPHERE_PERSPECTIVE_STRENGTH = 0.26
 SOLVING_BACKGROUND_DENSITY = 0.11
 SOLVING_SIGNAL_COUNT = 9
 SOLVING_SIGNAL_TRAIL_STEPS = 3
@@ -1024,7 +1024,7 @@ def _build_soft_supernova(
                 # into a larger circular shell instead of a chaotic release.
                 scatter_angle = math.tau * _stable_hash(particle_id, 31.2)
                 scatter_distance = math.sqrt(_stable_hash(particle_id, 57.8))
-                field_radius = min(sub_width, sub_height) * 0.62
+                field_radius = min(sub_width, sub_height) * 0.68
                 irregular_envelope = (
                     0.78
                     + 0.14 * math.sin(scatter_angle * 3 + 1.1)
@@ -1590,23 +1590,29 @@ def _style_for_ghost_depth(depth: float) -> str:
     """Approximate the reference ghost-path alpha using dark gold steps."""
 
     depth_ratio = (depth + 1) / 2
-    if depth_ratio > 0.82:
+    if depth_ratio > 0.86:
+        return EVEROS_GOLD_LIGHT
+    if depth_ratio > 0.7:
         return EVEROS_GOLD_MID
-    if depth_ratio > 0.55:
+    if depth_ratio > 0.52:
         return EVEROS_GOLD_DARK
-    if depth_ratio > 0.28:
+    if depth_ratio > 0.36:
         return EVEROS_GOLD_DEEP
     return EVEROS_GOLD_SHADOW
 
 
 def _style_for_shared_outer_shell(depth: float) -> str:
-    """Keep edge contrast calm and identical while the center tells the story."""
+    """Keep the edge stable while lighting it as a round shell."""
 
-    if depth > 0.48:
+    if depth > 0.68:
+        return EVEROS_YELLOW
+    if depth > 0.42:
+        return EVEROS_GOLD_LIGHT
+    if depth > 0.16:
+        return EVEROS_GOLD_WARM
+    if depth > -0.1:
         return EVEROS_GOLD_MID
-    if depth > 0.18:
-        return EVEROS_GOLD_DARK
-    if depth > -0.18:
+    if depth > -0.34:
         return EVEROS_GOLD_DEEP
     return EVEROS_GOLD_SHADOW
 

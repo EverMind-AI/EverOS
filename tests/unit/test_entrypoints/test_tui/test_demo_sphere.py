@@ -6,6 +6,10 @@ import math
 
 from everos.entrypoints.tui.demo.widgets.sphere import (
     BRAILLE_DOT_BITS,
+    EVEROS_GOLD_LIGHT,
+    EVEROS_GOLD_WARM,
+    EVEROS_YELLOW,
+    EVEROS_YELLOW_PALE,
     EXTRACT_BRANCH_COUNT,
     SHARED_EDGE_INNER_RADIUS,
     SPHERE_STATES,
@@ -100,7 +104,27 @@ def test_dot_sphere_uses_perspective_to_read_as_a_sphere() -> None:
     assert rear_radii
     assert sum(front_radii) / len(front_radii) > (
         sum(rear_radii) / len(rear_radii)
-    ) * 1.28
+    ) * 1.42
+
+
+def test_dot_sphere_front_shell_uses_brighter_depth_cues() -> None:
+    frame = build_dot_sphere(width=41, height=19, phase=0.25, state_key="booting")
+    bright_shell_styles = {
+        EVEROS_GOLD_WARM,
+        EVEROS_GOLD_LIGHT,
+        EVEROS_YELLOW,
+        EVEROS_YELLOW_PALE,
+    }
+
+    front_shell = [cell for cell in frame.cells if cell.z > 0.55]
+    rear_shell = [cell for cell in frame.cells if cell.z < -0.55]
+
+    assert front_shell
+    assert rear_shell
+    assert sum(cell.style in bright_shell_styles for cell in front_shell) >= (
+        len(front_shell) * 0.35
+    )
+    assert not any(cell.style in bright_shell_styles for cell in rear_shell)
 
 
 def test_all_pipeline_states_keep_a_round_outer_shell_through_cycle() -> None:
@@ -358,9 +382,12 @@ def test_working_reference_uses_dark_paths_and_bright_moving_particles() -> None
     )
     dark_styles = {"#61522F", "#76612F", "#8C6D2B", "#A97D25"}
     bright_styles = {"#DDA21E", "#F9B91C", "#FFD267"}
-    dark_cells = [cell for cell in frame.cells if cell.style in dark_styles]
+    rear_cells = [cell for cell in frame.cells if cell.z < -0.1]
 
-    assert len(dark_cells) > len(frame.cells) * 0.75
+    assert rear_cells
+    assert sum(cell.style in dark_styles for cell in rear_cells) >= (
+        len(rear_cells) * 0.9
+    )
     assert bright_styles <= {cell.style for cell in frame.cells}
 
 
