@@ -26,7 +26,7 @@ class Episode(BaseLanceTable):
     BM25_FIELDS: ClassVar[list[str]] = ["episode_tokens"]
 
     id: str
-    """PK = ``<owner_id>_<entry_id>`` (scalar PK)."""
+    """Opaque storage PK scoped by app, project, owner, and entry id."""
 
     entry_id: str
     """md-side seq id ``ep_<YYYYMMDD>_<NNNN>`` (cascade reverse-lookup)."""

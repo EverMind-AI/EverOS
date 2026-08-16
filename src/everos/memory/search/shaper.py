@@ -27,6 +27,10 @@ from everalgo.types import Candidate, ScoredItem
 
 from everos.component.utils.datetime import to_display_tz
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.lancedb.row_id import (
+    agent_skill_wire_id,
+    daily_log_wire_id,
+)
 
 from .dto import (
     SearchAgentCaseItem,
@@ -66,12 +70,20 @@ def shape_episode_from_candidate(
         return None
     session_id = md.get("session_id")
     episode = md.get("episode")
-    if not isinstance(episode, str):
+    owner_id = md.get("owner_id")
+    entry_id = md.get("entry_id")
+    if not (
+        isinstance(episode, str)
+        and isinstance(owner_id, str)
+        and owner_id
+        and isinstance(entry_id, str)
+        and entry_id
+    ):
         logger.warning("shape_episode_missing_required_field", id=candidate.id)
         return None
     return SearchEpisodeItem(
-        id=candidate.id,
-        user_id=_as_optional_str(md.get("owner_id")),
+        id=daily_log_wire_id(owner_id=owner_id, entry_id=entry_id),
+        user_id=owner_id,
         app_id=_as_str(md.get("app_id")) or "default",
         project_id=_as_str(md.get("project_id")) or "default",
         session_id=session_id,
@@ -89,21 +101,43 @@ def shape_episode_from_candidate(
 # ── Atomic fact shaping ─────────────────────────────────────────────────
 
 
-def shape_atomic_fact_from_candidate(candidate: Candidate) -> SearchAtomicFactItem:
+def shape_atomic_fact_from_candidate(
+    candidate: Candidate,
+) -> SearchAtomicFactItem | None:
     """Cast a LanceDB ``atomic_fact`` candidate row into the nested fact DTO."""
+    owner_id = candidate.metadata.get("owner_id")
+    entry_id = candidate.metadata.get("entry_id")
+    if not (
+        isinstance(owner_id, str)
+        and owner_id
+        and isinstance(entry_id, str)
+        and entry_id
+    ):
+        logger.warning("shape_fact_missing_identity", id=candidate.id)
+        return None
     content = _as_str(candidate.metadata.get("fact"))
     return SearchAtomicFactItem(
-        id=candidate.id,
+        id=daily_log_wire_id(owner_id=owner_id, entry_id=entry_id),
         content=content,
         score=float(candidate.score),
     )
 
 
-def shape_atomic_fact_from_scored(scored: ScoredItem) -> SearchAtomicFactItem:
+def shape_atomic_fact_from_scored(scored: ScoredItem) -> SearchAtomicFactItem | None:
     """Cast an everalgo ``ScoredItem(item_type='atomic_fact')`` into a fact DTO."""
+    owner_id = scored.metadata.get("owner_id")
+    entry_id = scored.metadata.get("entry_id")
+    if not (
+        isinstance(owner_id, str)
+        and owner_id
+        and isinstance(entry_id, str)
+        and entry_id
+    ):
+        logger.warning("shape_fact_missing_identity", id=scored.id)
+        return None
     content = _as_str(scored.metadata.get("fact"))
     return SearchAtomicFactItem(
-        id=scored.id,
+        id=daily_log_wire_id(owner_id=owner_id, entry_id=entry_id),
         content=content,
         score=float(scored.score),
     )
@@ -126,12 +160,16 @@ def shape_agent_case_from_candidate(candidate: Candidate) -> SearchAgentCaseItem
         logger.warning("shape_case_missing_timestamp", id=candidate.id)
         return None
     owner_id = md.get("owner_id")
+    entry_id = md.get("entry_id")
     session_id = md.get("session_id")
     task_intent = md.get("task_intent")
     approach = md.get("approach")
     quality = md.get("quality_score")
     if not (
         isinstance(owner_id, str)
+        and owner_id
+        and isinstance(entry_id, str)
+        and entry_id
         and isinstance(session_id, str)
         and isinstance(task_intent, str)
         and isinstance(approach, str)
@@ -140,7 +178,7 @@ def shape_agent_case_from_candidate(candidate: Candidate) -> SearchAgentCaseItem
         logger.warning("shape_case_missing_required_field", id=candidate.id)
         return None
     return SearchAgentCaseItem(
-        id=candidate.id,
+        id=daily_log_wire_id(owner_id=owner_id, entry_id=entry_id),
         agent_id=owner_id,
         app_id=_as_str(md.get("app_id")) or "default",
         project_id=_as_str(md.get("project_id")) or "default",
@@ -185,7 +223,7 @@ def shape_agent_skill_from_candidate(
         logger.warning("shape_skill_missing_required_field", id=candidate.id)
         return None
     return SearchAgentSkillItem(
-        id=candidate.id,
+        id=agent_skill_wire_id(owner_id=owner_id, name=name),
         agent_id=owner_id,
         app_id=_as_str(md.get("app_id")) or "default",
         project_id=_as_str(md.get("project_id")) or "default",
@@ -267,8 +305,10 @@ def reshape_hybrid_output(
 
 def _build_fact_items(scoreds: list[ScoredItem]) -> list[SearchAtomicFactItem]:
     return [
-        shape_atomic_fact_from_scored(s)
+        item
         for s in sorted(scoreds, key=lambda s: s.score, reverse=True)
+        for item in [shape_atomic_fact_from_scored(s)]
+        if item is not None
     ]
 
 

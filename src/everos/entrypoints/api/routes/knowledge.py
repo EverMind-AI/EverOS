@@ -40,6 +40,7 @@ from everos.core.errors import (
     UnsupportedModalityError,
 )
 from everos.core.persistence import MemoryRoot
+from everos.core.scope_ids import AppId, ProjectId
 from everos.entrypoints.api.utils import extract_request_id
 from everos.service import (
     CreateDocumentResult,
@@ -58,9 +59,7 @@ from everos.service import (
     search_knowledge,
 )
 
-# PathSafeId and SuccessEnvelope are imported from memorize routes;
-# a shared module would be cleaner but is out of scope for this PR.
-from .memorize import PathSafeId, SuccessEnvelope
+from .memorize import SuccessEnvelope
 
 _KNOWLEDGE_FEATURE = "knowledge"
 
@@ -124,8 +123,10 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 _FormTitle = Annotated[str, Form(min_length=1, pattern=r"\w")]
 _FormOptStr = Annotated[str | None, Form()]
-_FormPathSafe = Annotated[PathSafeId, Form()]
-_QueryPathSafe = Annotated[PathSafeId, Query()]
+_FormAppId = Annotated[AppId, Form()]
+_FormProjectId = Annotated[ProjectId, Form()]
+_QueryAppId = Annotated[AppId, Query()]
+_QueryProjectId = Annotated[ProjectId, Query()]
 _QueryOptStr = Annotated[str | None, Query()]
 _QueryPage = Annotated[int, Query(ge=1)]
 _QueryPageSize = Annotated[int, Query(ge=1, le=100)]
@@ -291,8 +292,8 @@ class KnowledgeSearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100)
     score_threshold: float | None = None
     include_content: bool = False
-    app_id: PathSafeId = "default"
-    project_id: PathSafeId = "default"
+    app_id: AppId = "default"
+    project_id: ProjectId = "default"
 
 
 class DocumentPatchRequest(BaseModel):
@@ -300,8 +301,8 @@ class DocumentPatchRequest(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, pattern=r"\w")
     category_id: str | None = Field(default=None, min_length=1)
-    app_id: PathSafeId = "default"
-    project_id: PathSafeId = "default"
+    app_id: AppId = "default"
+    project_id: ProjectId = "default"
 
 
 # ── Extractor builder ───────────────────────────────────────────────────────
@@ -553,8 +554,8 @@ async def create_document_route(
     title: _FormTitle,
     source_type: _FormOptStr = None,
     category_id: _FormOptStr = None,
-    app_id: _FormPathSafe = "default",
-    project_id: _FormPathSafe = "default",
+    app_id: _FormAppId = "default",
+    project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Upload a new knowledge document."""
     rid = extract_request_id(request)
@@ -592,8 +593,8 @@ async def replace_document_route(
     title: _FormTitle,
     source_type: _FormOptStr = None,
     category_id: _FormOptStr = None,
-    app_id: _FormPathSafe = "default",
-    project_id: _FormPathSafe = "default",
+    app_id: _FormAppId = "default",
+    project_id: _FormProjectId = "default",
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Replace an existing knowledge document (atomic backup/restore on failure)."""
     rid = extract_request_id(request)
@@ -622,8 +623,8 @@ async def replace_document_route(
 async def delete_document_route(
     request: Request,
     doc_id: _PathDocId,
-    app_id: _QueryPathSafe = "default",
-    project_id: _QueryPathSafe = "default",
+    app_id: _QueryAppId = "default",
+    project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[DocumentDeleteResponse] | Response:
     """Remove a knowledge document."""
     rid = extract_request_id(request)
@@ -645,8 +646,8 @@ async def delete_document_route(
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def list_documents_route(
     request: Request,
-    app_id: _QueryPathSafe = "default",
-    project_id: _QueryPathSafe = "default",
+    app_id: _QueryAppId = "default",
+    project_id: _QueryProjectId = "default",
     category_id: _QueryOptStr = None,
     page: _QueryPage = 1,
     page_size: _QueryPageSize = 20,
@@ -671,8 +672,8 @@ async def list_documents_route(
 async def get_document_route(
     request: Request,
     doc_id: _PathDocId,
-    app_id: _QueryPathSafe = "default",
-    project_id: _QueryPathSafe = "default",
+    app_id: _QueryAppId = "default",
+    project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[DocumentDetailResponse]:
     """Fetch a single document with its topic list."""
     rid = extract_request_id(request)
@@ -684,8 +685,8 @@ async def get_document_route(
 async def get_topic_route(
     request: Request,
     topic_id: _PathTopicId,
-    app_id: _QueryPathSafe = "default",
-    project_id: _QueryPathSafe = "default",
+    app_id: _QueryAppId = "default",
+    project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[TopicDetailResponse]:
     """Fetch a single topic with full content."""
     rid = extract_request_id(request)
@@ -718,8 +719,8 @@ async def search_knowledge_route(
 @router.get("/categories")
 async def list_categories_route(
     request: Request,
-    app_id: _QueryPathSafe = "default",
-    project_id: _QueryPathSafe = "default",
+    app_id: _QueryAppId = "default",
+    project_id: _QueryProjectId = "default",
 ) -> SuccessEnvelope[CategoryListResponse]:
     """List taxonomy categories from ``.taxonomy.md``."""
     rid = extract_request_id(request)

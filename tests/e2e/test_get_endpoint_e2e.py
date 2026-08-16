@@ -20,6 +20,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
+from everos.core.persistence.lancedb.row_id import (
+    agent_skill_storage_id,
+    daily_log_storage_id,
+    user_profile_storage_id,
+)
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence.lancedb import (
     AgentCase,
@@ -54,7 +59,12 @@ def _episode(
     day: int = 1,
 ) -> Episode:
     return Episode(
-        id=f"{owner}_{entry}",
+        id=daily_log_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id=owner,
+            entry_id=entry,
+        ),
         entry_id=entry,
         owner_id=owner,
         owner_type="user",
@@ -81,7 +91,12 @@ def _agent_case(
     day: int = 1,
 ) -> AgentCase:
     return AgentCase(
-        id=f"{owner}_{entry}",
+        id=daily_log_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id=owner,
+            entry_id=entry,
+        ),
         entry_id=entry,
         owner_id=owner,
         owner_type="agent",
@@ -107,7 +122,12 @@ def _agent_skill(
     owner: str = "a1",
 ) -> AgentSkill:
     return AgentSkill(
-        id=f"{owner}_{name}",
+        id=agent_skill_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id=owner,
+            name=name,
+        ),
         owner_id=owner,
         owner_type="agent",
         name=name,
@@ -117,7 +137,7 @@ def _agent_skill(
         content_tokens=f"content {name}",
         confidence=0.9,
         maturity_score=0.7,
-        source_case_ids=[f"{owner}_ac_1"],
+        source_case_ids=["ac_1"],
         md_path=f"agents/{owner}/skills/{name}/SKILL.md",
         content_sha256="abc",
         vector=[0.0] * 1024,
@@ -252,7 +272,11 @@ async def test_get_profile_returns_seeded_row(client: AsyncClient) -> None:
     await user_profile_repo.add(
         [
             UserProfile(
-                id="u1",
+                id=user_profile_storage_id(
+                    app_id="default",
+                    project_id="default",
+                    owner_id="u1",
+                ),
                 owner_id="u1",
                 owner_type="user",
                 app_id="default",

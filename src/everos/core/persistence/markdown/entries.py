@@ -44,9 +44,9 @@ verbatim. This keeps parsing tolerant of stray fields, wrapped
 strings, and manually-typed timestamps; the strong-typed model lives
 in business writers + the SQLite/LanceDB indexes.
 
-Cross-user uniqueness is handled at the database layer via a composite
-``<user_id>_<entry_id>`` field; it is *not* encoded into the
-:class:`EntryId` string itself.
+Database storage uniqueness is handled separately from :class:`EntryId` by
+an injective key over app, project, owner, and logical entry id. The public
+wire id remains ``<owner_id>_<entry_id>`` for compatibility.
 """
 
 from __future__ import annotations

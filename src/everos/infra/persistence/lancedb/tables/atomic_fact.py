@@ -24,7 +24,7 @@ class AtomicFact(BaseLanceTable):
     BM25_FIELDS: ClassVar[list[str]] = ["fact_tokens"]
 
     id: str
-    """PK = ``<owner_id>_<entry_id>``."""
+    """Opaque storage PK scoped by app, project, owner, and entry id."""
 
     entry_id: str
     """md-side seq id ``af_<YYYYMMDD>_<NNNN>``."""

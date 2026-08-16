@@ -127,6 +127,32 @@ async def test_owner_memory_type_mismatch_returns_422(client: AsyncClient) -> No
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("app_id", "DEFAULT_APP"),
+        ("app_id", ".index"),
+        ("project_id", "Project-A"),
+        ("project_id", "default_project"),
+    ],
+)
+async def test_nonportable_scope_returns_422(
+    client: AsyncClient,
+    field: str,
+    value: str,
+) -> None:
+    """Filesystem scope aliases are rejected by the public route."""
+    payload = {
+        "user_id": "u1",
+        "memory_type": "episode",
+        "app_id": "default",
+        "project_id": "default",
+    }
+    payload[field] = value
+    resp = await client.post("/api/v1/memory/get", json=payload)
+    assert resp.status_code == 422
+
+
 # ── service.compile_filters_for_get 422 ───────────────────────────────
 
 

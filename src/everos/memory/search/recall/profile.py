@@ -19,6 +19,10 @@ import json
 from typing import Any
 
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.lancedb.row_id import (
+    user_profile_storage_id,
+    user_profile_wire_id,
+)
 from everos.infra.persistence.lancedb import user_profile_repo
 
 from ..dto import SearchProfileItem
@@ -29,7 +33,13 @@ logger = get_logger(__name__)
 class ProfileRecaller:
     """Fetch the owner's profile row from LanceDB, return at most one item."""
 
-    async def fetch(self, owner_id: str) -> list[SearchProfileItem]:
+    async def fetch(
+        self,
+        owner_id: str,
+        *,
+        app_id: str,
+        project_id: str,
+    ) -> list[SearchProfileItem]:
         """Return ``[item]`` if a profile row exists, otherwise ``[]``.
 
         Empty list (rather than 404) lets the caller emit a normal
@@ -38,7 +48,12 @@ class ProfileRecaller:
         """
         if not owner_id:
             return []
-        row = await user_profile_repo.get_by_id(owner_id)
+        storage_id = user_profile_storage_id(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+        )
+        row = await user_profile_repo.get_by_id(storage_id)
         if row is None:
             logger.debug("profile_fetch_miss", owner_id=owner_id)
             return []
@@ -50,7 +65,7 @@ class ProfileRecaller:
         }
         return [
             SearchProfileItem(
-                id=row.id,
+                id=user_profile_wire_id(owner_id=row.owner_id),
                 user_id=row.owner_id,
                 app_id=row.app_id,
                 project_id=row.project_id,

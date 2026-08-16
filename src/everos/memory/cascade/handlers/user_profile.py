@@ -27,6 +27,7 @@ import json
 from typing import Any, ClassVar
 
 from everos.core.persistence import MarkdownReader
+from everos.core.persistence.lancedb.row_id import user_profile_storage_id
 from everos.infra.persistence.lancedb import UserProfile, user_profile_repo
 
 from ..types import HandlerOutcome
@@ -80,7 +81,11 @@ class UserProfileHandler(Handler):
             }
         )
 
-        row_id = owner_id
+        row_id = user_profile_storage_id(
+            app_id=app_id,
+            project_id=project_id,
+            owner_id=owner_id,
+        )
         prior = await user_profile_repo.get_by_id(row_id)
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(

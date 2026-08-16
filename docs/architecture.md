@@ -203,8 +203,13 @@ Three-piece observability:
     └── knowledge/                                      # global shared knowledge
 ```
 
-System-managed entries (`.index/`, `.tmp/`) and `ome.toml` live directly
-under the memory root.
+System-managed entries (`.index/`, `.tmp/`, `.lock`, and `.projection.lock`)
+and the `everos.toml` / `ome.toml` configuration files live directly under
+the memory root.
+
+`app_id` and `project_id` use a lowercase portable filesystem grammar because
+they are stored as raw path segments. Runtime/configuration names are reserved
+at the app level so user memory cannot overlap system-managed root entries.
 Full tree + frontmatter chassis: [storage_layout.md](storage_layout.md) and
 [how-memory-works.md](how-memory-works.md). Frontmatter has 4-tier field
 protection (L1 read-only / L2 system / L3 business / L4 user).

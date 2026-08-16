@@ -44,6 +44,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.core.persistence.markdown import dump_frontmatter, parse_frontmatter
+from everos.core.scope_ids import validate_app_id, validate_project_id
 from everos.infra.persistence.markdown import (
     KnowledgeWriter,
     ensure_taxonomy,
@@ -67,7 +68,6 @@ _FALLBACK_CATEGORY = "Others"
 _DOC_ID_PREFIX = "d_"
 _DOC_ID_HEX_LEN = 12
 _MAX_MINT_RETRIES = 5
-_SCOPE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-@+]+$")
 _ORIGINAL_DIR_NAME = "_original"
 _KNOWLEDGE_FEATURE = "knowledge"
 
@@ -366,6 +366,8 @@ async def get_document(
     Raises:
         DocumentNotFoundError: When no row exists for ``doc_id``.
     """
+    _validate_scope_id(app_id, "app_id")
+    _validate_scope_id(project_id, "project_id")
     row = await knowledge_document_repo.get_by_doc_id(doc_id)
     if row is None:
         raise DocumentNotFoundError(f"Document {doc_id!r} not found")
@@ -422,6 +424,8 @@ async def list_documents(
     Returns:
         DocumentListResult with items, total, page, and page_size.
     """
+    _validate_scope_id(app_id, "app_id")
+    _validate_scope_id(project_id, "project_id")
     page_result = await knowledge_document_repo.list_documents(
         app_id=app_id,
         project_id=project_id,
@@ -475,6 +479,8 @@ async def get_topic(
     Raises:
         TopicNotFoundError: When no row exists for ``topic_id``.
     """
+    _validate_scope_id(app_id, "app_id")
+    _validate_scope_id(project_id, "project_id")
     rows = await knowledge_topic_sqlite_repo.get_topics_by_ids([topic_id])
     if not rows:
         raise TopicNotFoundError(f"Topic {topic_id!r} not found")
@@ -517,6 +523,8 @@ async def delete_document(
     Returns:
         DeleteResult with the topic count that was present before deletion.
     """
+    _validate_scope_id(app_id, "app_id")
+    _validate_scope_id(project_id, "project_id")
     row = await knowledge_document_repo.get_by_doc_id(doc_id)
     if row is None:
         return DeleteResult(doc_id=doc_id, deleted_topics=0)
@@ -848,6 +856,8 @@ async def patch_document(
     Raises:
         DocumentNotFoundError: When neither SQLite nor md files contain ``doc_id``.
     """
+    _validate_scope_id(app_id, "app_id")
+    _validate_scope_id(project_id, "project_id")
     memory_root = MemoryRoot.resolve()
     current = await _resolve_current_doc(doc_id, app_id, project_id, memory_root)
 
@@ -1135,17 +1145,12 @@ class SearchKnowledgeResult:
 
 
 def _validate_scope_id(value: str, name: str) -> None:
-    """Reject scope ids with characters that could break LanceDB SQL.
-
-    Args:
-        value: The identifier value to validate.
-        name: The parameter name (for error messages).
-
-    Raises:
-        ValueError: If the value is empty or contains invalid characters.
-    """
-    if not value or not _SCOPE_ID_PATTERN.match(value):
-        raise ValueError(f"{name} contains invalid characters: {value!r}")
+    """Apply the shared field-specific scope contract with local context."""
+    validator = validate_app_id if name == "app_id" else validate_project_id
+    try:
+        validator(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} is invalid: {exc}") from exc
 
 
 def compile_knowledge_where(app_id: str, project_id: str) -> str:

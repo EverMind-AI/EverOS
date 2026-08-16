@@ -1,8 +1,11 @@
 """LanceDB ``agent_skill`` table schema.
 
 Field set for the agent-skill LanceDB row. AgentSkill is a *named
-entity* rather than a daily-log entry — PK is ``<owner_id>_<skill_name>``
-(no date / seq), and same agent + same name is the same row (upsert).
+entity* rather than a daily-log entry. Its opaque storage PK is the
+generation-2 length-prefixed encoding of ``(app_id, project_id, owner_id,
+skill_name)``. The historical public wire id remains
+``<owner_id>_<skill_name>``; same scope + same agent + same name is the
+same row (upsert).
 
 ``content`` is cascade-assembled from ``SKILL.md`` body plus every
 ``references/*.md`` sibling; ``scripts/`` is not indexed.
@@ -24,7 +27,7 @@ class AgentSkill(BaseLanceTable):
     BM25_FIELDS: ClassVar[list[str]] = ["description_tokens", "content_tokens"]
 
     id: str
-    """PK = ``<owner_id>_<skill_name>``."""
+    """Opaque storage PK scoped by app, project, owner, and skill name."""
 
     owner_id: str
     """The owning ``agent_id``."""
@@ -37,7 +40,7 @@ class AgentSkill(BaseLanceTable):
     """App / project scope (default ``"default"``); cascade fills from md path."""
 
     name: str
-    """Skill identifier; half of the PK."""
+    """Logical skill identifier and one input to the scoped storage PK."""
 
     description: str
     """When-to-use / purpose — original surface form (Tier-1 ad copy)."""

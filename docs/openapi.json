@@ -313,6 +313,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -323,6 +326,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -497,6 +503,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -507,6 +516,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -557,6 +569,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -567,6 +582,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -673,6 +691,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -683,6 +704,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -769,6 +793,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -779,6 +806,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1073,6 +1103,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -1083,6 +1116,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1257,6 +1293,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -1267,6 +1306,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1317,6 +1359,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -1327,6 +1372,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1433,6 +1481,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -1443,6 +1494,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1529,6 +1583,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "App Id"
             }
@@ -1539,6 +1596,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_.@+-]+$",
               "default": "default",
               "title": "Project Id"
             }
@@ -1630,11 +1690,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -1683,11 +1749,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -1736,11 +1808,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -1789,11 +1867,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -2252,11 +2336,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -2679,11 +2769,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           },
@@ -2890,11 +2986,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -2945,7 +3047,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
@@ -2953,7 +3055,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           },
@@ -2986,7 +3088,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
@@ -2994,7 +3096,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           }
@@ -3590,11 +3692,17 @@
           },
           "app_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "App Id",
             "default": "default"
           },
           "project_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
           },

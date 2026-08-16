@@ -131,22 +131,83 @@ everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
 
-> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the LanceDB tables. A running daemon holds
-> cached table handles that would keep pointing at (and writing to) the
-> dropped dataset, corrupting the rebuild. This is the one cascade
-> command that is **not** safe to run alongside a live server.
+> **Stop the `everos server` and other mutating cascade commands first.**
+> Unlike `cascade sync`, rebuild **drops and recreates** the LanceDB tables.
+> A running daemon or CLI writer holds cached table handles that would keep
+> pointing at the dropped dataset. Current servers and `sync`, `fix --apply`,
+> and `backfill` hold the shared projection lifecycle lock for their complete
+> LanceDB lifetime. Rebuild requires the exclusive side plus the legacy OME
+> lock, and refuses to start while any such process is active. During an
+> upgrade, do not launch an older binary concurrently with rebuild: an old
+> process does not participate in the projection-lock protocol until its OME
+> guard has been acquired.
+>
+> After a memory root has been rebuilt for storage generation 2, do not run an
+> older EverOS binary against that root at any time. Older binaries ignore the
+> generation marker and can write legacy row IDs while it still says
+> `READY(2)`. If that happens, stop every EverOS process and run
+> `everos cascade rebuild --yes` with the current binary before restarting.
 
 What it does, in order:
 
-1. **Drops** every business LanceDB table (`drop_business_tables`) and
-   evicts them from the connection cache.
-2. **Recreates** them empty from the current schema + FTS indexes
-   (`ensure_business_indexes`).
-3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
-   md file re-enqueues as `added` on the next scan.
-4. **Re-scans + drains** (`sync_once`): re-embeds and re-inserts every
-   md entry.
+1. **Establishes the exclusion precondition** described above. If either the
+   projection lifecycle lock or legacy OME lock is not free, rebuild exits
+   before changing the marker, queue, or LanceDB tables.
+2. **Atomically publishes `REBUILDING` for storage generation 2** before
+   opening the stores or performing any destructive work. This invalidates
+   a previously valid `READY` marker before a crash can expose a partial
+   rebuild.
+3. **Clears** the cascade queue (`md_change_state.reset_all`) so every md
+   file re-enqueues as `added` on the next scan.
+4. **Drops** every business LanceDB table (`drop_business_tables`) and
+   evicts it from the connection cache.
+5. **Recreates** the tables from the current schema and builds the FTS
+   indexes (`ensure_business_indexes`).
+6. **Re-scans and drains** (`sync_once`, followed by additional drains
+   while work remains): re-embeds and re-inserts every md entry.
+7. **Requires a clean completion state**: `pending == 0`,
+   `failed_retryable == 0`, and `failed_permanent == 0`. If any count is
+   nonzero, rebuild fails and leaves the marker as `REBUILDING`.
+8. **Atomically publishes `READY(2)`** only after all completion checks
+   pass. Only then does the command print `rebuild complete`.
+
+If the process crashes, is interrupted, or encounters an error after
+`REBUILDING` has been published but before `READY(2)` is published, the marker
+remains `REBUILDING`. The API server and mutating cascade commands fail closed
+rather than serving or changing a partial index. Correct the underlying error
+and rerun `everos cascade rebuild` with the server stopped; the rebuild
+recovery path deliberately does not require a `READY` marker.
+
+### Storage-generation gate on startup
+
+Generation 2 changes the value-level identity stored in LanceDB row primary
+keys. A schema check cannot distinguish generation-1 keys from generation-2
+keys, so startup validates `.index/lancedb/.storage_identity.json` before it
+opens LanceDB or runs schema/index migrations.
+
+Startup and mutating cascade commands acquire the shared projection lifecycle
+lock before checking the marker and keep it until their LanceDB handles close.
+They accept only `READY(2)` and refuse to proceed when the marker is:
+
+- missing on a memory root that contains source markdown or LanceDB artifacts;
+- malformed or contains unknown fields or JSON types;
+- `READY` for any generation other than 2; or
+- `REBUILDING`, including after an interrupted or failed rebuild.
+
+A marker-less root is initialized directly as `READY(2)` only when its
+extracted-memory source and projection are empty: it has neither source
+markdown nor LanceDB artifacts. Retained SQLite state is not proof of a fresh
+root, so existing installations must still perform the scope audit below. A
+bootstrap lock serializes first-time marker, schema, and index creation across
+API and mutating CLI processes. For every blocked state above, stop the server
+and rerun `everos cascade rebuild`. The read-only `cascade status` and
+`cascade fix` listing remain available through SQLite so operators can inspect
+the queue without opening LanceDB.
+
+Scope directories must use the lowercase portable grammar documented in
+[`api.md`](api.md#scopeid-app_id-and-project_id). Existing roots with only
+conforming scope names can proceed directly to the generation-2 rebuild.
+Nonconforming roots require the separate migration described below.
 
 It deliberately **skips `verify_business_schemas`** — the drift it
 recovers from would otherwise trip that guard on startup before the
@@ -154,11 +215,45 @@ rebuild could run (chicken-and-egg).
 
 Why not a bare `rm`:
 
-| Recovery | Re-populates `done` entries | Preserves `unprocessed_buffer` |
+| Recovery | Current result | Preserves `unprocessed_buffer` |
 |---|---|---|
-| `rm -rf .index/lancedb` | ❌ scanner skips `done` rows → empty index | ✅ |
-| `rm -rf .index` | ✅ | ❌ deletes un-extracted messages |
-| `everos cascade rebuild` | ✅ | ✅ |
+| Remove `.index/lancedb` | Unsupported; existing-root startup fails the generation gate | Yes |
+| Remove `.index` | Unsupported; startup fails the generation gate and SQLite-only state is lost | No |
+| `everos cascade rebuild` | Rebuilds all source markdown and publishes `READY(2)` | Yes |
+
+### Legacy nonconforming scope names
+
+Earlier releases accepted scope names that are unsafe or ambiguous on common
+filesystems, including uppercase letters, trailing dots, Windows device names,
+and names now reserved for runtime state such as `.index` and `.tmp`.
+
+Before upgrading an existing root, inspect both the source tree and retained
+SQLite data. If any `app_id` or `project_id` is nonconforming:
+
+1. Stop every EverOS process and take a complete backup of the memory root.
+2. Do not run the new server or `cascade rebuild` against that root yet.
+3. Do not hand-edit only the directory names or only the database. This release
+   does not provide a general supported in-place scope-name migration.
+4. Either import the extracted markdown into a fresh root with unique accepted
+   scope names, or use a separately reviewed, deployment-specific migration
+   that updates the business-scope directories and every matching `app_id`,
+   `project_id`, stored markdown-path reference, and serialized scope value in
+   all SQLite databases as one transactionally planned maintenance operation.
+   This includes scope values embedded in OME `run_record.event_payload` JSON,
+   not only ordinary columns in `system.db`.
+5. After that migration completes, run `everos cascade rebuild --yes` with the
+   current binary, then restart.
+
+`cascade rebuild` resets the cascade queue and reconstructs LanceDB, but it
+intentionally preserves `unprocessed_buffer`, `memcell`,
+`conversation_status`, knowledge, cluster, and reflection state in SQLite. It
+therefore cannot perform the scope-name migration by itself. There is no
+automatic migration for these legacy names in this release.
+
+For a legacy app literally named `.index` or `.tmp`, do not rename the whole
+directory: those paths also contain runtime-owned state. Prefer a fresh-root
+import; any attempt to separate business content from those directories needs
+its own reviewed migration rather than an ad hoc filesystem move.
 
 ## Recovery paths
 
@@ -186,14 +281,13 @@ and it would detonate later inside `merge_insert` as an opaque
 `LanceError(IO): Spill has sent an error` (EverOS #337). The type check
 turns that into this clean startup error.
 
-Recover with **`everos cascade rebuild`** (documented above). Do **not** just
-`rm -rf ~/.everos/.index/lancedb`: that clears the vectors but leaves
-`md_change_state` marked `done`, so the scanner skips every already-
-indexed file and the index comes back **empty**. And do **not**
-`rm -rf ~/.everos/.index`: that also deletes `unprocessed_buffer`
-(messages received but not yet extracted — not rebuildable from md).
-`cascade rebuild` is correct on both counts. Markdown is the source of
-truth, so no memory content is lost.
+Recover with **`everos cascade rebuild`** (documented above). Do **not** remove
+`~/.everos/.index/lancedb`: that also removes the storage-generation marker,
+so current startup fails closed when the root contains source markdown or
+projection artifacts. Do **not** remove `~/.everos/.index`: that additionally
+deletes `unprocessed_buffer` messages that have not yet become markdown.
+`cascade rebuild` preserves that SQLite-only state, rebuilds every source
+entry, and publishes `READY(2)` only after completion checks pass.
 
 ### inotify watch-limit exhaustion (Linux)
 

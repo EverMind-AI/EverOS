@@ -91,11 +91,18 @@ After `flush` the buffer should be empty for the test session.
 
 ### 6. Reset between runs
 
-The fixture's session_id is randomised per invocation, so previous runs
-don't pollute the new one. To wipe everything:
+The fixture's session_id is randomised per invocation, so previous runs do not
+pollute the new one. Do not delete `system.db` inside an active or valuable
+memory root: it contains buffered and coordination state, and leaving the
+LanceDB generation marker behind would produce an inconsistent root.
+
+For a fully disposable test run, stop every EverOS process and point
+`EVEROS_ROOT` at a dedicated temporary directory. Remove that entire dedicated
+test root between runs, never the default `~/.everos` root:
 
 ```bash
-rm -rf ~/.everos/users ~/.everos/agents ~/.everos/.index/sqlite/system.db
+export EVEROS_ROOT="$(mktemp -d)"
+# run the fixture, stop EverOS, then remove only this dedicated test directory
 ```
 
 ## Boundary expectations cheat sheet

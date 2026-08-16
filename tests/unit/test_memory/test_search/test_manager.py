@@ -68,6 +68,7 @@ def _case_row(cid: str) -> Candidate:
         metadata={
             "owner_id": "agent_a",
             "owner_type": "agent",
+            "entry_id": cid,
             "session_id": "sess_b",
             "timestamp": _ts(),
             "task_intent": f"intent {cid}",
@@ -195,6 +196,7 @@ class _StubAgentSkillRecaller:
         # Bridge recall fixture: reverse-resolved skills (``fetch_by_case_ids``).
         # Default empty — only the bridge tests populate this.
         self._by_case = by_case or []
+        self.last_case_ids: list[str] | None = None
 
     async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
         return list(self._sparse)
@@ -205,11 +207,12 @@ class _StubAgentSkillRecaller:
     async def fetch_by_case_ids(
         self, case_ids: Sequence[str], where: str, *, limit: int
     ) -> list[Candidate]:
+        self.last_case_ids = list(case_ids)
         return list(self._by_case)
 
 
 class _StubProfileRecaller:
-    async def fetch(self, owner_id: str) -> list:
+    async def fetch(self, owner_id: str, *, app_id: str, project_id: str) -> list:
         return []
 
 
@@ -296,7 +299,7 @@ async def test_user_keyword_returns_episodes_only() -> None:
         c in "0123456789abcdef" for c in resp.request_id
     )
     assert len(resp.data.episodes) == 1
-    assert resp.data.episodes[0].id == "ep_1"
+    assert resp.data.episodes[0].id == "alice_ep_1"
     assert resp.data.episodes[0].user_id == "alice"
     assert resp.data.episodes[0].type == "Conversation"
     # Agent paths stay empty.
@@ -469,7 +472,7 @@ async def test_vector_method_returns_episodes_via_maxsim() -> None:
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
-    assert [e.id for e in resp.data.episodes] == ["ep_dense"]
+    assert [e.id for e in resp.data.episodes] == ["alice_ep_dense"]
 
 
 async def test_vector_radius_filter_drops_below_threshold() -> None:
@@ -485,7 +488,7 @@ async def test_vector_radius_filter_drops_below_threshold() -> None:
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, radius=0.5))
-    assert [e.id for e in resp.data.episodes] == ["ep_high"]
+    assert [e.id for e in resp.data.episodes] == ["alice_ep_high"]
 
 
 async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
@@ -509,7 +512,7 @@ async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
     # Ordered by max-pooled fact score descending.
-    assert [e.id for e in resp.data.episodes] == ["ep_high", "ep_mid"]
+    assert [e.id for e in resp.data.episodes] == ["alice_ep_high", "alice_ep_mid"]
 
 
 async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
@@ -527,7 +530,7 @@ async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1, radius=0.1))
     # 0.1 threshold keeps both rows (the default 0.5 would have dropped ep_low).
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+    assert {e.id for e in resp.data.episodes} == {"alice_ep_low", "alice_ep_high"}
 
 
 async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
@@ -545,7 +548,7 @@ async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=10))
     # No radius default in normal mode -> both kept.
-    assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
+    assert {e.id for e in resp.data.episodes} == {"alice_ep_low", "alice_ep_high"}
 
 
 async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
@@ -566,7 +569,7 @@ async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=5))
     eps = resp.data.episodes
     # Both episodes returned, ordered by max-pool score desc.
-    assert [e.id for e in eps] == ["ep_A", "ep_B"]
+    assert [e.id for e in eps] == ["alice_ep_A", "alice_ep_B"]
     assert eps[0].score == pytest.approx(0.95)  # max(0.95, 0.40)
     assert eps[1].score == pytest.approx(0.75)
 
@@ -630,7 +633,11 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
         id="f1",
         parent_episode_id="ep_1",
         score=0.95,
-        metadata={"fact": "Alice prefers oat milk"},
+        metadata={
+            "owner_id": "alice",
+            "entry_id": "af_1",
+            "fact": "Alice prefers oat milk",
+        },
     )
     mgr = _build_manager(
         episode_sparse=[ep1, ep2],
@@ -641,10 +648,10 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10))
     eps = resp.data.episodes
     assert len(eps) >= 1
-    ep1_result = next((e for e in eps if e.id == "ep_1"), None)
+    ep1_result = next((e for e in eps if e.id == "alice_ep_1"), None)
     assert ep1_result is not None
     assert len(ep1_result.atomic_facts) == 1
-    assert ep1_result.atomic_facts[0].id == "f1"
+    assert ep1_result.atomic_facts[0].id == "alice_af_1"
 
 
 async def test_agentic_requires_reranker_and_llm(
@@ -759,8 +766,8 @@ async def test_agent_keyword_returns_cases_and_skills_only() -> None:
     resp = await mgr.search(_agent_req())
     assert resp.data.episodes == []
     assert resp.data.profiles == []
-    assert [c.id for c in resp.data.agent_cases] == ["c_1"]
-    assert [s.id for s in resp.data.agent_skills] == ["s_1"]
+    assert [c.id for c in resp.data.agent_cases] == ["agent_a_c_1"]
+    assert [s.id for s in resp.data.agent_skills] == ["agent_a_skill_s_1"]
 
 
 async def test_agent_owner_ignores_include_profile() -> None:
@@ -777,7 +784,11 @@ async def test_top_k_truncates_results() -> None:
     rows = [_episode_row(f"ep_{i}", score=1.0 - i * 0.01) for i in range(10)]
     mgr = _build_manager(episode_sparse=rows)
     resp = await mgr.search(_user_req(top_k=3))
-    assert [e.id for e in resp.data.episodes] == ["ep_0", "ep_1", "ep_2"]
+    assert [e.id for e in resp.data.episodes] == [
+        "alice_ep_0",
+        "alice_ep_1",
+        "alice_ep_2",
+    ]
 
 
 async def test_top_k_minus_one_caps_at_100() -> None:
@@ -911,9 +922,24 @@ async def test_case_bridged_skills_max_pools_score_across_source_cases() -> None
     )
     mgr = _build_manager(skill_by_case=[skill_row])
     bridge_cases = [
-        Candidate(id="c1", score=0.4, source="vector", metadata={}),
-        Candidate(id="c2", score=0.9, source="vector", metadata={}),  # max wins
-        Candidate(id="c_other", score=0.7, source="vector", metadata={}),
+        Candidate(
+            id="storage:c1",
+            score=0.4,
+            source="vector",
+            metadata={"entry_id": "c1"},
+        ),
+        Candidate(
+            id="storage:c2",
+            score=0.9,
+            source="vector",
+            metadata={"entry_id": "c2"},
+        ),  # max wins
+        Candidate(
+            id="storage:other",
+            score=0.7,
+            source="vector",
+            metadata={"entry_id": "c_other"},
+        ),
     ]
     bridged = await mgr._case_bridged_skills(bridge_cases, where="", top_k=5)
     assert len(bridged) == 1
@@ -923,6 +949,7 @@ async def test_case_bridged_skills_max_pools_score_across_source_cases() -> None
     # Metadata (incl. ``source_case_ids``) rides through so downstream
     # shaping doesn't need a second fetch.
     assert bridged[0].metadata["source_case_ids"] == ["c1", "c2", "c3"]
+    assert mgr._skill.last_case_ids == ["c1", "c2", "c_other"]
 
 
 async def test_case_bridged_skills_returns_empty_for_none_or_empty_input() -> None:
@@ -1014,7 +1041,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     from everalgo.types import RankOutput, ScoredItem
 
     case_result = ScoredItem(
-        id="agent_a_c1",
+        id="storage:case:c1",
         score=0.85,
         item_type="case",
         # Shaper requires owner_type="agent" + timestamp + intent/approach;
@@ -1022,6 +1049,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
         metadata={
             "owner_id": "agent_a",
             "owner_type": "agent",
+            "entry_id": "c1",
             "session_id": "sess_b",
             "timestamp": _ts(),
             "task_intent": "intent c1",
@@ -1034,7 +1062,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
         id="s_bridged",
         score=0.0,
         source="vector",
-        metadata={"source_case_ids": ["agent_a_c1"], "name": "s_bridged"},
+        metadata={"source_case_ids": ["c1"], "name": "s_bridged"},
     )
 
     seen_skill_dense: dict[str, list[Candidate]] = {}
@@ -1280,7 +1308,7 @@ async def test_search_captures_returned_hits_when_content_on(
 
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     out = json.loads(attrs["langfuse.observation.output"])
-    assert out["episodes"] == ["ep_1"]
+    assert out["episodes"] == ["alice_ep_1"]
     assert out["agent_cases"] == [] and out["agent_skills"] == []
 
 

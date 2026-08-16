@@ -343,3 +343,27 @@ async def test_patch_document_not_found_raises() -> None:
 
         with pytest.raises(DocumentNotFoundError):
             await patch_document("d_missing", "app1", "proj1", title="New")
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda: get_document("d_test", "DEFAULT_APP", "project"),
+        lambda: list_documents("app", "Project-A"),
+        lambda: get_topic("n_test", ".index", "project"),
+        lambda: delete_document("d_test", "app", "default_project"),
+        lambda: patch_document("d_test", "app", "project."),
+    ],
+)
+async def test_exported_knowledge_crud_rejects_invalid_scope_before_repository(
+    operation,
+) -> None:  # type: ignore[no-untyped-def]
+    with (
+        patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo,
+        patch(f"{_MOD}.knowledge_topic_sqlite_repo") as mock_topic_repo,
+        pytest.raises(ValueError),
+    ):
+        await operation()
+
+    assert mock_doc_repo.mock_calls == []
+    assert mock_topic_repo.mock_calls == []

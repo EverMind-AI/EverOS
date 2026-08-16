@@ -90,6 +90,30 @@ def test_min_score_in_range_accepted() -> None:
     assert req.min_score == 0.4
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [("app_id", "default_app"), ("project_id", "default_project")],
+)
+def test_search_request_rejects_reserved_scope_aliases(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        SearchRequest(**_minimal_request_kwargs(), **{field: value})
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("project_id", "Project-A"),
+        ("app_id", "DEFAULT_APP"),
+        ("app_id", ".index"),
+        ("app_id", "x" * 129),
+        ("project_id", "safe\n"),
+    ],
+)
+def test_search_request_rejects_nonportable_scopes(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        SearchRequest(**_minimal_request_kwargs(), **{field: value})
+
+
 def test_neither_user_id_nor_agent_id_rejected() -> None:
     """The xor validator requires exactly one of user_id / agent_id."""
     with pytest.raises(ValidationError, match="exactly one of"):

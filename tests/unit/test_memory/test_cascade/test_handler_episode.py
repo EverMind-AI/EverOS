@@ -18,6 +18,7 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.lancedb import Episode
 from everos.infra.persistence.markdown import EpisodeWriter
 from everos.memory.cascade.handlers import HandlerDeps
@@ -182,7 +183,12 @@ async def test_added_entry_upserts_typed_row(
     assert row.subject == "Test"
     assert row.md_path == rel
     assert row.entry_id.startswith("ep_")
-    assert row.id == f"u1_{row.entry_id}"
+    assert row.id == daily_log_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u1",
+        entry_id=row.entry_id,
+    )
     assert len(row.vector) == 1024
     assert row.subject_vector is not None
     assert len(row.subject_vector) == 1024

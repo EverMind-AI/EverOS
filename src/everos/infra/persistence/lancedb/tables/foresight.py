@@ -25,7 +25,7 @@ class Foresight(BaseLanceTable):
     BM25_FIELDS: ClassVar[list[str]] = ["foresight_tokens", "evidence_tokens"]
 
     id: str
-    """PK = ``<owner_id>_<entry_id>``."""
+    """Opaque storage PK scoped by app, project, owner, and entry id."""
 
     entry_id: str
     """md-side seq id ``fs_<YYYYMMDD>_<NNNN>``."""

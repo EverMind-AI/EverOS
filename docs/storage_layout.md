@@ -3,8 +3,9 @@
 How `everos` lays out a memory-root on disk: directory tree, file
 naming, frontmatter chassis, and entry-id encoding.
 
-The contents are the **source of truth**; SQLite and LanceDB are
-derived indexes that can be rebuilt from markdown alone.
+Markdown is the **source of truth for extracted memory content**. LanceDB is a
+rebuildable projection. SQLite also contains coordination and in-flight state,
+including buffered messages, that cannot be reconstructed from markdown alone.
 
 ## 1. Memory-root tree
 
@@ -13,14 +14,18 @@ default location is `~/.everos/`; override via the `EVEROS_ROOT`
 env var or `--root` on the CLI.
 
 Memory is partitioned by **`<app_id>/<project_id>`** *before* the
-user-visible scope dirs, so different `(app, project)` spaces never share
-a directory. The reserved id `"default"` materialises as `default_app` /
-`default_project` on disk. The scope is encoded **in the path**, not in
-the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
+user-visible scope dirs. In the managed layout, without operator-created
+symlink aliases, different accepted `(app, project)` spaces do not share a
+directory. App and project identifiers use a portable lowercase filesystem
+grammar; uppercase and reserved system names are rejected before path
+construction. The reserved id `"default"` materialises as `default_app` /
+`default_project` on disk. The scope is encoded **in the path**, not in the
+frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 
 ```
 <memory-root>/                              default ~/.everos
 │
+├── .projection.lock                       shared server/CLI vs exclusive rebuild lifecycle lock
 ├── <app_id>/                               user-visible; "default" → default_app
 │   └── <project_id>/                       "default" → default_project
 │       ├── users/
@@ -43,13 +48,15 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │       │               └── scripts/                  (optional)
 │       └── knowledge/                                user-visible (shared / global)
 │
-├── .index/                              system-managed, rebuildable (gitignore)
+├── .index/                              system-managed runtime state (gitignore)
+│   ├── .projection.bootstrap.lock        serializes first-time marker/schema/index setup
 │   ├── sqlite/
 │   │   ├── system.db                    state / cascade queue (md_change_state) / buffer / audit / LSN  (+ -wal / -shm)
 │   │   ├── ome.db                        Offline Memory Engine state
 │   │   ├── ome.aps.db                    APScheduler jobstore (split to avoid lock contention)
 │   │   └── ome.db.lock                   OME single-engine guard (portalocker)
 │   └── lancedb/
+│       ├── .storage_identity.json         READY/REBUILDING storage-key generation gate
 │       └── <kind>.lance/                one directory per LanceDB table
 │
 ├── ome.toml                             user-editable OME strategy overrides (hot-reloaded)
@@ -61,6 +68,15 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 > from that durable queue, not a log file. (`MemoryRoot` also exposes a
 > `.lock` anchor for the `memory_root_lock` primitive; there is no
 > `.cascade.log` / `.manifest.json`.)
+
+`.projection.lock` is retained in shared mode by API servers and mutating
+cascade commands, and in exclusive mode by `cascade rebuild`. First-time
+marker, schema, and index setup is serialized by a separate bootstrap lock.
+The storage-identity marker is published as `READY(2)` after a successful
+rebuild or when a marker-less root has neither source markdown nor LanceDB
+artifacts. Retained SQLite state is separate and still requires the upgrade
+audit described in the cascade runbook. Missing, malformed, stale, or
+`REBUILDING` state blocks normal writers.
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
@@ -167,10 +183,12 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
 > appear across two different `user_id`s (each user has its own daily file).
-> Cross-table joins must therefore key on **`(scope_id, entry_id)`**
-> rather than `entry_id` alone — see SQLite/LanceDB tables that follow.
+> Cross-table joins must therefore key on **`(app_id, project_id, owner_id,
+> entry_id)`** rather than `entry_id` alone. LanceDB uses a separate opaque,
+> injective storage key for this complete identity while public response IDs
+> retain their historical shape.
 
-## 5. SQLite + LanceDB derived indexes
+## 5. SQLite runtime state + LanceDB projection
 
 ```
 .index/
@@ -179,6 +197,7 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 │                           (system tables: md_change_state, memcell,
 │                            unprocessed_buffer, conversation_status, cluster)
 └── lancedb/
+    ├── .storage_identity.json  fail-closed storage-key generation marker
     └── <kind>.lance/      one Arrow table per business kind — the per-kind
                             rows (text / vector / tokens / metadata) live here
 ```
@@ -191,19 +210,21 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).
 - **LanceDB** ([`infra/persistence/lancedb/tables/`](../src/everos/infra/persistence/lancedb/tables/))
-  holds the per-kind business rows, keyed `<owner_id>_<entry_id>` (so
-  cross-table joins use `(owner_id, entry_id)`); each table's `Vector(N)`
-  dimension matches the embedding model output.
+  holds the per-kind business rows. Owner-scoped tables use an opaque,
+  injective storage key over app, project, owner, and the type-specific
+  logical id. Logical references remain in their explicit columns; each
+  table's `Vector(N)` dimension matches the embedding model output.
 
 Episode and AtomicFact LanceDB tables carry a `deprecated_by: str | None`
 column. When an episode is superseded by a Reflection merge,
 `deprecated_by` is set to the merged episode's entry_id. Search filters
 automatically exclude rows where `deprecated_by IS NOT NULL`.
 
-Both layers are **fully derivable from markdown** — wipe `.index/`
-and the in-process cascade subsystem re-builds everything by scanning the
-user-visible tree (the durable `md_change_state` SQLite queue covers
-crash-recovery replay).
+LanceDB business rows are a rebuildable projection of markdown. SQLite is not
+fully disposable: it also contains `unprocessed_buffer` messages that have not
+yet become markdown. Do not wipe `.index/` or `.index/lancedb` manually.
+Use `everos cascade rebuild`, which preserves SQLite state, resets the durable
+queue, rebuilds LanceDB, and publishes the required storage-identity marker.
 
 ## 6. Atomic write semantics
 

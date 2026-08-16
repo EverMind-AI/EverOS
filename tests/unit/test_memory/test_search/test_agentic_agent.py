@@ -53,6 +53,7 @@ def _case_candidate(cid: str, score: float = 0.8) -> Candidate:
         metadata={
             "owner_id": "agent_a",
             "owner_type": "agent",
+            "entry_id": cid,
             "session_id": "sess_b",
             "timestamp": _ts(),
             "task_intent": f"intent {cid}",
@@ -257,7 +258,7 @@ async def test_search_agent_cases_agentic_shapes_result() -> None:
 
     assert len(result) == 1
     assert isinstance(result[0], SearchAgentCaseItem)
-    assert result[0].id == "c_1"
+    assert result[0].id == "agent_a_c_1"
     assert result[0].task_intent == "intent c_1"
 
 
@@ -283,7 +284,7 @@ async def test_search_agent_skills_agentic_shapes_result() -> None:
 
     assert len(result) == 1
     assert isinstance(result[0], SearchAgentSkillItem)
-    assert result[0].id == "s_1"
+    assert result[0].id == "agent_a_skill_s_1"
     assert result[0].name == "skill_s_1"
 
 

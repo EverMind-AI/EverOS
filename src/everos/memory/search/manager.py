@@ -309,10 +309,15 @@ class SearchManager:
         produced high-quality case scores to inherit.
         """
         if _effective_llm_rerank(req):
-            cases = await self._search_agent_cases(req, where)
-            bridge_cases = [
-                Candidate(id=c.id, score=c.score, source="vector", metadata={})
-                for c in cases
+            # Preserve the storage candidate and its logical ``entry_id``
+            # through the bridge. Public DTO ids are compatibility wire ids
+            # and cannot safely be reverse-engineered into lineage ids.
+            bridge_cases = await self._rank_agent_case_candidates(req, where)
+            cases = [
+                item
+                for candidate in bridge_cases
+                for item in [shape_agent_case_from_candidate(candidate)]
+                if item is not None
             ]
             skills = await self._search_agent_skills(
                 req, where, bridge_cases=bridge_cases
@@ -448,6 +453,19 @@ class SearchManager:
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
             )
+        case_candidates = await self._rank_agent_case_candidates(req, where)
+        shaped = (shape_agent_case_from_candidate(c) for c in case_candidates)
+        return [item for item in shaped if item is not None]
+
+    async def _rank_agent_case_candidates(
+        self, req: SearchRequest, where: str
+    ) -> list[Candidate]:
+        """Recall and rank cases while retaining storage-side metadata.
+
+        This internal form is consumed by the case-to-skill lineage bridge.
+        Public wire shaping happens only after the bridge has read the logical
+        ``entry_id`` carried in each candidate's metadata.
+        """
         fusion_mode, _ = resolve_pipeline(req.method, "agent_case")
         enable_rerank = _effective_llm_rerank(req)
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
@@ -456,8 +474,7 @@ class SearchManager:
             cands = await self._single_route_recall(
                 self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
             )
-            shaped = (shape_agent_case_from_candidate(c) for c in cands[:top_k])
-            return [item for item in shaped if item is not None]
+            return cands[:top_k]
 
         sparse, dense, _ = await self._recall_sparse_dense(
             self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
@@ -483,9 +500,7 @@ class SearchManager:
                 enable_rerank=enable_rerank,
                 rerank_top_k=top_k,
             )
-        case_candidates = (_scored_as_candidate(s) for s in output.items)
-        shaped = (shape_agent_case_from_candidate(c) for c in case_candidates)
-        return [item for item in shaped if item is not None]
+        return [_scored_as_candidate(s) for s in output.items]
 
     # ── Agent skills ────────────────────────────────────────────────
 
@@ -576,7 +591,11 @@ class SearchManager:
     async def _fetch_profile(self, req: SearchRequest) -> list[SearchProfileItem]:
         if not req.include_profile or req.owner_type != "user":
             return []
-        return await self._profile.fetch(req.owner_id)
+        return await self._profile.fetch(
+            req.owner_id,
+            app_id=req.app_id,
+            project_id=req.project_id,
+        )
 
     # ── Recall helpers ──────────────────────────────────────────────
 
@@ -694,7 +713,21 @@ class SearchManager:
         """
         if not bridge_cases:
             return []
-        case_score = {c.id: c.score for c in bridge_cases}
+        case_score: dict[str, float] = {}
+        for candidate in bridge_cases:
+            entry_id = candidate.metadata.get("entry_id")
+            if not isinstance(entry_id, str) or not entry_id:
+                logger.warning(
+                    "case_bridge_missing_entry_id",
+                    candidate_id=candidate.id,
+                )
+                continue
+            case_score[entry_id] = max(
+                candidate.score,
+                case_score.get(entry_id, float("-inf")),
+            )
+        if not case_score:
+            return []
         # Bound the reverse fetch by the matched-case count; one case can map
         # to several skills, so allow a small fan-out per case.
         skill_cands = await self._skill.fetch_by_case_ids(

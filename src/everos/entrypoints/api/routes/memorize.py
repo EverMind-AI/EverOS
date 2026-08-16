@@ -10,52 +10,22 @@ server-side and does not expose this endpoint).
 
 from __future__ import annotations
 
-import re
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from everos.core.scope_ids import (
+    PATH_SAFE_CHARSET,
+    SCOPE_ID_CHARSET,
+    AppId,
+    PathSafeId,
+    ProjectId,
+)
 from everos.entrypoints.api.utils import extract_request_id
 from everos.service import memorize
 
 router = APIRouter(prefix="/memory", tags=["memory"])
-
-
-# ── Path-safe identifier ────────────────────────────────────────────────────
-# ``app_id`` / ``project_id`` / ``sender_id`` all become directory segments
-# under the memory root (``sender_id`` flows through to ``owner_id`` and is
-# joined into the daily-log write path), so they must reject ``.`` and ``..``
-# (path traversal). The basic character whitelist is enforced via ``pattern``
-# (pydantic_core uses the Rust regex engine, which does NOT support
-# lookaround), and the two reserved tokens are filtered out with a follow-up
-# ``AfterValidator``.
-#
-# ``@`` and ``+`` are admitted so real-world ids survive (email-style
-# ``user@example.com``, plus-addressing ``user+tag``); both are legal,
-# non-separator filename chars on every target filesystem (incl. NTFS, whose
-# reserved set is ``< > : " / \ | ? *``). The genuinely path-dangerous chars
-# (``/`` ``\`` NUL) stay out of the whitelist, and ``.``/``..`` stay blocked
-# by the token filter; the markdown writer's ``_ensure_within_root`` is the
-# final backstop regardless.
-_PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.@+-]+$"
-_PATH_TRAVERSAL_TOKENS = frozenset({".", ".."})
-
-
-_PATH_SAFE_RE = re.compile(_PATH_SAFE_CHARSET)
-
-
-def _reject_path_traversal(value: str) -> str:
-    if value in _PATH_TRAVERSAL_TOKENS:
-        raise ValueError("'.' and '..' are reserved (path traversal)")
-    if not _PATH_SAFE_RE.match(value):
-        raise ValueError(
-            "Only alphanumerics, underscore, dot, hyphen, @, and + are allowed"
-        )
-    return value
-
-
-PathSafeId = Annotated[str, AfterValidator(_reject_path_traversal)]
 
 
 # DTOs ────────────────────────────────────────────────────────────────────────
@@ -88,13 +58,14 @@ class ContentItemDTO(BaseModel):
 
 class MessageItemDTO(BaseModel):
     # ``sender_id`` becomes ``owner_id`` and then a directory segment on the
-    # episode write path, so it carries the same path-safety guard as
-    # ``app_id`` / ``project_id`` (charset whitelist + ``.``/``..`` rejection).
+    # episode write path, so it retains its historical path-safety guard
+    # (charset whitelist + ``.``/``..`` rejection). App/project scopes apply
+    # an additional lowercase portability contract independently.
     sender_id: PathSafeId = Field(
         ...,
         min_length=1,
         max_length=128,
-        pattern=_PATH_SAFE_CHARSET,
+        pattern=PATH_SAFE_CHARSET,
     )
     sender_name: str | None = None
     role: Literal["user", "assistant", "tool"]
@@ -114,17 +85,17 @@ class MessageItemDTO(BaseModel):
 
 class MemorizeAddRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=128)
-    app_id: PathSafeId = Field(
+    app_id: AppId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=_PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
-    project_id: PathSafeId = Field(
+    project_id: ProjectId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=_PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
     messages: list[MessageItemDTO] = Field(..., min_length=1, max_length=500)
 
@@ -136,17 +107,17 @@ class AddResponseData(BaseModel):
 
 class MemorizeFlushRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=128)
-    app_id: PathSafeId = Field(
+    app_id: AppId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=_PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
-    project_id: PathSafeId = Field(
+    project_id: ProjectId = Field(
         default="default",
         min_length=1,
         max_length=128,
-        pattern=_PATH_SAFE_CHARSET,
+        pattern=SCOPE_ID_CHARSET,
     )
 
 

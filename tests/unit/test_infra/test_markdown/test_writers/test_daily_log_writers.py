@@ -16,11 +16,13 @@ from pathlib import Path
 import pytest
 
 from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AgentCaseWriter,
     AtomicFactReader,
     AtomicFactWriter,
+    EpisodeWriter,
     ForesightReader,
     ForesightWriter,
 )
@@ -31,6 +33,79 @@ def memory_root(tmp_path: Path) -> MemoryRoot:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     return mr
+
+
+@pytest.mark.parametrize(
+    "app_id, project_id",
+    [
+        ("app", "Project-A"),
+        ("DEFAULT_APP", "project"),
+        (".index", "project"),
+        (".tmp", "project"),
+    ],
+)
+async def test_episode_writer_rejects_nonportable_scope_before_writing(
+    memory_root: MemoryRoot,
+    app_id: str,
+    project_id: str,
+) -> None:
+    writer = EpisodeWriter(memory_root)
+
+    with pytest.raises(ValueError):
+        await writer.append_entry(
+            "u1",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-15T10:00:00+00:00",
+                "parent_id": "mc_1",
+                "sender_ids": ["u1"],
+            },
+            sections={"Content": "must not be written"},
+            date=_dt.date(2026, 5, 15),
+            app_id=app_id,
+            project_id=project_id,
+        )
+
+    assert list(memory_root.root.rglob("*.md")) == []
+
+
+async def test_episode_writer_rejects_case_alias_without_changing_existing_scope(
+    memory_root: MemoryRoot,
+) -> None:
+    writer = EpisodeWriter(memory_root)
+    kwargs = {
+        "inline": {
+            "owner_id": "u1",
+            "session_id": "s1",
+            "timestamp": "2026-05-15T10:00:00+00:00",
+            "parent_id": "mc_1",
+            "sender_ids": ["u1"],
+        },
+        "date": _dt.date(2026, 5, 15),
+        "app_id": "app",
+    }
+    await writer.append_entry(
+        "u1",
+        sections={"Content": "preserved"},
+        project_id="project-a",
+        **kwargs,
+    )
+
+    with pytest.raises(ValueError):
+        await writer.append_entry(
+            "u1",
+            sections={"Content": "must not overwrite"},
+            project_id="Project-A",
+            **kwargs,
+        )
+
+    files = list(memory_root.root.rglob("episode-*.md"))
+    assert len(files) == 1
+    parsed = await MarkdownReader.read(files[0])
+    assert len(parsed.entries) == 1
+    assert "preserved" in parsed.body
+    assert "must not overwrite" not in parsed.body
 
 
 # ── AtomicFact ────────────────────────────────────────────────────────────
@@ -256,7 +331,12 @@ async def test_atomic_fact_writer_output_feeds_handler(
     row = await handler._build_row(
         owner_id="u1", owner_type="user", md_path=rel, entry=pe
     )
-    assert row.id == f"u1_{eid.format()}"
+    assert row.id == daily_log_storage_id(
+        app_id="default",
+        project_id="default",
+        owner_id="u1",
+        entry_id=eid.format(),
+    )
     assert row.fact == "Alice prefers Italian."
     assert row.parent_id == "mc_1"
     assert row.sender_ids == ["u1"]

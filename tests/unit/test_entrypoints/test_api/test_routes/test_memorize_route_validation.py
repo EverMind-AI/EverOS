@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from everos.entrypoints.api.routes.memorize import (
     MemorizeAddRequest,
+    MemorizeFlushRequest,
     MessageItemDTO,
 )
 
@@ -56,6 +57,7 @@ def test_message_item_rejects_unsafe_sender_id(bad_sender_id: str) -> None:
         "user@example.com",  # email-style id (``@`` + dotted domain)
         "user+tag",  # plus-addressing
         "user+tag@example.com",  # both, combined
+        "User-A",  # scope restrictions do not change sender identities
     ],
 )
 def test_message_item_accepts_path_safe_sender_id(good_sender_id: str) -> None:
@@ -78,3 +80,66 @@ def test_add_request_rejects_traversal_sender_id_in_messages() -> None:
                 }
             ],
         )
+
+
+@pytest.mark.parametrize("sender_id", ["default_app", "default_project"])
+def test_reserved_scope_aliases_remain_valid_sender_ids(sender_id: str) -> None:
+    """Scope aliases are reserved by field, not globally across identities."""
+    assert _message(sender_id).sender_id == sender_id
+
+
+@pytest.mark.parametrize(
+    "request_type, field, value",
+    [
+        (MemorizeAddRequest, "app_id", "default_app"),
+        (MemorizeAddRequest, "project_id", "default_project"),
+        (MemorizeFlushRequest, "app_id", "default_app"),
+        (MemorizeFlushRequest, "project_id", "default_project"),
+    ],
+)
+def test_memory_requests_reject_reserved_scope_aliases(
+    request_type: type[MemorizeAddRequest] | type[MemorizeFlushRequest],
+    field: str,
+    value: str,
+) -> None:
+    payload = {
+        "session_id": "s1",
+        "app_id": "default",
+        "project_id": "default",
+    }
+    payload[field] = value
+    if request_type is MemorizeAddRequest:
+        payload["messages"] = [_message("u1")]
+    with pytest.raises(ValidationError):
+        request_type.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "request_type, field, value",
+    [
+        (MemorizeAddRequest, "project_id", "Project-A"),
+        (MemorizeFlushRequest, "project_id", "Project-A"),
+        (MemorizeAddRequest, "app_id", "DEFAULT_APP"),
+        (MemorizeFlushRequest, "app_id", "DEFAULT_APP"),
+        (MemorizeAddRequest, "app_id", ".index"),
+        (MemorizeFlushRequest, "app_id", ".tmp"),
+        (MemorizeAddRequest, "app_id", "x" * 129),
+        (MemorizeFlushRequest, "project_id", "safe\n"),
+    ],
+)
+def test_memory_requests_reject_nonportable_scopes(
+    request_type: type[MemorizeAddRequest] | type[MemorizeFlushRequest],
+    field: str,
+    value: str,
+) -> None:
+    payload = {
+        "session_id": "s1",
+        "app_id": "default",
+        "project_id": "default",
+    }
+    payload[field] = value
+    if request_type is MemorizeAddRequest:
+        payload["messages"] = [_message("User-A")]
+
+    with pytest.raises(ValidationError):
+        request_type.model_validate(payload)

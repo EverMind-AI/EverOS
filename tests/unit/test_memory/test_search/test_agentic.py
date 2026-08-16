@@ -41,6 +41,7 @@ def _mc_candidate(mc_id: str, ep_id: str, score: float = 0.8) -> Candidate:
         source="vector",
         metadata={
             "episode_id": ep_id,
+            "entry_id": ep_id,
             "owner_id": "alice",
             "owner_type": "user",
             "session_id": "sess_a",
@@ -324,9 +325,9 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
 
     assert len(result) == 1
     assert isinstance(result[0], SearchEpisodeItem)
-    assert result[0].id == "ep_1", (
-        f"Expected episode_id='ep_1' but got {result[0].id!r}. "
-        "Shaper must remap from memcell_id via metadata['episode_id']."
+    assert result[0].id == "alice_ep_1", (
+        f"Expected wire id='alice_ep_1' but got {result[0].id!r}. "
+        "Shaper must reconstruct it from owner_id and entry_id."
     )
 
 

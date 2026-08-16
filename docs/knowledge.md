@@ -47,9 +47,10 @@ Each level corresponds to a different granularity of API:
 
 ## Storage layout
 
-Every document is a self-contained directory. Markdown files are the
-single source of truth; SQLite and LanceDB are derived indexes built
-automatically by the cascade daemon.
+Every document is a self-contained directory. Markdown files are the source of
+truth for extracted document content, and the cascade daemon builds its search
+projection automatically. SQLite also holds metadata and broader operational
+state, so the `.index` tree is not disposable as a whole.
 
 ```
 ~/.everos/<app>/<project>/knowledge/

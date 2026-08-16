@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.persistence import MemoryRoot
+from everos.core.persistence import (
+    MemoryRoot,
+    app_id_from_dir,
+    project_id_from_dir,
+)
 
 
 def test_resolve_returns_home_everos(
@@ -85,6 +89,47 @@ def test_user_visible_dirs_named_scope(tmp_path: Path) -> None:
     assert mr.agents_dir("claude_code", "oss") == base / "agents"
     assert mr.users_dir("claude_code", "oss") == base / "users"
     assert mr.knowledge_dir("claude_code", "oss") == base / "knowledge"
+
+
+def test_reserved_default_directory_aliases_are_rejected(tmp_path: Path) -> None:
+    """Caller scope ids cannot alias the reserved default directories."""
+    mr = MemoryRoot(tmp_path)
+
+    with pytest.raises(ValueError, match="reserved app"):
+        mr.users_dir("default_app", "project")
+    with pytest.raises(ValueError, match="reserved project"):
+        mr.users_dir("app", "default_project")
+
+
+@pytest.mark.parametrize(
+    "app_id, project_id",
+    [
+        ("DEFAULT_APP", "project"),
+        ("app", "DEFAULT_PROJECT"),
+        ("app", "Project-A"),
+        (".index", "project"),
+        (".tmp", "project"),
+    ],
+)
+def test_nonportable_scopes_are_rejected_before_path_resolution(
+    tmp_path: Path,
+    app_id: str,
+    project_id: str,
+) -> None:
+    mr = MemoryRoot(tmp_path)
+
+    with pytest.raises(ValueError):
+        mr.users_dir(app_id, project_id)
+
+
+def test_scope_recovery_rejects_nonportable_existing_directories() -> None:
+    with pytest.raises(ValueError):
+        app_id_from_dir("DEFAULT_APP")
+    with pytest.raises(ValueError):
+        project_id_from_dir("Project-A")
+
+    assert app_id_from_dir("default_app") == "default"
+    assert project_id_from_dir("default_project") == "default"
 
 
 def test_dotfile_paths(tmp_path: Path) -> None:

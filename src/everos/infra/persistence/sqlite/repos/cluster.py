@@ -122,12 +122,11 @@ class _ClusterRepo(RepoBase[Cluster]):
         to ``(app_id, project_id, owner_id)``.
 
         ``member_id`` (e.g. episode ``entry_id`` like
-        ``ep_20260517_00000001``) is only per-owner unique — see
-        ``core/persistence/markdown/entries.py``: "Cross-user uniqueness
-        is handled at the database layer via a composite
-        ``<user_id>_<entry_id>`` field; it is not encoded into the
-        EntryId string itself." Without the scope filter, two owners
-        writing on the same day would share ``entry_id`` and either
+        ``ep_20260517_00000001``) is only unique inside one owner's app/project
+        scope. The logical EntryId deliberately does not encode those scope
+        fields; callers supply app, project, and owner for the reverse lookup.
+        Without that scope filter, two owners writing on the same day would
+        share ``entry_id`` and either
         collide on the reverse index (false hit → the second owner's
         row silently drops from a cluster it was never part of) or find
         a foreign cluster.

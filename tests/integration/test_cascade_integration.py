@@ -27,6 +27,7 @@ from sqlmodel import SQLModel
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
 from everos.core.persistence import MemoryRoot
+from everos.core.persistence.lancedb.row_id import daily_log_storage_id
 from everos.infra.persistence.lancedb import (
     dispose_connection,
     ensure_business_indexes,
@@ -186,7 +187,12 @@ async def test_append_to_md_propagates_to_lancedb(
         assert done_row.error is None
 
         # 3. LanceDB carries the typed episode row.
-        episode_id = f"u_integration_{eid.format()}"
+        episode_id = daily_log_storage_id(
+            app_id="default",
+            project_id="default",
+            owner_id="u_integration",
+            entry_id=eid.format(),
+        )
         ep_row = await episode_repo.get_by_id(episode_id)
         assert ep_row is not None
         assert ep_row.episode == "the user mentioned dark mode preference"
@@ -242,7 +248,14 @@ async def test_delete_md_wipes_lancedb_row(
         absolute = memory_root.root / md_path
 
         async def _ep_present():  # type: ignore[no-untyped-def]
-            return await episode_repo.get_by_id(f"u_del_{eid.format()}")
+            return await episode_repo.get_by_id(
+                daily_log_storage_id(
+                    app_id="default",
+                    project_id="default",
+                    owner_id="u_del",
+                    entry_id=eid.format(),
+                )
+            )
 
         await _poll(_ep_present, deadline_seconds=10.0)
 
@@ -250,7 +263,14 @@ async def test_delete_md_wipes_lancedb_row(
         absolute.unlink()
 
         async def _ep_gone():  # type: ignore[no-untyped-def]
-            row = await episode_repo.get_by_id(f"u_del_{eid.format()}")
+            row = await episode_repo.get_by_id(
+                daily_log_storage_id(
+                    app_id="default",
+                    project_id="default",
+                    owner_id="u_del",
+                    entry_id=eid.format(),
+                )
+            )
             return row is None
 
         assert await _poll(_ep_gone, deadline_seconds=10.0)

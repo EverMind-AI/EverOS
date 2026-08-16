@@ -147,8 +147,9 @@ narrative.
 
 ## Storage layout
 
-Memory uses Markdown as the single source of truth; SQLite and LanceDB are
-derived indexes built automatically by the cascade daemon.
+Markdown is the source of truth for extracted memory, and LanceDB is its
+rebuildable search projection. SQLite also retains coordination and audit state
+that cannot be reconstructed completely from markdown.
 
 | Store | What it holds | Role |
 |---|---|---|

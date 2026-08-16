@@ -249,6 +249,8 @@ ignore_imports = [
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.tables",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.projection_lock",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.storage_identity",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",

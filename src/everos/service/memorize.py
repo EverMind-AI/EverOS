@@ -33,6 +33,7 @@ from everos.config import load_settings
 from everos.core.context import resolve_request_id
 from everos.core.observability.tracing import memory_span
 from everos.core.persistence import MemoryRoot
+from everos.core.scope_ids import validate_app_id, validate_project_id
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
 from everos.infra.persistence.markdown import EpisodeWriter
@@ -186,8 +187,8 @@ async def memorize(
     """Execute one add cycle. Dispatched concurrently across pipelines.
 
     Args:
-        payload: ``{"session_id", "messages": [...]}`` — entrypoints DTO
-            dumped to dict.
+        payload: ``{"session_id", "messages": [...], "app_id"?,
+            "project_id"?}`` from an entrypoint DTO or a direct Python caller.
         is_final: ``True`` only for flush (algo guarantees ``tail=[]``).
 
     Concurrency: serialised per ``session_id`` via
@@ -199,6 +200,17 @@ async def memorize(
     LLM cannot hold the lock indefinitely — on timeout the task is
     cancelled and ``async with`` auto-releases the lock.
     """
+    # ``memorize`` is also a public Python entrypoint, so it must enforce the
+    # same scope contract as the HTTP DTO before tracing, locking, ingestion,
+    # or any SQLite/markdown side effect can occur.
+    payload = dict(payload)
+    app_id = payload.get("app_id", "default")
+    project_id = payload.get("project_id", "default")
+    if not isinstance(app_id, str) or not isinstance(project_id, str):
+        raise ValueError("app_id and project_id must be strings")
+    payload["app_id"] = validate_app_id(app_id)
+    payload["project_id"] = validate_project_id(project_id)
+
     settings = load_settings()
     mode = settings.memorize.mode
     boundary_cfg = settings.boundary_detection
