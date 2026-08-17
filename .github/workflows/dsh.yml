@@ -1,0 +1,49 @@
+name: DSH plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/dsh/**"
+      - ".github/workflows/dsh.yml"
+  pull_request:
+    paths:
+      - "examples/dsh/**"
+      - ".github/workflows/dsh.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: dsh-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint, test, build, and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: examples/dsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: examples/dsh/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint, typecheck, test, and build
+        run: npm run ci
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run

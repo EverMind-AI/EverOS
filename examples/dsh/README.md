@@ -19,7 +19,7 @@ turn.
 
 ## Requirements
 
-- Node.js 22 or newer
+- Node.js `^22.19.0 || >=24.0.0`
 - DeepSeek Harness `0.1.0-rc.6` or newer within the `0.1.x` line
 - EverOS installed and initialized
 
@@ -28,10 +28,14 @@ uv tool install everos
 everos init
 ```
 
-EverOS 1.2.3 or newer can run in Tier 1 with only its LLM configured. The plugin defaults
-to BM25 keyword recall, so embedding, rerank, and multimodal credentials are optional.
-EverOS owns provider and storage configuration; this plugin does not accept or store API
-keys.
+EverOS 1.2.3 supports the plugin's LLM-only Tier 1 path with keyword recall. Deferred
+capture batching additionally requires an EverOS build that supports
+`defer_extraction`; until that capability is included in a tagged release, install
+EverOS from the same checkout as this example. With 1.2.3, capture remains functional,
+but `/add` uses the eager boundary and extraction path.
+
+Embedding, rerank, and multimodal credentials are optional. EverOS owns provider and
+storage configuration; this plugin does not accept or store API keys.
 
 For a local source checkout, install the current tree and provide the LLM key through the
 environment before starting EverOS:
@@ -53,7 +57,7 @@ For local development from the EverOS repository:
 
 ```bash
 cd examples/dsh
-npm install
+npm ci
 npm run ci
 dsh plugin --profile web add .
 ```
@@ -180,9 +184,9 @@ opaque and are not treated as file paths or bearer URLs.
 
 - Writes are serialized per DSH session.
 - Capture uses `defer_extraction: true`: raw turns are durable immediately, while the
-  expensive boundary and memory LLM work is batched. The current EverOS checkout is
-  required for this optimization; older servers ignore the new request field and retain
-  their eager `/add` behavior.
+  expensive boundary and memory LLM work is batched. An EverOS build with
+  `defer_extraction` support is required for this optimization; EverOS 1.2.3 ignores the
+  request field and retains its eager `/add` behavior.
 - Starting a new DSH session establishes a read-after-write barrier for other pending
   sessions in the same workspace, so the first recall sees the latest committed memory.
 - A cursor based on DSH event sequence numbers captures only new live events, including
@@ -211,7 +215,7 @@ authority.
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run ci
 ```
 
