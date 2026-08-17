@@ -93,6 +93,29 @@ class BoundaryOutcome(NamedTuple):
     message_count: int
 
 
+async def buffer_messages(ingested: IngestResult, *, mode: Mode) -> BoundaryOutcome:
+    """Durably merge fresh messages into the session buffer without an LLM call.
+
+    This is the low-cost half of deferred memorize. It deliberately stops before
+    boundary detection, memcell creation, and pipeline dispatch; a later flush
+    processes the complete buffer under the same per-session service lock.
+    """
+    app_id = ingested.app_id
+    project_id = ingested.project_id
+    fresh = _filter_for_mode(ingested.messages, mode)
+    if not fresh:
+        return _empty_outcome(status="skipped", message_count=0)
+
+    buffer_rows = await unprocessed_buffer_repo.list_for_track(
+        ingested.session_id, _TRACK, app_id=app_id, project_id=project_id
+    )
+    buffered = [_row_to_canonical(row) for row in buffer_rows]
+    merged = _merge_dedupe_sort(buffered, fresh)
+    await _replace_buffer(ingested.session_id, merged, app_id, project_id)
+    await _touch_last_message_ts(ingested.session_id, merged, app_id, project_id)
+    return _empty_outcome(status="accumulated", message_count=len(fresh))
+
+
 async def prepare_cells(
     ingested: IngestResult,
     *,

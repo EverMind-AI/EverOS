@@ -505,6 +505,7 @@ the `status` field — see [Response body](#response-body) below.
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | see [ScopeId](#scopeid-app_id-and-project_id) |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | see [ScopeId](#scopeid-app_id-and-project_id) |
 | `messages` | `array<MessageItem>` | yes | — | 1–500 items |
+| `defer_extraction` | `boolean` | no | `false` | buffer durably without boundary or extraction LLM calls |
 
 **`session_id`** — Identifies the conversation buffer on the server.
 Messages POSTed with the same `(session_id, app_id, project_id)`
@@ -519,6 +520,13 @@ append. Order matters (it is preserved when the buffer is later
 extracted). The 1–500 cap is a per-request safety bound, not a
 session lifetime cap — you can call `/add` many times for the same
 `session_id`.
+
+**`defer_extraction`** — When `true`, `/add` only merges the messages
+into the durable SQLite `unprocessed_buffer`. It skips boundary
+detection, memcell creation, and all extraction pipelines, so batching
+clients can capture every turn cheaply and call `/flush` after an idle
+window, a size threshold, or a session switch. A successful deferred
+add always reports `status: "accumulated"`.
 
 #### Response body
 

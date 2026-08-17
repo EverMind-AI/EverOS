@@ -78,3 +78,13 @@ def test_add_request_rejects_traversal_sender_id_in_messages() -> None:
                 }
             ],
         )
+
+
+def test_add_request_can_defer_extraction() -> None:
+    request = MemorizeAddRequest(
+        session_id="s1",
+        messages=[_message("u1")],
+        defer_extraction=True,
+    )
+
+    assert request.defer_extraction is True

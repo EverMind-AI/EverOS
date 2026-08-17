@@ -52,7 +52,7 @@ from everos.memory.strategies import (
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
-from everos.service._boundary import prepare_cells
+from everos.service._boundary import buffer_messages, prepare_cells
 from everos.service._session_lock import get_session_lock
 
 
@@ -182,6 +182,7 @@ async def memorize(
     payload: dict[str, Any],
     *,
     is_final: bool = False,
+    defer_extraction: bool = False,
 ) -> MemorizeResult:
     """Execute one add cycle. Dispatched concurrently across pipelines.
 
@@ -189,6 +190,9 @@ async def memorize(
         payload: ``{"session_id", "messages": [...]}`` — entrypoints DTO
             dumped to dict.
         is_final: ``True`` only for flush (algo guarantees ``tail=[]``).
+        defer_extraction: Persist fresh messages to the unprocessed buffer but
+            skip boundary detection and both extraction pipelines. Intended for
+            clients that batch work and call ``/flush`` on idle or thresholds.
 
     Concurrency: serialised per ``session_id`` via
     :func:`everos.service._session_lock.get_session_lock`. The lock
@@ -204,7 +208,13 @@ async def memorize(
     boundary_cfg = settings.boundary_detection
     session_id = payload["session_id"]
 
-    span_name = "everos.memory.flush" if is_final else "everos.memory.add"
+    span_name = (
+        "everos.memory.flush"
+        if is_final
+        else "everos.memory.buffer"
+        if defer_extraction
+        else "everos.memory.add"
+    )
     with memory_span(
         span_name,
         observation_type="span",
@@ -212,6 +222,7 @@ async def memorize(
         metadata={
             "mode": mode,
             "is_final": is_final,
+            "defer_extraction": defer_extraction,
             "request_id": resolve_request_id(),
         },
     ):
@@ -222,6 +233,7 @@ async def memorize(
                     mode=mode,
                     boundary_cfg=boundary_cfg,
                     is_final=is_final,
+                    defer_extraction=defer_extraction,
                 )
 
 
@@ -231,9 +243,17 @@ async def _memorize_locked(
     mode: Literal["chat", "agent"],
     boundary_cfg: Any,
     is_final: bool,
+    defer_extraction: bool,
 ) -> MemorizeResult:
     """Inner critical section — runs under the per-session lock."""
     ingested = await ingest_process(payload)
+    if defer_extraction and not is_final:
+        buffered = await buffer_messages(ingested, mode=mode)
+        return MemorizeResult(
+            message_count=len(payload.get("messages", [])),
+            status=_merge_status(buffered.status, "skipped"),
+        )
+
     # Boundary detection runs an LLM (everalgo detect_boundaries). Wrap it in a
     # generation span so its token usage lands on a GENERATION observation
     # (costed by Langfuse) instead of the SPAN-typed request root (dropped).

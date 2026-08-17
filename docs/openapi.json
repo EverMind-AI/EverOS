@@ -2965,6 +2965,12 @@
             "maxItems": 500,
             "minItems": 1,
             "title": "Messages"
+          },
+          "defer_extraction": {
+            "type": "boolean",
+            "title": "Defer Extraction",
+            "description": "Persist messages in the durable unprocessed buffer without running boundary detection or extraction. A later /flush commits the batch.",
+            "default": false
           }
         },
         "type": "object",

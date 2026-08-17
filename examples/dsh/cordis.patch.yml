@@ -1,0 +1,15 @@
+# Mount EverOS memory into every DeepSeek Harness agent composition.
+- insert:
+    - id: everos-memory
+      name: '@evermind-ai/dsh-plugin'
+      config:
+        baseUrl: !!js process.env.EVEROS_DSH_BASE_URL || 'http://127.0.0.1:8000'
+        userId: !!js process.env.EVEROS_DSH_USER_ID
+        agentId: !!js process.env.EVEROS_DSH_AGENT_ID
+        recallMethod: !!js process.env.EVEROS_DSH_RECALL_METHOD || 'keyword'
+        flushIdleMs: !!js Number(process.env.EVEROS_DSH_FLUSH_IDLE_MS || 30000)
+        flushTokenThreshold: !!js Number(process.env.EVEROS_DSH_FLUSH_TOKEN_THRESHOLD || 12000)
+        flushMessageThreshold: !!js Number(process.env.EVEROS_DSH_FLUSH_MESSAGE_THRESHOLD || 50)
+        flushMaxDelayMs: !!js Number(process.env.EVEROS_DSH_FLUSH_MAX_DELAY_MS || 300000)
+        startCommand: !!js process.env.EVEROS_DSH_START_COMMAND
+        everosDir: !!js process.env.EVEROS_DSH_DIR

@@ -127,6 +127,13 @@ class MemorizeAddRequest(BaseModel):
         pattern=_PATH_SAFE_CHARSET,
     )
     messages: list[MessageItemDTO] = Field(..., min_length=1, max_length=500)
+    defer_extraction: bool = Field(
+        default=False,
+        description=(
+            "Persist messages in the durable unprocessed buffer without running "
+            "boundary detection or extraction. A later /flush commits the batch."
+        ),
+    )
 
 
 class AddResponseData(BaseModel):
@@ -171,7 +178,9 @@ async def add_memory(
 ) -> SuccessEnvelope[AddResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
     request_id = extract_request_id(request)
-    result = await memorize(req.model_dump())
+    payload = req.model_dump()
+    defer_extraction = bool(payload.pop("defer_extraction"))
+    result = await memorize(payload, defer_extraction=defer_extraction)
     return SuccessEnvelope(
         request_id=request_id,
         data=AddResponseData(

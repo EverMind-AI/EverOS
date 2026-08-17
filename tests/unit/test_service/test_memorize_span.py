@@ -1,4 +1,4 @@
-"""``memorize`` opens an everos.memory.add / everos.memory.flush span.
+"""``memorize`` opens an add, deferred-buffer, or flush span.
 
 The inner critical section is mocked out — this asserts only the span
 wrapping + name selection (add vs flush) driven by ``is_final``.
@@ -65,3 +65,12 @@ async def test_flush_emits_memory_flush_span(_patch: InMemorySpanExporter) -> No
     force_flush()
     names = {s.name for s in _patch.get_finished_spans()}
     assert "everos.memory.flush" in names
+
+
+async def test_deferred_add_emits_memory_buffer_span(
+    _patch: InMemorySpanExporter,
+) -> None:
+    await mm.memorize({"session_id": "s3", "messages": []}, defer_extraction=True)
+    force_flush()
+    names = {s.name for s in _patch.get_finished_spans()}
+    assert "everos.memory.buffer" in names

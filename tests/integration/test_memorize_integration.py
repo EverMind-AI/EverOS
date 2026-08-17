@@ -376,6 +376,47 @@ async def test_single_user_message_accumulates(
     assert _buffer_count(tmp_path) == 1
 
 
+async def test_deferred_add_persists_without_llm_then_flushes(
+    tmp_path: Path,
+    memorize_env: Callable[..., Any],
+) -> None:
+    """Deferred add is durable and cheap; flush performs the LLM extraction."""
+    calls: list[str] = []
+
+    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
+        prompt = messages[0].content
+        calls.append(prompt)
+        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
+            return ChatResponse(content=_boundary_response([]), model="fake")
+        return ChatResponse(content=_episode_response(), model="fake")
+
+    await memorize_env(mode="chat", fake_llm=FakeLLMClient(handler=handler))
+    payload = {
+        "session_id": "test_deferred",
+        "messages": [
+            _user("remember the parser preference", 1_700_000_000_000),
+            _assistant("noted", 1_700_000_001_000),
+        ],
+    }
+
+    buffered = await memorize(payload, defer_extraction=True)
+
+    assert buffered.status == "accumulated"
+    assert buffered.message_count == 2
+    assert calls == []
+    assert _buffer_count(tmp_path) == 2
+    assert _memcell_rows(tmp_path) == []
+
+    flushed = await memorize(
+        {"session_id": "test_deferred", "messages": []}, is_final=True
+    )
+
+    assert flushed.status == "extracted"
+    assert calls
+    assert _buffer_count(tmp_path) == 0
+    assert len(_memcell_rows(tmp_path)) == 1
+
+
 async def test_chat_mode_filters_tool_messages(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
