@@ -218,6 +218,59 @@ async def test_empty_slug_fallback_for_title(tmp_path: Path) -> None:
     assert (doc_dir / "index.md").is_file()
 
 
+async def test_decomposed_accent_survives_in_directory_name(tmp_path: Path) -> None:
+    """A decomposed (NFD) title keeps its accent in the directory name.
+
+    Pins a deliberate behavior change: this writer's private sanitizer was
+    replaced by the shared ``core.persistence.markdown.path_safety``
+    primitive, which NFC-normalizes before filtering. The character class
+    (``[^\\w\\-.]``, Unicode-aware) is unchanged, so precomposed input —
+    including CJK — resolved identically before and after; NFD input did
+    not. A bare combining mark is not ``\\w``, so ``"e"`` + U+0301 used to
+    lose the accent and land in ``Résumé_…`` → ``Resume_…``.
+
+    This is the one directory-name change with a pre-existing corpus behind
+    it: knowledge upload shipped before this fix, so a document whose topic
+    arrived decomposed resolves to a *different* directory now than the one
+    already on disk. Kept because titles reaching here are overwhelmingly
+    precomposed already; pinned because nothing else in the suite would
+    notice a regression back to the stripping behavior.
+    """
+    nfd_topic = "Re" + "́" + "sume" + "́"  # "Résumé", decomposed
+    doc_id = "d_nfd0001"
+    doc_dir = await KnowledgeWriter.write(
+        [_root_node(doc_id=doc_id, topic=nfd_topic)], tmp_path
+    )
+
+    assert doc_dir == tmp_path / "Sports" / f"Résumé_{doc_id}"
+    assert (doc_dir / "index.md").is_file()
+
+
+async def test_dot_only_topic_falls_back_instead_of_escaping(tmp_path: Path) -> None:
+    """A ``".."`` topic must not resolve the document dir to its parent.
+
+    ``".."`` is a fixpoint of the character filter (``.`` is a safe
+    character), so before the fallback on degenerate results it survived
+    intact — and because this writer appends no prefix of its own, the
+    resulting ``<knowledge_dir>/<category>/.._<doc_id>`` was one literal
+    component but ``<category>`` itself was not, letting a ``".."``
+    *category* climb a level. Asserts containment rather than the exact
+    fallback string: the property that matters is that no path component
+    can walk back out of ``tmp_path``. Both assertions are needed and
+    neither implies the other — ``is_relative_to`` is prefix arithmetic
+    that a ``".."`` component would satisfy while still escaping, and the
+    ``parts`` check alone says nothing about where the path is rooted.
+    """
+    doc_id = "d_dots001"
+    doc_dir = await KnowledgeWriter.write(
+        [_root_node(doc_id=doc_id, topic="..", category_id="..")], tmp_path
+    )
+
+    assert doc_dir.is_relative_to(tmp_path)
+    assert ".." not in doc_dir.parts
+    assert (doc_dir / "index.md").is_file()
+
+
 async def test_empty_category_id_fallback_to_others(tmp_path: Path) -> None:
     memories = [_root_node(category_id="")]
     doc_dir = await KnowledgeWriter.write(memories, tmp_path)

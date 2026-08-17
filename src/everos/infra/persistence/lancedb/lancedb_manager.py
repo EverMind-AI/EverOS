@@ -11,6 +11,7 @@ manually.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from lancedb import AsyncConnection, AsyncTable
 
@@ -28,7 +29,7 @@ _lock = asyncio.Lock()
 async def get_connection() -> AsyncConnection:
     """Return the process-wide async LanceDB connection.
 
-    Built on first call from ``MemoryRoot.default().lancedb_dir`` and
+    Built on first call from ``MemoryRoot.resolve().lancedb_dir`` and
     ``Settings.lancedb``. Subsequent calls return the same instance.
     """
     async with _lock:
@@ -53,6 +54,27 @@ async def get_table(
         return _tables[name]
 
 
+async def drop_tables(names: Sequence[str]) -> list[str]:
+    """Drop the named tables if present; return the names actually dropped.
+
+    Each dropped table is also evicted from the cache so a later
+    :func:`get_table` recreates it fresh from the current schema. Used by
+    ``cascade rebuild`` to reset a corrupt / drifted index — the tables
+    are a rebuildable projection of markdown, so dropping is safe.
+    """
+    async with _lock:
+        conn = await _ensure_connection_locked()
+        existing = set((await conn.list_tables()).tables)
+        dropped: list[str] = []
+        for name in names:
+            if name in existing:
+                await conn.drop_table(name)
+                _tables.pop(name, None)
+                dropped.append(name)
+                logger.info("lancedb_table_dropped", name=name)
+        return dropped
+
+
 async def dispose_connection() -> None:
     """Close the connection + clear table cache. Idempotent."""
     global _conn
@@ -72,7 +94,7 @@ async def _ensure_connection_locked() -> AsyncConnection:
     global _conn
     if _conn is None:
         settings = load_settings()
-        memory_root = MemoryRoot.default()
+        memory_root = MemoryRoot.resolve()
         memory_root.ensure()
         _conn = await open_lancedb_connection(memory_root.lancedb_dir, settings.lancedb)
         logger.info(

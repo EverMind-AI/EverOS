@@ -18,10 +18,19 @@ After segmentation we drop:
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import Final
 
-import jieba
+with warnings.catch_warnings():
+    # jieba 0.42.1 (its last release; unmaintained) ships regex string
+    # literals with invalid escape sequences. Python >= 3.12 flags these as
+    # SyntaxWarning at first-import compile time (before the .pyc is cached),
+    # leaking noise on a user's first run. The warnings are harmless and out
+    # of our control, so we suppress them at the single jieba import site.
+    # See https://github.com/EverMind-AI/EverOS/issues/304.
+    warnings.simplefilter("ignore", SyntaxWarning)
+    import jieba
 
 # Small bilingual stopword set. Intentionally tight (not a full
 # Chinese stopword list) so the behaviour is predictable; callers

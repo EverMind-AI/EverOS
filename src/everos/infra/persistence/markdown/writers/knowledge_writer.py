@@ -15,11 +15,18 @@ path rather than binding to :class:`MemoryRoot`. The service layer
 resolves ``knowledge_dir`` from ``MemoryRoot.knowledge_dir(app, project)``
 and passes it in. This keeps the writer decoupled from the root-resolution
 logic and easier to test.
+
+``category_id`` / ``topic`` come from parsed source documents (untrusted
+free text), so both are routed through
+:func:`everos.core.persistence.markdown.sanitize_dirname` before becoming
+a directory/file segment — the same shared helper
+``AgentSkillFrontmatter.skill_dir_name`` uses for LLM-generated skill
+names, so there is one CWE-22 path-traversal defense for md directory
+names, not two independently maintained copies.
 """
 
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
 
@@ -28,11 +35,9 @@ import yaml
 from everalgo.types import KnowledgeMemory
 
 from everos.core.observability.logging import get_logger
+from everos.core.persistence.markdown import sanitize_dirname
 
 logger = get_logger(__name__)
-
-_MAX_DIRNAME_LEN = 50
-_SAFE_CHARS = re.compile(r"[^\w\-.]", re.UNICODE)
 
 
 # ── Writer ────────────────────────────────────────────────────────────────
@@ -113,26 +118,12 @@ def _split_root_and_topics(
     return root, topics
 
 
-def _sanitize_dirname(raw: str, fallback: str) -> str:
-    """Produce a safe directory/file name segment.
-
-    * Replace spaces with underscores.
-    * Strip characters outside ``[a-zA-Z0-9_\\-.]``.
-    * Truncate to 50 characters.
-    * Fall back to *fallback* if the result is empty.
-    """
-    slug = raw.replace(" ", "_")
-    slug = _SAFE_CHARS.sub("", slug)
-    slug = slug[:_MAX_DIRNAME_LEN]
-    return slug if slug else fallback
-
-
 def _resolve_doc_dir(knowledge_dir: Path, root: KnowledgeMemory) -> Path:
     """Build the document directory path from category, title, and doc_id."""
-    category = _sanitize_dirname(
+    category = sanitize_dirname(
         root.category_id if root.category_id else "Others", "Others"
     )
-    title_slug = _sanitize_dirname(root.topic, "doc")
+    title_slug = sanitize_dirname(root.topic, "doc")
     dir_name = f"{title_slug}_{root.doc_id}"
     return knowledge_dir / category / dir_name
 
@@ -232,7 +223,7 @@ async def _write_topic(
     doc_id: str,
 ) -> None:
     """Write a numbered topic md file with frontmatter and content body."""
-    slug = _sanitize_dirname(node.topic, f"topic_{node.topic_index}")
+    slug = sanitize_dirname(node.topic, f"topic_{node.topic_index}")
     filename = f"{node.topic_index}_{slug}.md"
     fm = _build_topic_frontmatter(node, doc_id)
     body = _ensure_trailing_newline(node.content)

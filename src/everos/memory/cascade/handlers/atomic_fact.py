@@ -14,15 +14,21 @@ md contract (md writer + cascade share this shape):
 ``sections``:
 
 - ``Fact``: the atomic-fact sentence — fed to the embedder and the
-  tokenizer (``fact_tokens`` BM25 field).
+  tokenizer (``fact_tokens`` BM25 field). Embedding is a soft
+  dependency: when unavailable, ``vector`` is written as ``None`` and
+  the row stays BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
 
+from everos.component.embedding import get_embedding_capability
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb import AtomicFact, ParentType, atomic_fact_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
+
+logger = get_logger(__name__)
 
 
 class AtomicFactHandler(BaseDailyLogHandler):
@@ -47,7 +53,14 @@ class AtomicFactHandler(BaseDailyLogHandler):
         s = entry.structured
         text = s.sections.get("Fact", "").strip()
         tokens = self._deps.tokenizer.tokenize(text)
-        vector = await self._deps.embedder.embed(text)
+        vector = await get_embedding_capability().embed_or_none(text)
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=entry.entry_id,
+                reason="embedding_capability_unavailable",
+            )
         return AtomicFact(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,

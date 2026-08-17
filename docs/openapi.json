@@ -3,7 +3,7 @@
   "info": {
     "title": "everos",
     "description": "md-first memory extraction framework",
-    "version": "1.2.0"
+    "version": "1.2.3"
   },
   "paths": {
     "/health": {
@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness probe — returns ``{\"status\": \"ok\"}`` with HTTP 200.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -20,11 +20,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -226,7 +222,7 @@
           "ome"
         ],
         "summary": "Trigger",
-        "description": "Manually trigger a registered OME strategy and wait for completion.",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
         "operationId": "trigger_api_v1_ome_trigger_post",
         "requestBody": {
           "content": {
@@ -986,7 +982,7 @@
           "ome"
         ],
         "summary": "Trigger",
-        "description": "Manually trigger a registered OME strategy and wait for completion.",
+        "description": "Manually trigger a registered OME strategy and wait for its runs to\nsettle. Returns without waiting for the LanceDB index — the response\nreflects markdown state only; poll ``GET /health``'s ``cascade.pending``\nfor index convergence (two consecutive zero samples to guard against the\nwatcher-input window). See docs/api.md#eventual-consistency.",
         "operationId": "trigger_api_v2_ome_trigger_post",
         "requestBody": {
           "content": {
@@ -1808,6 +1804,63 @@
           "title"
         ],
         "title": "Body_replace_document_route_api_v2_knowledge_documents__doc_id__put"
+      },
+      "CascadeHealthBlock": {
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent"
+          },
+          "failed_retryable": {
+            "type": "integer",
+            "title": "Failed Retryable"
+          },
+          "drain_consecutive_failures": {
+            "type": "integer",
+            "title": "Drain Consecutive Failures"
+          },
+          "unrecoverable_total": {
+            "type": "integer",
+            "title": "Unrecoverable Total"
+          },
+          "optimize_failure_streak": {
+            "type": "integer",
+            "title": "Optimize Failure Streak"
+          },
+          "prune_stale_seconds": {
+            "type": "number",
+            "title": "Prune Stale Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "reasons",
+          "pending",
+          "failed_permanent",
+          "failed_retryable",
+          "drain_consecutive_failures",
+          "unrecoverable_total",
+          "optimize_failure_streak",
+          "prune_stale_seconds"
+        ],
+        "title": "CascadeHealthBlock",
+        "description": "Readiness of the md → LanceDB projection (cascade) subsystem.\n\n``healthy`` reflects **operational** health only — drain loop alive,\noptimize not stuck, version cleanup (prune) not stalled — and is what\nalerting should watch. ``failed_permanent`` (md files awaiting\n``cascade fix``) is a normal data-quality backlog reported as an\ninformational count; it does **not** flip ``healthy``, otherwise the\nsignal would sit red forever."
       },
       "CategoryDTO": {
         "properties": {
@@ -2719,6 +2772,81 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthCapabilities": {
+        "properties": {
+          "llm": {
+            "type": "boolean",
+            "title": "Llm"
+          },
+          "embed": {
+            "type": "boolean",
+            "title": "Embed"
+          },
+          "rerank": {
+            "type": "boolean",
+            "title": "Rerank"
+          },
+          "multimodal_llm": {
+            "type": "boolean",
+            "title": "Multimodal Llm"
+          },
+          "parser": {
+            "type": "boolean",
+            "title": "Parser"
+          }
+        },
+        "type": "object",
+        "required": [
+          "llm",
+          "embed",
+          "rerank",
+          "multimodal_llm",
+          "parser"
+        ],
+        "title": "HealthCapabilities",
+        "description": "Availability flags for the five capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/HealthCapabilities"
+          },
+          "disabled_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Disabled Features"
+          },
+          "cascade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CascadeHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "capabilities",
+          "disabled_features"
+        ],
+        "title": "HealthResponse",
+        "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities``,\n``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``\nreturn type degrades the OpenAPI response to\n``additionalProperties: true``, which robs clients (and codegen) of\nany structure to lean on."
+      },
       "KnowledgeSearchRequest": {
         "properties": {
           "query": {
@@ -2960,6 +3088,36 @@
           "content"
         ],
         "title": "MessageItemDTO"
+      },
+      "RunSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunSummary",
+        "description": "One strategy run within a trigger response."
       },
       "SearchAgentCaseItem": {
         "properties": {
@@ -3878,15 +4036,28 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "dispatched": {
+            "type": "integer",
+            "title": "Dispatched"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "type": "array",
+            "title": "Runs",
+            "default": []
           }
         },
         "type": "object",
         "required": [
           "status",
-          "name"
+          "name",
+          "dispatched"
         ],
         "title": "TriggerResponse",
-        "description": "Response body for ``POST /api/v2/ome/trigger``."
+        "description": "Response body for ``POST /api/v2/ome/trigger``.\n\n``status`` distinguishes three outcomes that were previously masked as\na single ``ok``:\n\n- ``ok``: at least one strategy was dispatched and all runs settled\n  within ``timeout``. Individual run outcomes are in ``runs`` (a\n  ``dead_letter`` there is still ``ok`` at this level — the strategy\n  *ran*, it just failed permanently).\n- ``timeout``: at least one strategy was dispatched but the engine did\n  not go idle within ``timeout``. Runs may be partially complete;\n  poll ``GET /health`` for cascade convergence separately.\n- ``not_dispatched``: no strategy was dispatched — the subscriber was\n  rejected by one of the dispatch gates (``_routes_to`` / ``enabled`` /\n  ``applies_to`` / ``Counter``). Common cause: forgetting\n  ``force=true`` on a strategy that is ``enabled=false`` in ome.toml."
       },
       "UnprocessedMessageDTO": {
         "properties": {

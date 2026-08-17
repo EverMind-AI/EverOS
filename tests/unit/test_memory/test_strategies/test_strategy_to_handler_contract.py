@@ -21,7 +21,7 @@ import anyio
 import pytest
 from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MarkdownReader, MemoryRoot
 from everos.infra.ome.testing import FakeStrategyContext
@@ -58,6 +58,18 @@ class _StubEmbedder(EmbeddingProvider):
 
     async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
         return [await self.embed(t) for t in texts]
+
+
+@pytest.fixture(autouse=True)
+def _stub_embedding_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handlers fetch the embedder lazily via ``get_embedding_capability()``
+    — patch the process-wide singleton so ``_build_row`` returns a real
+    (stub) vector."""
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
 
 
 def _episode_event(owner_id: str) -> EpisodeExtracted:
@@ -127,7 +139,7 @@ async def test_atomic_fact_strategy_md_feeds_handler_with_content(
     """Strategy → md → AtomicFactHandler must carry the fact text intact."""
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(af_mod, "_writer", None, raising=False)
 
@@ -153,7 +165,6 @@ async def test_atomic_fact_strategy_md_feeds_handler_with_content(
     handler = AtomicFactHandler(
         HandlerDeps(
             memory_root=MemoryRoot(root=tmp_path),
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -172,7 +183,7 @@ async def test_foresight_strategy_md_feeds_handler_with_content(
     """Strategy → md → ForesightHandler must carry foresight + evidence text."""
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
@@ -199,7 +210,6 @@ async def test_foresight_strategy_md_feeds_handler_with_content(
     handler = ForesightHandler(
         HandlerDeps(
             memory_root=MemoryRoot(root=tmp_path),
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -246,7 +256,7 @@ async def test_agent_case_strategy_md_feeds_handler_with_content(
     """Strategy → md → AgentCaseHandler carries task_intent, approach, score."""
     ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(ac_mod, "_writer", None, raising=False)
 
@@ -275,7 +285,6 @@ async def test_agent_case_strategy_md_feeds_handler_with_content(
     handler = AgentCaseHandler(
         HandlerDeps(
             memory_root=MemoryRoot(root=tmp_path),
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )

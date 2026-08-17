@@ -6,9 +6,8 @@ scanner (periodic sweep) UPSERT into this table; the worker consumes
 internal ``processing`` claim state, and lands them in ``done`` or
 ``failed`` (with a ``retryable`` flag).
 
-Schema sourced from ``12_cascade_design.md`` §4.1 + decisions DD-3 …
-DD-12; the four indexes below are required by ``13_cascade_design.md``
-§7 status / fix queries.
+The schema + the four indexes below back the cascade queue and its
+status / fix queries (see ``docs/cascade_runbook.md``).
 """
 
 from __future__ import annotations
@@ -99,10 +98,10 @@ class MdChangeState(BaseTable, table=True):
     retryable: bool | None = Field(default=None)
     """Meaningful only when ``status='failed'``.
 
-    - ``TRUE`` — RecoverableError exhausted MAX_RETRY; ``cascade fix
+    - ``TRUE`` — ExternalServiceError exhausted MAX_RETRY; ``cascade fix
       --apply`` will re-enqueue this row (pending, retry_count reset).
-    - ``FALSE`` — UnrecoverableError (malformed YAML, schema error
-      etc.); requires editing the md and re-saving.
+    - ``FALSE`` — unrecoverable error (malformed YAML, schema error,
+      retry budget exhausted); requires editing the md and re-saving.
     - ``NULL`` — not a failed row (pending / processing / done).
     """
 

@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
 
 help:
 	@echo "Targets:"
@@ -9,6 +9,7 @@ help:
 	@echo "  check-commits Validate Conventional Commit subjects for a git range"
 	@echo "  check-pr-title Validate PR title uses Conventional Commit format"
 	@echo "  check-assets  Block committed images, videos, and asset/media directories"
+	@echo "  check-file-sizes Block committed files above the size ceiling (HARD gate, run via lint)"
 	@echo "  check-deprecated-names Block deprecated product names"
 	@echo "  check-github-docs Block legacy/internal branch-model residue in contributor docs"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
@@ -39,6 +40,7 @@ lint:
 	uv run ruff format --check src tests
 	uv run lint-imports
 	uv run python scripts/check_repo_assets.py
+	uv run python scripts/check_file_sizes.py
 	uv run python scripts/check_deprecated_names.py
 	uv run python scripts/check_github_contributor_docs.py
 	uv run python scripts/check_datetime_discipline.py
@@ -59,6 +61,14 @@ check-pr-title:
 # release artifacts, or other approved storage, then linked from docs.
 check-assets:
 	uv run python scripts/check_repo_assets.py
+
+# Repository file size gate (wired into `lint`, and therefore `ci`). Mirrors
+# the `check-added-large-files` pre-commit hook so the ceiling is enforced on
+# every PR, not only on machines that installed the hooks. Scope is the change
+# under review (diff vs the base branch), so existing files are left alone —
+# needs `fetch-depth: 0` in CI to resolve the merge base.
+check-file-sizes:
+	uv run python scripts/check_file_sizes.py
 
 # Product naming gate. Public repo text should use EverOS or EverMind Cloud.
 check-deprecated-names:

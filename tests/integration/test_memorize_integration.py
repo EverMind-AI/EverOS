@@ -4,7 +4,7 @@ Drives ``service.memorize.memorize()`` with a ``FakeLLMClient`` so the
 full chain (ingest → boundary → user / agent pipeline → md + OME emit)
 runs without real LLM calls. Each test isolates state by:
 
-- redirecting ``MemoryRoot.default()`` to a ``tmp_path``
+- redirecting ``MemoryRoot.resolve()`` to a ``tmp_path``
 - resetting service-layer lazy singletons
 - starting / stopping a per-test ``OfflineEngine``
 - patching ``get_llm_client`` (boundary + strategies) onto a fake
@@ -107,7 +107,7 @@ async def memorize_env(
     sqlite engine.
     """
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")

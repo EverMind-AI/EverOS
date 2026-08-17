@@ -20,6 +20,7 @@ therefore be safe to re-execute with the same payload.
 from __future__ import annotations
 
 import asyncio
+import random
 import traceback
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
@@ -32,6 +33,7 @@ from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span, use_traceparent
 from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
 from everos.infra.ome._stores.run_record import RunRecordStore
+from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.decorator import StrategyMeta
 from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.exceptions import EmitNotDeclaredError, StrategyContractError
@@ -98,12 +100,14 @@ class Runner:
         run_record_store: RunRecordStore,
         engine_sem: asyncio.Semaphore,
         emit_hook: Callable[[BaseEvent], Awaitable[None]],
+        config: OMEConfig,
         on_dead_letter: Callable[[RunRecord], None] | None = None,
         engine: OfflineEngine,
     ) -> None:
         self._rec = run_record_store
         self._sem = engine_sem
         self._emit_hook = emit_hook
+        self._config = config
         self._on_dead_letter = on_dead_letter
         self._engine = engine
 
@@ -118,23 +122,34 @@ class Runner:
     ) -> None:
         """Execute ``meta.func(event, ctx)`` with the attempt retry loop.
 
-        Holds ``engine_sem`` for the full retry chain so concurrency cap
-        applies end-to-end. Each attempt gets a fresh ``run_id`` after
-        the first, so the run history records every try.
+        ``engine_sem`` is held per *attempt*, not across the whole retry
+        chain: the backoff sleep happens outside it. The cap exists to
+        bound concurrent strategy work — LLM calls, embeddings, storage
+        IO — and a coroutine sleeping between attempts consumes none of
+        that. Holding the slot across the sleep turned a partial outage
+        into a total stall: with ``max_concurrent_runs`` slots and a
+        ``1s → 2s → 4s`` backoff, enough simultaneously-failing runs
+        park every slot in ``asyncio.sleep`` and starve strategies that
+        would have succeeded. Backpressure on the failing work is
+        wanted; backpressure on everything else is not.
+
+        Each attempt gets a fresh ``run_id`` after the first, so the run
+        history records every try.
         """
         if max_retries_snapshot < 0:
             raise ValueError(
                 f"max_retries_snapshot must be >= 0, got {max_retries_snapshot}"
             )
 
-        async with self._sem:
-            event_topic = type(event).topic()
-            event_payload = event.model_dump_json()
-            current_run_id = run_id
+        event_topic = type(event).topic()
+        event_payload = event.model_dump_json()
+        current_run_id = run_id
 
-            for attempt in range(max_retries_snapshot + 1):
-                if attempt > 0:
-                    current_run_id = uuid4().hex
+        for attempt in range(max_retries_snapshot + 1):
+            if attempt > 0:
+                await self._sleep_backoff(attempt)
+                current_run_id = uuid4().hex
+            async with self._sem:
                 terminated = await self._run_one_attempt(
                     meta=meta,
                     event=event,
@@ -145,8 +160,25 @@ class Runner:
                     max_retries_snapshot=max_retries_snapshot,
                     traceparent=traceparent,
                 )
-                if terminated:
-                    return
+            if terminated:
+                return
+
+    async def _sleep_backoff(self, attempt: int) -> None:
+        """Sleep before retry ``attempt`` (1-indexed): ``base * 2**(attempt-1)``,
+        capped at ``retry_backoff_cap_seconds``, plus up to
+        ``retry_jitter_seconds`` of uniform jitter. ``retry_backoff_base_seconds
+        == 0.0`` disables backoff entirely (used by tests that don't
+        monkeypatch ``asyncio.sleep``).
+        """
+        base = self._config.retry_backoff_base_seconds
+        if base <= 0.0:
+            return
+        cap = self._config.retry_backoff_cap_seconds
+        jitter_max = self._config.retry_jitter_seconds
+        sleep_seconds = min(base * (2 ** (attempt - 1)), cap)
+        if jitter_max > 0.0:
+            sleep_seconds += random.uniform(0.0, jitter_max)
+        await asyncio.sleep(sleep_seconds)
 
     async def _run_one_attempt(
         self,

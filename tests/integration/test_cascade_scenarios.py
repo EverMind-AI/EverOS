@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import shutil
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 import anyio
@@ -83,6 +83,12 @@ async def cascade_runtime(
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
+    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
+    # rather than through ``CascadeOrchestrator`` — patch the process-wide
+    # singleton so cascade never hits the fake network target above.
+    # ``test_lap_append_during_handler_no_loss`` re-patches with a slow
+    # variant to force a handler-in-flight race.
+    _patch_embedding_capability(monkeypatch, _StubEmbedder())
 
     await dispose_connection()
     await dispose_engine()
@@ -93,10 +99,20 @@ async def cascade_runtime(
     await ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.default()
+    yield MemoryRoot.resolve()
 
     await dispose_connection()
     await dispose_engine()
+
+
+def _patch_embedding_capability(
+    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
+) -> None:
+    """Patch the process-wide embedding capability singleton to *embedder*."""
+    import everos.component.embedding.accessor as acc
+    from everos.component.embedding import EmbeddingCapability
+
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
 
 
 def _build_orchestrator(
@@ -104,7 +120,6 @@ def _build_orchestrator(
 ) -> CascadeOrchestrator:
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=scan_interval,
@@ -117,32 +132,79 @@ def _build_orchestrator(
 
 
 async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
-    """Wait until ``md_path`` lands in state AND reaches ``status='done'``.
+    """Wait until ``md_path`` lands in state AND *stably* reaches a terminal
+    status (``done``/``failed``).
 
-    Bare ``_wait_drain`` returns immediately when the queue is empty,
-    which is exactly the case right after a single ``append_entries``
-    fires once but the watcher hasn't yet enqueued anything. This helper
-    polls for the row first (i.e. watcher has noticed), then waits for
-    terminal state, then re-checks after a short settle to absorb any
-    last-second re-enqueue (e.g. atomic-replace echo).
+    Bare ``_wait_drain`` returns immediately when the queue is empty, which
+    is exactly the case right after a single ``append_entries`` fires once
+    but the watcher hasn't yet enqueued anything. This helper polls for the
+    row first (i.e. watcher has noticed), then waits for a terminal state
+    that *survives* a short settle window: a last-second re-enqueue (an
+    atomic-replace echo, or a rename's delete event) flips the row back to
+    ``processing``, so we absorb it by waiting for terminal again rather
+    than treating the transient flip as a failure. Bounded by ``deadline``,
+    so a row that never settles still surfaces as a timeout.
     """
     async with asyncio.timeout(deadline):
         while True:
-            row = await md_change_state_repo.get_by_id(md_path)
-            if row is not None:
+            if await md_change_state_repo.get_by_id(md_path) is not None:
                 break
             await asyncio.sleep(0.05)
         while True:
             row = await md_change_state_repo.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
-                break
+                await asyncio.sleep(0.1)  # settle
+                row = await md_change_state_repo.get_by_id(md_path)
+                if row is not None and row.status in ("done", "failed"):
+                    return  # stably terminal
+                # flipped back to processing (re-enqueue) — keep waiting
             await asyncio.sleep(0.05)
-        await asyncio.sleep(0.1)
-        row = await md_change_state_repo.get_by_id(md_path)
-        assert row is not None and row.status in ("done", "failed"), (
-            f"path {md_path} flipped back to {row.status if row else 'NONE'} "
-            f"after reaching done"
-        )
+
+
+async def _wait_projection_quiescent(
+    md_path: str,
+    *,
+    counter: Callable[[str], Awaitable[int]],
+    deadline: float = 30.0,
+    samples: int = 3,
+    interval: float = 0.2,
+) -> int:
+    """Wait until ``md_path``'s projection has stopped moving; return the count.
+
+    Stronger than :func:`_wait_path_done`, and needed whenever the writer keeps
+    appending *while* the worker is mid-handler. There, a terminal row does not
+    mean the file is fully projected: the handler read the md at whatever length
+    it had, marked the row done, and the appends that landed during that call
+    are picked up by a *later* filesystem event. ``_wait_path_done``'s 0.1s
+    settle window is a bet that the re-enqueue has already been delivered —
+    which holds on macOS/fsevents and does not on a loaded Linux/inotify runner,
+    so the assertion fires against a half-projected table for a reason that has
+    nothing to do with the behaviour under test.
+
+    Quiescence instead of a fixed settle: terminal row + empty pending queue +
+    a projected count unchanged across ``samples`` consecutive polls. Real loss
+    still fails the caller's assertion — the count simply converges below the md
+    entry count and stays there.
+    """
+    async with asyncio.timeout(deadline):
+        await _wait_path_done(md_path, deadline=deadline)
+        stable = 0
+        last = await counter(md_path)
+        while True:
+            await asyncio.sleep(interval)
+            row = await md_change_state_repo.get_by_id(md_path)
+            summary = await md_change_state_repo.queue_summary()
+            current = await counter(md_path)
+            settled = (
+                row is not None
+                and row.status in ("done", "failed")
+                and summary.pending == 0
+                and current == last
+            )
+            stable = stable + 1 if settled else 0
+            last = current
+            if stable >= samples:
+                return current
 
 
 async def _wait_paths_done(*md_paths: str, deadline: float = 15.0) -> None:
@@ -486,6 +548,7 @@ async def test_concurrent_writes_different_owners_no_bleed(
 
 async def test_lap_append_during_handler_no_loss(
     cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Writer keeps appending while worker is mid-handler.
 
@@ -500,9 +563,12 @@ async def test_lap_append_during_handler_no_loss(
             await asyncio.sleep(0.05)  # handler takes ~0.05*N entries
             return [0.0] * self.dim
 
+    # Override the fixture's default stub — this test needs latency to
+    # force a handler invocation to overlap later writer appends.
+    _patch_embedding_capability(monkeypatch, _SlowEmbedder())
+
     orchestrator = CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_SlowEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
@@ -544,10 +610,14 @@ async def test_lap_append_during_handler_no_loss(
 
         md_path = _atomic_fact_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
-        await _wait_path_done(md_path, deadline=30.0)
+        # Quiescence, not just a terminal row: the appends that landed during a
+        # handler invocation are projected by a *later* filesystem event, so a
+        # done row can coexist with a half-projected table.
+        lance_rows = await _wait_projection_quiescent(
+            md_path, counter=_count_lance_rows_md, deadline=30.0
+        )
 
         md_entries = await _count_md_entries(absolute)
-        lance_rows = await _count_lance_rows_md(md_path)
         assert md_entries == total, (
             f"writer self-check: expected {total} md entries, got {md_entries}"
         )
@@ -564,7 +634,6 @@ def _build_orchestrator_fast_scanner(memory_root: MemoryRoot) -> CascadeOrchestr
     don't wait 30s for the fallback path."""
     return CascadeOrchestrator(
         memory_root=memory_root,
-        embedder=_StubEmbedder(),
         tokenizer=build_tokenizer(),
         config=CascadeConfig(
             scan_interval_seconds=2.0,

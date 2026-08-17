@@ -16,6 +16,8 @@ External usage:
         # Frontmatter schema chassis
         BaseFrontmatter, UserScopedFrontmatter, AgentScopedFrontmatter,
         DailyLogPathMixin, SkillPathMixin,
+        # Path safety
+        sanitize_dirname,
         # Async SQLite (SQLModel / SA 2.0)
         create_system_engine, create_session_factory, session_scope,
         SQLModel, Field, Relationship, BaseTable, RepoBase,
@@ -49,6 +51,7 @@ from .markdown import find_entry as find_entry
 from .markdown import parse_frontmatter as parse_frontmatter
 from .markdown import parse_structured_entry as parse_structured_entry
 from .markdown import render_structured_entry as render_structured_entry
+from .markdown import sanitize_dirname as sanitize_dirname
 from .markdown import split_entries as split_entries
 from .memory_root import MemoryRoot as MemoryRoot
 from .memory_root import app_dir_name as app_dir_name
@@ -100,6 +103,7 @@ __all__ = [
     "project_dir_name",
     "project_id_from_dir",
     "render_structured_entry",
+    "sanitize_dirname",
     "session_scope",
     "split_entries",
     "touch",

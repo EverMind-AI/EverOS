@@ -49,6 +49,42 @@ lsn:
   never auto-clear these — they represent malformed md the user must
   edit.
 
+### Machine-readable: the `cascade` block on `GET /health`
+
+`GET /health` carries a `cascade` block while the daemon runs (`null`
+for an app built without the cascade lifespan). **Alert on
+`cascade.healthy`** — it is the operational readiness verdict, and
+`reasons` explains a `false` in plain text:
+
+```json
+{"status": "ok", "cascade": {
+  "healthy": false,
+  "reasons": ["version cleanup stalled for kind 'episode' (1200s since its last prune — that table's index dir may grow)"],
+  "pending": 3, "failed_permanent": 1, "failed_retryable": 0,
+  "drain_consecutive_failures": 0, "unrecoverable_total": 4,
+  "optimize_failure_streak": 0, "prune_stale_seconds": 1200.0}}
+```
+
+What flips `healthy` false — and nothing else does:
+
+| Symptom | Signal | Threshold |
+|---|---|---|
+| Writes accepted but not projected to LanceDB | `drain_consecutive_failures` | ≥ 3 in a row |
+| Index maintenance wedged | `optimize_failure_streak` | ≥ 5 in a row (lost commit races excluded — they are expected under churn) |
+| Version cleanup stopped, that table's disk will grow | `prune_stale_seconds` (worst kind, named in `reasons`) | ≥ 900s (3 missed 300s beats) |
+
+`failed_permanent` is **informational only** — it is a data-quality
+backlog awaiting `cascade fix`, so it never flips `healthy` (otherwise
+the signal sits red until a human edits md). Watch it separately.
+
+The HTTP code is a *liveness* signal and stays 200 even when the block
+says `healthy: false` — a degraded projection must not trigger a
+container restart, which fixes neither a bad md file nor disk bloat. If
+the probe itself fails (locked / full SQLite), the block comes back
+`healthy: false` with a `cascade health probe failed: …` reason and the
+counters zeroed — treat zeros alongside that reason as "unknown", not
+as "clean".
+
 ## Recovering from failures: `everos cascade fix`
 
 `cascade fix` (no flag) lists every failed row. With `--apply`:
@@ -79,8 +115,50 @@ everos cascade sync users/u1/episodes/X.md    # re-enqueue + drain
 ```
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
-calls `sync_once` / `drain_once` — no watcher / scanner background
-task. So it's safe to run in parallel with a live `everos server`.
+calls `sync_once` / `drain_once` — no watcher / scanner background task.
+Its drain still runs the same compaction + version-cleanup (`prune`) as
+the daemon, but `prune` uses `delete_unverified=False`, so it never
+deletes a file another process may be mid-commit on. Safe to run in
+parallel with a live `everos server`.
+
+## Rebuild the index: `everos cascade rebuild`
+
+The safe recovery from a drifted or corrupt LanceDB index. It rebuilds
+the whole index from markdown (the source of truth) in one shot:
+
+```bash
+everos cascade rebuild          # prompts for confirmation
+everos cascade rebuild --yes    # non-interactive
+```
+
+> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
+> **drops and recreates** the LanceDB tables. A running daemon holds
+> cached table handles that would keep pointing at (and writing to) the
+> dropped dataset, corrupting the rebuild. This is the one cascade
+> command that is **not** safe to run alongside a live server.
+
+What it does, in order:
+
+1. **Drops** every business LanceDB table (`drop_business_tables`) and
+   evicts them from the connection cache.
+2. **Recreates** them empty from the current schema + FTS indexes
+   (`ensure_business_indexes`).
+3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
+   md file re-enqueues as `added` on the next scan.
+4. **Re-scans + drains** (`sync_once`): re-embeds and re-inserts every
+   md entry.
+
+It deliberately **skips `verify_business_schemas`** — the drift it
+recovers from would otherwise trip that guard on startup before the
+rebuild could run (chicken-and-egg).
+
+Why not a bare `rm`:
+
+| Recovery | Re-populates `done` entries | Preserves `unprocessed_buffer` |
+|---|---|---|
+| `rm -rf .index/lancedb` | ❌ scanner skips `done` rows → empty index | ✅ |
+| `rm -rf .index` | ✅ | ❌ deletes un-extracted messages |
+| `everos cascade rebuild` | ✅ | ✅ |
 
 ## Recovery paths
 
@@ -91,15 +169,31 @@ an on-disk table has columns the current Pydantic schema does not
 declare (or vice versa), the boot fails with:
 
 ```
-LanceDB table 'episode' schema drift: missing=[...], extra=[...].
-The index is rebuildable from md — recover with
-`rm -rf ~/.everos/.index/lancedb` and restart.
+LanceDB table 'episode' schema drift: missing=[...], extra=[...],
+type_drift=[...]. Recover with `everos cascade rebuild` (stop the server
+first): it drops and re-indexes from md, preserving un-extracted buffered
+messages. Restarting will not clear this — the startup migrations only
+alter column nullability, never a column's name or type, so a name/type
+drift never resolves on its own.
 ```
 
-This is the documented recovery: delete the index, restart the
-server, the scanner will pick up every md file on its first sweep and
-the worker repopulates LanceDB. Markdown is the source of truth, so
-no data is lost.
+`verify_business_schemas` compares both the column **names** and their
+**Arrow types** against the current schema. Catching type drift matters:
+an `episode.subject_vector` column left as `string` (or `null`) by an
+older build, while the schema now declares a 1024-d `fixed_size_list`,
+has the same column *name* — so a name-only check would wave it through
+and it would detonate later inside `merge_insert` as an opaque
+`LanceError(IO): Spill has sent an error` (EverOS #337). The type check
+turns that into this clean startup error.
+
+Recover with **`everos cascade rebuild`** (documented above). Do **not** just
+`rm -rf ~/.everos/.index/lancedb`: that clears the vectors but leaves
+`md_change_state` marked `done`, so the scanner skips every already-
+indexed file and the index comes back **empty**. And do **not**
+`rm -rf ~/.everos/.index`: that also deletes `unprocessed_buffer`
+(messages received but not yet extracted — not rebuildable from md).
+`cascade rebuild` is correct on both counts. Markdown is the source of
+truth, so no memory content is lost.
 
 ### inotify watch-limit exhaustion (Linux)
 
@@ -262,7 +356,9 @@ is a deployment-side change with no schema work.
 
 ## What cascade does NOT do (yet)
 
-- **Schema migration**: LanceDB column changes require `rm -rf`.
+- **Schema migration**: LanceDB has no in-place column migration; a
+  schema change is recovered by rebuilding from md (`everos cascade
+  rebuild`), not an automatic `ALTER`.
 - **Parent-id back-link**: Episode rows currently carry
   `parent_id=None`; the writer doesn't preserve the source memcell id
   in the entry inline. Tracked separately.

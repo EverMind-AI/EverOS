@@ -13,6 +13,7 @@ External usage::
 
     from everos.entrypoints.api.lifespans import (
         LLMLifespanProvider,
+        ParserLifespanProvider,
         SqliteLifespanProvider,
         LanceDBLifespanProvider,
         CascadeLifespanProvider,
@@ -24,6 +25,7 @@ from .cascade import CascadeLifespanProvider as CascadeLifespanProvider
 from .lancedb import LanceDBLifespanProvider as LanceDBLifespanProvider
 from .llm import LLMLifespanProvider as LLMLifespanProvider
 from .ome import OmeLifespanProvider as OmeLifespanProvider
+from .parser import ParserLifespanProvider as ParserLifespanProvider
 from .sqlite import SqliteLifespanProvider as SqliteLifespanProvider
 
 __all__ = [
@@ -31,5 +33,6 @@ __all__ = [
     "LLMLifespanProvider",
     "LanceDBLifespanProvider",
     "OmeLifespanProvider",
+    "ParserLifespanProvider",
     "SqliteLifespanProvider",
 ]

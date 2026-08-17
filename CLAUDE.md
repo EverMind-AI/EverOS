@@ -38,7 +38,7 @@ Detailed: [docs/architecture.md](docs/architecture.md).
 ## Engineering practices
 
 - **Coding rules** auto-loaded from [.claude/rules/](.claude/rules/) (10 rules; the three always-loaded ones cover architecture / code-style / language-policy, the rest are path-scoped and load when Claude Code opens a matching file)
-- **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`
+- **Workflows** as slash commands in [.claude/skills/](.claude/skills/) — `/commit`, `/new-branch`, `/pr`, `/release`
 - **Project-level decisions** in [docs/](docs/) (low-frequency, human-judgment-required)
 - **Language policy**: the project targets a global audience — docs and code are English; CJK appears only in test fixtures and locale-suffixed mirrors. Scanned by `make check-cjk`.
 - **Datetime discipline**: never call `datetime.now()` / `time.time()` directly — use `everos.component.utils.datetime`. Enforced by `make check-datetime`.

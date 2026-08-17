@@ -109,3 +109,31 @@ def test_get_logger_with_same_name_returns_equivalent(
     assert isinstance(a, structlog.stdlib.BoundLogger | structlog.BoundLoggerBase) or (
         hasattr(a, "info") and hasattr(b, "info")
     )
+
+
+def _console_renderer_exception_formatter():
+    """Pull the exception formatter out of the configured ProcessorFormatter."""
+    import logging
+
+    configure_logging(level="INFO")
+    for handler in logging.getLogger().handlers:
+        fmt = getattr(handler, "formatter", None)
+        procs = getattr(fmt, "processors", None) or ()
+        for proc in procs:
+            if isinstance(proc, structlog.dev.ConsoleRenderer):
+                return proc._exception_formatter
+    return None
+
+
+def test_traceback_rendering_omits_locals_and_caps_frames() -> None:
+    formatter = _console_renderer_exception_formatter()
+    assert formatter is not None, "ConsoleRenderer not found on the root handler"
+    assert isinstance(formatter, structlog.dev.RichTracebackFormatter)
+    assert formatter.show_locals is False, (
+        "locals rendering is what blew a soak run's logs up to 85MB and can "
+        "print request payloads into them"
+    )
+    assert formatter.max_frames <= 30, (
+        f"max_frames={formatter.max_frames} — deep async stacks render "
+        "thousands of lines per exception"
+    )

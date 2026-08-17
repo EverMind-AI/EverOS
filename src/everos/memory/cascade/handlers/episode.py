@@ -26,16 +26,24 @@ writers must match):
 - ``Summary`` (optional): condensed narrative.
 - ``Content``: full episode narrative — fed to the embedder AND the
   tokenizer for the ``episode_tokens`` BM25 field.
+
+Embedding is a soft dependency: when unavailable, both ``vector`` and
+``subject_vector`` are written as ``None`` and the row stays
+BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
 
 import asyncio
 
+from everos.component.embedding import get_embedding_capability
+from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb import Episode, ParentType, episode_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
+
+logger = get_logger(__name__)
 
 
 class EpisodeHandler(BaseDailyLogHandler):
@@ -72,14 +80,22 @@ class EpisodeHandler(BaseDailyLogHandler):
         subject_text = s.sections.get("Subject", "").strip()
 
         # Embed content and subject concurrently; skip subject embed when absent.
+        capability = get_embedding_capability()
         if subject_text:
             vector, subject_vector = await asyncio.gather(
-                self._deps.embedder.embed(text),
-                self._deps.embedder.embed(subject_text),
+                capability.embed_or_none(text),
+                capability.embed_or_none(subject_text),
             )
         else:
-            vector = await self._deps.embedder.embed(text)
+            vector = await capability.embed_or_none(text)
             subject_vector = None
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=entry.entry_id,
+                reason="embedding_capability_unavailable",
+            )
 
         # BM25 tokenization covers both body and subject keywords.
         tokenize_source = f"{text} {subject_text}" if subject_text else text

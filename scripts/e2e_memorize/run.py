@@ -51,7 +51,7 @@ def _print_header(mode: str, fixture_path: Path, session_id: str) -> None:
     print(f"  everos e2e memorize  ·  mode={mode}")
     print(f"  fixture     : {fixture_path.name}")
     print(f"  session_id  : {session_id}")
-    print(f"  memory root : {MemoryRoot.default().root}")
+    print(f"  memory root : {MemoryRoot.resolve().root}")
     llm_state = "<configured>" if get_llm_client() else "<None — pipeline will skip>"
     print(f"  llm_client  : {llm_state}")
     print("=" * 72)
@@ -59,7 +59,7 @@ def _print_header(mode: str, fixture_path: Path, session_id: str) -> None:
 
 def _list_written_files(session_id: str, mode: str) -> None:
     """Walk memory root and print files touched in this run."""
-    root = MemoryRoot.default().root
+    root = MemoryRoot.resolve().root
     cutoff = time.time() - 600  # files modified in the last 10 min
     print()
     print("─── files modified within the last 10 minutes under memory root ───")

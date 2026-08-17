@@ -43,9 +43,27 @@ async def client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; resets knowledge singletons per test."""
+    """FastAPI app with no lifespan; resets knowledge singletons per test.
+
+    The knowledge router gates every route on the embed + rerank
+    capability singletons (Task 13). This suite exercises DTO
+    validation / route mapping, not the capability gate itself, so
+    both singletons are stubbed available here -- otherwise every
+    request would short-circuit into the 422 gate response instead
+    of reaching the mocked service call under test.
+    """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
+
+    import everos.component.embedding.accessor as embedding_acc
+    import everos.component.rerank.accessor as rerank_acc
+    from everos.component.embedding import EmbeddingCapability
+    from everos.component.rerank import RerankCapability
+
+    monkeypatch.setattr(
+        embedding_acc, "_capability", EmbeddingCapability(provider=object())
+    )
+    monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=object()))
 
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
@@ -515,6 +533,13 @@ async def test_post_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file without parser → UnsupportedModalityError → 415."""
+    # ``parser_available()`` is @lru_cache'd — clear it so this test's
+    # sys.modules patch actually reaches the import check instead of
+    # hitting a stale cached True/False from an earlier test in the
+    # same worker (round-4 review M7).
+    from everos.component.parser import parser_available
+
+    parser_available.cache_clear()
     with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
         resp = await client.post(
             "/api/v1/knowledge/documents",
@@ -523,6 +548,7 @@ async def test_post_binary_file_without_parser_returns_415(
             },
             data={"title": "Binary Test"},
         )
+    parser_available.cache_clear()  # leave clean for the next test
     assert resp.status_code == 415
 
 
@@ -530,6 +556,9 @@ async def test_put_binary_file_without_parser_returns_415(
     client: AsyncClient,
 ) -> None:
     """Non-UTF-8 binary file on PUT → UnsupportedModalityError → 415."""
+    from everos.component.parser import parser_available
+
+    parser_available.cache_clear()
     with patch.dict(sys.modules, {"everalgo.parser": None}):  # type: ignore[dict-item]
         resp = await client.put(
             "/api/v1/knowledge/documents/d_aabbccddee01",
@@ -538,4 +567,101 @@ async def test_put_binary_file_without_parser_returns_415(
             },
             data={"title": "Binary Test"},
         )
+    parser_available.cache_clear()
     assert resp.status_code == 415
+
+
+# ── _looks_like_utf8_text: plain-text short-circuit ─────────────────────────
+
+
+class _UploadStub:
+    """Minimal UploadFile-shaped stand-in for _looks_like_utf8_text."""
+
+    def __init__(self, mime: str | None, filename: str | None) -> None:
+        self.content_type = mime
+        self.filename = filename
+
+
+@pytest.mark.parametrize(
+    "mime, filename, expected",
+    [
+        # Explicit plain-text mimes: short-circuit
+        ("text/markdown", "note.md", True),
+        ("text/plain", "note.txt", True),
+        ("TEXT/MARKDOWN", "note.md", True),  # case-insensitive
+        ("text/x-rst", "readme.rst", True),
+        # HTML must NOT short-circuit — needs everalgo's clean_html_for_llm
+        # (strips <script>/<style>/<nav>/comments) + 1 MiB cap. Was a
+        # regression when the whitelist used ``startswith("text/")``.
+        ("text/html", "page.html", False),
+        ("TEXT/HTML", "page.html", False),
+        # Missing / octet-stream mime + known plaintext extension: OK
+        ("application/octet-stream", "note.md", True),
+        (None, "note.md", True),
+        ("", "notes.rst", True),
+        # Unknown extension: fall through
+        ("application/octet-stream", "note.bin", False),
+        (None, "note.bin", False),
+        # Non-text mimes always route to parser
+        ("application/pdf", "doc.pdf", False),
+        ("image/png", "img.png", False),
+        ("application/json", "data.json", False),
+        ("text/xml", "data.xml", False),  # future text/* additions default to safe
+    ],
+)
+def test_looks_like_utf8_text_matrix(
+    mime: str | None, filename: str, expected: bool
+) -> None:
+    from everos.entrypoints.api.routes.knowledge import _looks_like_utf8_text
+
+    assert _looks_like_utf8_text(_UploadStub(mime, filename)) is expected  # type: ignore[arg-type]
+
+
+async def test_utf8_short_circuit_skips_parser_when_available(
+    client: AsyncClient,
+) -> None:
+    """Markdown upload must NOT call the parser even when parser_available.
+
+    Regression cover: prior _parse_upload went straight into aparse_file
+    whenever ``parser_available()`` returned True, forcing markdown
+    uploads to require a [multimodal] LLM config. The short-circuit
+    keeps text/* + known-extension uploads on the UTF-8 fast path.
+    """
+    from everos.service import CreateDocumentResult
+
+    result = CreateDocumentResult(
+        doc_id="d_aabbccddee01",
+        category_id="Technology",
+        topic_count=1,
+        source_name="note.md",
+        md_path="/tmp/note.md",
+    )
+    # `parser_available` / `aparse_file` are locally imported inside
+    # _parse_upload (deferred), so patch the source modules — patches on
+    # the route module namespace won't intercept a `from … import` that
+    # happens at call time.
+    with (
+        patch(
+            "everos.component.parser.parser_available",
+            return_value=True,
+        ),
+        patch(
+            "everos.component.parser.aparse_file",
+            new=AsyncMock(side_effect=AssertionError("parser must not be called")),
+            create=True,
+        ),
+        patch(
+            f"{_ROUTE_MOD}._build_extractor",
+            return_value=MagicMock(),
+        ),
+        patch(
+            f"{_ROUTE_MOD}.create_document",
+            new=AsyncMock(return_value=result),
+        ),
+    ):
+        resp = await client.post(
+            "/api/v1/knowledge/documents",
+            files={"file": ("note.md", b"# Hello\n\nplain text.", "text/markdown")},
+            data={"title": "MD Test"},
+        )
+    assert resp.status_code == 201

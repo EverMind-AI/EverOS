@@ -26,11 +26,11 @@ business semantics the raw spec does not carry.
   - [SearchMethod](#searchmethod)
   - [GetMemoryType](#getmemorytype)
 - [Endpoints](#endpoints)
-  - [POST /api/v2/memory/add](#post-apiv1memoryadd)
-  - [POST /api/v2/memory/flush](#post-apiv1memoryflush)
-  - [POST /api/v2/memory/search](#post-apiv1memorysearch)
-  - [POST /api/v2/memory/get](#post-apiv1memoryget)
-  - [POST /api/v2/ome/trigger](#post-apiv1ometrigger)
+  - [POST /api/v2/memory/add](#post-apiv2memoryadd)
+  - [POST /api/v2/memory/flush](#post-apiv2memoryflush)
+  - [POST /api/v2/memory/search](#post-apiv2memorysearch)
+  - [POST /api/v2/memory/get](#post-apiv2memoryget)
+  - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
   - [Knowledge endpoints](#knowledge-endpoints)
 - [OpenAPI spec source](#openapi-spec-source)
 
@@ -52,11 +52,13 @@ but are intentionally outside this reference — they are runtime probes
 for deployment, not part of the application contract.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
-business endpoint is **also** served under `/api/v1`, which is retained as a
-permanent, backward-compatible alias: the two prefixes resolve to the same
-handlers with identical request/response contracts. Existing `/api/v1`
-integrations keep working unchanged; new integrations should use `/api/v2`.
-Swap the prefix in any example below to reach the same endpoint under v1.
+business endpoint is **also** served under `/api/v1`, kept as a legacy
+compatibility alias: the two prefixes resolve to the same handlers with
+identical request/response contracts, so existing `/api/v1` integrations keep
+working today. The alias carries no long-term guarantee — it may be removed in
+a future major release, and it will be announced in the changelog with a
+deprecation window before that happens. Write new integrations against
+`/api/v2`, and migrate existing ones when convenient.
 
 ### Content type
 
@@ -1068,8 +1070,32 @@ Manually trigger a registered OME strategy.
 
 | Field | Type | Notes |
 |---|---|---|
-| `status` | `"ok" \| "timeout"` | Whether the strategy completed within the timeout |
+| `status` | `"ok" \| "timeout" \| "not_dispatched"` | `ok` = every dispatched run settled — a dead-lettered run still counts as settled (see `runs[*].error`); `timeout` = at least one run had not settled when `timeout` elapsed; `not_dispatched` = no strategy was dispatched (see below) |
 | `name` | `string` | Echoes the requested strategy name |
+| `dispatched` | `int` | Number of strategy routes enqueued. `0` iff `status == "not_dispatched"` |
+| `runs` | `list[RunSummary]` | One entry per strategy run *attempt*, not per dispatched route: `{run_id: string, status: string, error?: string}`. A strategy that retried before settling contributes multiple entries sharing one `event_id`. `status` is one of `running` / `success` / `failed` / `dead_letter` / `crashed`. Includes dead-lettered runs |
+
+**`not_dispatched`** means every subscriber was rejected by one of the
+four dispatch gates (`_routes_to` / `enabled` / `applies_to` /
+`Counter`). The most common cause is forgetting `"force": true` on a
+strategy that is `enabled=false` in `ome.toml` — e.g. triggering
+`reflect_episodes` without `force` while it is disabled in config
+returns `{"status": "not_dispatched", "dispatched": 0, "runs": []}`
+instead of an error.
+
+> `status: "ok"` means all dispatched strategy runs settled — including
+> runs that dead-lettered (their errors are in `runs[*].error`). It does
+> **not** mean the LanceDB index has caught up. Markdown is written
+> synchronously; the index syncs asynchronously (see
+> [Eventual consistency](#eventual-consistency)).
+>
+> If you need read-your-write semantics, poll `GET /health`'s
+> `cascade.pending` field until it reads `0` on two consecutive samples
+> (a single zero can be a false convergence — the watcher-input window
+> can briefly report an empty queue between md write and enqueue).
+
+See [docs/openapi.json](openapi.json) for the exact generated schema
+(`TriggerResponse` / `RunSummary`) behind this table.
 
 #### Errors
 

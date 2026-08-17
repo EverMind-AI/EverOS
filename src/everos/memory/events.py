@@ -65,18 +65,26 @@ class EpisodeExtracted(BaseEvent):
 class AgentCaseExtracted(BaseEvent):
     """Fired by ``extract_agent_case`` after the AgentCase md is written.
 
-    Carries ``task_intent`` so the skill-clustering strategy can embed it
-    directly, and ``quality_score`` so the strategy can short-circuit
-    before any embedding work when the case is below algo's quality floor
-    (``AgentCaseExtractor`` also short-circuits internally; this is the
-    upstream gate that saves an LLM call too). ``case_timestamp_ms``
-    drives the algo-side ``Cluster.last_ts`` for the time-window filter
-    in :func:`everalgo.clustering.cluster_by_geometry`.
+    Carries the full case body (``task_intent`` / ``approach`` / ``key_insight``)
+    so downstream strategies do not need to read LanceDB — they receive strong-
+    consistency data on the event bus, avoiding the cascade lag that made
+    ``extract_agent_skill`` retry-then-dead-letter on every run.
+
+    ``quality_score`` lets ``trigger_skill_clustering`` short-circuit before any
+    embedding work when the case is below algo's quality floor.
+    ``case_timestamp_ms`` drives the algo-side ``Cluster.last_ts`` for the
+    time-window filter in :func:`everalgo.clustering.cluster_by_geometry`.
     """
 
     memcell_id: str
     case_entry_id: str
     task_intent: str
+    approach: str = ""
+    """Case's Approach section verbatim. Defaults empty for back-compat with
+    pending 1.2.2 events in the OME run_record queue."""
+    key_insight: str | None = None
+    """Case's optional KeyInsight section. Defaults None for the same
+    back-compat reason as ``approach``."""
     quality_score: float
     case_timestamp_ms: int
     agent_id: str
@@ -103,8 +111,11 @@ class SkillClusterUpdated(BaseEvent):
     """Fired after the agent-case cluster strategy has merged a new
     case into a cluster.
 
-    Drives the agent-skill extraction strategy; ``cluster_id`` is the
-    new or merged cluster the source case now belongs to.
+    Drives the agent-skill extraction strategy. Carries a snapshot of the
+    triggering case body (``task_intent`` / ``approach`` / ``key_insight`` /
+    ``quality_score`` / ``case_timestamp_ms``) plus ``case_vector`` (already
+    embedded by ``trigger_skill_clustering``) so ``extract_agent_skill`` can
+    build its algo input without a LanceDB probe that races cascade.
     """
 
     case_entry_id: str
@@ -112,3 +123,14 @@ class SkillClusterUpdated(BaseEvent):
     agent_id: str
     app_id: str = "default"
     project_id: str = "default"
+    task_intent: str = ""
+    """Case task_intent for algo-side rendering. Default empty for back-compat
+    with 1.2.2 payloads in the OME run_record queue; 1.2.3+ emitters populate it."""
+    approach: str = ""
+    key_insight: str | None = None
+    quality_score: float = 0.0
+    case_timestamp_ms: int = 0
+    case_vector: list[float] | None = None
+    """Case task_intent embedding, produced by trigger_skill_clustering when it
+    embeds for cluster matching. Passed through so extract_agent_skill does not
+    need a second embedding call for the > MAX_SKILLS_IN_PROMPT top-k branch."""

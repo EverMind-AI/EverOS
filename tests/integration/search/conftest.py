@@ -224,15 +224,7 @@ async def search_client(
     # The search service has its own module-level singletons; reset
     # those too so re-attach is clean.
     search_svc = importlib.import_module("everos.service.search")
-    for attr in (
-        "_manager",
-        "_embedding",
-        "_reranker",
-        "_llm_client",
-        "_embedding_resolved",
-        "_rerank_resolved",
-        "_llm_resolved",
-    ):
+    for attr in ("_manager", "_llm_client", "_llm_resolved"):
         if hasattr(search_svc, attr):
             monkeypatch.setattr(
                 search_svc,
@@ -240,6 +232,18 @@ async def search_client(
                 None if not attr.endswith("_resolved") else False,
                 raising=False,
             )
+
+    # Embedding / rerank now route through the process-wide capability
+    # accessors (``everos.component.{embedding,rerank}.accessor``) instead
+    # of module-level singletons on ``everos.service.search`` — reset those
+    # singletons directly so re-attach is clean. (Also covered by the
+    # autouse fixtures in ``tests/conftest.py``; kept here for locality with
+    # the rest of this fixture's singleton reset.)
+    import everos.component.embedding.accessor as embedding_acc
+    import everos.component.rerank.accessor as rerank_acc
+
+    monkeypatch.setattr(embedding_acc, "_capability", None, raising=False)
+    monkeypatch.setattr(rerank_acc, "_capability", None, raising=False)
 
     from everos.entrypoints.api.app import create_app
 

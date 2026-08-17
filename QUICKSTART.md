@@ -1,292 +1,276 @@
 # Quickstart
 
-> Five minutes from zero to "I added a conversation, queried it back, and
-> can read it as plain Markdown."
+> Five minutes from one OpenRouter API key to durable Markdown memory and
+> keyword recall.
 
-EverOS runs as a **service** — start the server, then call the HTTP API.
-There is no in-process library mode; an `everos` server is always in
-front of your agent.
+EverOS runs as a local service. The minimum production path needs only an LLM:
+configure one OpenRouter key, start the server, then call the HTTP API.
+
+## What the one-key setup includes
+
+With only `[llm]` configured, EverOS can:
+
+- start the server;
+- extract conversations into durable Markdown;
+- keep the local index in sync; and
+- retrieve memories with keyword search.
+
+Embedding, rerank, knowledge, and multimodal providers are optional upgrades.
+They are not required for this walkthrough.
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **API keys** for three capabilities: a chat LLM (memory extraction),
-  an embedding model (vector retrieval), and a reranker. Any
-  OpenAI-compatible endpoint works.
+- Python 3.12+
+- One [OpenRouter API key](https://openrouter.ai/keys)
 
 ## 1. Install
 
-**From PyPI** (users):
+From PyPI:
 
 ```bash
 pip install everos
-# or:  uv pip install everos
+# or: uv pip install everos
 ```
 
-**From source** (contributors / developers):
+From source:
 
 ```bash
 git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
-uv sync          # install all deps into .venv
+uv sync
+source .venv/bin/activate
 ```
 
-> **Note:** source install creates a `.venv` virtualenv. Subsequent
-> `everos` commands need either `uv run everos ...` or activate the venv
-> first (`source .venv/bin/activate`).
+You can also prefix source-checkout commands with `uv run` instead of
+activating the virtual environment.
 
-## 2. Configure
+## 2. Try the standalone demo — no key required
+
+Before initialization or provider setup, run:
 
 ```bash
-everos init                        # default root: ~/.everos
-everos init --root /data/everos    # or specify a custom root
+everos demo
 ```
 
-> **Root directory** — defaults to `~/.everos`. Use `--root <path>` to
-> relocate; all subsequent commands (`server start`, `cascade status`,
-> etc.) must use the matching `--root`. Any setting in `everos.toml` can
-> also be overridden via `EVEROS_*` environment variables for containers
-> and CI.
+The command asks for one memory and one recall question, then opens a local
+terminal visualizer. It is hardcoded and completely decoupled from the real
+workflow: it needs no API key, does not start or call the EverOS server, and
+does not write to your real memory root.
 
-This creates `everos.toml` and `ome.toml` under the root directory.
-Open `everos.toml` and fill in three sections — here's the minimum
-viable config:
+Press `r` to replay and `q` to quit. For a copyable non-interactive preview:
+
+```bash
+everos demo --plain
+```
+
+See [docs/everos-demo.md](docs/everos-demo.md) for the visualizer's scope.
+
+## 3. Initialize EverOS
+
+```bash
+everos init
+```
+
+This creates two files under the default memory root:
+
+```text
+~/.everos/
+├── everos.toml    # provider and server configuration
+└── ome.toml       # memory strategy configuration
+```
+
+To use another root, run `everos init --root <path>` and pass the same
+`--root <path>` to subsequent commands.
+
+## 4. Add your OpenRouter key
+
+Open `~/.everos/everos.toml`. The generated
+`[llm]` section already contains the recommended model and base URL; replace
+only the empty `api_key`:
 
 ```toml
 [llm]
-model    = "gpt-4.1-mini"                        # or your preferred model
-base_url = "https://openrouter.ai/api/v1"        # any OpenAI-compatible endpoint
-api_key  = "sk-..."                               # your API key
-
-[embedding]
-model    = "Qwen/Qwen3-Embedding-4B"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key  = "..."
-
-[rerank]
-provider = "deepinfra"
-model    = "Qwen/Qwen3-Reranker-4B"
-base_url = "https://api.deepinfra.com/v1/inference"
-api_key  = "..."
+model = "openai/gpt-4.1-mini"
+api_key = "<OPENROUTER_API_KEY>"
+base_url = "https://openrouter.ai/api/v1"
 ```
 
-The generated file pre-fills recommended `model` and `base_url`
-defaults — just drop in your API keys. Any OpenAI-compatible endpoint
-works.
+Leave `[embedding]`, `[rerank]`, and `[multimodal]` unchanged for this
+walkthrough. Their empty keys do not prevent the server from starting; this
+setup uses keyword search.
 
-> **Multimodal** (`[multimodal]`) is optional — only needed when
-> ingesting image / pdf / audio content items. See
-> [docs/multimodal.md](docs/multimodal.md) for setup.
-
-
-## 3. Start the server
-
-Check your file descriptor limit — EverOS opens many LanceDB segment
-files under concurrent search + indexing. Platform defaults:
-**macOS 256** · **Linux 1024** · **Windows 8192**. If yours is below
-4096, raise it before starting:
-
-Run these in the **same terminal** where you will start the server —
-`ulimit` is per-shell-session, not global:
+## 5. Start the server
 
 ```bash
-ulimit -n            # check current limit
-ulimit -n 4096       # raise if needed
-everos server start [--root <path>]   # must be in the same session
+everos server start
 ```
 
-> **No side effects** — `ulimit -n` only raises the per-process ceiling.
-> It does not pre-allocate memory or file handles, and has zero
-> performance cost. For Linux production, set `LimitNOFILE=65536` in
-> your systemd unit file.
-
-You should see:
-
-```
-starting everos on 127.0.0.1:8000
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-```
-
-The server runs in the foreground. **Open a second terminal** for the
-steps below.
-
-Verify it's up:
+The server runs in the foreground on `http://127.0.0.1:8000`. Open a second
+terminal and verify it:
 
 ```bash
 curl http://127.0.0.1:8000/health
-# {"status":"ok"}
 ```
 
-## 4. Add a conversation
+The response includes the complete capability matrix. In the one-key setup,
+the important fields look like this:
 
-Send messages to the server — one at a time or in batches. Each batch
-belongs to a `session_id`, which represents one conversation thread.
-Timestamps are Unix epoch in **milliseconds** (UTC).
+```json
+{
+  "status": "ok",
+  "capabilities": {
+    "llm": true,
+    "embed": false,
+    "rerank": false
+  },
+  "disabled_features": [
+    "vector_search",
+    "hybrid_search",
+    "agentic_search",
+    "reflection",
+    "skill_extraction",
+    "knowledge"
+  ]
+}
+```
 
-First, a chat about climbing:
+The actual response also includes version, multimodal/parser capabilities, and
+cascade readiness.
+
+> [!NOTE]
+> EverOS opens local index files during concurrent search and indexing. If you
+> encounter file-descriptor errors, run `ulimit -n 4096` in the same shell
+> before starting the server.
+
+## 6. Add a conversation
+
+Business endpoints live under `/api/v2`. The `/api/v1` prefix remains a legacy
+compatibility alias, but new integrations should use `/api/v2`.
+
+Timestamps are Unix epoch milliseconds in UTC:
 
 ```bash
 TS=$(($(date +%s)*1000))
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
+    \"app_id\": \"default\",
+    \"project_id\": \"default\",
     \"messages\": [
-      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $TS,              \"content\": \"I just got back from a week in Yosemite. The climbing was incredible.\"},
-      {\"sender_id\": \"agent1\", \"role\": \"assistant\", \"timestamp\": $((TS+10000)),  \"content\": \"That sounds amazing! Which routes did you do?\"},
-      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+20000)),  \"content\": \"Mostly cracks on El Cap. I go every spring — it's my favorite season there.\"}
-    ]
-  }"
-# → status: "accumulated"
-```
-
-Now the topic shifts to work:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
-  -H 'Content-Type: application/json' \
-  -d "{
-    \"session_id\": \"demo-001\",
-    \"messages\": [
-      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+60000)),  \"content\": \"By the way, I switched to biking to work last month. Loving it so far.\"},
-      {\"sender_id\": \"agent1\", \"role\": \"assistant\", \"timestamp\": $((TS+70000)),  \"content\": \"How long is your commute?\"},
-      {\"sender_id\": \"alice\",  \"role\": \"user\",      \"timestamp\": $((TS+80000)),  \"content\": \"About 25 minutes. I stop at Blue Bottle in SOMA for coffee most mornings.\"}
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $TS, \"content\": \"I love climbing in Yosemite every spring.\"},
+      {\"sender_id\": \"agent1\", \"role\": \"assistant\", \"timestamp\": $((TS+10000)), \"content\": \"Which routes do you enjoy most?\"},
+      {\"sender_id\": \"alice\", \"role\": \"user\", \"timestamp\": $((TS+20000)), \"content\": \"Mostly the cracks on El Cap.\"}
     ]
   }"
 ```
 
-Response:
+Messages are buffered by session until EverOS detects a boundary or the client
+explicitly flushes the session.
 
-```json
-{
-    "data": {
-        "message_count": 3,
-        "status": "extracted"
-    }
-}
-```
-
-EverOS detected a topic shift (climbing → commute) and automatically
-extracted the earlier conversation into memory.
-
-The `status` field tells you what happened:
-
-| Status | Meaning |
-|---|---|
-| `accumulated` | Messages buffered, still part of the same topic. |
-| `extracted` | Topic shift detected — memory extracted from the buffer. |
-
-> For the full API contract, see [docs/openapi.json](docs/openapi.json).
-
-## 5. Flush (manual extraction)
-
-If you want to extract memory without waiting for a topic shift — for
-example at the end of a session — call `/flush`:
+## 7. Flush at the end of the session
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-001"}'
+  -d '{
+    "session_id": "demo-001",
+    "app_id": "default",
+    "project_id": "default"
+  }'
 ```
 
-```json
-{
-    "data": {
-        "status": "extracted"
-    }
-}
-```
+A successful flush returns `data.status` as `"extracted"`. The extraction is
+written to Markdown, then the cascade worker projects it into the local index.
 
-This forces extraction of whatever is still in the buffer.
-
-## 6. Search
+## 8. Search with the one-key method
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
-    "query": "Where do I like to climb?",
+    "app_id": "default",
+    "project_id": "default",
+    "query": "Where does Alice like to climb?",
+    "method": "keyword",
     "top_k": 5
   }'
 ```
 
-Response (trimmed):
+The response should contain an episode whose summary mentions Yosemite or El
+Cap. If the first search is empty, wait a moment for cascade indexing and retry.
 
-```json
-{
-    "data": {
-        "episodes": [
-            {
-                "id": "alice_ep_20260528_00000002",
-                "summary": "... Alice shared that she loves climbing in Yosemite every spring ...",
-                "score": 0.628,
-                "atomic_facts": [
-                    {
-                        "content": "Alice said she loves climbing in Yosemite every spring.",
-                        "score": 0.628
-                    }
-                ]
-            }
-        ]
-    }
-}
-```
+> [!IMPORTANT]
+> Keep `"method": "keyword"` when only the LLM is configured. The API default
+> is hybrid, which requires embedding and returns HTTP 422 in the one-key tier.
 
-Hybrid retrieval (BM25 + vector + scalar) returns the matching episode
-with its atomic facts nested under it.
+Keyword retrieval returns matching episodes from the local BM25 index. Atomic
+facts are created by an embedding-dependent strategy, so they are not expected
+in the OpenRouter Tier 1 response.
 
-## 7. Your memory is just Markdown
+## 9. Read the Markdown source of truth
 
-This is what makes EverOS different — memory persists as plain Markdown:
+Your extracted memory is a normal Markdown file under the memory root:
 
-```
-<root>/                                  ← ~/.everos or your --root path
-├── default_app/                        ← app_id ("default" → "default_app")
-│   └── default_project/                ← project_id ("default" → "default_project")
-│       ├── users/<user_id>/
-│       │   ├── user.md                 ← profile
-│       │   ├── episodes/               ← daily-log episodes
-│       │   ├── .atomic_facts/          ← nested facts (dot-hidden)
-│       │   └── .foresights/            ← predictive memory (dot-hidden)
+```text
+~/.everos/
+├── default_app/
+│   └── default_project/
+│       ├── users/alice/
+│       │   ├── user.md
+│       │   ├── episodes/
+│       │   ├── .atomic_facts/
+│       │   └── .foresights/
 │       ├── agents/<agent_id>/
 │       │   ├── agent.md
-│       │   ├── .cases/                 ← task cases
-│       │   └── skills/                 ← procedural memories
-│       └── knowledge/                  ← shared knowledge base
-├── everos.toml                         ← provider config
-├── ome.toml                            ← strategy config (hot-reloaded)
-├── .index/                             ← derived indexes (rebuildable from md)
-│   ├── sqlite/system.db
-│   └── lancedb/
-└── .tmp/
+│       │   ├── .cases/
+│       │   └── skills/
+│       └── knowledge/
+├── everos.toml
+├── ome.toml
+└── .index/
+    ├── sqlite/system.db
+    └── lancedb/
 ```
 
-Every memory entry is a plain Markdown file you can directly read and
-edit — no database driver needed.
+Markdown is canonical; SQLite and LanceDB are derived indexes. You can read,
+edit, diff, and version the memory files without a database client.
 
-## Stopping the server
+## Upgrade capabilities when you need them
 
-`Ctrl+C` in the server terminal.
+The generated `everos.toml` already includes commented guidance and default
+models for the optional providers.
+
+| Configuration | Available capabilities |
+| --- | --- |
+| `[llm]` only | Add, flush, Markdown persistence, cascade sync, keyword search |
+| Add `[embedding]` | Vector/user hybrid search, reflection, skill extraction |
+| Add `[rerank]` too | Agentic search, default agent hybrid search, Knowledge Wiki |
+| Add `[multimodal]` and install `everos[multimodal]` | Image, PDF, audio, and office-file ingestion |
+
+EverOS reports unavailable features through `/health`. Requests that require a
+missing provider fail fast with a descriptive HTTP 422 instead of silently
+degrading to a different search method.
+
+You can replace OpenRouter with another OpenAI-compatible LLM endpoint by
+changing the `[llm]` model, base URL, and key.
+
+## Stop the server
+
+Press `Ctrl+C` in the server terminal.
 
 ## Next steps
 
-- **Integrate into your agent** — wrap `/add`, `/flush`, `/search` in a
-  thin HTTP client and call them from your agent loop.
-- **App + project scope** — pass `app_id` / `project_id` in your API
-  requests to partition memory spaces inside one server (defaults to
-  `"default"` when omitted).
-- **Knowledge base** — upload documents via
-  `/api/v1/knowledge/documents` and search with hybrid retrieval. See
-  [docs/knowledge.md](docs/knowledge.md).
-- **Reflection** — offline memory consolidation; enable in `ome.toml`.
-  See [docs/reflection.md](docs/reflection.md).
-- **Multimodal** — ingest image / pdf / audio / office documents. See
-  [docs/multimodal.md](docs/multimodal.md).
-- **Search modes** — four methods (`HYBRID` / `KEYWORD` / `VECTOR` /
-  `AGENTIC`) with a filter DSL. See [docs/openapi.json](docs/openapi.json)
-  for the full API schema.
-- **Architecture** — [docs/architecture.md](docs/architecture.md) for
-  DDD layering; [docs/storage_layout.md](docs/storage_layout.md) for
-  on-disk layout.
-- **Found a bug?** — [open an issue](CONTRIBUTING.md).
+- Integrate `/add`, `/flush`, and `/search` into your agent loop.
+- Partition memory with `app_id` and `project_id`.
+- Explore the full API contract in [docs/openapi.json](docs/openapi.json).
+- Configure advanced retrieval in the generated `everos.toml`.
+- Run `everos demo --live` after starting a server with embedding configured;
+  unlike the standalone demo in step 2, live mode calls the real API and uses
+  hybrid search.
+- Read [docs/architecture.md](docs/architecture.md) and
+  [docs/storage_layout.md](docs/storage_layout.md).
+- Set up multimodal ingestion with [docs/multimodal.md](docs/multimodal.md).
+- Report problems through [CONTRIBUTING.md](CONTRIBUTING.md).

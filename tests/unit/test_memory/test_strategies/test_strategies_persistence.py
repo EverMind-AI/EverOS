@@ -91,7 +91,7 @@ async def test_atomic_facts_round_trip(
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(af_mod, "_writer", None, raising=False)
 
@@ -137,7 +137,7 @@ async def test_foresights_round_trip(
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
@@ -179,7 +179,7 @@ async def test_agent_case_round_trip(
     ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
 
     monkeypatch.setattr(
-        MemoryRoot, "default", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
     monkeypatch.setattr(ac_mod, "_writer", None, raising=False)
 

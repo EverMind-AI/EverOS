@@ -72,13 +72,12 @@ class Episode(BaseLanceTable):
     embedding-relevant fields changed — the entry is skipped (no
     re-upsert, no re-embed). Inline audit fields (owner_id /
     session_id / timestamp / parent_id / sender_ids) are intentionally
-    NOT in the hash so editing them doesn't waste an embedding call.
-    See ``16_cascade_impl_design.md`` §3.3."""
+    NOT in the hash so editing them doesn't waste an embedding call."""
 
     deprecated_by: str | None = None
     """Soft-delete marker set by Reflection when this episode is
     consolidated into a cluster. Value is the cluster entry_id that
     supersedes this row. ``NULL`` means the row is still active."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
     subject_vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

@@ -25,15 +25,18 @@ if TYPE_CHECKING:
     from everos.service.knowledge import KnowledgeExtractor
 
 from everalgo.types import ParsedContent
-from fastapi import APIRouter, Path, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, UploadFile
 from fastapi.params import Form
 from pydantic import BaseModel, Field
 
+from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
+from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.errors import (
     InvalidInputError,
+    ProviderNotConfiguredError,
     UnsupportedModalityError,
 )
 from everos.core.persistence import MemoryRoot
@@ -59,6 +62,61 @@ from everos.service import (
 # a shared module would be cleaner but is out of scope for this PR.
 from .memorize import PathSafeId, SuccessEnvelope
 
+_KNOWLEDGE_FEATURE = "knowledge"
+
+
+def _require_knowledge_capabilities() -> None:
+    """Per-endpoint gate: knowledge writes/search require embed + rerank.
+
+    **Why the gate lives at the HTTP layer, not at cascade registry**:
+    cascade handlers register **unconditionally** now (see
+    ``memory/cascade/registry.py:177-194`` — the earlier atomic-pair
+    gate that lived there was removed because it broke the delete
+    path: a Tier-3 → Tier-2/1 downgrade would strand existing knowledge
+    documents with no handler to process their deletion). Handlers
+    body-guard the embed/rerank branches internally instead, so the
+    delete path stays reachable across tier changes.
+
+    Because the cascade layer no longer refuses the write, the HTTP
+    layer is now the *only* place that enforces "knowledge features
+    require Tier 3". Without this gate a Tier-1/2 upload would:
+
+    - accept the multipart request → md write succeeds
+    - enqueue for cascade → cascade handler body-guards on
+      ``get_embedding_capability().available`` and no-ops the
+      index write
+    - client sees 201 but the doc is permanently keyword-only /
+      unsearchable
+
+    Returning 422 up front is the honest answer.
+
+    **Attached per-endpoint (not router-wide)** so read / list /
+    delete / metadata-patch routes stay reachable after a Tier-3 →
+    Tier-2/1 downgrade: users can still inspect and clean up their
+    existing docs (rename, recategorize, delete) even when the
+    providers that would embed or rerank new content are no longer
+    configured. Title / category patches only rewrite md frontmatter
+    (and move the doc directory when category changes) — no embed or
+    rerank code runs on that path.
+
+    Checks both capabilities (not just embedding) up front so a client
+    missing only rerank gets a rerank-specific message rather than
+    passing this gate and failing later inside search.
+    """
+    if not get_embedding_capability().available:
+        raise ProviderNotConfiguredError(
+            provider="embedding",
+            feature=_KNOWLEDGE_FEATURE,
+        )
+    if not get_rerank_capability().available:
+        raise ProviderNotConfiguredError(
+            provider="rerank",
+            feature=_KNOWLEDGE_FEATURE,
+        )
+
+
+# Router prefix is /knowledge; app.py mounts it under both /api/v1 and
+# /api/v2 (see create_app — v1 retained as a permanent alias).
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
@@ -276,6 +334,61 @@ def _reject_oversized_upload(file: UploadFile) -> None:
         raise InvalidInputError(f"Uploaded file exceeds the {limit_mib:.1f} MiB limit.")
 
 
+_PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(
+    {"md", "txt", "rst", "markdown", "text"}
+)
+# Explicit mime allowlist. ``text/*`` prefix matching would let
+# ``text/html`` (and any future ``text/xml`` etc.) bypass the parser and
+# feed raw markup — script tags, HTML comments, style blocks — straight
+# into the knowledge-extraction LLM. everalgo's HTML parser runs
+# ``clean_html_for_llm`` (strips ``<script>/<style>/<nav>/<iframe>`` +
+# comments) and caps output at 1 MiB — semantics we must NOT skip.
+_PLAIN_TEXT_MIMES: frozenset[str] = frozenset(
+    {"text/plain", "text/markdown", "text/x-rst", "text/x-markdown"}
+)
+
+
+def _looks_like_utf8_text(file: UploadFile) -> bool:
+    """Decide whether to skip the parser and go straight to UTF-8 decode.
+
+    A file is treated as plain UTF-8 text when its ``content_type`` is on
+    ``_PLAIN_TEXT_MIMES`` (browsers set ``text/markdown`` / ``text/plain``
+    for ``.md`` / ``.txt`` uploads), or when the mime is missing /
+    ``application/octet-stream`` (typical for ``curl -F file=@x.md``
+    without an explicit ``type=`` hint) AND the filename extension is on
+    the extension allowlist.
+
+    ``text/html`` is deliberately EXCLUDED — HTML uploads must go through
+    the parser so ``clean_html_for_llm`` can strip active markup and cap
+    the payload; the ``text/*`` prefix match this file used to carry
+    would have let raw HTML (including ``<script>`` bodies and
+    ``<!-- prompt injection -->`` comments) reach the LLM as-is.
+    """
+    mime = (file.content_type or "").lower()
+    if mime in _PLAIN_TEXT_MIMES:
+        return True
+    if mime and mime != "application/octet-stream":
+        return False
+    if file.filename and "." in file.filename:
+        return file.filename.rsplit(".", 1)[-1].lower() in _PLAIN_TEXT_EXTENSIONS
+    return False
+
+
+def _decode_as_utf8(raw_bytes: bytes) -> ParsedContent:
+    """Decode ``raw_bytes`` as UTF-8 or raise a caller-friendly error."""
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UnsupportedModalityError(
+            "File is not UTF-8 text. "
+            "Install everos[multimodal] for PDF/HTML/DOCX support."
+        ) from exc
+    parsed = ParsedContent(text=text)
+    if not parsed.text or not parsed.text.strip():
+        raise InvalidInputError("Uploaded file has no valid content.")
+    return parsed
+
+
 async def _parse_upload(
     file: UploadFile, *, raw_bytes: bytes | None = None
 ) -> ParsedContent:
@@ -293,6 +406,12 @@ async def _parse_upload(
 
     if raw_bytes is None:
         raw_bytes = await file.read()
+
+    # Short-circuit plain-text uploads even when everalgo.parser is
+    # installed — the parser path depends on [multimodal] being
+    # configured, which markdown/plaintext ingestion doesn't need.
+    if _looks_like_utf8_text(file):
+        return _decode_as_utf8(raw_bytes)
 
     if parser_available():
         from everalgo.types import RawFile  # Deferred: optional dep
@@ -313,17 +432,7 @@ async def _parse_upload(
             raise InvalidInputError("Uploaded file has no valid content.")
         return parsed
 
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise UnsupportedModalityError(
-            "File is not UTF-8 text. "
-            "Install everos[multimodal] for PDF/HTML/DOCX support."
-        ) from exc
-    parsed = ParsedContent(text=text)
-    if not parsed.text or not parsed.text.strip():
-        raise InvalidInputError("Uploaded file has no valid content.")
-    return parsed
+    return _decode_as_utf8(raw_bytes)
 
 
 def _map_create_result(result: CreateDocumentResult) -> DocumentCreateResponse:
@@ -432,7 +541,11 @@ def _map_search_result(result: SearchKnowledgeResult) -> KnowledgeSearchResponse
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/documents", status_code=201)
+@router.post(
+    "/documents",
+    status_code=201,
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def create_document_route(
     request: Request,
@@ -450,7 +563,7 @@ async def create_document_route(
     parsed = await _parse_upload(file, raw_bytes=file_content)
     source_name = file.filename
 
-    knowledge_dir = MemoryRoot.default().knowledge_dir(app_id, project_id)
+    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
     extractor = _build_extractor()
 
     result = await create_document(
@@ -466,7 +579,11 @@ async def create_document_route(
     return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
 
 
-@router.put("/documents/{doc_id}", status_code=200)
+@router.put(
+    "/documents/{doc_id}",
+    status_code=200,
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 # FastAPI requires flat Form/Query params — ≤5 positional rule exempted.
 async def replace_document_route(
     request: Request,
@@ -484,7 +601,7 @@ async def replace_document_route(
     file_content = await file.read()
     parsed = await _parse_upload(file, raw_bytes=file_content)
 
-    knowledge_dir = MemoryRoot.default().knowledge_dir(app_id, project_id)
+    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
     extractor = _build_extractor()
 
     result = await replace_document(
@@ -576,7 +693,10 @@ async def get_topic_route(
     return SuccessEnvelope(request_id=rid, data=_map_topic_detail(detail))
 
 
-@router.post("/search")
+@router.post(
+    "/search",
+    dependencies=[Depends(_require_knowledge_capabilities)],
+)
 async def search_knowledge_route(
     request: Request,
     req: KnowledgeSearchRequest,

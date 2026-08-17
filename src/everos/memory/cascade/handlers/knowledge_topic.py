@@ -25,6 +25,8 @@ structure fields are excluded — they change on re-parse without
 semantic drift.
 
 Embedding source: ``summary`` (mirrors the search recaller's anchor).
+Embedding is a soft dependency: when unavailable, ``vector`` is
+written as ``None`` and the row stays BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
@@ -32,7 +34,9 @@ from __future__ import annotations
 import json
 from typing import Any, ClassVar
 
+from everos.component.embedding import get_embedding_capability
 from everos.component.utils.datetime import get_utc_now
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, ParsedMarkdown
 from everos.infra.persistence.lancedb import KnowledgeTopic, knowledge_topic_repo
 from everos.infra.persistence.sqlite import (
@@ -44,6 +48,8 @@ from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
 from ._common import resolve_scope
 from .base import Handler
+
+logger = get_logger(__name__)
 
 
 class KnowledgeTopicHandler(Handler):
@@ -191,7 +197,14 @@ class KnowledgeTopicHandler(Handler):
         content_tokens = " ".join(
             self._deps.tokenizer.tokenize(fields["content"]),
         )
-        vector = await self._deps.embedder.embed(fields["summary"])
+        vector = await get_embedding_capability().embed_or_none(fields["summary"])
+        if vector is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                entry_id=fields["node_id"],
+                reason="embedding_capability_unavailable",
+            )
         now = get_utc_now()
         return KnowledgeTopic(
             id=fields["node_id"],

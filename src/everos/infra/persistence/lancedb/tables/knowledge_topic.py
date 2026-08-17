@@ -31,6 +31,6 @@ class KnowledgeTopic(BaseLanceTable):
     content_labels: list[str] = []
     md_path: str
     content_sha256: str
-    vector: Vector(_DIM)  # type: ignore[valid-type]  -- Vector() is runtime-constructed; static analyzers cannot verify
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]  -- Vector() is runtime-constructed; static analyzers cannot verify
     created_at: dt.datetime
     updated_at: dt.datetime

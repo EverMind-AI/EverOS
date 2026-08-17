@@ -15,8 +15,8 @@ def test_ome_config_defaults() -> None:
     from everos.core.persistence.memory_root import MemoryRoot
 
     c = OMEConfig()
-    assert c.jobstore_path == MemoryRoot.default().ome_db
-    assert c.aps_jobstore_path == MemoryRoot.default().ome_aps_db
+    assert c.jobstore_path == MemoryRoot.resolve().ome_db
+    assert c.aps_jobstore_path == MemoryRoot.resolve().ome_aps_db
     assert c.max_concurrent_runs == 20
     assert c.max_retries == 1
     assert c.max_records_per_strategy == 1000

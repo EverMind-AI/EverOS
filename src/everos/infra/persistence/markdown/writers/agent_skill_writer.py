@@ -22,14 +22,30 @@ This writer is intentionally distinct from :class:`BaseDailyWriter`:
 Path resolution comes from :class:`MemoryRoot` + the ClassVars on
 :class:`AgentSkillFrontmatter` (``SKILLS_CONTAINER_NAME`` /
 ``SKILL_DIR_PREFIX`` / etc.). The writer + reader pair is the single
-addressing API for skills.
+addressing API for skills. ``skill_name`` is LLM output (see
+``memory.strategies.extract_agent_skill``), so the directory segment is
+built via :meth:`AgentSkillFrontmatter.skill_dir_name` — the shared,
+traversal-safe path-safety point both this writer and
+:class:`AgentSkillReader` derive from.
+
+``reference_name`` and ``script_filename`` are appended *after* that
+segment, so ``skill_dir_name`` does not cover them; both route through
+:func:`sanitize_dirname` separately. Nothing in ``src/`` calls those two
+methods yet, but they are public API and their inputs will come from the
+same untrusted place the skill name does once progressive disclosure is
+wired up. :class:`AgentSkillReader` sanitizes them identically — the two
+sides must agree on every segment, not just the skill directory, or a
+write and its matching read resolve to different paths.
 """
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
-from everos.core.persistence import MarkdownWriter, MemoryRoot
+import anyio
+
+from everos.core.persistence import MarkdownWriter, MemoryRoot, sanitize_dirname
 
 from ..mds import AgentSkillFrontmatter
 
@@ -135,6 +151,40 @@ class AgentSkillWriter:
         )
         return await self._writer.write(path, _ensure_trailing_newline(content))
 
+    async def delete_skill(
+        self,
+        agent_id: str,
+        skill_name: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> bool:
+        """Remove ``skills/skill_<name>/`` and everything under it.
+
+        The one destructive operation on this writer. It exists for
+        reconciliation, not for expiry: when an update renames a skill,
+        the new name is written to a new directory and the old one has
+        to go, or it survives as a duplicate that
+        :meth:`AgentSkillReader.list_by_cluster` keeps feeding back into
+        the next extraction's prompt.
+
+        Returns:
+            ``True`` if the directory existed and was removed, ``False``
+            if it was already absent. Absence is not an error — the
+            caller reconciles against markdown it enumerated earlier, so
+            a concurrent delete is a benign race, and a directory whose
+            on-disk name is not a fixpoint of
+            :meth:`AgentSkillFrontmatter.skill_dir_name` simply is not
+            found. Failing closed here (leaving an orphan) is the safe
+            direction; the destructive alternative would be resolving the
+            target by anything looser than the writer's own path rule.
+        """
+        skill_dir = self._skill_dir(agent_id, skill_name, app_id, project_id)
+        if not await anyio.Path(skill_dir).is_dir():
+            return False
+        await anyio.to_thread.run_sync(lambda: shutil.rmtree(skill_dir))
+        return True
+
     # ── Path API (callers that need to echo paths in responses) ──────────
 
     def main_path(
@@ -157,7 +207,7 @@ class AgentSkillWriter:
             self._root.agents_dir(app_id, project_id)
             / agent_id
             / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
-            / f"{AgentSkillFrontmatter.SKILL_DIR_PREFIX}{skill_name}"
+            / AgentSkillFrontmatter.skill_dir_name(skill_name)
         )
 
     def _main_path(
@@ -179,7 +229,7 @@ class AgentSkillWriter:
         return (
             self._skill_dir(agent_id, skill_name, app_id, project_id)
             / AgentSkillFrontmatter.SKILL_REFERENCES_DIR_NAME
-            / f"{reference_name}.md"
+            / f"{sanitize_dirname(reference_name, 'reference')}.md"
         )
 
     def _script_path(
@@ -193,7 +243,7 @@ class AgentSkillWriter:
         return (
             self._skill_dir(agent_id, skill_name, app_id, project_id)
             / AgentSkillFrontmatter.SKILL_SCRIPTS_DIR_NAME
-            / script_filename
+            / sanitize_dirname(script_filename, "script")
         )
 
 

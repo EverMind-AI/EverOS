@@ -1,6 +1,6 @@
 """LanceDB ``agent_skill`` table schema.
 
-Field set per 17_lancedb_tables_design.md §3.5. AgentSkill is a *named
+Field set for the agent-skill LanceDB row. AgentSkill is a *named
 entity* rather than a daily-log entry — PK is ``<owner_id>_<skill_name>``
 (no date / seq), and same agent + same name is the same row (upsert).
 
@@ -77,4 +77,4 @@ class AgentSkill(BaseLanceTable):
     changed (e.g. the watcher fires for unrelated stat updates). See
     :attr:`AgentSkillHandler.content_change_keys`."""
 
-    vector: Vector(_DIM)  # type: ignore[valid-type]
+    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]

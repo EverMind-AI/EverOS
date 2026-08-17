@@ -36,9 +36,12 @@ from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate, RankInput
 
+from everos.component.embedding import get_embedding_capability
+from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.context import resolve_request_id
+from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
     capture_input,
@@ -144,7 +147,8 @@ def _top_score(data: SearchData) -> float:
 # (HYBRID → LR sigmoid, AGENTIC → cross-encoder), so the recall_hit
 # threshold is meaningful. KEYWORD (unbounded BM25) and single-route
 # VECTOR are excluded — a fixed threshold there yields a misleading
-# near-constant "hit" that inflates cross-method dashboards.
+# near-constant "hit" that inflates cross-method dashboards. Their top
+# score is also reported under a separate score name (see ``scores``).
 _CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
 
 
@@ -712,7 +716,26 @@ class SearchManager:
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
-        return await self._embedding.embed(query)
+        vector = await self._embedding.embed(query)
+        expected = getattr(self._embedding, "dim", None)
+        if expected and len(vector) != expected:
+            # Fail here, not inside LanceDB. A mismatched query vector reaches
+            # the engine as an opaque `ValueError: Invalid input, No vector
+            # column found to match...` after the query has already been set
+            # up — measured at 13-14s per request in a soak run, versus
+            # microseconds here, and it surfaces as an unhandled 500 with a
+            # ~6k-line traceback instead of a named error.
+            #
+            # ConfigurationError (not InvalidInputError): the caller only ever
+            # sends query *text*; the vector is produced by our own provider,
+            # so a width that disagrees with the provider's declared ``dim``
+            # is a server-side configuration or provider-implementation fault.
+            raise ConfigurationError(
+                f"embedding provider returned a {len(vector)}-dimension query "
+                f"vector but declares dim={expected}; the vector index cannot "
+                f"be searched with a mismatched width"
+            )
+        return vector
 
     # ── Limits / filters ────────────────────────────────────────────
 
@@ -754,51 +777,103 @@ class SearchManager:
     # ── Component guards ────────────────────────────────────────────
 
     def _validate_components(self, req: SearchRequest) -> None:
-        """Fail fast when the chosen method needs components that are missing."""
+        """Fail fast when the chosen method needs a provider that is missing.
+
+        Every provider branch (embedding, rerank, LLM) raises the same
+        :class:`ProviderNotConfiguredError` -> HTTP 422 with a toml-pointing
+        message; vocabulary is uniform across the three.
+
+        Embedding and rerank checks read BOTH the process-wide capability
+        singletons AND this manager's own injected providers. Either side
+        being "missing" is enough to fail the guard: accessor
+        says-unavailable means the tier never had it; ``self._embedding``
+        is ``None`` means whoever built this manager didn't wire one in.
+        Because dispatch reads ``self._embedding`` directly, letting an
+        accessor-says-available-but-self-is-None case through would
+        produce an opaque ``AttributeError('NoneType')`` deep in recall
+        instead of a clean 422. Single source of truth = both must agree
+        the provider exists.
+
+        Agent HYBRID has two rerank lanes selected by ``enable_llm_rerank``:
+        the LLM lane (``True``) reranks via the LLM and needs no rerank
+        provider; the cross-encoder lane (``False``, default) does.
+
+        Design contract (PR #361 round-3 review #6): this manager is
+        instantiated by ``service.search`` — a single caller that always
+        sources its providers from the same capability accessors this
+        guard reads. On that path DI-injected provider and accessor
+        state cannot disagree, so the belt-and-suspenders check is a
+        near-no-op; it only fires on pathological drift (a subclass or
+        a test that constructs a manager with mismatched inputs).
+        Library consumers that embed :class:`SearchManager` directly
+        and hand it their OWN provider will hit 422 even when their
+        provider is valid, because the accessor reflects the
+        process-wide toml. This is an accepted limitation of the
+        current DI shape — the guard prefers false-positives
+        (over-refuse) to false-negatives (dispatch with a ``None``
+        provider) because the latter surfaces as an opaque
+        ``AttributeError('NoneType')`` deep in recall.
+        """
         method = req.method
-        needs_embedding = method != SearchMethod.KEYWORD
-        if needs_embedding and self._embedding is None:
-            raise RuntimeError(
-                f"method={method.value!r} requires an embedding provider; "
-                "configure [embedding] in settings"
-            )
-        # LLM is only mandatory when the caller explicitly opts into
-        # Phase-5 rerank on HYBRID, or always for AGENTIC (sufficiency
-        # check + multi-query generation).
-        if (
-            method == SearchMethod.HYBRID
-            and req.enable_llm_rerank
-            and self._llm is None
+        is_agent_hybrid = method == SearchMethod.HYBRID and req.owner_type == "agent"
+
+        needs_embedding = method in (
+            SearchMethod.VECTOR,
+            SearchMethod.HYBRID,
+            SearchMethod.AGENTIC,
+        )
+        if needs_embedding and (
+            not get_embedding_capability().available or self._embedding is None
         ):
-            raise RuntimeError(
-                "method='hybrid' with enable_llm_rerank=true needs an LLM; "
-                "configure [llm] in settings or drop the flag"
+            raise ProviderNotConfiguredError(
+                provider="embedding",
+                feature=_feature_name(method, req.owner_type),
             )
-        # agent_skill HYBRID without LLM rerank reaches the cross-encoder
-        # lane; without the reranker it would AttributeError deep in the
-        # callback. Episode / agent_case HYBRID don't need it.
+
+        # agent HYBRID cross-encoder lane (enable_llm_rerank=False, the
+        # default) reaches ``search_agent_skills_hybrid``, which needs a
+        # real rerank provider; the LLM lane reranks via the LLM instead
+        # and is exempt.
         if (
-            method == SearchMethod.HYBRID
-            and req.owner_type == "agent"
+            is_agent_hybrid
             and not req.enable_llm_rerank
-            and self._reranker is None
+            and (not get_rerank_capability().available or self._reranker is None)
         ):
-            raise RuntimeError(
-                "owner_type='agent' with method='hybrid' requires a rerank "
-                "provider (skill cross-encoder lane); configure [rerank] in "
-                "settings, or set enable_llm_rerank=true to use the LLM lane"
+            raise ProviderNotConfiguredError(
+                provider="rerank",
+                feature="agent_hybrid",
+                alternative_hint=(
+                    "Set enable_llm_rerank=true to route through the "
+                    "LLM rerank lane instead of the cross-encoder "
+                    "provider."
+                ),
             )
-        if method == SearchMethod.AGENTIC:
-            if self._reranker is None:
-                raise RuntimeError(
-                    "method='agentic' requires a rerank provider; "
-                    "configure [rerank] in settings"
-                )
-            if self._llm is None:
-                raise RuntimeError(
-                    "method='agentic' requires an LLM client; "
-                    "configure [llm] in settings"
-                )
+
+        if method == SearchMethod.AGENTIC and (
+            not get_rerank_capability().available or self._reranker is None
+        ):
+            raise ProviderNotConfiguredError(
+                provider="rerank", feature="agentic_search"
+            )
+
+        # LLM has no Capability wrapper yet; guard on the injected client
+        # directly. Belt-and-suspenders with the embedding/rerank branches
+        # above -- same 422 vocabulary via ProviderNotConfiguredError.
+        is_hybrid_llm_lane = method == SearchMethod.HYBRID and req.enable_llm_rerank
+        if is_hybrid_llm_lane and self._llm is None:
+            raise ProviderNotConfiguredError(
+                provider="llm",
+                feature=_feature_name(method, req.owner_type),
+                alternative_hint=(
+                    "drop the enable_llm_rerank flag to use the cross-encoder "
+                    "rerank lane (needs a configured [rerank] provider)"
+                ),
+            )
+        if method == SearchMethod.AGENTIC and self._llm is None:
+            raise ProviderNotConfiguredError(
+                provider="llm",
+                feature=_feature_name(method, req.owner_type),
+            )
 
 
 def _scored_as_candidate(scored) -> Candidate:  # type: ignore[no-untyped-def]
@@ -813,6 +888,27 @@ def _scored_as_candidate(scored) -> Candidate:  # type: ignore[no-untyped-def]
         source="other",
         metadata=dict(scored.metadata),
     )
+
+
+def _feature_name(method: SearchMethod, owner_type: str) -> str:
+    """Map a search method (+ owner partition) to its 422 ``feature`` tag.
+
+    HYBRID splits by ``owner_type`` because the episode path (embed only)
+    and the agent path (embed, plus a rerank lane) have different
+    prerequisites and deserve distinct log/response tags.
+
+    Note: this vocabulary (``"vector"``, ``"user_hybrid"``, ``"agent_hybrid"``,
+    ``"agentic_search"``) is separate from the capability-level vocabulary
+    in :mod:`everos.component.capabilities`. See that module's docstring
+    for the rationale and contract.
+    """
+    if method == SearchMethod.VECTOR:
+        return "vector"
+    if method == SearchMethod.HYBRID:
+        return "agent_hybrid" if owner_type == "agent" else "user_hybrid"
+    if method == SearchMethod.AGENTIC:
+        return "agentic_search"
+    return method.value
 
 
 def _effective_llm_rerank(req: SearchRequest) -> bool:

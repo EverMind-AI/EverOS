@@ -21,7 +21,11 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
+      # Full history: scripts/check_file_sizes.py diffs against the base
+      # branch's merge base, which a shallow clone cannot resolve.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0

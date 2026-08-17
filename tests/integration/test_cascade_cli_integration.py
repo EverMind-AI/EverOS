@@ -4,7 +4,8 @@ Drives the actual Typer commands against a real sqlite + lancedb under a
 tmp memory root. Validates the in-process orchestration that
 ``test_cascade_command`` (unit) cannot reach: ``_runtime()`` context,
 queue summary formatting, fix (no-rows path), and a full
-``cascade sync <path>`` round-trip with a stub embedder.
+``cascade sync <path>`` round-trip against an empty queue (no handler
+ever runs, so embedding availability is irrelevant here).
 
 The CLI commands call ``asyncio.run(_run())`` internally, so this test
 is **synchronous** — pytest-asyncio's auto mode would otherwise wrap it
@@ -22,21 +23,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.infra.persistence.lancedb import dispose_connection
 from everos.infra.persistence.sqlite import dispose_engine
-
-
-class _StubEmbedder(EmbeddingProvider):
-    dim = 1024
-
-    async def embed(self, text: str) -> list[float]:
-        return [0.0] * self.dim
-
-    async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
-        return [[0.0] * self.dim for _ in texts]
 
 
 @pytest.fixture
@@ -101,11 +91,10 @@ def test_sync_on_empty_queue_with_stub_embedder(
     from everos.memory.cascade import CascadeOrchestrator
 
     def fake_build_orchestrator() -> CascadeOrchestrator:
-        root = MemoryRoot.default()
+        root = MemoryRoot.resolve()
         root.ensure()
         return CascadeOrchestrator(
             memory_root=root,
-            embedder=_StubEmbedder(),
             tokenizer=build_tokenizer(),
         )
 
@@ -148,8 +137,7 @@ def test_sync_with_unmatched_path(
 
     def fake_build_orchestrator() -> CascadeOrchestrator:
         return CascadeOrchestrator(
-            memory_root=MemoryRoot.default(),
-            embedder=_StubEmbedder(),
+            memory_root=MemoryRoot.resolve(),
             tokenizer=build_tokenizer(),
         )
 
@@ -185,6 +173,144 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     assert result.exit_code == 0, result.stdout
     # One row pending; LSN must be ≥ 1.
     assert "pending:                  1" in result.stdout
+
+
+def _fake_orchestrator_factory():  # type: ignore[no-untyped-def]
+    from everos.component.tokenizer import build_tokenizer
+    from everos.core.persistence import MemoryRoot
+    from everos.memory.cascade import CascadeOrchestrator
+
+    def _build() -> CascadeOrchestrator:
+        root = MemoryRoot.resolve()
+        root.ensure()
+        return CascadeOrchestrator(
+            memory_root=root,
+            tokenizer=build_tokenizer(),
+        )
+
+    return _build
+
+
+def test_rebuild_recovers_drifted_index_and_reindexes(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cascade rebuild`` recovers a type-drifted index.
+
+    Proves the three properties bare ``rm`` can't offer together:
+    (1) it runs despite a schema-type drift that trips the normal
+    startup guard (``verify_business_schemas``); (2) it drops + recreates
+    the drifted table with the current (correct) type; (3) it re-indexes
+    md from scratch even for entries the queue already marked ``done``.
+    """
+    import datetime as _dt
+
+    import lancedb
+    import pyarrow as pa
+
+    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence.lancedb import get_table
+    from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
+    from everos.infra.persistence.lancedb.tables.episode import Episode
+    from everos.infra.persistence.markdown import AtomicFactWriter
+
+    root = MemoryRoot.resolve()
+    root.ensure()
+    owner_id = "u_rebuild"
+    bucket = _dt.date(2026, 5, 18)
+    md_path = (
+        f"default_app/default_project/users/{owner_id}/.atomic_facts/"
+        f"atomic_fact-{bucket.isoformat()}.md"
+    )
+
+    async def _seed_md() -> None:
+        writer = AtomicFactWriter(root=root)
+        items = [
+            (
+                {
+                    "owner_id": owner_id,
+                    "session_id": f"s_{j}",
+                    "timestamp": "2026-05-18T07:04:26+00:00",
+                    "parent_id": f"mc_{j}",
+                    "sender_ids": [owner_id],
+                },
+                {"Fact": f"seed fact {j}"},
+            )
+            for j in range(2)
+        ]
+        await writer.append_entries(owner_id, items, date=bucket)
+
+    async def _drift_episode_table() -> None:
+        conn = await lancedb.connect_async(str(root.lancedb_dir))
+        drifted = pa.schema(
+            [
+                pa.field("subject_vector", pa.string(), nullable=True)
+                if f.name == "subject_vector"
+                else f
+                for f in Episode.to_arrow_schema()
+            ]
+        )
+        await conn.create_table("episode", schema=drifted)
+        conn.close()
+
+    async def _episode_subject_vector_type():  # type: ignore[no-untyped-def]
+        tbl = await get_table("episode", Episode)
+        return (await tbl.schema()).field("subject_vector").type
+
+    async def _atomic_fact_row_count() -> int:
+        tbl = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
+        return await tbl.count_rows(filter=f"md_path = '{md_path}'")
+
+    asyncio.run(_seed_md())
+    asyncio.run(_drift_episode_table())
+    asyncio.run(_dispose_all())
+
+    monkeypatch.setattr(
+        cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
+    )
+
+    # Contrast: a normal command boots via _runtime() → verify trips on the drift.
+    status_result = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert status_result.exit_code != 0
+    asyncio.run(_dispose_all())
+
+    # rebuild skips verify, recreates the table, and re-indexes md.
+    result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "rebuild complete" in result.stdout
+    asyncio.run(_dispose_all())
+
+    # Table recreated with the correct vector type; md re-indexed.
+    assert asyncio.run(_episode_subject_vector_type()).equals(
+        Episode.to_arrow_schema().field("subject_vector").type
+    )
+    assert asyncio.run(_atomic_fact_row_count()) == 2
+
+
+def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``rebuild`` must refuse when a daemon is running on this memory root.
+
+    It drops and recreates the LanceDB tables; a live daemon holds cached
+    table handles and would keep writing to the dropped dataset, leaving a
+    corrupted rebuild plus a permanent-failure backlog. Detection reuses the
+    OME jobstore lock that ``backfill`` already gates on, and the exit code
+    matches backfill's ``3`` (SERVER_RUNNING).
+    """
+    monkeypatch.setattr(cascade_mod, "ome_lock_is_free", lambda: False)
+
+    result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
+
+    assert result.exit_code == 3, result.output
+    # The explanation goes to stderr (click 8.2 keeps the streams separate).
+    assert "server" in result.stderr.lower()
+    assert "stop `everos server`" in result.stderr.lower()
+    # And it must bail out BEFORE touching anything — none of the step
+    # progress lines may appear.
+    combined = result.output + result.stderr
+    assert "LanceDB table(s)" not in combined
+    assert "cascade queue row(s)" not in combined
+    assert "rebuild complete" not in combined
 
 
 # Reduce false negatives on date drift.

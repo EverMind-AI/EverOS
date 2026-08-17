@@ -36,6 +36,8 @@ from typing import Any, ClassVar, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from .path_safety import sanitize_dirname
+
 # ── YAML helpers ────────────────────────────────────────────────────────
 
 _DELIM = "---"
@@ -229,6 +231,15 @@ class SkillPathMixin:
             SKILL_DIR_PREFIX: ClassVar[str] = "skill_"
             SKILL_MAIN_FILENAME: ClassVar[str] = "SKILL.md"
             ...
+
+    ``skill_dir_name`` / ``sanitize_skill_name`` are the single
+    sanitization point both ``AgentSkillWriter`` and ``AgentSkillReader``
+    derive their ``skill_<name>`` directory segment from, and that
+    ``memory.strategies.extract_agent_skill._persist_skill`` uses to
+    sanitize LLM-emitted ``skill_name`` *before* constructing
+    ``AgentSkillFrontmatter`` — ``skill_name`` is LLM output and must not
+    reach the filesystem, or the frontmatter's traversal validator,
+    unsanitized (CWE-22).
     """
 
     SKILLS_CONTAINER_NAME: ClassVar[str]
@@ -243,6 +254,83 @@ class SkillPathMixin:
             f"*/*/{cls.SCOPE_DIR}/*/{cls.SKILLS_CONTAINER_NAME}/"
             f"{cls.SKILL_DIR_PREFIX}*/{cls.SKILL_MAIN_FILENAME}"
         )
+
+    @classmethod
+    def sanitize_skill_name(cls, skill_name: str) -> str:
+        """Bare sanitized skill name (no ``skill_`` prefix).
+
+        The single sanitization point for a skill's ``name`` value itself —
+        as opposed to :meth:`skill_dir_name`, which additionally prefixes
+        it for the directory segment. Callers building
+        ``AgentSkillFrontmatter.name`` from LLM output (see
+        ``memory.strategies.extract_agent_skill._persist_skill``) route
+        through this *before* constructing the frontmatter, so
+        ``frontmatter.name`` ends up byte-identical to the directory-derived
+        name rather than merely idempotent-if-resanitized.
+
+        This is lossy: distinct raw names can collapse onto the same
+        sanitized name. Dropped punctuation, space/underscore collapse, and
+        the 50-character cap are the visible cases (``"fix django"`` and
+        ``"fix_django"`` both become ``"fix_django"``; ``"fix!django"`` and
+        ``"fixdjango"`` both become ``"fixdjango"``). The larger case is
+        every combining mark: a combining mark alone is not ``\\w``, so it
+        is stripped regardless of script, and two names that differ only in
+        their marks collide — e.g. Devanagari ``"किताब"`` and ``"कताब"``
+        both sanitize to ``"कतब"``; the same holds for Thai tone marks,
+        Hebrew niqqud, and Arabic harakat.
+
+        Case is *not* folded, which makes the collision above
+        filesystem-dependent rather than universal, and is the dimension an
+        LLM varies most freely: ``"Fix Django"`` → ``"Fix_Django"`` and
+        ``"fix django"`` → ``"fix_django"`` are two distinct sanitized
+        names, so they are two rows in LanceDB (a case-sensitive Python
+        string key) but one directory on a case-insensitive filesystem —
+        macOS APFS and Windows NTFS in their default configurations. That
+        splits the invariant this seam otherwise maintains: the surviving
+        ``SKILL.md`` carries one of the two names in its frontmatter while
+        the index still advertises both, so a search hit on the shadowed
+        name resolves to the other skill's content. On a case-sensitive
+        filesystem the same pair simply stays two independent skills.
+
+        Because ``AgentSkillWriter.write_main`` is a full-file replace and
+        the LanceDB primary key is ``f"{agent_id}_{sanitized_name}"``, a
+        collision means the later skill silently overwrites the earlier
+        one — its accumulated ``source_case_ids``, ``maturity_score``, and
+        body are lost, not merged.
+
+        This is deliberate, not an oversight — but not because a collision
+        "usually reads as an intended update". ``_persist_skill`` sanitizes
+        *before* constructing the frontmatter, so the LLM is shown the
+        already-sanitized name in ``existing_relevant_skills``; when it
+        then emits a raw name like ``"fix django"`` after having just been
+        shown ``"fix_django"``, it has affirmatively treated them as two
+        different skills, and the write silently merges them anyway.
+
+        What justifies accepting it is narrower: the two alternatives are
+        both worse here. Detecting a collision and raising would
+        reintroduce the dead-letter DoS this sanitizer was built to avoid —
+        LLM output would again decide whether a run survives. Appending a
+        disambiguating suffix is the real candidate and is left for a
+        deliberate design pass, not dismissed: it does *not* break the
+        ``frontmatter.name`` ≡ directory-suffix identity (writing
+        ``"fix_django_2"`` into both keeps that intact), but it does need a
+        collision probe on a path that currently touches no other skill,
+        and a rule for the case-insensitive-filesystem variant above where
+        the probe must compare case-folded while the key stays exact.
+        """
+        return sanitize_dirname(skill_name, fallback="unnamed")
+
+    @classmethod
+    def skill_dir_name(cls, skill_name: str) -> str:
+        """Sanitized ``skill_<name>`` directory segment (traversal-safe).
+
+        Idempotent in ``skill_name``: calling this again on an already
+        sanitized name (e.g. one recovered by walking the directory tree)
+        returns the same segment, so a reader deriving ``skill_name`` from
+        the on-disk directory and a writer deriving it from raw LLM output
+        land on the same path.
+        """
+        return f"{cls.SKILL_DIR_PREFIX}{cls.sanitize_skill_name(skill_name)}"
 
 
 class ProfilePathMixin:

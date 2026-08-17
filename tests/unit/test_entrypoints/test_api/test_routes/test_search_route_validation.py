@@ -33,10 +33,19 @@ async def client(
 
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
-    for attr in ("_manager", "_embedding", "_reranker", "_llm_client"):
+    for attr in ("_manager", "_llm_client"):
         setattr(search_service_mod, attr, None)
-    for attr in ("_embedding_resolved", "_rerank_resolved", "_llm_resolved"):
+    for attr in ("_llm_resolved",):
         setattr(search_service_mod, attr, False)
+
+    # Embedding / rerank route through the process-wide capability
+    # accessors now, not module-level singletons on this module — reset
+    # those directly (also covered by the autouse fixtures in
+    # ``tests/conftest.py``; kept explicit here for locality).
+    embedding_acc = import_module("everos.component.embedding.accessor")
+    rerank_acc = import_module("everos.component.rerank.accessor")
+    embedding_acc._capability = None
+    rerank_acc._capability = None
 
     app = create_app(lifespan_providers=[])
     transport = ASGITransport(app=app)

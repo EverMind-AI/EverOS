@@ -8,6 +8,7 @@ sync-thread walker's resilience to broken files.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -112,16 +113,23 @@ async def test_run_loop_swallows_scan_exception(
     scanner = CascadeScanner(mr, scan_interval_seconds=0.05)
 
     call_count = {"n": 0}
+    second_call = asyncio.Event()
 
     async def fake_scan() -> list:  # type: ignore[type-arg]
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise RuntimeError("simulated scanner failure")
+        second_call.set()
         return []
 
     monkeypatch.setattr(scanner, "scan_once", fake_scan)
     await scanner.start()
-    # Let the loop iterate at least twice (interval is 50ms).
-    await asyncio.sleep(0.2)
+    # Wait for the second call event with a generous ceiling — CI
+    # runners can eat > 100 ms on the first iteration (asyncio startup
+    # + logger.exception formatting), so a fixed sleep flakes. Event
+    # returns as soon as convergence hits and stays bounded on failure;
+    # suppress the timeout so the assertion below surfaces the count.
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(second_call.wait(), timeout=5.0)
     await scanner.stop()
     assert call_count["n"] >= 2  # second call ran despite first throwing

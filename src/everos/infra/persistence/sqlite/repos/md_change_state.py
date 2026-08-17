@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,6 +38,20 @@ from everos.core.persistence.sqlite import RepoBase, session_scope
 
 from ..sqlite_manager import get_session_factory
 from ..tables import MdChangeState
+
+MTIME_TOLERANCE_SECONDS = 0.01
+"""Absolute mtime delta (seconds) treated as "unchanged".
+
+Used both by the upsert's retry_count carry-over CASE (below) and by the
+cascade reconciler's stable-mtime check
+(:func:`everos.memory.cascade.reconciler.reconcile`). The two comparisons
+share this single source of truth so their notions of "same file" stay
+in lock-step; drift would leave upsert preserving ``retry_count`` while
+the reconciler skips re-enqueue (or vice versa), corrupting the retry
+budget.
+
+Sized to absorb SQLite ``REAL`` round-trip loss (~5 µs) so a stable
+mtime does not oscillate the reconcile decision every scanner tick."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,9 +108,13 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
           ``lsn = MAX(lsn) + 1``.
         - **Existing row** → bump ``last_changed_at``, refresh
           ``kind`` / ``change_type`` / ``mtime``, reset status back to
-          ``pending``, zero ``retry_count`` / ``error`` / ``retryable``,
-          and assign a fresh ``MAX(lsn) + 1`` so the worker re-processes
-          this path *after* anything queued in between.
+          ``pending``, clear ``error`` / ``retryable``, and assign a
+          fresh ``MAX(lsn) + 1`` so the worker re-processes this path
+          *after* anything queued in between. ``retry_count`` is
+          conditionally preserved: if the row was ``failed`` and the
+          mtime is unchanged (scanner auto-retry), ``retry_count``
+          carries over so the worker can enforce a total retry budget;
+          otherwise it resets to 0 (new content deserves a fresh start).
 
         The fresh LSN on re-enqueue is the property that lets the worker
         rely on ``ORDER BY lsn`` for ordering without losing fairness
@@ -134,8 +152,16 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                         "status": "pending",
                         "retryable": None,
                         "last_attempt_at": None,
-                        "retry_count": 0,
                         "error": None,
+                        "retry_count": text(
+                            "CASE"
+                            " WHEN md_change_state.status = 'failed'"
+                            " AND ABS(md_change_state.mtime - :new_mtime)"
+                            f" < {MTIME_TOLERANCE_SECONDS}"
+                            " THEN md_change_state.retry_count"
+                            " ELSE 0"
+                            " END"
+                        ).bindparams(new_mtime=mtime),
                     },
                 )
             )
@@ -181,30 +207,48 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             row = await s.get(MdChangeState, md_path)
             return row
 
-    async def claim_pending_batch(self, limit: int = 100) -> list[MdChangeState]:
+    async def claim_pending_batch(
+        self,
+        limit: int = 100,
+        *,
+        kinds: set[str] | None = None,
+    ) -> list[MdChangeState]:
         """Claim up to ``limit`` pending rows in LSN order.
 
         Returns the claimed rows (now ``status='processing'``); empty
         list if none were pending. Sibling workers / processes may race
         on the same prefix — the per-row ``WHERE status='pending'``
         filter ensures each row lands in exactly one batch.
+
+        Args:
+            limit: Maximum rows to claim in one batch.
+            kinds: Optional restriction on which ``kind`` values are
+                eligible. ``None`` (the default) claims across every
+                registered kind — the shape the background worker and
+                the CLI ``cascade sync`` path have always used. Passing
+                a set restricts the SELECT + UPDATE to ``kind IN (...)``
+                via parameter binding (no string interpolation), so a
+                Phase-3 sync scoped to ``{"agent_skill"}`` cannot touch
+                unrelated kinds' queue state. Empty set is treated the
+                same as ``None`` — meaning "no kind filter" would be
+                surprising, but returning an empty result is what the
+                caller almost certainly meant, so we short-circuit.
         """
         if limit <= 0:
             return []
+        if kinds is not None and not kinds:
+            return []
         now = get_utc_now()
         async with session_scope(self._factory) as s:
-            picks = (
-                (
-                    await s.execute(
-                        select(MdChangeState.md_path)
-                        .where(MdChangeState.status == "pending")
-                        .order_by(MdChangeState.lsn)
-                        .limit(limit)
-                    )
-                )
-                .scalars()
-                .all()
+            pick_stmt = (
+                select(MdChangeState.md_path)
+                .where(MdChangeState.status == "pending")
+                .order_by(MdChangeState.lsn)
+                .limit(limit)
             )
+            if kinds is not None:
+                pick_stmt = pick_stmt.where(MdChangeState.kind.in_(kinds))
+            picks = (await s.execute(pick_stmt)).scalars().all()
             if not picks:
                 return []
             update_result = await s.execute(
@@ -371,6 +415,24 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
                     last_changed_at=now,
                 )
             )
+            await s.commit()
+            return int(result.rowcount or 0)
+
+    async def reset_all(self) -> int:
+        """`cascade rebuild` engine: clear the entire work-queue table.
+
+        This table is pure sync bookkeeping — a projection of (md ×
+        index) — so deleting every row forces the next scan to treat
+        every md file as newly ``added`` and re-index it from scratch.
+        Touches **only** ``md_change_state``; other SQLite tables
+        (``memcell``, ``unprocessed_buffer``, …) are left intact, which
+        is what makes ``cascade rebuild`` non-destructive to un-extracted
+        buffered messages.
+
+        Returns the number of rows deleted.
+        """
+        async with session_scope(self._factory) as s:
+            result = await s.execute(delete(MdChangeState))
             await s.commit()
             return int(result.rowcount or 0)
 

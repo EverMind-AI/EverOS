@@ -114,6 +114,15 @@ class ReflectionOrchestrator:
         Returns:
             List of successful ReflectionReport rows (typed as object
             because the table class lives in infra).
+
+        Note:
+            No embedding-availability guard here — upstream callers are
+            responsible for skipping this run when the capability is
+            missing. In production the ``reflect_episodes`` strategy
+            body-guards on ``get_embedding_capability().available`` and
+            then constructs the orchestrator via ``.require()`` (which
+            raises before ``run()`` can be called if the provider is
+            missing), so an in-body check would be unreachable.
         """
         candidates = await self._select_candidates(
             owner_id=owner_id,
@@ -1013,7 +1022,7 @@ class ReflectionOrchestrator:
             if is_deprecated and ep.md_path:
                 path_to_entries[ep.md_path][ep.entry_id] = merged_entry_id
 
-        root = MemoryRoot.default().root
+        root = MemoryRoot.resolve().root
         for md_path, deprecated_map in path_to_entries.items():
             await self._episode_writer.patch_frontmatter(
                 root / md_path,

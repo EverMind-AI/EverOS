@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.embedding import EmbeddingProvider
+from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import AgentSkill
@@ -39,6 +39,18 @@ class _StubEmbedder(EmbeddingProvider):
 
     async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
         return [await self.embed(t) for t in texts]
+
+
+@pytest.fixture(autouse=True)
+def _stub_embedding_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AgentSkillHandler fetches the embedder lazily via
+    ``get_embedding_capability()`` — patch the process-wide singleton so
+    ``handle_added_or_modified`` returns a real (stub) vector."""
+    import everos.component.embedding.accessor as acc
+
+    monkeypatch.setattr(
+        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+    )
 
 
 class _FakeSkillRepo:
@@ -132,7 +144,6 @@ async def test_handle_added_or_modified_upserts_typed_row(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -174,7 +185,6 @@ async def test_references_md_concatenated_into_content(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -203,7 +213,6 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -241,7 +250,6 @@ async def test_first_create_does_not_call_orphan_sweep(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -264,7 +272,6 @@ async def test_content_edit_skips_orphan_lookup(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -290,7 +297,6 @@ async def test_handle_deleted_calls_delete_by_md_path(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )
@@ -323,7 +329,6 @@ async def test_missing_name_raises(
     handler = AgentSkillHandler(
         HandlerDeps(
             memory_root=memory_root,
-            embedder=_StubEmbedder(),
             tokenizer=_StubTokenizer(),
         )
     )

@@ -9,16 +9,63 @@ provider) instead of silently failing per-request downstream.
 
 from __future__ import annotations
 
+from typing import Any
+
 from everalgo.llm import build_client
 from everalgo.llm.config import LLMConfig
 from everalgo.llm.protocols import LLMClient
+from everalgo.llm.types import ChatMessage, ChatResponse
+from pydantic import BaseModel
 
+from everos.component.utils.config_hints import missing_config_error
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 
 from ._usage_client import UsageRecordingClient
 
 logger = get_logger(__name__)
+
+
+class _LoggingLLMClient:
+    """Wrapper that logs non-stop ``finish_reason`` for diagnostics.
+
+    Always active — cost is one branch per chat() call. OpenRouter and
+    a few compatible providers occasionally return HTTP 200 with a
+    truncated body and ``finish_reason != "stop"`` (length cap, filter
+    trigger). Recording the reason plus the tail of the content lets
+    us triage those without needing a repro from the caller.
+    """
+
+    def __init__(self, inner: LLMClient) -> None:
+        self._inner = inner
+
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        response_format: type[BaseModel] | None = None,
+        **extra: Any,
+    ) -> ChatResponse:
+        resp = await self._inner.chat(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            **extra,
+        )
+        if resp.finish_reason and resp.finish_reason != "stop":
+            logger.warning(
+                "llm_non_stop_finish",
+                finish_reason=resp.finish_reason,
+                content_len=len(resp.content),
+                content_tail=resp.content[-200:] if resp.content else "",
+                model=resp.model,
+            )
+        return resp
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -47,7 +94,7 @@ def get_llm_client() -> LLMClient:
     )
     if not api_key or not llm_cfg.base_url:
         raise LLMNotConfiguredError(
-            "LLM is required; set EVEROS_LLM__API_KEY + EVEROS_LLM__BASE_URL"
+            missing_config_error("LLM api_key and base_url", "llm")
         )
     client: LLMClient = build_client(
         LLMConfig(
@@ -60,7 +107,11 @@ def get_llm_client() -> LLMClient:
     # disabled path (the default) allocation- and overhead-free.
     if settings.observability.enabled:
         client = UsageRecordingClient(client)
-    _llm_client = client
+    # Finish-reason diagnostic wrapper is always outermost: it must see
+    # the response even when tracing is off, and it must observe the
+    # exact reason the underlying provider reported (not one synthesised
+    # by an inner wrapper).
+    _llm_client = _LoggingLLMClient(client)
     logger.info("llm_client_built", model=llm_cfg.model)
     return _llm_client
 
@@ -83,8 +134,7 @@ def get_multimodal_llm_client() -> LLMClient:
     api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
     if not api_key or not cfg.base_url:
         raise LLMNotConfiguredError(
-            "Multimodal LLM is required for parsing; set "
-            "EVEROS_MULTIMODAL__API_KEY + EVEROS_MULTIMODAL__BASE_URL"
+            missing_config_error("Multimodal LLM api_key and base_url", "multimodal")
         )
     _multimodal_client = build_client(
         LLMConfig(

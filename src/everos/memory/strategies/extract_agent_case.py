@@ -44,7 +44,7 @@ _writer: AgentCaseWriter | None = None
 def _get_writer() -> AgentCaseWriter:
     global _writer
     if _writer is None:
-        _writer = AgentCaseWriter(root=MemoryRoot.default())
+        _writer = AgentCaseWriter(root=MemoryRoot.resolve())
     return _writer
 
 
@@ -100,6 +100,8 @@ async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) 
                 memcell_id=event.memcell_id,
                 case_entry_id=eid.format(),
                 task_intent=case.task_intent,
+                approach=case.approach,
+                key_insight=case.key_insight,
                 quality_score=case.quality_score,
                 case_timestamp_ms=case.timestamp,
                 agent_id=case.owner_id,

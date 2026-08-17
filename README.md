@@ -1,6 +1,6 @@
 <div align="center" id="readme-top">
 
-![EverOS banner](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)
+![EverOS banner](https://github.com/user-attachments/assets/806e9d7f-c861-4b89-9141-11e38f8753e3)
 
 <p align="center">
   <a href="https://x.com/evermind"><img src="https://img.shields.io/badge/EverMind-000000?labelColor=gray&style=for-the-badge&logo=x&logoColor=white" alt="X"></a>
@@ -25,7 +25,6 @@
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Documentation](#documentation)
-- [Star Us](#star-us)
 - [EverMind Ecosystems](#evermind-ecosystems)
 - [Contributing](#contributing)
 
@@ -89,24 +88,17 @@ for fast retrieval and self-evolving reuse.
 
 ## Quick Start
 
-> Goal: play with the memory visualizer first, then start EverOS, write one
-> real memory, and search it back.
+> One OpenRouter API key is enough to start EverOS, write durable memories,
+> and retrieve them with keyword search.
 
-### 0. Prerequisites
+### Prerequisites
 
 - Python 3.12+
-- No API keys are needed for `everos demo`.
-- To run the real server-backed memory flow, create two provider keys before
-  `everos init`:
+- One [OpenRouter API key](https://openrouter.ai/keys)
 
-| Capability | Provider | Used for | Fill these `.env` slots |
-| --- | --- | --- | --- |
-| Chat + multimodal | [OpenRouter](https://openrouter.ai/) | `LLM` / `MULTIMODAL` | `EVEROS_LLM__API_KEY`, `EVEROS_MULTIMODAL__API_KEY` |
-| Chat | Atlas Cloud OpenAI-compatible endpoint | `LLM` | `EVEROS_LLM__PROVIDER=atlascloud`, `EVEROS_LLM__API_KEY` |
-| Embedding + rerank | [DeepInfra](https://deepinfra.com/) | `EMBEDDING` / `RERANK` | `EVEROS_EMBEDDING__API_KEY`, `EVEROS_RERANK__API_KEY` |
-
-You can use other OpenAI-compatible providers by changing the matching
-`*__BASE_URL` fields in `.env`.
+To use Atlas Cloud for chat instead, set `EVEROS_LLM__PROVIDER=atlascloud`
+and `EVEROS_LLM__API_KEY`; EverOS will select the Atlas Cloud
+OpenAI-compatible endpoint and default model.
 
 ### 1. Install
 
@@ -115,56 +107,46 @@ uv pip install everos
 # or: pip install everos
 ```
 
-### 2. Play With The Demo
+### 2. Try the standalone demo — no key required
 
-Run this before configuring API keys or starting the server:
+No API key or server setup required—run one command to quickly experience how
+EverOS stores and recalls memory:
 
 ```bash
+# If you installed EverOS as a package:
 everos demo
+
+# If you cloned or forked this repository and have not activated .venv:
+uv run everos demo
 ```
 
-The command asks for one memory and one recall question, then opens a
-full-screen terminal UI. This is an educational visualizer: it is hardcoded,
-local to the CLI, and does not connect to the EverOS server. Its job is to make
-the memory lifecycle visible: conversation -> memory sphere -> recall -> source
-proof -> confetti. See [docs/everos-demo.md](docs/everos-demo.md) for the demo
-scope and TUI source layout.
+Enter something EverOS should remember, then ask a related question to watch
+the memory move through ingest -> extract -> index -> recall.
 
-The sphere moves through ingest, extraction, indexing, recall, source reveal,
-and a confetti burst after the first memory lands. Press `r` to replay and `q`
-to quit.
+<https://github.com/user-attachments/assets/98cb8e1e-2ca8-4504-b0a6-0b9a040a0a5c>
 
-<p align="center">
-  <img src="https://gist.githubusercontent.com/cyfyifanchen/afa2cf40bf138a3ec96d917e8f2791a2/raw/d4ce82a6ddd7b3ebaf221e4825af993aeca5a7ce/everos-demo-tui-animation.svg" alt="Animated EverOS demo preview showing the memory sphere moving through recall and confetti states" width="720">
-</p>
-
-For the looping showroom view used in README media, run:
-
-```bash
-everos demo --cinematic
-```
-
-If your shell is not interactive, or you want a copyable preview, use:
-
-```bash
-everos demo --plain
-```
-
-### 3. Configure
-
-Generate a starter `.env` file, then fill the four API key slots shown in the
-generated comments. With the default setup, paste your OpenRouter key into the
-`LLM` / `MULTIMODAL` slots and your DeepInfra key into the `EMBEDDING` /
-`RERANK` slots.
+### 3. Initialize and add your OpenRouter key
 
 ```bash
 everos init
-# or, from a source checkout:
-cp .env.example .env
 ```
 
-`everos init` writes `./.env` by default. Use `everos init --xdg` to
-write `${XDG_CONFIG_HOME:-~/.config}/everos/.env` instead.
+This creates `~/.everos/everos.toml` and `~/.everos/ome.toml`. Open
+`~/.everos/everos.toml`; the generated model and OpenRouter URL are already
+correct, so replace only the empty `api_key`:
+
+```toml
+[llm]
+model = "openai/gpt-4.1-mini"
+api_key = "<OPENROUTER_API_KEY>"
+base_url = "https://openrouter.ai/api/v1"
+```
+
+This is the smallest Tier 1 setup: memory add, flush, Markdown persistence,
+cascade indexing, and keyword search.
+
+Use `everos init --root <path>` if you want a different memory root. Pass the
+same `--root <path>` to subsequent commands.
 
 ### 4. Start EverOS
 
@@ -178,37 +160,23 @@ Keep the server running, then open a second terminal and check it:
 curl http://127.0.0.1:8000/health
 ```
 
-Expected response:
+Look for `"status":"ok"`. With this one-key setup, `capabilities.llm` is
+`true`; embedding and rerank remain `false` until you configure them.
 
-```json
-{"status":"ok"}
-```
+### 5. Add and retrieve your first memory
 
-`everos server start` searches for `.env` in this order: `--env-file <path>` →
-`./.env` (cwd) → `${XDG_CONFIG_HOME:-~/.config}/everos/.env` → `~/.everos/.env`.
-The endpoint stack is OpenAI-protocol compatible (OpenAI / OpenRouter / vLLM /
-Ollama / DeepInfra) - override `*__BASE_URL` in the generated `.env` to point
-at any of them.
-
-Now make the demo real. In the second terminal, run:
-
-```bash
-everos demo --live
-```
-
-Live demo mode connects to the running server and performs the real
-`/health` -> `/api/v1/memory/add` -> `/api/v1/memory/flush` ->
-`/api/v1/memory/search` flow before opening the same memory sphere UI. Use
-`--server-url <url>` if your server is not on `http://127.0.0.1:8000`.
-
-### 5. Try Your First Memory
+> [!NOTE]
+> Business endpoints live under `/api/v2`. The older `/api/v1` prefix still
+> resolves to the same handlers so existing integrations keep working, but it
+> is a legacy alias that may be removed in a future major release — write new
+> code against `/api/v2`.
 
 Add a tiny conversation:
 
 ```bash
 TS=$(($(date +%s)*1000))
 
-curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
   -H 'Content-Type: application/json' \
   -d "{
     \"session_id\": \"demo-001\",
@@ -221,10 +189,10 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/add \
   }"
 ```
 
-Force extraction for the local demo:
+Flush the memory at the end of the session:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"demo-001","app_id":"default","project_id":"default"}'
 ```
@@ -232,20 +200,21 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/flush \
 Search it back:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/memory/search \
+curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
     "user_id": "alice",
     "app_id": "default",
     "project_id": "default",
     "query": "Where do I like to climb?",
+    "method": "keyword",
     "top_k": 5
   }'
 ```
 
-You should see the Yosemite memory in the response. If the result is empty on
-the first try, wait a moment and retry; Markdown is written synchronously, while
-the local index catches up in the background.
+You should see the Yosemite memory in the response. Keep
+`"method": "keyword"` in this one-key setup because the API defaults to hybrid
+search, which requires an embedding provider.
 
 > [!TIP]
 > **First memory unlocked.**
@@ -257,20 +226,40 @@ the local index catches up in the background.
 For annotated responses and the Markdown files EverOS creates, see
 [QUICKSTART.md](QUICKSTART.md).
 
+### What works with one key?
+
+The OpenRouter one-key setup is EverOS Tier 1. It supports server startup,
+memory add and flush, durable Markdown storage, cascade indexing, and keyword
+search. Add optional providers only when you need the features below:
+
+| Configuration | Adds |
+| --- | --- |
+| `[llm]` only | Core memory flow and keyword search |
+| Add `[embedding]` | Vector/user hybrid search, reflection, and skill extraction |
+| Add `[rerank]` too | Agentic search, default agent hybrid search, and Knowledge Wiki |
+| Add `[multimodal]` and parser extra | Image, PDF, audio, and office-file ingestion |
+
+Missing optional capabilities are reported by `/health` and return a clear
+HTTP 422 if you request a feature that needs them.
+
+> [!NOTE]
+> `everos demo --live` is different from the standalone demo in step 2: it
+> connects to a running server and uses the real add/flush/search flow. It uses
+> hybrid search, so add an embedding provider before you run it.
+
 ### Optional: Ingest Multimodal Files
 
 To ingest non-text content (image / pdf / audio / office documents)
-through `/api/v1/memory/add` `content` items, install the optional
+through `/api/v2/memory/add` `content` items, install the optional
 extra:
 
 ```bash
 uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 ```
 
-This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG
-support via cairosvg) and wires up the multimodal LLM client
-(`EVEROS_MULTIMODAL__*` fields in `.env`, defaults to
-`google/gemini-3-flash-preview` via OpenRouter).
+This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG support via
+cairosvg). Configure the `[multimodal]` section in `everos.toml`; its default
+model is `google/gemini-3-flash-preview` via OpenRouter.
 
 **Office document support requires LibreOffice as a system dependency.**
 The parser shells out to `soffice` (LibreOffice's headless renderer) to
@@ -292,11 +281,10 @@ sudo apt-get install -y libreoffice          # Debian / Ubuntu
 git clone https://github.com/EverMind-AI/EverOS.git
 cd EverOS
 uv sync                              # creates ./.venv and installs deps
-source .venv/bin/activate            # or prefix commands with `uv run`
-everos demo --plain                  # try the local educational demo; no API keys needed
-everos init                          # paste OpenRouter + DeepInfra keys into .env
+uv run everos demo --plain           # try the local educational demo; no API keys needed
+uv run everos init                   # add one OpenRouter key to ~/.everos/everos.toml
 
-everos --help
+uv run everos --help
 make test
 ```
 
@@ -649,23 +637,6 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes
 - [CHANGELOG.md](CHANGELOG.md) — Release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
-
-<br>
-<div align="right">
-
-[![](https://img.shields.io/badge/-Back_to_top-gray?style=flat-square)](#readme-top)
-
-</div>
-
-## Star Us
-
-If EverOS is useful to your agent stack, please star the repo. It helps more
-builders discover the project and gives the memory ecosystem a stronger signal
-to keep improving.
-
-### Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=EverMind-AI/EverOS&type=Date)](https://www.star-history.com/#EverMind-AI/EverOS&Date)
 
 <br>
 <div align="right">

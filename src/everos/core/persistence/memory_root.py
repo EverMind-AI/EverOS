@@ -23,11 +23,12 @@ The cascade queue, LSN watermark, and change audit all live in
 
 The default location and tunables come from :class:`everos.config.Settings`
 (loaded from ``config/default.toml`` + ``EVEROS_*`` environment variables);
-:meth:`MemoryRoot.default` resolves the configured path.
+:meth:`MemoryRoot.resolve` resolves the configured path.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,7 +93,7 @@ class MemoryRoot:
         object.__setattr__(self, "root", resolved)
 
     @classmethod
-    def default(cls, *, explicit_root: str | None = None) -> MemoryRoot:
+    def resolve(cls, *, explicit_root: str | None = None) -> MemoryRoot:
         """Return the memory-root resolved from CLI / env / default.
 
         Resolution: ``explicit_root`` > ``EVEROS_ROOT`` env > ``~/.everos``.
@@ -104,6 +105,25 @@ class MemoryRoot:
         from everos.config.settings import resolve_root
 
         return cls(resolve_root(explicit_root))
+
+    @classmethod
+    def default(cls, *, explicit_root: str | None = None) -> MemoryRoot:
+        """Deprecated alias for :meth:`resolve`. Removed in a future major.
+
+        Kept as a backward-compatibility shim for v1.2.0 callers who used
+        the old ``default()`` name (renamed to ``resolve()`` in this
+        release). Emits :class:`DeprecationWarning` on every call so
+        existing callers surface in test / CI runs; the constructor
+        semantics are identical.
+        """
+        warnings.warn(
+            "MemoryRoot.default() is deprecated and renamed to "
+            "MemoryRoot.resolve(); the alias will be removed in a "
+            "future major release. Update call sites.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls.resolve(explicit_root=explicit_root)
 
     # ── User-visible (partitioned by app / project) ──────────────────────────
     #
