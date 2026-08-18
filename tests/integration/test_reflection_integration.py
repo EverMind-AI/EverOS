@@ -19,6 +19,7 @@ import datetime as _dt
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -34,9 +35,11 @@ from everos.core.persistence import (
 )
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
 from everos.infra.ome.testing import FakeStrategyContext
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
+from everos.infra.persistence.predicate import Predicate
 from everos.infra.persistence.sqlite import cluster_repo, reflection_report_repo
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.reflection.orchestrator import ReflectionOrchestrator
@@ -69,9 +72,23 @@ class _StubEmbedder:
 class _EpisodeRepo(LanceDailyLogRepoBase[LanceEpisode]):
     schema = LanceEpisode
 
+    async def find_where(
+        self, where: str | Predicate, *, limit: int = 100
+    ) -> list[LanceEpisode]:
+        rendered = render_predicate(where) if isinstance(where, Predicate) else where
+        return await super().find_where(rendered, limit=limit)
+
+    async def update(self, updates: dict[str, Any], *, where: str | Predicate) -> None:
+        rendered = render_predicate(where) if isinstance(where, Predicate) else where
+        await super().update(updates, where=rendered)
+
 
 class _AtomicFactRepo(LanceDailyLogRepoBase[AtomicFact]):
     schema = AtomicFact
+
+    async def update(self, updates: dict[str, Any], *, where: str | Predicate) -> None:
+        rendered = render_predicate(where) if isinstance(where, Predicate) else where
+        await super().update(updates, where=rendered)
 
 
 # ---------------------------------------------------------------------------

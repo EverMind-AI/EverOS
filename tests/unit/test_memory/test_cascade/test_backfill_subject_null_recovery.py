@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from everos.infra.persistence.predicate import Comparison, Predicate
 from everos.memory.cascade._backfill import (
     NullBackfillPresenter,
     _backfill_table,
@@ -59,9 +60,9 @@ class _RecordingRepo:
     assert on the exact ``{col: value}`` shape written back."""
 
     def __init__(self) -> None:
-        self.updates: list[tuple[dict[str, Any], str]] = []
+        self.updates: list[tuple[dict[str, Any], Predicate]] = []
 
-    async def update(self, values: dict[str, Any], *, where: str) -> None:
+    async def update(self, values: dict[str, Any], *, where: Predicate) -> None:
         self.updates.append((values, where))
 
 
@@ -200,11 +201,12 @@ async def test_orthogonal_partial_states_all_recover() -> None:
     assert result.rows_processed == 3
     assert result.rows_failed == 0
 
-    # Recover per-id updates by parsing the where clause
-    # (``id = 'xxx'``) — the repo double preserves call order and shape.
+    # Recover per-id updates from the neutral predicate tree.
     updates_by_id: dict[str, dict[str, Any]] = {}
     for values, where in repo.updates:
-        row_id = where.split("'")[1]
+        assert isinstance(where, Comparison)
+        assert where.field == "id"
+        row_id = str(where.value)
         updates_by_id[row_id] = values
 
     assert set(updates_by_id) == {"both", "subj_only", "prim_only"}

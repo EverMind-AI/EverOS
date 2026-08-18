@@ -52,8 +52,6 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 │   │   └── ome.db.lock                   OME single-engine guard (portalocker)
 │   ├── lancedb/
 │   │   └── <kind>.lance/                default derived index backend
-│   └── milvus/
-│       └── milvus.db                    Milvus Lite database when configured
 │
 ├── ome.toml                             user-editable OME strategy overrides (hot-reloaded)
 └── .tmp/                                staging dir for batch / multi-step writes
@@ -67,7 +65,7 @@ the frontmatter (see [§3](#3-frontmatter-chassis-yaml)).
 
 The path manager is [`MemoryRoot`](../src/everos/core/persistence/memory_root.py),
 exposing every path as a property. `MemoryRoot.ensure()` creates the
-runtime-required dirs (`.index/{sqlite,lancedb,milvus}/`, `.tmp/`); the
+runtime-required dirs (`.index/{sqlite,lancedb}/`, `.tmp/`); the
 user-visible dirs are *not* pre-created — they appear on first write.
 Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
 
@@ -183,8 +181,6 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 │                            unprocessed_buffer, conversation_status, cluster)
 ├── lancedb/
 │   └── <kind>.lance/      default derived index backend
-└── milvus/
-    └── milvus.db          Milvus Lite database when configured
 ```
 
 - **SQLite** ([`infra/persistence/sqlite/tables/`](../src/everos/infra/persistence/sqlite/tables/))
@@ -197,8 +193,8 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 - The **derived index backend** holds the per-kind business rows, keyed
   `<owner_id>_<entry_id>` (so cross-table joins use `(owner_id, entry_id)`).
   LanceDB is the default backend under `.index/lancedb/`; Milvus can be enabled
-  as the same rebuildable index backend and uses `.index/milvus/milvus.db` by
-  default for Milvus Lite.
+  as the same rebuildable index backend and lives outside the memory root in a
+  configured Milvus Server or Zilliz Cloud deployment.
 
 Episode and AtomicFact index rows carry a `deprecated_by: str | None` column.
 When an episode is superseded by a Reflection merge,

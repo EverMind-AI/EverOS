@@ -24,7 +24,9 @@ from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import AgentCase
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.infra.persistence.markdown import AgentCaseWriter
+from everos.infra.persistence.predicate import Predicate
 from everos.memory.cascade.handlers import HandlerDeps
 from everos.memory.cascade.handlers.agent_case import AgentCaseHandler
 
@@ -61,10 +63,13 @@ class _FakeAgentCaseRepo:
         self.deletes: list[str] = []
         self.rows: list[AgentCase] = []
 
-    async def find_where(self, where: str, *, limit: int = 100) -> list[AgentCase]:
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100
+    ) -> list[AgentCase]:
+        rendered = render_predicate(where)
         prefix = "md_path = '"
-        if where.startswith(prefix):
-            md_path = where[len(prefix) :].rstrip("'")
+        if rendered.startswith(prefix):
+            md_path = rendered[len(prefix) :].rstrip("'")
             return [r for r in self.rows if r.md_path == md_path]
         return []
 
@@ -75,8 +80,8 @@ class _FakeAgentCaseRepo:
             by_id[r.id] = r
         self.rows = list(by_id.values())
 
-    async def delete(self, predicate: str) -> None:
-        self.deletes.append(predicate)
+    async def delete(self, predicate: Predicate) -> None:
+        self.deletes.append(render_predicate(predicate))
 
     async def delete_by_md_path(self, md_path: str) -> int:
         before = len(self.rows)

@@ -108,16 +108,27 @@ everos init --root /data/everos
 ### `[milvus]`
 
 Milvus is optional. Install with `everos[milvus]`, then set
-`[index].backend = "milvus"`.
+`[index].backend = "milvus"`. The backend connects only to an external
+Milvus Server or Zilliz Cloud endpoint; embedded Milvus Lite and local `.db`
+paths are not supported.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `uri` | string \| null | `""` | Empty uses Milvus Lite at `<root>/.index/milvus/milvus.db`. Set to a Milvus server or Zilliz Cloud endpoint to use an external service. |
-| `token` | string \| null | `""` | Token for Zilliz Cloud or auth-enabled Milvus. |
-| `db_name` | string \| null | `""` | Optional Milvus database name. |
+| `uri` | string | `""` | Required when the Milvus backend is selected. Must be a remote Milvus Server or Zilliz Cloud endpoint. |
+| `token` | string | `""` | Token for Zilliz Cloud or auth-enabled Milvus Server. |
+| `db_name` | string | `""` | Optional Milvus database name. Prefer a dedicated database on shared clusters. |
 | `consistency_level` | `"Strong"` \| `"Session"` \| `"Bounded"` \| `"Eventually"` | `"Session"` | Milvus consistency level for created collections. |
-| `dimension` | int | `1024` | Dense vector dimension. Must match the configured embedding model output. |
-| `collection_prefix` | string | `"everos"` | Prefix for EverOS Milvus collections. |
+| `collection_prefix` | string | `"everos"` | Prefix for EverOS collections. Must start with a letter or underscore and contain only letters, digits, and underscores. Make it unique when deployments share a database. |
+
+EverOS creates seven collections and supports every dense field in the shared
+index schema, including `episode.subject_vector`. The vector dimension is owned
+by that schema (currently 1024), rather than duplicated in Milvus config.
+
+Milvus imposes limits that LanceDB does not: strings are capped at 65,535
+UTF-8 bytes, string arrays at 256 items, and each array item at 512 UTF-8
+bytes. EverOS validates these before a write and reports the exact table and
+field instead of relying on a server-side insert error. Ensure the selected
+Zilliz Cloud plan permits at least seven collections.
 
 ### `[llm]`
 

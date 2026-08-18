@@ -1,4 +1,4 @@
-"""LanceDB lifespan provider (HTTP API entrypoint).
+"""Derived-index lifespan provider (HTTP API entrypoint).
 
 Startup:
     Open the connection via ``get_connection`` (lazy, idempotent).
@@ -31,13 +31,18 @@ from fastapi import FastAPI
 
 from everos.core.lifespan import LifespanProvider
 from everos.core.observability.logging import get_logger
+from everos.infra.persistence.index import (
+    active_backend,
+)
+from everos.infra.persistence.index import (
+    shutdown as shutdown_index,
+)
+from everos.infra.persistence.index import (
+    startup as startup_index,
+)
 from everos.infra.persistence.lancedb import (
     BUSINESS_SCHEMAS_WITH_VECTOR,
-    dispose_connection,
-    ensure_business_indexes,
-    get_connection,
     get_table,
-    verify_business_schemas,
 )
 
 logger = get_logger(__name__)
@@ -83,7 +88,7 @@ async def _log_unbackfilled_hint() -> None:
 
 
 class LanceDBLifespanProvider(LifespanProvider):
-    """Manage the LanceDB connection + table cache for the app lifecycle.
+    """Manage the configured derived index for the app lifecycle.
 
     Startup runs four steps:
 
@@ -100,12 +105,12 @@ class LanceDBLifespanProvider(LifespanProvider):
         super().__init__(name="lancedb", order=order)
 
     async def startup(self, app: FastAPI) -> Any:
-        conn = await get_connection()
-        await verify_business_schemas()
-        await ensure_business_indexes()
-        await _log_unbackfilled_hint()
-        logger.info("lancedb_ready", uri=conn.uri)
+        backend = active_backend()
+        conn = await startup_index()
+        if backend == "lancedb":
+            await _log_unbackfilled_hint()
+        logger.info("derived_index_ready", backend=backend)
         return conn
 
     async def shutdown(self, app: FastAPI) -> None:
-        await dispose_connection()
+        await shutdown_index()

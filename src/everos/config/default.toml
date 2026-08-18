@@ -57,15 +57,15 @@ cache_size_kb = 2048
 backend = "lancedb"
 
 [milvus]
-# Optional derived index backend. Leave uri empty to use Milvus Lite at
-# <root>/.index/milvus/milvus.db. Set uri/token/db_name for Milvus server or
-# Zilliz Cloud.
+# Optional remote derived index backend for Milvus Server or Zilliz Cloud.
+# `uri` is required when [index] backend = "milvus". Embedded Milvus Lite and
+# local database paths are not supported. Use a unique db_name or
+# collection_prefix when multiple EverOS deployments share a cluster.
 # Override via EVEROS_MILVUS__URI, EVEROS_MILVUS__TOKEN, EVEROS_MILVUS__DB_NAME.
 uri = ""
 token = ""
 db_name = ""
 consistency_level = "Session"
-dimension = 1024
 collection_prefix = "everos"
 
 [llm]

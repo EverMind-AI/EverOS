@@ -28,6 +28,7 @@ import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 
@@ -108,13 +109,13 @@ class _StubEpisodeRecaller:
     async def sparse_recall(
         self, query: str, where: Any, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = str(where)
+        self.last_where = render_predicate(where)
         return list(self._sparse[:limit])
 
     async def dense_recall(
         self, vector: Sequence[float], where: Any, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = str(where)
+        self.last_where = render_predicate(where)
         return list(self._dense[:limit])
 
     async def fetch_by_parent_ids(

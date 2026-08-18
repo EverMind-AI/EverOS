@@ -29,6 +29,7 @@ from everos.infra.persistence.lancedb import (
     atomic_fact_repo,
     lancedb_manager,
 )
+from everos.infra.persistence.predicate import all_of, eq
 from everos.memory.search.recall import atomic_fact as atomic_fact_module
 from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps
@@ -84,6 +85,9 @@ def _recaller() -> AtomicFactRecaller:
     return AtomicFactRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
 
 
+_ALICE_WHERE = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
+
+
 async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
     """Two episodes sharing one memcell both see the same fact pool.
 
@@ -105,8 +109,9 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
         "alice_ep_b": ["mc_shared"],
         "alice_ep_c": ["mc_other"],
     }
-    where = "owner_id = 'alice' AND owner_type = 'user'"
-    out = await _recaller().facts_for_episodes(ep_to_parents, where, per_episode=10)
+    out = await _recaller().facts_for_episodes(
+        ep_to_parents, _ALICE_WHERE, per_episode=10
+    )
 
     assert sorted(out.keys()) == ["alice_ep_a", "alice_ep_b", "alice_ep_c"]
     assert sorted(f.id for f in out["alice_ep_a"]) == ["alice_af_1", "alice_af_2"]
@@ -121,9 +126,7 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
 
 
 async def test_facts_for_episodes_returns_empty_for_no_episodes() -> None:
-    out: dict = await _recaller().facts_for_episodes(
-        {}, "owner_id = 'alice'", per_episode=10
-    )
+    out: dict = await _recaller().facts_for_episodes({}, _ALICE_WHERE, per_episode=10)
     assert out == {}
 
 
@@ -135,7 +138,7 @@ async def test_facts_for_episodes_skips_unknown_memcells() -> None:
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": ["mc_a"], "alice_ep_b": ["mc_missing"]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
     )
     assert "alice_ep_a" in out
@@ -164,7 +167,7 @@ async def test_facts_for_episodes_filters_by_where_clause() -> None:
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": ["mc_a"]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
     )
     assert [f.id for f in out["alice_ep_a"]] == ["alice_af_1"]
@@ -184,7 +187,7 @@ async def test_facts_for_episodes_drops_empty_parent_ids() -> None:
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": [""]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
     )
     assert out == {}
@@ -232,7 +235,7 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() 
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": ["mc_shared"]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
         query_vector=_unit_vector(0),
     )
@@ -260,7 +263,7 @@ async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": ["mc_a"]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
         # no query_vector
     )
@@ -287,7 +290,7 @@ async def test_facts_for_episodes_caps_dense_recall_limit(
 
     out = await _recaller().facts_for_episodes(
         ep_to_parents,
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=20,
         query_vector=_unit_vector(0),
     )
@@ -316,7 +319,7 @@ async def test_facts_for_episodes_dual_parent_id_finds_both_eras() -> None:
 
     out = await _recaller().facts_for_episodes(
         {"alice_ep_a": ["ep_entry_1", "mc_1"]},
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
     )
 
@@ -344,7 +347,7 @@ async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes() ->
             "alice_ep_a": ["ep_entry_1", "mc_shared"],
             "alice_ep_b": ["ep_entry_2", "mc_shared"],
         },
-        "owner_id = 'alice' AND owner_type = 'user'",
+        _ALICE_WHERE,
         per_episode=10,
     )
 

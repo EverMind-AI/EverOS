@@ -21,7 +21,13 @@ from typing import Any, ClassVar
 
 from everalgo.types import Candidate, FactCandidate
 
-from everos.infra.persistence.index import AtomicFact, atomic_fact_repo
+from everos.infra.persistence.index import (
+    AtomicFact,
+    Predicate,
+    all_of,
+    atomic_fact_repo,
+    one_of,
+)
 
 from .base import (
     RecallerDeps,
@@ -46,7 +52,7 @@ class AtomicFactRecaller:
         self._deps = deps
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring)."""
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
@@ -64,7 +70,7 @@ class AtomicFactRecaller:
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Cosine ANN recall over the atomic_fact table.
 
@@ -91,7 +97,7 @@ class AtomicFactRecaller:
     async def facts_for_episodes(
         self,
         ep_to_parents: Mapping[str, Sequence[str]],
-        where: str,
+        where: Predicate,
         *,
         per_episode: int,
         query_vector: Sequence[float] | None = None,
@@ -152,15 +158,13 @@ class AtomicFactRecaller:
     async def _query_facts_for_parents(
         self,
         parent_to_eps: dict[str, list[str]],
-        where: str,
+        where: Predicate,
         *,
         per_episode: int,
         query_vector: Sequence[float] | None,
     ) -> list[dict[str, Any]]:
         """Construct and execute the LanceDB query for parent_id IN (...)."""
-        quoted = ", ".join(f"'{_q(pid)}'" for pid in parent_to_eps)
-        clause = f"parent_id IN ({quoted})"
-        full_where = f"({where}) AND ({clause})"
+        full_where = all_of(where, one_of("parent_id", list(parent_to_eps)))
         # Milvus server / Zilliz Cloud reject search topK values above 1024.
         # The fact expansion only needs a bounded candidate pool for top-N
         # competition, so keep the same cap for every derived-index backend.
@@ -182,7 +186,3 @@ def _build_parent_to_episode_map(
             if pid:
                 parent_to_eps[pid].append(ep_id)
     return parent_to_eps
-
-
-def _q(value: str) -> str:
-    return value.replace("'", "''")

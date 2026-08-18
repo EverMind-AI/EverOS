@@ -59,16 +59,16 @@ max_concurrent  = 5
 
 # ── Optional Milvus derived index ─────────────────────
 # Markdown remains the source of truth. Set the index backend to Milvus
-# when you want the rebuildable vector/BM25 index to live in Milvus.
-# Leave uri empty for Milvus Lite at <root>/.index/milvus/milvus.db.
+# when you want the rebuildable vector/BM25 index to live in an external
+# Milvus Server or Zilliz Cloud deployment. Embedded Milvus Lite and local
+# database paths are not supported.
 #
 # [index]
 # backend = "milvus"
 #
 # [milvus]
-# uri = ""                         # or "http://localhost:19530"
+# uri = "http://localhost:19530"   # required remote endpoint
 # token = ""                       # required for Zilliz Cloud/auth-enabled Milvus
-# db_name = ""
+# db_name = ""                     # use a dedicated database when available
 # consistency_level = "Session"
-# dimension = 1024                 # must match your embedding model output
-# collection_prefix = "everos"
+# collection_prefix = "everos"     # make unique on a shared database

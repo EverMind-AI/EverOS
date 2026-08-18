@@ -1148,15 +1148,15 @@ def _validate_scope_id(value: str, name: str) -> None:
         raise ValueError(f"{name} contains invalid characters: {value!r}")
 
 
-def compile_knowledge_where(app_id: str, project_id: str) -> str:
-    """Build a LanceDB ``where`` clause scoped to the given tenant.
+def compile_knowledge_where(app_id: str, project_id: str):  # type: ignore[no-untyped-def]
+    """Build a backend-neutral predicate scoped to the given tenant.
 
     Args:
         app_id: Tenant application identifier.
         project_id: Tenant project identifier.
 
     Returns:
-        SQL-style predicate string safe for use in LanceDB ``where`` parameter.
+        Predicate safe for either derived-index backend.
 
     Raises:
         ValueError: If either id contains invalid characters.
@@ -1164,10 +1164,9 @@ def compile_knowledge_where(app_id: str, project_id: str) -> str:
     _validate_scope_id(app_id, "app_id")
     _validate_scope_id(project_id, "project_id")
 
-    def _esc(v: str) -> str:
-        return v.replace("'", "''")
+    from everos.infra.persistence.index import all_of, eq
 
-    return f"app_id = '{_esc(app_id)}' AND project_id = '{_esc(project_id)}'"
+    return all_of(eq("app_id", app_id), eq("project_id", project_id))
 
 
 # ── Recall helpers ───────────────────────────────────────────────────────────

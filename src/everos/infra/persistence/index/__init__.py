@@ -30,6 +30,23 @@ from everos.infra.persistence.lancedb import (
     ParentType,
     UserProfile,
 )
+from everos.infra.persistence.lancedb.predicate import render_predicate as _render_lance
+
+from .predicate import (
+    Predicate,
+    all_of,
+    any_of,
+    contains,
+    eq,
+    gt,
+    gte,
+    is_null,
+    lt,
+    lte,
+    ne,
+    one_of,
+)
+from .schema import schema_for
 
 
 def active_backend() -> str:
@@ -48,6 +65,13 @@ async def startup() -> Any:
     await _lancedb.verify_business_schemas()
     await _lancedb.ensure_business_indexes()
     return conn
+
+
+async def connect() -> Any:
+    """Open the active backend without creating or verifying indexes."""
+    if active_backend() == "milvus":
+        return await _milvus().get_client()
+    return await _lancedb.get_connection()
 
 
 async def shutdown() -> None:
@@ -72,12 +96,20 @@ async def verify_business_schemas() -> None:
         await _lancedb.verify_business_schemas()
 
 
+async def drop_business_tables() -> list[str]:
+    """Drop all business indexes for the active backend."""
+    if active_backend() == "milvus":
+        return await _milvus().drop_business_tables()
+    return await _lancedb.drop_business_tables()
+
+
 class _LanceIndexRepoAdapter:
     """Add backend-neutral recall helpers to an existing LanceDB repo."""
 
     def __init__(self, repo: Any, schema: type[Any]) -> None:
         self._repo = repo
         self.schema = schema
+        self.index_schema = schema_for(schema)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._repo, name)
@@ -90,7 +122,7 @@ class _LanceIndexRepoAdapter:
         columns: Sequence[str] | None = None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        fields = list(columns or self.schema.BM25_FIELDS)
+        fields = list(columns or self.index_schema.bm25_fields)
         if not query_terms or not fields:
             return []
         table = await _lancedb.get_table(self.schema.TABLE_NAME, self.schema)
@@ -125,6 +157,7 @@ class _LanceIndexRepoAdapter:
         where: Any,
         *,
         limit: int,
+        vector_field: str = "vector",
     ) -> list[dict[str, Any]]:
         if not vector:
             return []
@@ -132,6 +165,7 @@ class _LanceIndexRepoAdapter:
         return (
             await table.query()
             .nearest_to(list(vector))
+            .column(vector_field)
             .distance_type("cosine")
             .where(_lance_expr(where))
             .limit(limit)
@@ -148,10 +182,11 @@ class _IndexRepoRouter:
         self._lance = _LanceIndexRepoAdapter(lance_repo, schema)
         self._milvus_repo_name = milvus_repo_name
         self.schema = schema
+        self.index_schema = schema_for(schema)
 
     @property
     def table_name(self) -> str:
-        return self.schema.TABLE_NAME
+        return self.index_schema.table_name
 
     def _repo(self) -> Any:
         if active_backend() == "milvus":
@@ -240,21 +275,40 @@ class _IndexRepoRouter:
         )
 
     async def dense_search(
-        self, vector: Sequence[float], where: Any, *, limit: int
+        self,
+        vector: Sequence[float],
+        where: Any,
+        *,
+        limit: int,
+        vector_field: str = "vector",
     ) -> list[dict[str, Any]]:
         return await self._repo().dense_search(
-            vector, _where_for_backend(where), limit=limit
+            vector,
+            _where_for_backend(where),
+            limit=limit,
+            vector_field=vector_field,
         )
 
 
 def _where_for_backend(where: Any) -> Any:
+    if where is None:
+        return None if active_backend() == "milvus" else ""
+    if not isinstance(where, Predicate):
+        raise TypeError(
+            "derived-index repository predicates must use the neutral "
+            f"Predicate AST, got {type(where).__name__}"
+        )
     if active_backend() == "milvus":
-        return getattr(where, "milvus", where)
-    return _lance_expr(where)
+        return where
+    return _render_lance(where)
 
 
 def _lance_expr(where: Any) -> str:
-    return getattr(where, "lancedb", where)
+    if isinstance(where, Predicate):
+        return _render_lance(where)
+    if isinstance(where, str):
+        return where
+    raise TypeError(f"unsupported LanceDB predicate: {type(where).__name__}")
 
 
 def _build_or_query(tokens: Sequence[str], column: str) -> FullTextQuery:
@@ -311,15 +365,29 @@ __all__ = [
     "Foresight",
     "KnowledgeTopic",
     "ParentType",
+    "Predicate",
     "UserProfile",
     "active_backend",
     "agent_case_repo",
     "agent_skill_repo",
+    "all_of",
+    "any_of",
     "atomic_fact_repo",
+    "connect",
+    "contains",
+    "drop_business_tables",
     "ensure_business_indexes",
     "episode_repo",
+    "eq",
     "foresight_repo",
+    "gt",
+    "gte",
+    "is_null",
     "knowledge_topic_repo",
+    "lt",
+    "lte",
+    "ne",
+    "one_of",
     "shutdown",
     "startup",
     "user_profile_repo",

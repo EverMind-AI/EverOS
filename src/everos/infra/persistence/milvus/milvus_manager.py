@@ -7,8 +7,8 @@ import re
 from pymilvus import MilvusClient
 
 from everos.config import MilvusSettings, load_settings
+from everos.core.errors import ConfigurationError
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
 
 logger = get_logger(__name__)
 
@@ -17,6 +17,10 @@ _client: MilvusClient | None = None
 
 class MilvusSchemaMismatchError(RuntimeError):
     """Raised when an existing Milvus collection does not match EverOS."""
+
+
+class MilvusConfigurationError(ConfigurationError):
+    """Raised when the remote Milvus profile is incomplete or invalid."""
 
 
 def collection_name(table_name: str, settings: MilvusSettings | None = None) -> str:
@@ -55,14 +59,27 @@ async def dispose_connection() -> None:
         _client.close()
         _client = None
         logger.info("milvus_connection_closed")
+    from .repository import MilvusRepoBase
+
+    MilvusRepoBase._reset_collection_cache()
 
 
 def _resolve_uri(settings: MilvusSettings) -> str:
-    if settings.uri:
-        return settings.uri
-    memory_root = MemoryRoot.default()
-    memory_root.milvus_dir.mkdir(parents=True, exist_ok=True)
-    return str(memory_root.milvus_db)
+    uri = settings.uri.strip()
+    if not uri:
+        raise MilvusConfigurationError(
+            "[index] backend = 'milvus' requires EVEROS_MILVUS__URI (or "
+            "[milvus] uri) pointing to Milvus Server or Zilliz Cloud; "
+            "embedded Milvus Lite is not supported"
+        )
+    scheme, separator, _rest = uri.partition("://")
+    if not separator or scheme.lower() not in {"http", "https"}:
+        raise MilvusConfigurationError(
+            "[milvus] uri must be a remote http(s) endpoint for Milvus Server "
+            "or Zilliz Cloud, not a local database path; embedded Milvus Lite "
+            "is not supported"
+        )
+    return uri
 
 
 def _secret(value: object | None) -> str:
@@ -80,6 +97,7 @@ def _sanitize_name_part(value: str) -> str:
 
 
 __all__ = [
+    "MilvusConfigurationError",
     "MilvusSchemaMismatchError",
     "collection_name",
     "dispose_connection",

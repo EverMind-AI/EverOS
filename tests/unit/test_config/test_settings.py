@@ -127,7 +127,6 @@ def test_index_milvus_defaults() -> None:
     assert s.milvus.token.get_secret_value() == ""
     assert s.milvus.db_name == ""
     assert s.milvus.consistency_level == "Session"
-    assert s.milvus.dimension == 1024
     assert s.milvus.collection_prefix == "everos"
 
 
@@ -137,14 +136,12 @@ def test_index_milvus_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVEROS_MILVUS__TOKEN", "secret")
     monkeypatch.setenv("EVEROS_MILVUS__DB_NAME", "tenant_a")
     monkeypatch.setenv("EVEROS_MILVUS__CONSISTENCY_LEVEL", "Strong")
-    monkeypatch.setenv("EVEROS_MILVUS__DIMENSION", "1536")
     s = Settings()
     assert s.index.backend == "milvus"
     assert s.milvus.uri == "http://localhost:19530"
     assert s.milvus.token.get_secret_value() == "secret"
     assert s.milvus.db_name == "tenant_a"
     assert s.milvus.consistency_level == "Strong"
-    assert s.milvus.dimension == 1536
 
 
 def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:

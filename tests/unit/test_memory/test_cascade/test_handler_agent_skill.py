@@ -19,7 +19,9 @@ from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import AgentSkill
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.infra.persistence.markdown import AgentSkillWriter
+from everos.infra.persistence.predicate import Predicate
 from everos.memory.cascade.handlers import AgentSkillHandler, HandlerDeps
 
 
@@ -72,29 +74,31 @@ class _FakeSkillRepo:
         self.deletes.append(md_path)
         return 1
 
-    async def find_where(self, predicate: str, *, limit: int) -> list[AgentSkill]:
+    async def find_where(self, predicate: Predicate, *, limit: int) -> list[AgentSkill]:
         """In-memory equivalent — handles only the
         ``md_path = '...' AND id != '...'`` shape the handler emits."""
-        if "md_path = " in predicate and "id != " in predicate:
-            md_lit = predicate.split("md_path = '")[1].split("'", 1)[0]
-            id_lit = predicate.split("id != '")[1].split("'", 1)[0]
+        rendered = render_predicate(predicate)
+        if "md_path = " in rendered and "id != " in rendered:
+            md_lit = rendered.split("md_path = '")[1].split("'", 1)[0]
+            id_lit = rendered.split("id != '")[1].split("'", 1)[0]
             return [
                 r for r in self.rows.values() if r.md_path == md_lit and r.id != id_lit
             ][:limit]
-        raise NotImplementedError(f"fake repo doesn't handle {predicate!r}")
+        raise NotImplementedError(f"fake repo doesn't handle {rendered!r}")
 
-    async def delete(self, predicate: str) -> None:
-        self.predicate_deletes.append(predicate)
-        if "md_path = " in predicate and "id != " in predicate:
-            md_lit = predicate.split("md_path = '")[1].split("'", 1)[0]
-            id_lit = predicate.split("id != '")[1].split("'", 1)[0]
+    async def delete(self, predicate: Predicate) -> None:
+        rendered = render_predicate(predicate)
+        self.predicate_deletes.append(rendered)
+        if "md_path = " in rendered and "id != " in rendered:
+            md_lit = rendered.split("md_path = '")[1].split("'", 1)[0]
+            id_lit = rendered.split("id != '")[1].split("'", 1)[0]
             self.rows = {
                 rid: row
                 for rid, row in self.rows.items()
                 if not (row.md_path == md_lit and row.id != id_lit)
             }
             return
-        raise NotImplementedError(f"fake repo doesn't handle {predicate!r}")
+        raise NotImplementedError(f"fake repo doesn't handle {rendered!r}")
 
 
 @pytest.fixture
@@ -233,7 +237,7 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
     assert list(fake_repo.rows.keys()) == ["a1_new_name"]
     # The sweep predicate references the *new* id with the same md_path.
     assert fake_repo.predicate_deletes == [
-        f"md_path = '{md_path}' AND id != 'a1_new_name'"
+        f"((md_path = '{md_path}') AND (id != 'a1_new_name'))"
     ]
 
 

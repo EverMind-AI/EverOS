@@ -17,6 +17,7 @@ from everalgo.types import Candidate
 
 from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import ProviderNotConfiguredError
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
 )
@@ -134,11 +135,11 @@ def _patch_stack(
 
 class TestCompileKnowledgeWhere:
     def test_basic_clause(self) -> None:
-        result = compile_knowledge_where("myapp", "myproj")
-        assert result == "app_id = 'myapp' AND project_id = 'myproj'"
+        result = render_predicate(compile_knowledge_where("myapp", "myproj"))
+        assert result == "((app_id = 'myapp') AND (project_id = 'myproj'))"
 
     def test_defaults(self) -> None:
-        result = compile_knowledge_where("default", "default")
+        result = render_predicate(compile_knowledge_where("default", "default"))
         assert "app_id = 'default'" in result
         assert "project_id = 'default'" in result
 
@@ -159,12 +160,12 @@ class TestCompileKnowledgeWhere:
             compile_knowledge_where("app", "")
 
     def test_accepts_valid_ids_with_special_chars(self) -> None:
-        result = compile_knowledge_where("my_app.v2", "project-1")
+        result = render_predicate(compile_knowledge_where("my_app.v2", "project-1"))
         assert "my_app.v2" in result
         assert "project-1" in result
 
     def test_accepts_valid_ids_with_at_plus(self) -> None:
-        result = compile_knowledge_where("app@org+v1", "proj_1")
+        result = render_predicate(compile_knowledge_where("app@org+v1", "proj_1"))
         assert "app@org+v1" in result
         assert "proj_1" in result
 

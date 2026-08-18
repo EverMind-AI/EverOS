@@ -1,55 +1,62 @@
-"""Milvus repository implementation for EverOS derived index tables."""
+"""Milvus repository for EverOS rebuildable derived indexes."""
 
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import re
 from collections.abc import Sequence
-from importlib.metadata import PackageNotFoundError, version
-from typing import Any, ClassVar, get_args, get_origin
+from typing import Any, ClassVar
 
+from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
 
-from everos.component.utils.datetime import (
-    ensure_utc,
-    from_iso_format,
-    from_timestamp,
-    to_timestamp_ms,
-)
+from everos.component.utils.datetime import ensure_utc, from_timestamp, to_timestamp_ms
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import BaseLanceTable
-
-from .milvus_manager import (
-    MilvusSchemaMismatchError,
-    collection_name,
-    get_client,
+from everos.infra.persistence.index.predicate import (
+    Predicate,
+    all_of,
+    eq,
+    one_of,
 )
+from everos.infra.persistence.index.schema import (
+    IndexField,
+    IndexFieldKind,
+    IndexSchema,
+    schema_for,
+)
+
+from .milvus_manager import MilvusSchemaMismatchError, collection_name, get_client
+from .predicate import render_predicate
 
 logger = get_logger(__name__)
 
 _DUMMY_VECTOR_FIELD = "_everos_dummy_vector"
+_DUMMY_VECTOR_DIMENSION = 2
 _SPARSE_SUFFIX = "__sparse"
-_MAX_VARCHAR_LENGTH = 65_535
-_ID_MAX_LENGTH = 512
-_ARRAY_MAX_CAPACITY = 256
+_PRESENT_SUFFIX = "__present"
+_UPDATE_FETCH_LIMIT = 10_000
 
 
-def _q(value: str) -> str:
-    """Escape a string for a Milvus single-quoted expression literal."""
-    return value.replace("\\", "\\\\").replace("'", "\\'")
+class MilvusValueLimitError(ValueError):
+    """A row exceeds a documented Milvus VARCHAR, array, or vector limit."""
 
 
-class MilvusRepoBase[T: BaseLanceTable]:
-    """Generic Milvus repository for one EverOS derived index collection."""
+class MilvusRepoBase[T: BaseModel]:
+    """Generic Milvus repository backed by one neutral index schema."""
 
     schema: type[T]
     _write_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _collection_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _ready_collections: ClassVar[set[str]] = set()
+
+    @property
+    def index_schema(self) -> IndexSchema:
+        return schema_for(self.schema)
 
     @property
     def table_name(self) -> str:
-        return self.schema.TABLE_NAME
+        return self.index_schema.table_name
 
     @property
     def collection_name(self) -> str:
@@ -60,36 +67,57 @@ class MilvusRepoBase[T: BaseLanceTable]:
         return cls._write_locks.setdefault(name, asyncio.Lock())
 
     @classmethod
+    def _collection_lock(cls, name: str) -> asyncio.Lock:
+        return cls._collection_locks.setdefault(name, asyncio.Lock())
+
+    @classmethod
+    def _reset_collection_cache(cls) -> None:
+        cls._ready_collections.clear()
+        cls._collection_locks.clear()
+
+    @classmethod
     def _reset_locks_for_tests(cls) -> None:
         cls._write_locks.clear()
+        cls._reset_collection_cache()
 
     async def ensure_collection(self) -> None:
-        client = await get_client()
-        if await _run(client.has_collection, self.collection_name):
-            await self.verify_collection()
+        """Create or verify the collection once per process."""
+        name = self.collection_name
+        if name in self._ready_collections:
             return
+        async with self._collection_lock(name):
+            if name in self._ready_collections:
+                return
+            client = await get_client()
+            if await _run(client.has_collection, name):
+                await self.verify_collection()
+            else:
+                await self._create_collection(client)
+            self._ready_collections.add(name)
 
+    async def _create_collection(self, client: MilvusClient) -> None:
         schema = self._build_collection_schema()
         index_params = client.prepare_index_params()
-        if "vector" in self.schema.model_fields:
-            index_params.add_index(
-                field_name="vector",
-                index_type="AUTOINDEX",
-                metric_type="COSINE",
-            )
+        vector_fields = self.index_schema.vector_fields
+        if vector_fields:
+            for field in vector_fields:
+                index_params.add_index(
+                    field_name=field.name,
+                    index_type="AUTOINDEX",
+                    metric_type="COSINE",
+                )
         else:
             index_params.add_index(
                 field_name=_DUMMY_VECTOR_FIELD,
                 index_type="AUTOINDEX",
                 metric_type="COSINE",
             )
-        for field in self.schema.BM25_FIELDS:
+        for field in self.index_schema.bm25_fields:
             index_params.add_index(
                 field_name=_sparse_field(field),
                 index_type="AUTOINDEX",
                 metric_type="BM25",
             )
-
         settings = load_settings().milvus
         await _run(
             client.create_collection,
@@ -110,21 +138,20 @@ class MilvusRepoBase[T: BaseLanceTable]:
         actual = {field["name"] for field in description.get("fields", [])}
         expected = set(self._stored_field_names())
         missing = expected - actual
-        if missing:
+        stale = actual - expected
+        if missing or stale:
             raise MilvusSchemaMismatchError(
                 f"Milvus collection {self.collection_name!r} schema drift: "
-                f"missing={sorted(missing)}. The index is rebuildable from md; "
-                "drop the collection and restart to rebuild it."
+                f"missing={sorted(missing)}, stale={sorted(stale)}. The index is "
+                "rebuildable from markdown; run `everos cascade rebuild`."
             )
-
-    # ── Create / update ─────────────────────────────────────────────
 
     async def add(self, records: Sequence[T]) -> None:
         if not records:
             return
         await self.ensure_collection()
-        client = await get_client()
         payload = [self._to_milvus_record(record) for record in records]
+        client = await get_client()
         async with self._write_lock(self.collection_name):
             await _run(client.insert, self.collection_name, payload)
 
@@ -134,52 +161,57 @@ class MilvusRepoBase[T: BaseLanceTable]:
         if not records:
             return
         await self.ensure_collection()
-        client = await get_client()
         payload = [self._to_milvus_record(record) for record in records]
+        client = await get_client()
         async with self._write_lock(self.collection_name):
             await _run(client.upsert, self.collection_name, payload)
 
-    async def update(self, updates: dict[str, Any], *, where: Any) -> None:
-        await self.ensure_collection()
-        rows = await self._query_raw(where, limit=10_000, include_vectors=True)
+    async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
+        rows = await self._query_raw(
+            where, limit=_UPDATE_FETCH_LIMIT, include_vectors=True
+        )
         if not rows:
             return
-        patched = []
+        if len(rows) == _UPDATE_FETCH_LIMIT:
+            logger.warning(
+                "milvus_update_truncated",
+                table=self.table_name,
+                limit=_UPDATE_FETCH_LIMIT,
+            )
+        patched: list[dict[str, Any]] = []
         for row in rows:
             merged = dict(row)
             for key, value in updates.items():
                 self._write_field_value(merged, key, value)
+            self._validate_raw_record(merged)
             patched.append(merged)
         client = await get_client()
         async with self._write_lock(self.collection_name):
             await _run(client.upsert, self.collection_name, patched)
 
-    # ── Maintenance ────────────────────────────────────────────────
-
     async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
-        """Milvus indexes are managed by the service; no per-write compaction."""
+        """Milvus indexes and compaction are service-managed."""
 
     async def rebuild_indexes(self) -> None:
         """Milvus AUTOINDEX maintenance is service-managed."""
 
-    # ── Reads ──────────────────────────────────────────────────────
-
     async def count(self) -> int:
+        return await self._count_where(None)
+
+    async def _count_where(self, where: Predicate | None) -> int:
         await self.ensure_collection()
         client = await get_client()
         rows = await _run(
             client.query,
             self.collection_name,
-            filter="",
+            filter=self._expr(where),
             output_fields=["count(*)"],
         )
-        if not rows:
-            return 0
-        return int(rows[0].get("count(*)", 0))
+        return int(rows[0].get("count(*)", 0)) if rows else 0
 
     async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
         if id_field != "id":
-            rows = await self.find_where(f"{id_field} = '{_q(id_value)}'", limit=1)
+            rows = await self.find_where(eq(id_field, id_value), limit=1)
             return rows[0] if rows else None
         await self.ensure_collection()
         client = await get_client()
@@ -189,21 +221,19 @@ class MilvusRepoBase[T: BaseLanceTable]:
             ids=[id_value],
             output_fields=self._output_fields(include_vectors=True),
         )
-        if not rows:
-            return None
-        return self._model_from_milvus(rows[0])
+        return self._model_from_milvus(rows[0]) if rows else None
 
-    async def find_where(self, where: Any, *, limit: int = 100) -> list[T]:
+    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
         rows = await self._query_raw(where, limit=limit, include_vectors=True)
         return [self._model_from_milvus(row) for row in rows]
 
-    async def find_one_where(self, where: Any) -> T | None:
+    async def find_one_where(self, where: Predicate) -> T | None:
         rows = await self.find_where(where, limit=1)
         return rows[0] if rows else None
 
     async def find_where_paginated(
         self,
-        where: Any,
+        where: Predicate,
         *,
         sort_by: str,
         descending: bool = True,
@@ -211,9 +241,9 @@ class MilvusRepoBase[T: BaseLanceTable]:
         page_size: int = 20,
         max_fetch: int = 20_000,
     ) -> tuple[list[T], int]:
+        total = await self._count_where(where)
         raw = await self._query_raw(where, limit=max_fetch, include_vectors=True)
-        total = len(raw)
-        if total >= max_fetch:
+        if total > len(raw):
             logger.warning(
                 "milvus_find_where_paginated_truncated",
                 table=self.table_name,
@@ -229,16 +259,16 @@ class MilvusRepoBase[T: BaseLanceTable]:
         return rows[offset : offset + page_size], total
 
     async def find_by_owner(self, owner_id: str, *, limit: int = 100) -> list[T]:
-        return await self.find_where(f"owner_id = '{_q(owner_id)}'", limit=limit)
+        return await self.find_where(eq("owner_id", owner_id), limit=limit)
 
     async def find_by_md_path(self, md_path: str) -> T | None:
-        return await self.find_one_where(f"md_path = '{_q(md_path)}'")
+        return await self.find_one_where(eq("md_path", md_path))
 
     async def search(
         self,
         *,
         vector: Sequence[float] | None = None,
-        where: Any = None,
+        where: Predicate | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         if vector is None:
@@ -248,7 +278,7 @@ class MilvusRepoBase[T: BaseLanceTable]:
     async def sparse_search(
         self,
         query_terms: Sequence[str],
-        where: Any,
+        where: Predicate | None,
         *,
         columns: Sequence[str] | None = None,
         limit: int,
@@ -256,11 +286,13 @@ class MilvusRepoBase[T: BaseLanceTable]:
         if not query_terms:
             return []
         await self.ensure_collection()
-        fields = list(columns or self.schema.BM25_FIELDS)
+        fields = list(columns or self.index_schema.bm25_fields)
         if not fields:
             return []
+        unknown = set(fields) - set(self.index_schema.bm25_fields)
+        if unknown:
+            raise ValueError(f"unknown BM25 fields: {sorted(unknown)}")
         client = await get_client()
-        expr = self._expr(where)
         query = " ".join(term for term in query_terms if term)
         best: dict[str, dict[str, Any]] = {}
         for field in fields:
@@ -269,7 +301,7 @@ class MilvusRepoBase[T: BaseLanceTable]:
                 self.collection_name,
                 data=[query],
                 anns_field=_sparse_field(field),
-                filter=expr,
+                filter=self._expr(where),
                 limit=limit,
                 output_fields=self._output_fields(include_vectors=False),
                 search_params={"metric_type": "BM25"},
@@ -291,20 +323,26 @@ class MilvusRepoBase[T: BaseLanceTable]:
     async def dense_search(
         self,
         vector: Sequence[float],
-        where: Any,
+        where: Predicate | None,
         *,
         limit: int,
+        vector_field: str = "vector",
     ) -> list[dict[str, Any]]:
-        if not vector or "vector" not in self.schema.model_fields:
+        if not vector:
             return []
+        field = self.index_schema.field(vector_field)
+        if field.kind is not IndexFieldKind.DENSE_VECTOR:
+            raise ValueError(f"{vector_field!r} is not a dense-vector field")
+        self._validate_vector(field, vector)
         await self.ensure_collection()
         client = await get_client()
+        present = eq(_present_field(vector_field), True)
         results = await _run(
             client.search,
             self.collection_name,
             data=[list(vector)],
-            anns_field="vector",
-            filter=self._expr(where),
+            anns_field=vector_field,
+            filter=self._expr(all_of(where, present)),
             limit=limit,
             output_fields=self._output_fields(include_vectors=False),
             search_params={"metric_type": "COSINE"},
@@ -314,9 +352,7 @@ class MilvusRepoBase[T: BaseLanceTable]:
             for row in _first_result_set(results)
         ]
 
-    # ── Deletes ────────────────────────────────────────────────────
-
-    async def delete(self, predicate: Any) -> None:
+    async def delete(self, predicate: Predicate) -> None:
         await self.ensure_collection()
         client = await get_client()
         async with self._write_lock(self.collection_name):
@@ -327,14 +363,11 @@ class MilvusRepoBase[T: BaseLanceTable]:
             )
 
     async def delete_by_md_path(self, md_path: str) -> int:
-        await self.ensure_collection()
-        before = await self.find_where(f"md_path = '{_q(md_path)}'", limit=10_000)
-        if not before:
-            return 0
-        await self.delete(f"md_path = '{_q(md_path)}'")
-        return len(before)
-
-    # ── Daily-log helpers ──────────────────────────────────────────
+        predicate = eq("md_path", md_path)
+        count = await self._count_where(predicate)
+        if count:
+            await self.delete(predicate)
+        return count
 
     async def find_by_owner_entry(
         self,
@@ -345,8 +378,12 @@ class MilvusRepoBase[T: BaseLanceTable]:
         project_id: str = "default",
     ) -> T | None:
         return await self.find_one_where(
-            f"owner_id = '{_q(owner_id)}' AND entry_id = '{_q(entry_id)}' "
-            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'"
+            all_of(
+                eq("owner_id", owner_id),
+                eq("entry_id", entry_id),
+                eq("app_id", app_id),
+                eq("project_id", project_id),
+            )
         )
 
     async def find_by_owner_entries(
@@ -359,10 +396,13 @@ class MilvusRepoBase[T: BaseLanceTable]:
     ) -> list[T]:
         if not entry_ids:
             return []
-        quoted = ", ".join(f"'{_q(entry_id)}'" for entry_id in entry_ids)
         return await self.find_where(
-            f"owner_id = '{_q(owner_id)}' AND entry_id IN ({quoted}) "
-            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'",
+            all_of(
+                eq("owner_id", owner_id),
+                one_of("entry_id", list(entry_ids)),
+                eq("app_id", app_id),
+                eq("project_id", project_id),
+            ),
             limit=len(entry_ids),
         )
 
@@ -370,7 +410,7 @@ class MilvusRepoBase[T: BaseLanceTable]:
         self, owner_id: str, session_id: str, *, limit: int = 100
     ) -> list[T]:
         return await self.find_where(
-            f"owner_id = '{_q(owner_id)}' AND session_id = '{_q(session_id)}'",
+            all_of(eq("owner_id", owner_id), eq("session_id", session_id)),
             limit=limit,
         )
 
@@ -378,82 +418,24 @@ class MilvusRepoBase[T: BaseLanceTable]:
         self, parent_type: str, parent_id: str, *, limit: int = 100
     ) -> list[T]:
         return await self.find_where(
-            f"parent_type = '{_q(parent_type)}' AND parent_id = '{_q(parent_id)}'",
+            all_of(eq("parent_type", parent_type), eq("parent_id", parent_id)),
             limit=limit,
         )
 
-    # ── Field conversion ───────────────────────────────────────────
-
     def _build_collection_schema(self):  # type: ignore[no-untyped-def]
-        settings = load_settings().milvus
         schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
-        has_vector = False
-        for name, field in self.schema.model_fields.items():
-            if name == "subject_vector":
-                continue
-            annotation = field.annotation
-            if name == "id":
-                schema.add_field(
-                    field_name=name,
-                    datatype=DataType.VARCHAR,
-                    is_primary=True,
-                    max_length=_ID_MAX_LENGTH,
-                )
-            elif name == "vector":
-                has_vector = True
-                schema.add_field(
-                    field_name=name,
-                    datatype=DataType.FLOAT_VECTOR,
-                    dim=settings.dimension,
-                )
-            elif _is_datetime(annotation):
-                schema.add_field(
-                    field_name=_datetime_storage_field(name),
-                    datatype=DataType.INT64,
-                    nullable=_is_optional(annotation),
-                )
-            elif _is_list(annotation):
-                schema.add_field(
-                    field_name=name,
-                    datatype=DataType.ARRAY,
-                    element_type=DataType.VARCHAR,
-                    max_capacity=_ARRAY_MAX_CAPACITY,
-                    max_length=_ID_MAX_LENGTH,
-                    nullable=_is_optional(annotation),
-                )
-            elif _is_float(annotation):
-                schema.add_field(
-                    field_name=name,
-                    datatype=DataType.DOUBLE,
-                    nullable=_is_optional(annotation),
-                )
-            elif _is_int(annotation):
-                schema.add_field(
-                    field_name=name,
-                    datatype=DataType.INT64,
-                    nullable=_is_optional(annotation),
-                )
-            else:
-                kwargs: dict[str, Any] = {
-                    "field_name": name,
-                    "datatype": DataType.VARCHAR,
-                    "max_length": _MAX_VARCHAR_LENGTH,
-                }
-                if name in self.schema.BM25_FIELDS:
-                    kwargs["enable_analyzer"] = True
-                elif _is_optional(annotation):
-                    kwargs["nullable"] = True
-                schema.add_field(**kwargs)
-
-        if not has_vector:
+        for field in self.index_schema.fields:
+            self._add_schema_field(schema, field)
+        if not self.index_schema.vector_fields:
             schema.add_field(
                 field_name=_DUMMY_VECTOR_FIELD,
                 datatype=DataType.FLOAT_VECTOR,
-                dim=1,
+                dim=_DUMMY_VECTOR_DIMENSION,
             )
-        for field in self.schema.BM25_FIELDS:
+        for field in self.index_schema.bm25_fields:
+            sparse_name = _sparse_field(field)
             schema.add_field(
-                field_name=_sparse_field(field),
+                field_name=sparse_name,
                 datatype=DataType.SPARSE_FLOAT_VECTOR,
             )
             schema.add_function(
@@ -461,35 +443,91 @@ class MilvusRepoBase[T: BaseLanceTable]:
                     name=f"{field}_bm25",
                     function_type=FunctionType.BM25,
                     input_field_names=[field],
-                    output_field_names=[_sparse_field(field)],
+                    output_field_names=[sparse_name],
                 )
             )
         return schema
 
+    def _add_schema_field(self, schema: Any, field: IndexField) -> None:
+        if field.kind is IndexFieldKind.STRING:
+            kwargs: dict[str, Any] = {
+                "field_name": field.name,
+                "datatype": DataType.VARCHAR,
+                "max_length": field.max_length,
+            }
+            if field.primary:
+                kwargs["is_primary"] = True
+            elif field.nullable and field.name not in self.index_schema.bm25_fields:
+                kwargs["nullable"] = True
+            if field.name in self.index_schema.bm25_fields:
+                kwargs["enable_analyzer"] = True
+            schema.add_field(**kwargs)
+        elif field.kind is IndexFieldKind.STRING_ARRAY:
+            schema.add_field(
+                field_name=field.name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=field.max_capacity,
+                max_length=field.max_length,
+                nullable=field.nullable,
+            )
+        elif field.kind is IndexFieldKind.FLOAT:
+            schema.add_field(
+                field_name=field.name,
+                datatype=DataType.DOUBLE,
+                nullable=field.nullable,
+            )
+        elif field.kind is IndexFieldKind.INTEGER:
+            schema.add_field(
+                field_name=field.name,
+                datatype=DataType.INT64,
+                nullable=field.nullable,
+            )
+        elif field.kind is IndexFieldKind.DATETIME:
+            schema.add_field(
+                field_name=_datetime_storage_field(field.name),
+                datatype=DataType.INT64,
+                nullable=field.nullable,
+            )
+        elif field.kind is IndexFieldKind.DENSE_VECTOR:
+            schema.add_field(
+                field_name=field.name,
+                datatype=DataType.FLOAT_VECTOR,
+                dim=field.dimension,
+            )
+            schema.add_field(
+                field_name=_present_field(field.name),
+                datatype=DataType.BOOL,
+            )
+        else:  # pragma: no cover - enum exhaustiveness guard
+            raise TypeError(f"unsupported index field kind: {field.kind}")
+
     def _stored_field_names(self) -> list[str]:
         names: list[str] = []
-        has_vector = False
-        for name, field in self.schema.model_fields.items():
-            if name == "subject_vector":
-                continue
-            if name == "vector":
-                has_vector = True
-                names.append(name)
-            elif _is_datetime(field.annotation):
-                names.append(_datetime_storage_field(name))
+        for field in self.index_schema.fields:
+            if field.kind is IndexFieldKind.DATETIME:
+                names.append(_datetime_storage_field(field.name))
             else:
-                names.append(name)
-        if not has_vector:
+                names.append(field.name)
+            if field.kind is IndexFieldKind.DENSE_VECTOR:
+                names.append(_present_field(field.name))
+        if not self.index_schema.vector_fields:
             names.append(_DUMMY_VECTOR_FIELD)
-        names.extend(_sparse_field(field) for field in self.schema.BM25_FIELDS)
+        names.extend(_sparse_field(field) for field in self.index_schema.bm25_fields)
         return names
 
     def _output_fields(self, *, include_vectors: bool) -> list[str]:
         fields: list[str] = []
+        vector_names = {field.name for field in self.index_schema.vector_fields}
+        present_names = {_present_field(name) for name in vector_names}
         for name in self._stored_field_names():
-            if name.endswith(_SPARSE_SUFFIX) or name == _DUMMY_VECTOR_FIELD:
+            if name.endswith(_SPARSE_SUFFIX):
                 continue
-            if not include_vectors and name == "vector":
+            if name == _DUMMY_VECTOR_FIELD:
+                if include_vectors:
+                    fields.append(name)
+                continue
+            if not include_vectors and (name in vector_names or name in present_names):
                 continue
             fields.append(name)
         return fields
@@ -497,35 +535,80 @@ class MilvusRepoBase[T: BaseLanceTable]:
     def _to_milvus_record(self, record: T) -> dict[str, Any]:
         raw = record.model_dump(mode="python")
         out: dict[str, Any] = {}
-        for name, field in self.schema.model_fields.items():
-            if name == "subject_vector":
-                continue
-            value = raw.get(name)
-            if name in self.schema.BM25_FIELDS and value is None:
+        for field in self.index_schema.fields:
+            value = raw.get(field.name)
+            if field.name in self.index_schema.bm25_fields and value is None:
                 value = ""
-            if _is_datetime(field.annotation):
-                storage_name = _datetime_storage_field(name)
-                out[storage_name] = (
+            if field.kind is IndexFieldKind.DATETIME:
+                out[_datetime_storage_field(field.name)] = (
                     _datetime_to_ms(value) if value is not None else None
                 )
-            elif name == "vector":
-                out[name] = list(value or [])
-            elif _is_list(field.annotation):
-                out[name] = [str(item) for item in (value or [])]
+            elif field.kind is IndexFieldKind.DENSE_VECTOR:
+                present = value is not None
+                out[field.name] = (
+                    list(value) if present else [0.0] * int(field.dimension or 0)
+                )
+                out[_present_field(field.name)] = present
+            elif field.kind is IndexFieldKind.STRING_ARRAY:
+                out[field.name] = [str(item) for item in (value or [])]
             else:
-                out[name] = value
-        if "vector" not in self.schema.model_fields:
-            out[_DUMMY_VECTOR_FIELD] = [0.0]
+                out[field.name] = value
+        if not self.index_schema.vector_fields:
+            out[_DUMMY_VECTOR_FIELD] = [0.0] * _DUMMY_VECTOR_DIMENSION
+        self._validate_raw_record(out)
         return out
 
+    def _validate_raw_record(self, row: dict[str, Any]) -> None:
+        for field in self.index_schema.fields:
+            storage_name = (
+                _datetime_storage_field(field.name)
+                if field.kind is IndexFieldKind.DATETIME
+                else field.name
+            )
+            value = row.get(storage_name)
+            if value is None:
+                if not field.nullable:
+                    raise MilvusValueLimitError(
+                        f"{self.table_name}.{field.name} cannot be null"
+                    )
+                continue
+            if field.kind is IndexFieldKind.STRING:
+                size = len(str(value).encode("utf-8"))
+                if field.max_length is not None and size > field.max_length:
+                    raise MilvusValueLimitError(
+                        f"{self.table_name}.{field.name} is {size} UTF-8 bytes; "
+                        f"Milvus limit is {field.max_length}"
+                    )
+            elif field.kind is IndexFieldKind.STRING_ARRAY:
+                if field.max_capacity is not None and len(value) > field.max_capacity:
+                    raise MilvusValueLimitError(
+                        f"{self.table_name}.{field.name} has {len(value)} items; "
+                        f"Milvus limit is {field.max_capacity}"
+                    )
+                for position, item in enumerate(value):
+                    size = len(str(item).encode("utf-8"))
+                    if field.max_length is not None and size > field.max_length:
+                        raise MilvusValueLimitError(
+                            f"{self.table_name}.{field.name}[{position}] is {size} "
+                            f"UTF-8 bytes; Milvus limit is {field.max_length}"
+                        )
+            elif field.kind is IndexFieldKind.DENSE_VECTOR:
+                self._validate_vector(field, value)
+
+    def _validate_vector(self, field: IndexField, value: Sequence[float]) -> None:
+        if len(value) != field.dimension:
+            raise MilvusValueLimitError(
+                f"{self.table_name}.{field.name} has dimension {len(value)}; "
+                f"expected {field.dimension}"
+            )
+
     def _model_from_milvus(self, row: dict[str, Any]) -> T:
-        shaped = self._restore_row(row, include_distance=False)
-        return self.schema.model_validate(shaped)
+        return self.schema.model_validate(self._restore_row(row))
 
     def _candidate_row_from_search(
         self, row: dict[str, Any], *, normalize_cosine: bool = False
     ) -> dict[str, Any]:
-        shaped = self._restore_row(row.get("entity", {}), include_distance=False)
+        shaped = self._restore_row(row.get("entity", {}))
         raw_distance = row.get("distance")
         shaped["_distance"] = (
             _cosine_distance_from_milvus(raw_distance)
@@ -534,49 +617,53 @@ class MilvusRepoBase[T: BaseLanceTable]:
         )
         return shaped
 
-    def _restore_row(
-        self, row: dict[str, Any], *, include_distance: bool
-    ) -> dict[str, Any]:
+    def _restore_row(self, row: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        for name, field in self.schema.model_fields.items():
-            if name == "subject_vector":
-                continue
-            if _is_datetime(field.annotation):
-                storage_name = _datetime_storage_field(name)
-                value = row.get(storage_name)
-                if value is None:
-                    out[name] = None
-                else:
-                    out[name] = from_timestamp(int(value))
-            elif name in row:
-                value = row[name]
+        for field in self.index_schema.fields:
+            if field.kind is IndexFieldKind.DATETIME:
+                value = row.get(_datetime_storage_field(field.name))
+                out[field.name] = None if value is None else from_timestamp(int(value))
+            elif field.kind is IndexFieldKind.DENSE_VECTOR:
+                if field.name in row:
+                    out[field.name] = (
+                        row[field.name]
+                        if row.get(_present_field(field.name), True)
+                        else None
+                    )
+            elif field.name in row:
+                value = row[field.name]
                 if (
-                    name in self.schema.BM25_FIELDS
+                    field.name in self.index_schema.bm25_fields
                     and value == ""
-                    and _is_optional(field.annotation)
+                    and field.nullable
                 ):
-                    out[name] = None
-                else:
-                    out[name] = value
-        if include_distance and "distance" in row:
-            out["_distance"] = row["distance"]
+                    value = None
+                out[field.name] = value
         return out
 
     def _write_field_value(
         self, row: dict[str, Any], field_name: str, value: Any
     ) -> None:
-        field = self.schema.model_fields.get(field_name)
-        if field is None:
-            row[field_name] = value
-        elif _is_datetime(field.annotation):
+        field = self.index_schema.field(field_name)
+        if field.kind is IndexFieldKind.DATETIME:
             row[_datetime_storage_field(field_name)] = (
                 _datetime_to_ms(value) if value is not None else None
             )
+        elif field.kind is IndexFieldKind.DENSE_VECTOR:
+            present = value is not None
+            row[field_name] = (
+                list(value) if present else [0.0] * int(field.dimension or 0)
+            )
+            row[_present_field(field_name)] = present
         else:
             row[field_name] = value
 
     async def _query_raw(
-        self, where: Any, *, limit: int, include_vectors: bool
+        self,
+        where: Predicate | None,
+        *,
+        limit: int,
+        include_vectors: bool,
     ) -> list[dict[str, Any]]:
         await self.ensure_collection()
         client = await get_client()
@@ -589,47 +676,29 @@ class MilvusRepoBase[T: BaseLanceTable]:
         )
 
     async def _query_candidate_rows(
-        self, where: Any, *, limit: int
+        self, where: Predicate | None, *, limit: int
     ) -> list[dict[str, Any]]:
         rows = await self._query_raw(where, limit=limit, include_vectors=False)
-        return [self._restore_row(row, include_distance=False) for row in rows]
+        return [self._restore_row(row) for row in rows]
 
-    def _expr(self, where: Any) -> str:
-        if where is None:
-            return ""
-        milvus_expr = getattr(where, "milvus", None)
-        if isinstance(milvus_expr, str):
-            return milvus_expr
-        if not isinstance(where, str):
-            return str(where)
-        return _lancedb_expr_to_milvus(where)
-
-
-def _lancedb_expr_to_milvus(expr: str) -> str:
-    """Best-effort conversion for internal EverOS LanceDB predicates."""
-    converted = expr
-    converted = re.sub(r"\barray_has\s*\(", "array_contains(", converted)
-    converted = re.sub(r"\bIS\s+NULL\b", "is null", converted, flags=re.IGNORECASE)
-    converted = re.sub(
-        r"\b([A-Za-z_][A-Za-z0-9_]*)\s+IN\s+\(([^)]*)\)",
-        lambda m: f"{m.group(1)} in [{m.group(2)}]",
-        converted,
-        flags=re.IGNORECASE,
-    )
-    converted = re.sub(r"(?<![!<>=])=(?!=)", "==", converted)
-    converted = re.sub(r"\btimestamp\b", "timestamp_ms", converted)
-    converted = re.sub(r"\bcreated_at\b", "created_at_ms", converted)
-    converted = re.sub(r"\bupdated_at\b", "updated_at_ms", converted)
-    converted = re.sub(
-        r"TIMESTAMP\s+'([^']*)'",
-        lambda m: str(_iso_to_ms(m.group(1))),
-        converted,
-    )
-    return converted
+    def _expr(self, where: Predicate | None) -> str:
+        if where is not None and not isinstance(where, Predicate):
+            raise TypeError(
+                "Milvus repository predicates must use the neutral Predicate AST, "
+                f"got {type(where).__name__}"
+            )
+        return render_predicate(
+            where,
+            datetime_fields=self.index_schema.datetime_fields,
+        )
 
 
 def _datetime_storage_field(name: str) -> str:
     return f"{name}_ms"
+
+
+def _present_field(name: str) -> str:
+    return f"{name}{_PRESENT_SUFFIX}"
 
 
 def _sparse_field(name: str) -> str:
@@ -646,46 +715,6 @@ def _datetime_to_ms(value: Any) -> int:
     raise TypeError(f"expected datetime or epoch ms, got {type(value).__name__}")
 
 
-def _iso_to_ms(value: str) -> int:
-    aware = ensure_utc(from_iso_format(value))
-    assert aware is not None
-    return to_timestamp_ms(aware)
-
-
-def _is_optional(annotation: Any) -> bool:
-    args = get_args(annotation)
-    return type(None) in args
-
-
-def _non_none_args(annotation: Any) -> tuple[Any, ...]:
-    return tuple(arg for arg in get_args(annotation) if arg is not type(None))
-
-
-def _is_datetime(annotation: Any) -> bool:
-    if annotation is dt.datetime:
-        return True
-    return any(arg is dt.datetime for arg in _non_none_args(annotation))
-
-
-def _is_list(annotation: Any) -> bool:
-    origin = get_origin(annotation)
-    if origin is list:
-        return True
-    return any(get_origin(arg) is list for arg in _non_none_args(annotation))
-
-
-def _is_float(annotation: Any) -> bool:
-    if annotation is float:
-        return True
-    return any(arg is float for arg in _non_none_args(annotation))
-
-
-def _is_int(annotation: Any) -> bool:
-    if annotation is int:
-        return True
-    return any(arg is int for arg in _non_none_args(annotation))
-
-
 def _sort_value(value: Any) -> Any:
     if value is None:
         fallback = ensure_utc(dt.datetime.min)
@@ -695,64 +724,25 @@ def _sort_value(value: Any) -> Any:
 
 
 def _bm25_score_from_distance(distance: Any) -> float:
-    """Convert the Milvus BM25 search distance into a higher-is-better score."""
-    if distance is None:
-        return 0.0
-    return abs(float(distance))
+    """Milvus BM25 is higher-is-better; expose a non-negative score."""
+    return 0.0 if distance is None else max(0.0, float(distance))
 
 
 def _cosine_distance_from_milvus(distance: Any) -> float | None:
-    """Normalize Milvus COSINE results to LanceDB-style distance.
-
-    Milvus server / Zilliz Cloud return cosine similarity through the
-    ``distance`` field. Milvus Lite 3.0 reports cosine distance instead; keep
-    this version-gated workaround narrow because the upstream issue is expected
-    to be fixed after 3.0:
-    https://github.com/milvus-io/milvus-lite/issues/343
-
-    Recaller code expects LanceDB's ``1 - similarity`` distance contract.
-    """
+    """Convert Milvus Server / Zilliz similarity to Lance-style distance."""
     if distance is None:
         return None
-    value = float(distance)
-    if not _uses_milvus_lite_3_0_cosine_distance_bug():
-        value = 1.0 - value
-    if value < 0.0:
-        return 0.0
-    if value > 1.0:
-        return 1.0
-    return value
-
-
-def _uses_milvus_lite() -> bool:
-    uri = load_settings().milvus.uri
-    if not uri:
-        return True
-    return "://" not in uri
-
-
-def _uses_milvus_lite_3_0_cosine_distance_bug() -> bool:
-    if not _uses_milvus_lite():
-        return False
-    return _milvus_lite_version() in {"3.0", "3.0.0"}
-
-
-def _milvus_lite_version() -> str | None:
-    try:
-        return version("milvus-lite")
-    except PackageNotFoundError:
-        return None
+    return min(1.0, max(0.0, 1.0 - float(distance)))
 
 
 def _first_result_set(results: Any) -> list[dict[str, Any]]:
     if not results:
         return []
-    first = results[0]
-    return list(first or [])
+    return list(results[0] or [])
 
 
 async def _run(func: Any, /, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-__all__ = ["MilvusRepoBase"]
+__all__ = ["MilvusRepoBase", "MilvusValueLimitError"]

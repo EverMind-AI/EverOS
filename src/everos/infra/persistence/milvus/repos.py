@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
+from everos.component.utils.datetime import from_timestamp
+from everos.infra.persistence.index.predicate import all_of, eq, gt, is_null
 from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
@@ -19,6 +22,50 @@ from .repository import MilvusRepoBase
 
 class _EpisodeRepo(MilvusRepoBase[Episode]):
     schema = Episode
+
+    async def count_by_owner(
+        self,
+        owner_id: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        parent_type: str | None = None,
+    ) -> int:
+        return await self._count_where(
+            all_of(
+                eq("owner_id", owner_id),
+                eq("app_id", app_id),
+                eq("project_id", project_id),
+                is_null("deprecated_by"),
+                eq("parent_type", parent_type) if parent_type is not None else None,
+            )
+        )
+
+    async def list_by_owner_after_ts(
+        self,
+        *,
+        owner_id: str,
+        after_ts: int,
+        parent_type: str,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str] | None = None,
+        limit: int | None = None,
+    ) -> list[Episode] | list[dict[str, Any]]:
+        predicate = all_of(
+            eq("owner_id", owner_id),
+            gt("timestamp", from_timestamp(after_ts)),
+            eq("parent_type", parent_type),
+            eq("app_id", app_id),
+            eq("project_id", project_id),
+            is_null("deprecated_by"),
+        )
+        rows = await self.find_where(predicate, limit=limit or 20_000)
+        rows.sort(key=lambda row: row.timestamp)
+        if columns is None:
+            return rows
+        projection = list(dict.fromkeys([*columns, "timestamp"]))
+        return [{name: getattr(row, name) for name in projection} for row in rows]
 
 
 class _AtomicFactRepo(MilvusRepoBase[AtomicFact]):
@@ -37,17 +84,15 @@ class _AgentSkillRepo(MilvusRepoBase[AgentSkill]):
     schema = AgentSkill
 
     async def count_in_cluster(self, *, owner_id: str, cluster_id: str) -> int:
-        rows = await self.find_where(
-            f"owner_id = '{_q(owner_id)}' AND cluster_id = '{_q(cluster_id)}'",
-            limit=10_000,
+        return await self._count_where(
+            all_of(eq("owner_id", owner_id), eq("cluster_id", cluster_id))
         )
-        return len(rows)
 
     async def find_in_cluster(
         self, *, owner_id: str, cluster_id: str, limit: int
     ) -> list[AgentSkill]:
         return await self.find_where(
-            f"owner_id = '{_q(owner_id)}' AND cluster_id = '{_q(cluster_id)}'",
+            all_of(eq("owner_id", owner_id), eq("cluster_id", cluster_id)),
             limit=limit,
         )
 
@@ -66,7 +111,7 @@ class _AgentSkillRepo(MilvusRepoBase[AgentSkill]):
             )
         rows = await self.dense_search(
             query_vector,
-            f"owner_id = '{_q(owner_id)}' AND cluster_id = '{_q(cluster_id)}'",
+            all_of(eq("owner_id", owner_id), eq("cluster_id", cluster_id)),
             limit=top_k,
         )
         out: list[AgentSkill] = []
@@ -83,10 +128,6 @@ class _UserProfileRepo(MilvusRepoBase[UserProfile]):
 
 class _KnowledgeTopicRepo(MilvusRepoBase[KnowledgeTopic]):
     schema = KnowledgeTopic
-
-
-def _q(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 episode_repo = _EpisodeRepo()

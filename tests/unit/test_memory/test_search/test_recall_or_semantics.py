@@ -30,6 +30,7 @@ from everos.infra.persistence.lancedb import (
     episode_repo,
     lancedb_manager,
 )
+from everos.infra.persistence.predicate import all_of, eq
 from everos.memory.search.recall.base import RecallerDeps, build_or_query
 from everos.memory.search.recall.episode import EpisodeRecaller
 
@@ -148,7 +149,7 @@ async def test_or_semantics_poison_token_does_not_kill_query() -> None:
     tbl = await get_table(Episode.TABLE_NAME, Episode)
     await tbl.optimize()
 
-    where = "owner_id = 'alice' AND owner_type = 'user'"
+    where = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
     cands = await _recaller().sparse_recall("alice support group", where, limit=10)
     assert cands, "alice + support + group should recall ep_1 via SHOULD"
     # ep_1 is the support-group episode; should rank above ep_2 (no support).
@@ -177,7 +178,7 @@ async def test_or_semantics_single_informative_token() -> None:
     tbl = await get_table(Episode.TABLE_NAME, Episode)
     await tbl.optimize()
 
-    where = "owner_id = 'alice' AND owner_type = 'user'"
+    where = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
     cands = await _recaller().sparse_recall("painting", where, limit=10)
     assert cands, "single informative token must recall the matching episode"
     assert cands[0].id == "alice_ep_2"
@@ -185,5 +186,5 @@ async def test_or_semantics_single_informative_token() -> None:
 
 async def test_or_semantics_empty_query_returns_empty() -> None:
     """Tokenisation yields nothing → recall returns ``[]`` without hitting LanceDB."""
-    cands = await _recaller().sparse_recall("   ", "owner_id = 'alice'", limit=10)
+    cands = await _recaller().sparse_recall("   ", eq("owner_id", "alice"), limit=10)
     assert cands == []

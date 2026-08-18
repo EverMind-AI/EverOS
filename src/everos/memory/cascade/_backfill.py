@@ -46,8 +46,7 @@ from everos.core.persistence.lancedb import BaseLanceTable, LanceRepoBase
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
 from everos.infra.ome.exceptions import EngineLockHeldError
-from everos.infra.persistence.lancedb import (
-    BUSINESS_SCHEMAS_WITH_VECTOR,
+from everos.infra.persistence.index import (
     AgentCase,
     AgentSkill,
     AtomicFact,
@@ -58,10 +57,11 @@ from everos.infra.persistence.lancedb import (
     agent_skill_repo,
     atomic_fact_repo,
     episode_repo,
+    eq,
     foresight_repo,
-    get_table,
     knowledge_topic_repo,
 )
+from everos.infra.persistence.lancedb import BUSINESS_SCHEMAS_WITH_VECTOR, get_table
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 from everos.infra.persistence.sqlite import cluster_repo, get_engine
 from everos.memory.cascade.worker import (
@@ -697,7 +697,7 @@ async def _backfill_table(
                 and row.id not in subject_vectors
             )
             try:
-                await backlog.spec.repo.update(updates, where=f"id = '{_q(row.id)}'")
+                await backlog.spec.repo.update(updates, where=eq("id", row.id))
             except Exception:
                 result.rows_failed += 1
                 logger.warning(

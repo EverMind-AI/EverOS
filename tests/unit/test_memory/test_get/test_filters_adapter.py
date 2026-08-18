@@ -19,17 +19,25 @@ from __future__ import annotations
 
 import pytest
 
-from everos.memory.get.filters_adapter import compile_filters_for_get
+from everos.infra.persistence.lancedb.predicate import render_predicate
+from everos.memory.get.filters_adapter import (
+    compile_filters_for_get as compile_filter_predicate_for_get,
+)
 from everos.memory.search import FilterError, FilterNode
+
+
+def compile_filters_for_get(*args: object, **kwargs: object) -> str:
+    """Render the neutral predicate with the legacy LanceDB test oracle."""
+    return render_predicate(compile_filter_predicate_for_get(*args, **kwargs))  # type: ignore[arg-type]
 
 
 def test_no_filters_emits_base_clause() -> None:
     """``filters=None`` → owner + app/project scope clauses AND-joined."""
     where = compile_filters_for_get(None, owner_id="u1", owner_type="user")
     assert where == (
-        "owner_id = 'u1' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default' "
-        "AND deprecated_by IS NULL"
+        "((owner_id = 'u1') AND (owner_type = 'user') "
+        "AND (app_id = 'default') AND (project_id = 'default') "
+        "AND (deprecated_by IS NULL))"
     )
 
 
@@ -43,9 +51,9 @@ def test_owner_id_quote_is_escaped() -> None:
     """SQL-standard double-quote escape on ``owner_id``."""
     where = compile_filters_for_get(None, owner_id="o'reilly", owner_type="user")
     assert where == (
-        "owner_id = 'o''reilly' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default' "
-        "AND deprecated_by IS NULL"
+        "((owner_id = 'o''reilly') AND (owner_type = 'user') "
+        "AND (app_id = 'default') AND (project_id = 'default') "
+        "AND (deprecated_by IS NULL))"
     )
 
 
@@ -93,7 +101,7 @@ def test_timestamp_range_renders_and_folded() -> None:
     assert "timestamp < TIMESTAMP '" in where
     # The two clauses are AND-joined inside one parenthesised group.
     assert "(timestamp >= TIMESTAMP" in where
-    assert " AND timestamp < TIMESTAMP" in where
+    assert ") AND (timestamp < TIMESTAMP" in where
 
 
 def test_sender_id_in_list_renders_array_has() -> None:
@@ -125,7 +133,7 @@ def test_top_level_and_renders_grouped_clause() -> None:
     )
     where = compile_filters_for_get(node, owner_id="u1", owner_type="user")
     # Base clause is always first; combinator output appended.
-    assert where.startswith("owner_id = 'u1' AND owner_type = 'user' AND ")
+    assert where.startswith("((owner_id = 'u1') AND (owner_type = 'user') AND ")
     assert "session_id = 'sess_a'" in where
     assert "parent_id = 'mc_x'" in where
 

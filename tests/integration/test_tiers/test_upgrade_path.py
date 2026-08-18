@@ -16,6 +16,7 @@ the closest in-process equivalent to a real restart with new config.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -39,6 +40,18 @@ _N_ITEMS = 4
 async def _episode_rows(owner_id: str) -> list[dict]:
     table = await get_table(Episode.TABLE_NAME, Episode)
     return await table.query().where(f"owner_id = '{owner_id}'").to_list()
+
+
+async def _wait_for_episode_rows(
+    owner_id: str, expected: int, *, deadline_seconds: float
+) -> list[dict]:
+    """Wait for every logical entry in a debounced daily-log update."""
+    async with asyncio.timeout(deadline_seconds):
+        while True:
+            rows = await _episode_rows(owner_id)
+            if len(rows) >= expected:
+                return rows
+            await asyncio.sleep(0.1)
 
 
 async def _atomic_fact_rows(owner_id: str) -> list[dict]:
@@ -118,7 +131,10 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
             # below directly against the LanceDB table.
             await wait_drained(deadline_seconds=40.0)
 
-        rows = await _episode_rows("u_alice")
+        # The queue drains file-level work, but another append to the same
+        # daily log can arrive just after that drain. Wait for the logical
+        # entry count as the end-to-end completion condition.
+        rows = await _wait_for_episode_rows("u_alice", _N_ITEMS, deadline_seconds=40.0)
         assert len(rows) == _N_ITEMS
         assert all(r["vector"] is None for r in rows), (
             "Tier 1 (no embed) must write every episode with vector=NULL"

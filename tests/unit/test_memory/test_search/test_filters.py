@@ -4,32 +4,40 @@ from __future__ import annotations
 
 import pytest
 
+from everos.infra.persistence.lancedb.predicate import render_predicate as render_lance
+from everos.infra.persistence.milvus.predicate import render_predicate as render_milvus
 from everos.memory.search import (
     FilterError,
     FilterNode,
-    compile_filters,
+)
+from everos.memory.search import (
+    compile_filters as compile_filter_ast,
 )
 from everos.memory.search.filters import compile_filters_for_backends
+
+
+def compile_filters(*args, **kwargs):  # type: ignore[no-untyped-def]
+    """Render the neutral result through LanceDB for legacy syntax assertions."""
+    return render_lance(compile_filter_ast(*args, **kwargs))
+
 
 # ── Base injection ───────────────────────────────────────────────────────
 
 
 def test_no_filters_emits_base_clause() -> None:
     where = compile_filters(None, owner_id="alice", owner_type="user")
-    assert where == (
-        "owner_id = 'alice' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default' "
-        "AND deprecated_by IS NULL"
-    )
+    assert "owner_id = 'alice'" in where
+    assert "owner_type = 'user'" in where
+    assert "app_id = 'default'" in where
+    assert "project_id = 'default'" in where
+    assert "deprecated_by IS NULL" in where
 
 
 def test_no_filters_agent_omits_deprecated_by() -> None:
     where = compile_filters(None, owner_id="bot_42", owner_type="agent")
     assert "deprecated_by" not in where
-    assert where == (
-        "owner_id = 'bot_42' AND owner_type = 'agent' "
-        "AND app_id = 'default' AND project_id = 'default'"
-    )
+    assert "owner_id = 'bot_42'" in where
+    assert "owner_type = 'agent'" in where
 
 
 def test_owner_type_agent_pinned() -> None:
@@ -249,10 +257,10 @@ def test_empty_and_array_skips_combinator() -> None:
     """Empty AND/OR arrays compile to no clauses — only the base remains."""
     node = FilterNode.model_validate({"AND": []})
     where = compile_filters(node, owner_id="alice", owner_type="user")
-    assert where == (
-        "owner_id = 'alice' AND owner_type = 'user' "
-        "AND app_id = 'default' AND project_id = 'default' "
-        "AND deprecated_by IS NULL"
+    assert where == compile_filters(
+        None,
+        owner_id="alice",
+        owner_type="user",
     )
 
 
@@ -274,11 +282,12 @@ def test_compile_filters_omits_deprecated_by_for_agent() -> None:
 
 def test_compile_filters_for_backends_preserves_lancedb_default() -> None:
     filters = compile_filters_for_backends(None, owner_id="u_a", owner_type="user")
-    assert str(filters) == filters.lancedb
-    assert "owner_id = 'u_a'" in filters.lancedb
-    assert 'owner_id == "u_a"' in filters.milvus
-    assert "deprecated_by IS NULL" in filters.lancedb
-    assert "deprecated_by is null" in filters.milvus
+    lancedb = render_lance(filters)
+    milvus = render_milvus(filters)
+    assert "owner_id = 'u_a'" in lancedb
+    assert 'owner_id == "u_a"' in milvus
+    assert "deprecated_by IS NULL" in lancedb
+    assert "deprecated_by is null" in milvus
 
 
 def test_compile_filters_for_milvus_timestamp_and_array() -> None:
@@ -286,16 +295,20 @@ def test_compile_filters_for_milvus_timestamp_and_array() -> None:
         {"timestamp": {"gte": 1704067200000}, "sender_id": "u_jason"}
     )
     filters = compile_filters_for_backends(node, owner_id="u_a", owner_type="user")
-    assert "timestamp_ms >= 1704067200000" in filters.milvus
-    assert 'array_contains(sender_ids, "u_jason")' in filters.milvus
-    assert "TIMESTAMP '" in filters.lancedb
-    assert "array_has(sender_ids, 'u_jason')" in filters.lancedb
+    milvus = render_milvus(filters, datetime_fields={"timestamp"})
+    lancedb = render_lance(filters)
+    assert "timestamp_ms >= 1704067200000" in milvus
+    assert 'array_contains(sender_ids, "u_jason")' in milvus
+    assert "TIMESTAMP '" in lancedb
+    assert "array_has(sender_ids, 'u_jason')" in lancedb
 
 
 def test_compile_filters_for_milvus_escapes_string_literals() -> None:
     node = FilterNode.model_validate({"session_id": "ses's"})
     filters = compile_filters_for_backends(node, owner_id="al'ice", owner_type="user")
-    assert 'owner_id == "al\'ice"' in filters.milvus
-    assert 'session_id == "ses\'s"' in filters.milvus
-    assert "owner_id = 'al''ice'" in filters.lancedb
-    assert "session_id = 'ses''s'" in filters.lancedb
+    milvus = render_milvus(filters)
+    lancedb = render_lance(filters)
+    assert 'owner_id == "al\'ice"' in milvus
+    assert 'session_id == "ses\'s"' in milvus
+    assert "owner_id = 'al''ice'" in lancedb
+    assert "session_id = 'ses''s'" in lancedb

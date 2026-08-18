@@ -14,17 +14,20 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import AgentSkill, agent_skill_repo
+from everos.infra.persistence.index import (
+    AgentSkill,
+    Predicate,
+    agent_skill_repo,
+    all_of,
+    any_of,
+    contains,
+)
 
 from .base import (
     RecallerDeps,
     cosine_score_from_distance,
     row_to_candidate,
 )
-
-
-def _q(value: str) -> str:
-    return value.replace("'", "''")
 
 
 class AgentSkillRecaller:
@@ -38,7 +41,7 @@ class AgentSkillRecaller:
         self._deps = deps
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -61,7 +64,7 @@ class AgentSkillRecaller:
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         if not vector:
             return []
@@ -76,7 +79,7 @@ class AgentSkillRecaller:
         ]
 
     async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: str, *, limit: int
+        self, case_ids: Sequence[str], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Skills whose ``source_case_ids`` intersect ``case_ids``.
         Filter is ``array_has`` OR-ed per id (same as
@@ -88,7 +91,9 @@ class AgentSkillRecaller:
         """
         if not case_ids:
             return []
-        clause = " OR ".join(f"array_has(source_case_ids, '{_q(c)}')" for c in case_ids)
-        full_where = f"({where}) AND ({clause})"
+        full_where = all_of(
+            where,
+            any_of(*(contains("source_case_ids", case_id) for case_id in case_ids)),
+        )
         rows = await agent_skill_repo.search(where=full_where, limit=limit)
         return [row_to_candidate(r, source="vector", score=0.0) for r in rows]

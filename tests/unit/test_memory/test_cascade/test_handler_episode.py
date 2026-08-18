@@ -19,7 +19,9 @@ from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import Episode
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.infra.persistence.markdown import EpisodeWriter
+from everos.infra.persistence.predicate import Predicate
 from everos.memory.cascade.handlers import HandlerDeps
 from everos.memory.cascade.handlers.episode import EpisodeHandler
 
@@ -58,11 +60,12 @@ class _FakeEpisodeRepo:
         self.deletes: list[str] = []
         self.rows: list[Episode] = []
 
-    async def find_where(self, where: str, *, limit: int = 100) -> list[Episode]:
+    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[Episode]:
         # Honour only the md_path = '...' filter the handler emits.
+        rendered = render_predicate(where)
         prefix = "md_path = '"
-        if where.startswith(prefix):
-            md_path = where[len(prefix) :].rstrip("'")
+        if rendered.startswith(prefix):
+            md_path = rendered[len(prefix) :].rstrip("'")
             return [r for r in self.rows if r.md_path == md_path]
         return []
 
@@ -74,8 +77,8 @@ class _FakeEpisodeRepo:
             by_id[r.id] = r
         self.rows = list(by_id.values())
 
-    async def delete(self, predicate: str) -> None:
-        self.deletes.append(predicate)
+    async def delete(self, predicate: Predicate) -> None:
+        self.deletes.append(render_predicate(predicate))
 
     async def delete_by_md_path(self, md_path: str) -> int:
         before = len(self.rows)

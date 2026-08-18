@@ -30,6 +30,7 @@ from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, StructuredEntry
+from everos.infra.persistence.index import all_of, eq, one_of
 
 from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -108,7 +109,7 @@ class BaseDailyLogHandler(Handler):
         ]
 
         existing = await self.lance_repo.find_where(
-            f"md_path = '{_q(md_path)}'",
+            eq("md_path", md_path),
             limit=10_000,
         )
         owner_id, owner_type = resolve_owner(parsed.frontmatter, md_path)
@@ -198,9 +199,11 @@ class BaseDailyLogHandler(Handler):
         if to_upsert:
             await self.lance_repo.upsert(to_upsert)
         if to_delete_ids:
-            in_list = ", ".join(f"'{eid}'" for eid in to_delete_ids)
             await self.lance_repo.delete(
-                f"md_path = '{_q(md_path)}' AND entry_id IN ({in_list})"
+                all_of(
+                    eq("md_path", md_path),
+                    one_of("entry_id", to_delete_ids),
+                )
             )
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:
@@ -252,11 +255,11 @@ class BaseDailyLogHandler(Handler):
         entry may have been deleted or not yet indexed.
         """
         app_id, project_id = scope
-        predicate = (
-            f"owner_id = '{_q(owner_id)}' "
-            f"AND entry_id = '{_q(entry_id)}' "
-            f"AND app_id = '{_q(app_id)}' "
-            f"AND project_id = '{_q(project_id)}'"
+        predicate = all_of(
+            eq("owner_id", owner_id),
+            eq("entry_id", entry_id),
+            eq("app_id", app_id),
+            eq("project_id", project_id),
         )
         try:
             await self.lance_repo.update(
@@ -290,8 +293,3 @@ class BaseDailyLogHandler(Handler):
         ``"default"`` so white-box callers exercising only the field mapping
         can omit them.
         """
-
-
-def _q(text: str) -> str:
-    """Defensive SQL-quote escape (mirrors lancedb chassis convention)."""
-    return text.replace("'", "''")

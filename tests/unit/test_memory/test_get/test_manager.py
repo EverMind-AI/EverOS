@@ -27,6 +27,7 @@ from everos.infra.persistence.lancedb import (
     Episode,
     UserProfile,
 )
+from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.memory.get import (
     GetManager,
     GetMemoryType,
@@ -65,7 +66,7 @@ class _StubRepo:
         max_fetch: int = 20000,
     ) -> tuple[list[Any], int]:
         self.last = _CallRecord(
-            where=str(where),
+            where=render_predicate(where),
             sort_by=sort_by,
             descending=descending,
             page=page,

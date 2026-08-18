@@ -127,7 +127,7 @@ parallel with a live `everos server`.
 
 ## Rebuild the index: `everos cascade rebuild`
 
-The safe recovery from a drifted or corrupt LanceDB index. It rebuilds
+The safe recovery from a drifted or corrupt derived index. It rebuilds
 the whole index from markdown (the source of truth) in one shot:
 
 ```bash
@@ -136,15 +136,16 @@ everos cascade rebuild --yes    # non-interactive
 ```
 
 > **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the LanceDB tables. A running daemon holds
+> **drops and recreates** the active backend's tables or collections. A running
+> daemon holds
 > cached table handles that would keep pointing at (and writing to) the
 > dropped dataset, corrupting the rebuild. This is the one cascade
 > command that is **not** safe to run alongside a live server.
 
 What it does, in order:
 
-1. **Drops** every business LanceDB table (`drop_business_tables`) and
-   evicts them from the connection cache.
+1. **Drops** every business table or collection (`drop_business_tables`) and
+   evicts it from the process cache.
 2. **Recreates** them empty from the current schema + FTS indexes
    (`ensure_business_indexes`).
 3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
@@ -163,6 +164,10 @@ Why not a bare `rm`:
 | `rm -rf .index/lancedb` | ❌ scanner skips `done` rows → empty index | ✅ |
 | `rm -rf .index` | ✅ | ❌ deletes un-extracted messages |
 | `everos cascade rebuild` | ✅ | ✅ |
+
+For a remote Milvus backend, rebuild acts only on collections whose names use
+the configured `collection_prefix`. Use a unique prefix or dedicated database
+before running it on a shared Milvus Server or Zilliz Cloud deployment.
 
 ## Recovery paths
 

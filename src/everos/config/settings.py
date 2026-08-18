@@ -23,6 +23,7 @@ call. Tests that mutate environment variables must call
 from __future__ import annotations
 
 import os
+import re
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -392,11 +393,18 @@ class MilvusSettings(BaseModel):
     uri: str = ""
     token: SecretStr = SecretStr("")
     db_name: str = ""
-    consistency_level: Literal["Strong", "Bounded", "Session", "Eventually"] = (
-        "Session"
-    )
-    dimension: int = Field(default=1024, ge=1)
+    consistency_level: Literal["Strong", "Bounded", "Session", "Eventually"] = "Session"
     collection_prefix: str = Field(default="everos", min_length=1)
+
+    @field_validator("collection_prefix")
+    @classmethod
+    def _validate_collection_prefix(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError(
+                "collection_prefix must start with a letter or underscore and "
+                "contain only letters, digits, and underscores"
+            )
+        return value
 
 
 class KnowledgeSearchSettings(BaseModel):
