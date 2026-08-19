@@ -120,6 +120,32 @@ paths are not supported.
 | `consistency_level` | `"Strong"` \| `"Session"` \| `"Bounded"` \| `"Eventually"` | `"Session"` | Milvus consistency level for created collections. |
 | `collection_prefix` | string | `"everos"` | Prefix for EverOS collections. Must start with a letter or underscore and contain only letters, digits, and underscores. Make it unique when deployments share a database. |
 
+For a self-hosted Milvus Server, a minimal configuration is:
+
+```toml
+[index]
+backend = "milvus"
+
+[milvus]
+uri = "http://localhost:19530"
+collection_prefix = "everos"
+```
+
+Zilliz Cloud uses the same backend. Credentials can be supplied through
+environment variables:
+
+```bash
+export EVEROS_INDEX__BACKEND=milvus
+export EVEROS_MILVUS__URI="https://your-cluster-endpoint"
+export EVEROS_MILVUS__TOKEN="<api-key>"
+export EVEROS_MILVUS__DB_NAME="default"
+export EVEROS_MILVUS__COLLECTION_PREFIX="everos_prod"
+```
+
+Use a deployment secret rather than committing the token to a configuration
+file. If the memory root already contains Markdown records, stop the EverOS
+server and run `everos cascade rebuild --yes` to populate the derived index.
+
 EverOS creates seven collections and supports every dense field in the shared
 index schema, including `episode.subject_vector`. The vector dimension is owned
 by that schema (currently 1024), rather than duplicated in Milvus config.
@@ -261,3 +287,6 @@ Examples:
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
 | `[index] backend = "milvus"` | `EVEROS_INDEX__BACKEND=milvus` |
 | `[milvus] uri = "http://localhost:19530"` | `EVEROS_MILVUS__URI=http://localhost:19530` |
+| `[milvus] token = "..."` | `EVEROS_MILVUS__TOKEN=...` |
+| `[milvus] db_name = "default"` | `EVEROS_MILVUS__DB_NAME=default` |
+| `[milvus] collection_prefix = "everos_prod"` | `EVEROS_MILVUS__COLLECTION_PREFIX=everos_prod` |
