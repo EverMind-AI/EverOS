@@ -12,9 +12,9 @@ External usage::
 
     from everos.infra.persistence.lancedb import (
         get_connection, get_table, dispose_connection,
-        Episode, AtomicFact, Foresight, AgentCase, AgentSkill, UserProfile,
-        KnowledgeTopic,
-        episode_repo, atomic_fact_repo, foresight_repo,
+        Episode, AtomicFact, Decision, Foresight, AgentCase, AgentSkill,
+        UserProfile, KnowledgeTopic,
+        episode_repo, atomic_fact_repo, decision_repo, foresight_repo,
         agent_case_repo, agent_skill_repo, user_profile_repo,
         knowledge_topic_repo,
     )
@@ -40,6 +40,7 @@ from .lancedb_manager import get_table as get_table
 from .repos import agent_case_repo as agent_case_repo
 from .repos import agent_skill_repo as agent_skill_repo
 from .repos import atomic_fact_repo as atomic_fact_repo
+from .repos import decision_repo as decision_repo
 from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
 from .repos import knowledge_topic_repo as knowledge_topic_repo
@@ -47,6 +48,7 @@ from .repos import user_profile_repo as user_profile_repo
 from .tables import AgentCase as AgentCase
 from .tables import AgentSkill as AgentSkill
 from .tables import AtomicFact as AtomicFact
+from .tables import Decision as Decision
 from .tables import Episode as Episode
 from .tables import Foresight as Foresight
 from .tables import KnowledgeTopic as KnowledgeTopic
@@ -56,6 +58,7 @@ from .tables import UserProfile as UserProfile
 _BUSINESS_SCHEMAS = (
     Episode,
     AtomicFact,
+    Decision,
     Foresight,
     AgentCase,
     AgentSkill,
@@ -173,6 +176,7 @@ a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
 BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[BaseLanceTable], ...] = (
     Episode,
     AtomicFact,
+    Decision,
     Foresight,
     AgentCase,
     AgentSkill,
@@ -371,6 +375,7 @@ __all__ = [
     "AgentCase",
     "AgentSkill",
     "AtomicFact",
+    "Decision",
     "Episode",
     "Foresight",
     "KnowledgeTopic",
@@ -381,6 +386,7 @@ __all__ = [
     "agent_case_repo",
     "agent_skill_repo",
     "atomic_fact_repo",
+    "decision_repo",
     "dispose_connection",
     "drop_business_tables",
     "ensure_business_indexes",

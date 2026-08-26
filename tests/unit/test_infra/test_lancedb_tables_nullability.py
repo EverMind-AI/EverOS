@@ -23,6 +23,7 @@ from everos.infra.persistence.lancedb.tables import (
     AgentCase,
     AgentSkill,
     AtomicFact,
+    Decision,
     Episode,
     Foresight,
     KnowledgeTopic,
@@ -71,22 +72,28 @@ def test_knowledge_topic_vector_nullable():
     assert "None" in ann
 
 
+def test_decision_vector_nullable():
+    ann = str(_vector_field_type(Decision))
+    assert "None" in ann
+
+
 def test_dim_unchanged():
     """_DIM stays at 1024 across all table modules — only nullability moves."""
     from everos.infra.persistence.lancedb.tables import agent_case as m1
     from everos.infra.persistence.lancedb.tables import agent_skill as m2
     from everos.infra.persistence.lancedb.tables import atomic_fact as m3
-    from everos.infra.persistence.lancedb.tables import episode as m4
-    from everos.infra.persistence.lancedb.tables import foresight as m5
-    from everos.infra.persistence.lancedb.tables import knowledge_topic as m6
+    from everos.infra.persistence.lancedb.tables import decision as m4
+    from everos.infra.persistence.lancedb.tables import episode as m5
+    from everos.infra.persistence.lancedb.tables import foresight as m6
+    from everos.infra.persistence.lancedb.tables import knowledge_topic as m7
 
-    for module in (m1, m2, m3, m4, m5, m6):
+    for module in (m1, m2, m3, m4, m5, m6, m7):
         assert module._DIM == 1024
 
 
 @pytest.mark.parametrize(
     "cls",
-    [Episode, AtomicFact, Foresight, AgentCase, AgentSkill, KnowledgeTopic],
+    [Episode, AtomicFact, Decision, Foresight, AgentCase, AgentSkill, KnowledgeTopic],
 )
 def test_vector_nullable_at_pyarrow_layer(cls):
     """``alter_columns`` (the migration primitive) operates on the pyarrow

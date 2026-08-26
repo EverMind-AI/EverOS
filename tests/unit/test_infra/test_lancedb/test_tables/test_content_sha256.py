@@ -16,6 +16,7 @@ from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
     AtomicFact,
+    Decision,
     Episode,
     Foresight,
 )
@@ -82,6 +83,28 @@ def _foresight() -> Foresight:
     )
 
 
+def _decision() -> Decision:
+    return Decision(
+        id="u1_dc_1",
+        entry_id="dc_20260514_0001",
+        owner_id="u1",
+        owner_type="user",
+        session_id="s1",
+        timestamp=_NOW,
+        parent_type="memcell",
+        parent_id="mc_1",
+        title="Use Rust on device",
+        decision="Device Runtime uses Rust.",
+        reason="Need deterministic latency on the edge.",
+        tags=["runtime"],
+        decision_tokens="Device Runtime uses Rust",
+        reason_tokens="Need deterministic latency on the edge",
+        md_path="users/u1/decisions/decision-2026-05-14.md",
+        content_sha256=_SHA,
+        vector=_VEC,
+    )
+
+
 def _agent_case() -> AgentCase:
     return AgentCase(
         id="a1_ac_1",
@@ -124,8 +147,15 @@ def _agent_skill() -> AgentSkill:
 
 @pytest.mark.parametrize(
     "factory",
-    [_episode, _atomic_fact, _foresight, _agent_case, _agent_skill],
-    ids=["episode", "atomic_fact", "foresight", "agent_case", "agent_skill"],
+    [_episode, _atomic_fact, _decision, _foresight, _agent_case, _agent_skill],
+    ids=[
+        "episode",
+        "atomic_fact",
+        "decision",
+        "foresight",
+        "agent_case",
+        "agent_skill",
+    ],
 )
 def test_content_sha256_round_trip(factory) -> None:  # type: ignore[no-untyped-def]
     row = factory()
@@ -138,8 +168,15 @@ def test_content_sha256_round_trip(factory) -> None:  # type: ignore[no-untyped-
 
 @pytest.mark.parametrize(
     "factory",
-    [_episode, _atomic_fact, _foresight, _agent_case, _agent_skill],
-    ids=["episode", "atomic_fact", "foresight", "agent_case", "agent_skill"],
+    [_episode, _atomic_fact, _decision, _foresight, _agent_case, _agent_skill],
+    ids=[
+        "episode",
+        "atomic_fact",
+        "decision",
+        "foresight",
+        "agent_case",
+        "agent_skill",
+    ],
 )
 def test_content_sha256_required(factory) -> None:  # type: ignore[no-untyped-def]
     """Dropping content_sha256 from the kwargs surfaces a ValidationError."""
