@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Domain `Decision` + `Decision.from_algo`.** Copies `Episode.from_algo`: the caller supplies `owner_id` / `session_id` / `parent_id` (source memcell), and any algo-side `owner_id` or smuggled `parent_id` is dropped so one generic extract can fan out per user sender. No domain `Principle`.
+
 ### Changed
 
 - **`everalgo-user-memory` 0.4.0 → 0.8.0** (path-pin to the sibling EverAlgo checkout until 0.8.0 is on PyPI) and **`everalgo-agent-memory` 0.4.0 → 0.5.0**. 0.8.0 is the first user-memory release that exports `Decision` / `Principle` types and extractors. Existing EverOS code does not call `DecisionExtractor` yet. `AlgoEpisode` construction now passes the required `summary` field introduced in everalgo-core 0.5.0.
