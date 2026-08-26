@@ -17,6 +17,7 @@ External usage::
         BaseDailyWriter, BaseDailyReader,
         EpisodeWriter, EpisodeReader, EpisodeDailyFrontmatter,
         AtomicFactDailyFrontmatter,
+        DecisionDailyFrontmatter,
         ForesightDailyFrontmatter,
         AgentCaseDailyFrontmatter,
         AgentSkillFrontmatter, AgentSkillWriter, AgentSkillReader,
@@ -31,6 +32,7 @@ layers by import-linter.
 from .mds import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
 from .mds import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .mds import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
+from .mds import DecisionDailyFrontmatter as DecisionDailyFrontmatter
 from .mds import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from .mds import ForesightDailyFrontmatter as ForesightDailyFrontmatter
 from .mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
@@ -66,6 +68,7 @@ __all__ = [
     "AtomicFactWriter",
     "BaseDailyReader",
     "BaseDailyWriter",
+    "DecisionDailyFrontmatter",
     "EpisodeDailyFrontmatter",
     "EpisodeReader",
     "EpisodeWriter",

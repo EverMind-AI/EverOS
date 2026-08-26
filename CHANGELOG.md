@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Domain `Decision` + `Decision.from_algo`.** Copies `Episode.from_algo`: the caller supplies `owner_id` / `session_id` / `parent_id` (source memcell), and any algo-side `owner_id` or smuggled `parent_id` is dropped so one generic extract can fan out per user sender. No domain `Principle`.
+- **`DecisionDailyFrontmatter`.** User-readable daily-log at `users/<id>/decisions/decision-<date>.md` (`ENTRY_ID_PREFIX="dc"`), with `deprecated_entries` from day one. Not a dot-prefixed internal directory.
 
 ### Changed
 

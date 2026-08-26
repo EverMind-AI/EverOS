@@ -26,6 +26,7 @@ its own conventions:
 from .agent_case import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
 from .agent_skill import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .atomic_fact import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
+from .decision import DecisionDailyFrontmatter as DecisionDailyFrontmatter
 from .episode import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from .foresight import ForesightDailyFrontmatter as ForesightDailyFrontmatter
 from .knowledge_document import (
@@ -38,6 +39,7 @@ __all__ = [
     "AgentCaseDailyFrontmatter",
     "AgentSkillFrontmatter",
     "AtomicFactDailyFrontmatter",
+    "DecisionDailyFrontmatter",
     "EpisodeDailyFrontmatter",
     "ForesightDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",

@@ -11,6 +11,7 @@ from everos.infra.persistence.markdown import (
     AgentCaseDailyFrontmatter,
     AgentSkillFrontmatter,
     AtomicFactDailyFrontmatter,
+    DecisionDailyFrontmatter,
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
 )
@@ -20,6 +21,7 @@ from everos.infra.persistence.markdown import (
     ("schema", "expected"),
     [
         (EpisodeDailyFrontmatter, "*/*/users/*/episodes/episode-*.md"),
+        (DecisionDailyFrontmatter, "*/*/users/*/decisions/decision-*.md"),
         (AtomicFactDailyFrontmatter, "*/*/users/*/.atomic_facts/atomic_fact-*.md"),
         (ForesightDailyFrontmatter, "*/*/users/*/.foresights/foresight-*.md"),
         (AgentCaseDailyFrontmatter, "*/*/agents/*/.cases/agent_case-*.md"),
