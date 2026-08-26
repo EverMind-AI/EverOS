@@ -642,48 +642,41 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 
 ## EverMind 生态
 
-EverMind 是一个面向长期记忆、自进化 Agent、AI-native interfaces 和记忆评测的开源生态。
+EverMind 将记忆研究、可直接使用的产品与实际集成连接为一个开源生态。
 
-<table>
-<tr>
-<th colspan="2">EverMind 开源生态</th>
-</tr>
-<tr>
-<td><strong>Memory Runtime</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - 本地记忆操作系统，以及有研究支撑的 Agent 和用户记忆 runtime。</td>
-</tr>
-<tr>
-<td><strong>Self-Improving Agent Harness</strong></td>
-<td><a href="https://github.com/EverMind-AI/Raven">Raven</a> - The Self-Improving Agent Harness，把记忆、主动性、上下文控制和 skill evolution 带进终端原生 Agent。</td>
-</tr>
-<tr>
-<td><strong>算法引擎</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction、ranking、parsing 和 memory operators，为 EverOS 提供算法能力。</td>
-</tr>
-<tr>
-<td><strong>Hypergraph Memory</strong></td>
-<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - 面向长期对话的 hypergraph memory，拥有独立的 benchmark-backed topic -> episode -> fact 检索方法。</td>
-</tr>
-<tr>
-<td><strong>Benchmarks</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - conversational memory 和 Agent self-evolution 的评测套件。</td>
-</tr>
-<tr>
-<td><strong>Long-Context Research</strong></td>
-<td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention，用于可扩展 latent memory 和 100M-token contexts。</td>
-</tr>
-<tr>
-<td><strong>个人记忆层</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI 和 Agent plugin suite，用于跨设备、跨 Agent 的个人记忆。</td>
-</tr>
-<tr>
-<td><strong>开发者集成</strong></td>
-<td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - AI coding agents 的 plugins、skills 和 migration tooling。</td>
-</tr>
-</table>
+### 产品
 
-这些仓库共同构成 EverMind 的 research-to-runtime stack：新的记忆方法、
-可复用算法、benchmark evidence，以及可落地的 Agent 集成。
+| 项目 | 定位 |
+|---|---|
+| [EverOS](https://github.com/EverMind-AI/EverOS) | 本地优先、Markdown 原生的 Agent 与用户长期记忆运行时。 |
+| [Raven](https://github.com/EverMind-AI/Raven) | 以记忆为核心的自进化 Agent Harness，具备主动性、上下文控制与 Skill 进化能力。 |
+| [EverMe](https://github.com/EverMind-AI/EverMe) | 面向跨设备、跨 Agent 个人记忆的 CLI 与 Agent 插件套件。 |
+
+### 研究与评测
+
+| 项目 | 研究方向 |
+|---|---|
+| [SkillCorpus](https://github.com/EverMind-AI/SkillCorpus) | 将分散的 Agent Skill 整理为可检索语料库，并提供检索与评测工具。 |
+| [EverAlgo](https://github.com/EverMind-AI/EverAlgo) | 为 EverOS 提供无状态的提取、排序、解析与记忆算法。 |
+| [HyperMem](https://github.com/EverMind-AI/HyperMem) | 基于超图的分层记忆架构，用于由粗到细的长期对话检索。 |
+| [MSA](https://github.com/EverMind-AI/MSA) | 面向可扩展潜在记忆与一亿 Token 上下文的 Memory Sparse Attention。 |
+| [EverMemBench](https://github.com/EverMind-AI/EverMemBench) | 从事实召回、应用推理和个性化泛化三个层面评测记忆系统。 |
+| [EvoAgentBench](https://github.com/EverMind-AI/EvoAgentBench) | 纵向评测 Agent 自进化、迁移效率、错误规避和 Skill 使用能力。 |
+
+### 插件与集成
+
+官方集成统一维护在
+[EverMind plugins 仓库](https://github.com/EverMind-AI/plugins)。
+
+| 平台 | EverOS 集成 |
+|---|---|
+| [OpenClaw](https://docs.openclaw.ai) | [OpenClaw 插件](https://github.com/EverMind-AI/plugins/tree/main/openclaw)，自动管理召回、写入与会话记忆生命周期。 |
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Hermes 插件](https://github.com/EverMind-AI/plugins/tree/main/hermes)，为 Hermes 会话提供持久记忆。 |
+| [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) | [DSH 插件](https://github.com/EverMind-AI/plugins/tree/main/dsh)，让 DeepSeek Harness Agent 使用长期记忆。 |
+| [Dify](https://dify.ai) | [本地版](https://github.com/EverMind-AI/plugins/tree/main/dify)与[云端版](https://github.com/EverMind-AI/plugins/tree/main/dify_cloud)工具，在工作流和 Agent 中显式搜索与写入记忆。 |
+
+这些项目共同构成 EverMind 从研究到运行时的完整链路：将方法与评测转化为
+可复用的记忆基础设施、产品和 Agent 集成。
 
 <br>
 <div align="right">
