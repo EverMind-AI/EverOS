@@ -659,7 +659,7 @@ integrations into one open-source ecosystem.
 <td>A memory-first, self-improving agent harness with proactivity, context control, and skill evolution.</td>
 </tr>
 <tr>
-<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe</a></strong></td>
+<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe (CLI)</a></strong></td>
 <td>A CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
 </tr>
 <tr>

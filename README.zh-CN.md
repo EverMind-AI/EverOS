@@ -657,7 +657,7 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 <td>以记忆为核心的自进化 Agent Harness，具备主动性、上下文控制与 Skill 进化能力。</td>
 </tr>
 <tr>
-<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe</a></strong></td>
+<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe（CLI）</a></strong></td>
 <td>面向跨设备、跨 Agent 个人记忆的 CLI 与 Agent 插件套件。</td>
 </tr>
 <tr>
