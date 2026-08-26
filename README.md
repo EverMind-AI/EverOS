@@ -646,36 +646,73 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 EverMind connects memory research, production-ready products, and practical
 integrations into one open-source ecosystem.
 
-### Products
-
-| Project | Role |
-|---|---|
-| [EverOS](https://github.com/EverMind-AI/EverOS) | A local-first, Markdown-native long-term memory runtime for agents and users. |
-| [Raven](https://github.com/EverMind-AI/Raven) | A memory-first, self-improving agent harness with proactivity, context control, and skill evolution. |
-| [EverMe](https://github.com/EverMind-AI/EverMe) | A CLI and agent plugin suite for cross-device, cross-agent personal memory. |
-
-### Research & Evaluation
-
-| Project | Focus |
-|---|---|
-| [SkillCorpus](https://github.com/EverMind-AI/SkillCorpus) | Curated, retrieval-ready agent skill corpora with retrieval and evaluation tooling. |
-| [EverAlgo](https://github.com/EverMind-AI/EverAlgo) | Stateless extraction, ranking, parsing, and memory operators that power EverOS. |
-| [HyperMem](https://github.com/EverMind-AI/HyperMem) | Hypergraph-based hierarchical memory for coarse-to-fine long-term conversation retrieval. |
-| [MSA](https://github.com/EverMind-AI/MSA) | Memory Sparse Attention for scalable latent memory and 100M-token contexts. |
-| [EverMemBench](https://github.com/EverMind-AI/EverMemBench) | Evaluation of factual recall, applied reasoning, and personalized generalization in memory systems. |
-| [EvoAgentBench](https://github.com/EverMind-AI/EvoAgentBench) | Longitudinal evaluation of agent self-evolution, transfer efficiency, error avoidance, and skill use. |
-
-### Integrations
-
-Official integrations are maintained in the
-[EverMind plugins repository](https://github.com/EverMind-AI/plugins).
-
-| Platform | EverOS integration |
-|---|---|
-| [OpenClaw](https://docs.openclaw.ai) | [OpenClaw plugin](https://github.com/EverMind-AI/plugins/tree/main/openclaw) for automatic recall, capture, and session-memory lifecycle management. |
-| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Hermes plugin](https://github.com/EverMind-AI/plugins/tree/main/hermes) for persistent memory across Hermes sessions. |
-| [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) | [DSH plugin](https://github.com/EverMind-AI/plugins/tree/main/dsh) for memory-aware DeepSeek Harness agents. |
-| [Dify](https://dify.ai) | [Self-hosted](https://github.com/EverMind-AI/plugins/tree/main/dify) and [cloud](https://github.com/EverMind-AI/plugins/tree/main/dify_cloud) tools for explicit memory search and storage in workflows and agents. |
+<table>
+<tr>
+<th colspan="2">Products</th>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EverOS">EverOS</a></strong></td>
+<td>A local-first, Markdown-native long-term memory runtime for agents and users.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/Raven">Raven</a></strong></td>
+<td>A memory-first, self-improving agent harness with proactivity, context control, and skill evolution.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe</a></strong></td>
+<td>A CLI and agent plugin suite for cross-device, cross-agent personal memory.</td>
+</tr>
+<tr>
+<th colspan="2">Research &amp; Evaluation</th>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/SkillCorpus">SkillCorpus</a></strong></td>
+<td>Curated, retrieval-ready agent skill corpora with retrieval and evaluation tooling.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a></strong></td>
+<td>Stateless extraction, ranking, parsing, and memory operators that power EverOS.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a></strong></td>
+<td>Hypergraph-based hierarchical memory for coarse-to-fine long-term conversation retrieval.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/MSA">MSA</a></strong></td>
+<td>Memory Sparse Attention for scalable latent memory and 100M-token contexts.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a></strong></td>
+<td>Evaluation of factual recall, applied reasoning, and personalized generalization in memory systems.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a></strong></td>
+<td>Longitudinal evaluation of agent self-evolution, transfer efficiency, error avoidance, and skill use.</td>
+</tr>
+<tr>
+<th colspan="2">Integrations</th>
+</tr>
+<tr>
+<td><strong><a href="https://docs.openclaw.ai">OpenClaw</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/openclaw">OpenClaw plugin</a> for automatic recall, capture, and session-memory lifecycle management.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/hermes">Hermes plugin</a> for persistent memory across Hermes sessions.</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/deepseek-ai/DeepSeek-Harness">DeepSeek Harness</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/dsh">DSH plugin</a> for memory-aware DeepSeek Harness agents.</td>
+</tr>
+<tr>
+<td><strong><a href="https://dify.ai">Dify</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/dify">Self-hosted</a> and <a href="https://github.com/EverMind-AI/plugins/tree/main/dify_cloud">cloud</a> tools for explicit memory search and storage in workflows and agents.</td>
+</tr>
+<tr>
+<td><strong>Integration Hub</strong></td>
+<td>Browse all official integrations in the <a href="https://github.com/EverMind-AI/plugins">EverMind plugins repository</a>.</td>
+</tr>
+</table>
 
 Together, these projects form EverMind's research-to-runtime stack: methods
 and benchmarks become reusable memory infrastructure, products, and agent
