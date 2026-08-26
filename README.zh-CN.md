@@ -688,7 +688,7 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 <td>纵向评测 Agent 自进化、迁移效率、错误规避和 Skill 使用能力。</td>
 </tr>
 <tr>
-<th colspan="2">插件与集成</th>
+<th colspan="2"><a href="https://github.com/EverMind-AI/plugins">插件与集成</a></th>
 </tr>
 <tr>
 <td><strong><a href="https://docs.openclaw.ai">OpenClaw</a></strong></td>
@@ -705,10 +705,6 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 <tr>
 <td><strong><a href="https://dify.ai">Dify</a></strong></td>
 <td><a href="https://github.com/EverMind-AI/plugins/tree/main/dify">本地版</a>与<a href="https://github.com/EverMind-AI/plugins/tree/main/dify_cloud">云端版</a>工具，在工作流和 Agent 中显式搜索与写入记忆。</td>
-</tr>
-<tr>
-<td><strong>集成中心</strong></td>
-<td>在 <a href="https://github.com/EverMind-AI/plugins">EverMind plugins 仓库</a>浏览全部官方集成。</td>
 </tr>
 </table>
 

@@ -690,7 +690,7 @@ integrations into one open-source ecosystem.
 <td>Longitudinal evaluation of agent self-evolution, transfer efficiency, error avoidance, and skill use.</td>
 </tr>
 <tr>
-<th colspan="2">Integrations</th>
+<th colspan="2"><a href="https://github.com/EverMind-AI/plugins">Integrations</a></th>
 </tr>
 <tr>
 <td><strong><a href="https://docs.openclaw.ai">OpenClaw</a></strong></td>
@@ -707,10 +707,6 @@ integrations into one open-source ecosystem.
 <tr>
 <td><strong><a href="https://dify.ai">Dify</a></strong></td>
 <td><a href="https://github.com/EverMind-AI/plugins/tree/main/dify">Self-hosted</a> and <a href="https://github.com/EverMind-AI/plugins/tree/main/dify_cloud">cloud</a> tools for explicit memory search and storage in workflows and agents.</td>
-</tr>
-<tr>
-<td><strong>Integration Hub</strong></td>
-<td>Browse all official integrations in the <a href="https://github.com/EverMind-AI/plugins">EverMind plugins repository</a>.</td>
 </tr>
 </table>
 
