@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`everalgo-user-memory` 0.4.0 → 0.8.0** (path-pin to the sibling EverAlgo checkout until 0.8.0 is on PyPI) and **`everalgo-agent-memory` 0.4.0 → 0.5.0**. 0.8.0 is the first user-memory release that exports `Decision` / `Principle` types and extractors. Existing EverOS code does not call `DecisionExtractor` yet. `AlgoEpisode` construction now passes the required `summary` field introduced in everalgo-core 0.5.0.
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on

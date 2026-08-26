@@ -217,7 +217,7 @@ optional `everalgo-parser` extra), imported under the `everalgo` namespace,
 holding **only memory extraction algorithms**:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
-- `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
+- `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile / Decision extractors
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
 - `everalgo.rank` — boundary detection / fusion + rerank
 - `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)

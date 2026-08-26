@@ -174,7 +174,9 @@ def test_episode_from_algo_owner_id_caller_supplied() -> None:
     EPISODE_GENERATION_PROMPT) and then fans the same algo Episode out
     to one domain Episode per user sender, each rooted at its own owner.
     """
-    algo = AlgoEpisode(owner_id=None, episode="hello", timestamp=1_700_000_000_000)
+    algo = AlgoEpisode(
+        owner_id=None, episode="hello", summary="hello", timestamp=1_700_000_000_000
+    )
     ep_alice = Episode.from_algo(
         algo,
         owner_id="u_alice",

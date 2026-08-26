@@ -1047,6 +1047,7 @@ def _to_algo_episodes(episodes: list[Any]) -> list[AlgoEpisode]:
             owner_id=e.owner_id,
             episode=e.episode,
             subject=e.subject or "",
+            summary=e.summary or e.episode,
             timestamp=_ts_to_ms(e.timestamp),
         )
         for e in episodes
