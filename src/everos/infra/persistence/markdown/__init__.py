@@ -17,7 +17,7 @@ External usage::
         BaseDailyWriter, BaseDailyReader,
         EpisodeWriter, EpisodeReader, EpisodeDailyFrontmatter,
         AtomicFactDailyFrontmatter,
-        DecisionDailyFrontmatter,
+        DecisionDailyFrontmatter, DecisionWriter, DecisionReader,
         ForesightDailyFrontmatter,
         AgentCaseDailyFrontmatter,
         AgentSkillFrontmatter, AgentSkillWriter, AgentSkillReader,
@@ -42,6 +42,7 @@ from .readers import AgentCaseReader as AgentCaseReader
 from .readers import AgentSkillReader as AgentSkillReader
 from .readers import AtomicFactReader as AtomicFactReader
 from .readers import BaseDailyReader as BaseDailyReader
+from .readers import DecisionReader as DecisionReader
 from .readers import EpisodeReader as EpisodeReader
 from .readers import ForesightReader as ForesightReader
 from .readers import ProfileReader as ProfileReader
@@ -51,6 +52,7 @@ from .writers import AgentCaseWriter as AgentCaseWriter
 from .writers import AgentSkillWriter as AgentSkillWriter
 from .writers import AtomicFactWriter as AtomicFactWriter
 from .writers import BaseDailyWriter as BaseDailyWriter
+from .writers import DecisionWriter as DecisionWriter
 from .writers import EpisodeWriter as EpisodeWriter
 from .writers import ForesightWriter as ForesightWriter
 from .writers import KnowledgeWriter as KnowledgeWriter
@@ -69,6 +71,8 @@ __all__ = [
     "BaseDailyReader",
     "BaseDailyWriter",
     "DecisionDailyFrontmatter",
+    "DecisionReader",
+    "DecisionWriter",
     "EpisodeDailyFrontmatter",
     "EpisodeReader",
     "EpisodeWriter",
