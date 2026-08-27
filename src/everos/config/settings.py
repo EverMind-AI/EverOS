@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
@@ -111,6 +111,35 @@ class SqliteSettings(BaseModel):
     foreign_keys: bool = True
     temp_store: Literal["DEFAULT", "FILE", "MEMORY"] = "MEMORY"
     busy_timeout_ms: int = Field(default=5000, ge=0)
+    pool_size: int = Field(default=5, ge=1)
+    """Connections the pool keeps open. SQLAlchemy's own default; named here so
+    the next two are tunable alongside it rather than inherited invisibly."""
+    max_overflow: int = Field(default=10, ge=0)
+    """Extra connections allowed above ``pool_size`` under load."""
+    pool_timeout_seconds: float = Field(default=30.0, gt=0)
+    """How long a caller waits for a free connection before raising.
+
+    The reason this is configurable rather than left at the library default: a
+    checkout that never returns turns every later caller into a silent hang. Two
+    benchmark servers died exactly that way -- aiosqlite connection threads grew
+    from a steady 6-10 to 20 and 58, with 7 and 22 of them parked inside
+    ``aiosqlite``'s connect path, and every SQLite file stopped being written
+    (one froze for 3h33m, the other 2h17m). Neither process was dead: HTTP still
+    answered, the event loop still ran, and the OME queue simply stopped
+    draining because no strategy could persist its own result. A bounded wait
+    converts that into a loud, retryable error instead.
+    """
+    pool_recycle_seconds: int = Field(default=1800, ge=-1)
+    """Discard and reopen a connection older than this; ``-1`` disables.
+
+    A leaked-but-idle connection is reclaimed on its next checkout attempt
+    instead of being held for the life of the process."""
+    pool_pre_ping: bool = True
+    """Verify a pooled connection is alive before handing it out.
+
+    Costs one round trip per checkout against a local file; buys detection of
+    connections whose underlying aiosqlite thread is no longer serviceable --
+    the state both stalled servers were in."""
     journal_size_limit_bytes: int = Field(default=64 * 1024 * 1024, ge=0)
     cache_size_kb: int = Field(default=2048, ge=0)
 
@@ -127,11 +156,139 @@ class LLMSettings(BaseModel):
         EVEROS_LLM__MODEL
         EVEROS_LLM__API_KEY
         EVEROS_LLM__BASE_URL
+        EVEROS_LLM__TIMEOUT_SECONDS
+        EVEROS_LLM__EXTRA
     """
 
     model: str = "gpt-4.1-mini"
     api_key: SecretStr | None = None
     base_url: str | None = None
+    timeout_seconds: float = Field(default=60.0, gt=0)
+    """Per-request deadline handed to the algo client.
+
+    Matches the algo default, so leaving it alone changes nothing. It exists
+    because extraction latency is a property of the endpoint, not of this
+    project: a hosted frontier model answers an extraction prompt in seconds,
+    while a self-hosted mid-size model on a shared gateway can take minutes for
+    the same prompt. Without this the deadline was unreachable from config, and
+    a slow endpoint could only fail -- three attempts, three timeouts, one
+    dead-lettered memory.
+    """
+    extra: dict[str, Any] = Field(default_factory=dict)
+    """Provider-specific request fields merged into every chat call.
+
+    An escape hatch for what the OpenAI protocol does not cover, kept generic
+    because each gateway spells its own knobs differently. The case it was added
+    for: a reasoning model served over an OpenAI-compatible endpoint keeps
+    thinking by default, and thinking is billed against ``max_tokens`` -- so an
+    extraction call can spend its entire budget reasoning and return an empty
+    ``content``, which reads downstream as "the model found no facts" rather
+    than as a misconfiguration.
+
+    **Non-standard fields must be nested under ``extra_body``.** These entries
+    are passed as keyword arguments to the OpenAI SDK's ``create()``, which
+    raises ``TypeError`` on an unrecognised top-level name and forwards only
+    ``extra_body`` into the request JSON. Getting this wrong fails loudly at the
+    first call, which is the good case; getting it *absent* is the quiet one::
+
+        EVEROS_LLM__EXTRA='{"extra_body":
+            {"chat_template_kwargs": {"enable_thinking": false}}}'
+
+    Measured on one gateway with an atomic-facts prompt: nested = 12.7s and 2264
+    characters, bare = ``TypeError``, omitted = 42.4s and **zero** characters.
+
+    Merged under the per-call ``extra``, so a caller can still override a key.
+    """
+
+
+class DeciderSettings(BaseModel):
+    """LLM driving the multi-round retrieval decider.
+
+    A flat section mirroring ``[llm]``, kept separate for the same reason
+    ``[multimodal]`` is: the two jobs have different demands. ``[llm]`` extracts
+    memories during ingestion -- a long, throughput-bound batch job -- while this one
+    runs inside the search request and decides, round by round, which episodes are
+    core and what to query next. Sharing one setting forced the decider to be whatever
+    model the store happened to be extracted with, and made "which model made the
+    retrieval decisions" unanswerable after the fact.
+
+    Empty ``model`` falls back to ``[llm]``, so existing deployments and every store
+    built before this section existed behave exactly as they did.
+
+    The loop-tuning fields below used to exist only as ``EVEROS_LLMMR_*`` environment
+    variables read once at import time inside
+    :mod:`everos.memory.search.llm_multiround`. That made them undiscoverable -- nothing
+    in the config named them, so an operator could not find out they existed, let
+    alone set one from a file. They are declared here for the same reason the model
+    is: a run's behaviour should be readable off its configuration. The legacy env
+    names still win when set, so nothing in flight changes.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_DECIDER__MODEL
+        EVEROS_DECIDER__API_KEY
+        EVEROS_DECIDER__BASE_URL
+        EVEROS_DECIDER__TIMEOUT_SECONDS
+        EVEROS_DECIDER__EXTRA
+        EVEROS_DECIDER__MAX_ROUNDS ... and one per field below
+    """
+
+    model: str = ""
+    api_key: SecretStr | None = None
+    base_url: str | None = None
+    timeout_seconds: float = Field(default=60.0, gt=0)
+    """Per-request deadline for one decider round. See
+    :attr:`LLMSettings.timeout_seconds`; separate because this one sits inside a
+    search request, where the acceptable wait is bounded by the caller rather
+    than by a background queue."""
+    extra: dict[str, Any] = Field(default_factory=dict)
+    """Provider-specific request fields for the decider. See
+    :attr:`LLMSettings.extra`; kept separate so the decider and the extractor can
+    run on gateways with different vocabularies."""
+
+    # ── multi-round loop tuning ──────────────────────────────────────────
+    max_rounds: int = Field(default=3, ge=1)
+    """Hard cap on retrieval rounds. The cost bound: each round is one decider call
+    plus one recall per sub-query."""
+    seed_topk: int = Field(default=50, ge=1)
+    """Round-0 block size -- how many candidates the original question contributes."""
+    subq_topk: int = Field(default=20, ge=1)
+    """Per-sub-query block size on round >= 1. Narrower than the seed on purpose:
+    breadth comes from having several blocks, not from each being large."""
+    max_subqueries: int = Field(default=3, ge=1)
+    """Breadth cap -- gap-covering sub-queries the decider may issue per round."""
+    rrf_k: int = Field(default=60, ge=1)
+    """RRF smoothing constant for fusing each sub-query's sparse and dense lists."""
+    no_new_core_patience: int = Field(default=1, ge=0)
+    """Stop after this many consecutive rounds add no new core (after >= 1 round)."""
+    per_subquery_guarantee: int = Field(default=1, ge=0)
+    """Final-injection backfill: guarantee this many top non-core candidates per
+    sub-query a slot, so every facet keeps coverage instead of being crowded out by
+    one strong sub-query."""
+    retries: int = Field(default=3, ge=0)
+    """Retries on a transient decider failure before falling back to a fixed core."""
+    retry_backoff_seconds: float = Field(default=0.5, ge=0)
+    """Base delay between decider retries, doubled per attempt. Retrying a reasoning
+    decider back-to-back tends to reproduce the same empty completion, so the pause is
+    what makes the attempts meaningfully independent."""
+    core_overflow: bool = False
+    """Let the core-first stage exceed ``top_k`` (the pre-2026-08-06 behaviour).
+    Measured at 316/1522 questions (20.8%) returning more items than asked for on
+    SubtleMemory, up to 68 for ``top_k=20`` -- which breaks the ``top_k`` contract and
+    invalidates any same-budget comparison. Set only to reproduce a pre-fix run."""
+    full_text: bool = False
+    """Show the decider the full episode text instead of the stored summary.
+
+    Stores disagree about which column holds the full text: some hold a 200-character
+    prefix in ``summary`` with the full text in ``episode``. On those, the decider picks
+    core from a preview roughly 7x shorter than what the answering model is shown, which
+    measurably costs core recall. Default off so an in-flight comparison cannot change
+    behaviour mid-run."""
+    fallback_core: int = Field(default=3, ge=0)
+    """Core size to fall back to when every decider attempt fails.
+
+    Not 0: an empty core silently disables core-first injection -- the very mechanism
+    under test -- and is indistinguishable in the output from a decider that chose
+    nothing on purpose."""
 
 
 class MultimodalSettings(BaseModel):
@@ -449,6 +606,7 @@ class Settings(BaseSettings):
     sqlite: SqliteSettings = SqliteSettings()
     lancedb: LanceDBSettings = LanceDBSettings()
     llm: LLMSettings = LLMSettings()
+    decider: DeciderSettings = DeciderSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
