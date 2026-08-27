@@ -179,6 +179,7 @@ async def test_get_episodes_returns_page_and_total(
     assert data["episodes"][1]["id"] == "u1_ep_004"
     # The non-requested kinds are empty arrays (envelope invariant).
     assert data["profiles"] == []
+    assert data["decisions"] == []
     assert data["agent_cases"] == []
     assert data["agent_skills"] == []
 

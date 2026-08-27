@@ -13,7 +13,7 @@ fusion / rerank.
 A shared :class:`RecallerDeps` bundles the providers a recaller needs
 at construction time (tokenizer for BM25 query, embedder is consumed
 upstream by the manager so we keep deps minimal). The bundle keeps the
-constructor signatures identical across the four LanceDB-backed
+constructor signatures identical across the LanceDB-backed
 recallers so the orchestrator wiring stays uniform.
 """
 
@@ -57,10 +57,13 @@ class KindRecaller(Protocol):
     """One business kind, BM25 + vector recall over its LanceDB table."""
 
     kind: ClassVar[str]
-    """``episode`` / ``atomic_fact`` / ``agent_case`` / ``agent_skill``."""
+    """``episode`` / ``atomic_fact`` / ``decision`` / ``agent_case`` /
+    ``agent_skill``."""
 
     everalgo_memory_type: ClassVar[str]
-    """``episodic`` / ``case`` / ``skill`` — passed to ``RankInput.memory_type``."""
+    """``episodic`` / ``case`` / ``skill`` — passed to ``RankInput.memory_type``.
+    Decision leaves this empty: its HYBRID path uses ``rrf``, not ``arank``.
+    """
 
     text_field: ClassVar[str]
     """Source column for cross-encoder rerank passages (display text)."""

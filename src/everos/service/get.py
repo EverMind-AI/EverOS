@@ -14,6 +14,7 @@ from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb import (
     agent_case_repo,
     agent_skill_repo,
+    decision_repo,
     episode_repo,
     user_profile_repo,
 )
@@ -29,6 +30,7 @@ def _get_manager() -> GetManager:
     if _manager is None:
         _manager = GetManager(
             episode_repo=episode_repo,
+            decision_repo=decision_repo,
             agent_case_repo=agent_case_repo,
             agent_skill_repo=agent_skill_repo,
             user_profile_repo=user_profile_repo,

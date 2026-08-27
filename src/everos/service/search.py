@@ -33,6 +33,7 @@ from everos.memory.search.recall import (
     AgentCaseRecaller,
     AgentSkillRecaller,
     AtomicFactRecaller,
+    DecisionRecaller,
     EpisodeRecaller,
     ProfileRecaller,
     RecallerDeps,
@@ -78,6 +79,7 @@ def _get_manager() -> SearchManager:
         _manager = SearchManager(
             episode_recaller=EpisodeRecaller(deps),
             atomic_fact_recaller=AtomicFactRecaller(deps),
+            decision_recaller=DecisionRecaller(deps),
             agent_case_recaller=AgentCaseRecaller(deps),
             agent_skill_recaller=AgentSkillRecaller(deps),
             profile_recaller=ProfileRecaller(),

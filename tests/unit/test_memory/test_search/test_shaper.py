@@ -14,6 +14,7 @@ from everos.memory.search.shaper import (
     shape_agent_case_from_candidate,
     shape_agent_skill_from_candidate,
     shape_atomic_fact_from_candidate,
+    shape_decision_from_candidate,
     shape_episode_from_candidate,
 )
 
@@ -38,6 +39,25 @@ def _episode_candidate(*, id: str = "alice_ep_1", score: float = 0.9) -> Candida
             "subject": "Coffee chat",
             "summary": "Discussed coffee preferences.",
             "episode": "Alice said she prefers oat milk.",
+        },
+    )
+
+
+def _decision_candidate(*, id: str = "alice_dc_1", score: float = 0.88) -> Candidate:
+    return Candidate(
+        id=id,
+        score=score,
+        source="keyword",
+        metadata={
+            "owner_id": "alice",
+            "owner_type": "user",
+            "session_id": "sess_a",
+            "timestamp": _ts(),
+            "title": "Runtime language",
+            "decision": "Use Rust for the device Runtime",
+            "reason": "Need deterministic latency",
+            "impact": "Rewrite the hot path",
+            "tags": ["runtime", "rust"],
         },
     )
 
@@ -119,6 +139,37 @@ def test_shape_episode_attaches_facts() -> None:
     assert item is not None
     assert len(item.atomic_facts) == 1
     assert item.atomic_facts[0].content == "Alice prefers oat milk"
+
+
+# ── Decision shaping ────────────────────────────────────────────────────
+
+
+def test_shape_decision_basic() -> None:
+    item = shape_decision_from_candidate(_decision_candidate())
+    assert item is not None
+    assert item.id == "alice_dc_1"
+    assert item.user_id == "alice"
+    assert item.title == "Runtime language"
+    assert item.decision == "Use Rust for the device Runtime"
+    assert item.reason == "Need deterministic latency"
+    assert item.impact == "Rewrite the hot path"
+    assert item.tags == ["runtime", "rust"]
+    assert item.score == 0.88
+    assert "sender_ids" not in item.model_dump()
+
+
+def test_shape_decision_missing_impact_is_none() -> None:
+    cand = _decision_candidate()
+    del cand.metadata["impact"]
+    item = shape_decision_from_candidate(cand)
+    assert item is not None
+    assert item.impact is None
+
+
+def test_shape_decision_drops_when_owner_type_wrong() -> None:
+    cand = _decision_candidate()
+    cand.metadata["owner_type"] = "agent"
+    assert shape_decision_from_candidate(cand) is None
 
 
 # ── Agent case / skill shaping ──────────────────────────────────────────

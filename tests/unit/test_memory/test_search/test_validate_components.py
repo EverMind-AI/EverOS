@@ -59,6 +59,7 @@ def _build_manager(
     return SearchManager(
         episode_recaller=None,  # type: ignore[arg-type]
         atomic_fact_recaller=None,  # type: ignore[arg-type]
+        decision_recaller=None,  # type: ignore[arg-type]
         agent_case_recaller=None,  # type: ignore[arg-type]
         agent_skill_recaller=None,  # type: ignore[arg-type]
         profile_recaller=None,  # type: ignore[arg-type]
@@ -298,3 +299,17 @@ def test_keyword_never_requires_embed_or_rerank(manager: SearchManager) -> None:
     injected providers ``None``."""
     req = SearchRequest(user_id="u1", query="q", method=SearchMethod.KEYWORD)
     manager._validate_components(req)  # no raise
+
+
+def test_agentic_kinds_decision_needs_embed_not_rerank_or_llm(
+    embed_available: None,
+) -> None:
+    """``kinds=["decision"]`` remaps AGENTIC to rrf — embed only, no graph."""
+    manager = _build_manager(embedding_present=True, llm_present=False)
+    req = SearchRequest(
+        user_id="u1",
+        query="q",
+        method=SearchMethod.AGENTIC,
+        kinds=["decision"],
+    )
+    manager._validate_components(req)  # must not raise

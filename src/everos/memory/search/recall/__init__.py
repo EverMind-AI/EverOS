@@ -7,6 +7,7 @@ External usage::
         RecallerDeps,
         EpisodeRecaller,
         AtomicFactRecaller,
+        DecisionRecaller,
         AgentCaseRecaller,
         AgentSkillRecaller,
         ProfileRecaller,
@@ -21,6 +22,7 @@ from .base import KindRecaller as KindRecaller
 from .base import RecallerDeps as RecallerDeps
 from .base import cosine_score_from_distance as cosine_score_from_distance
 from .base import row_to_candidate as row_to_candidate
+from .decision import DecisionRecaller as DecisionRecaller
 from .episode import EpisodeRecaller as EpisodeRecaller
 from .knowledge_topic import KnowledgeTopicRecaller as KnowledgeTopicRecaller
 from .profile import ProfileRecaller as ProfileRecaller
@@ -29,6 +31,7 @@ __all__ = [
     "AgentCaseRecaller",
     "AgentSkillRecaller",
     "AtomicFactRecaller",
+    "DecisionRecaller",
     "EpisodeRecaller",
     "KindRecaller",
     "KnowledgeTopicRecaller",

@@ -18,6 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from everos.memory.get.dto import (
+    GetData,
     GetMemoryType,
     GetRequest,
 )
@@ -114,7 +115,7 @@ def test_get_request_rejects_both_user_and_agent_id() -> None:
 
 
 def test_get_request_rejects_invalid_memory_type_value() -> None:
-    """A value outside the four-kind enum is 422."""
+    """A value outside the enumerated kinds is 422."""
     with pytest.raises(ValidationError):
         GetRequest.model_validate(
             {
@@ -122,6 +123,26 @@ def test_get_request_rejects_invalid_memory_type_value() -> None:
                 "memory_type": "atomic_fact",  # not a top-level kind
             }
         )
+
+
+def test_get_request_rejects_principle_memory_type() -> None:
+    """Principle is Meta Memory — not a GetMemoryType."""
+    with pytest.raises(ValidationError):
+        GetRequest.model_validate(
+            {
+                "user_id": "u1",
+                "memory_type": "principle",
+            }
+        )
+
+
+def test_get_data_defaults_include_decisions() -> None:
+    data = GetData()
+    assert data.episodes == []
+    assert data.decisions == []
+    assert data.profiles == []
+    assert data.agent_cases == []
+    assert data.agent_skills == []
 
 
 def test_get_request_rejects_invalid_sort_order() -> None:
@@ -143,6 +164,7 @@ def test_get_request_rejects_invalid_sort_order() -> None:
     "id_field, memory_type",
     [
         ("user_id", GetMemoryType.EPISODE),
+        ("user_id", GetMemoryType.DECISION),
         ("user_id", GetMemoryType.PROFILE),
         ("agent_id", GetMemoryType.AGENT_CASE),
         ("agent_id", GetMemoryType.AGENT_SKILL),
@@ -152,7 +174,7 @@ def test_get_request_allows_valid_owner_memory_pair(
     id_field: str,
     memory_type: GetMemoryType,
 ) -> None:
-    """The four valid (owner-kind, memory_type) combinations."""
+    """The valid (owner-kind, memory_type) combinations."""
     req = GetRequest(**{id_field: "u1"}, memory_type=memory_type)
     assert req.memory_type is memory_type
     expected_owner_type = "user" if id_field == "user_id" else "agent"
@@ -165,6 +187,7 @@ def test_get_request_allows_valid_owner_memory_pair(
         ("user_id", GetMemoryType.AGENT_CASE),
         ("user_id", GetMemoryType.AGENT_SKILL),
         ("agent_id", GetMemoryType.EPISODE),
+        ("agent_id", GetMemoryType.DECISION),
         ("agent_id", GetMemoryType.PROFILE),
     ],
 )

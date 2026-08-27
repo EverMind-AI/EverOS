@@ -476,14 +476,16 @@ should be reserved for offline or background workflows.
 | Value | Track | Returned in `data.<plural>` |
 |---|---|---|
 | `"episode"` | user | `data.episodes` — [GetEpisodeItem](#getepisodeitem) |
+| `"decision"` | user | `data.decisions` — [GetDecisionItem](#getdecisionitem) |
 | `"profile"` | user | `data.profiles` — [GetProfileItem](#getprofileitem) |
 | `"agent_case"` | agent | `data.agent_cases` — [GetAgentCaseItem](#getagentcaseitem) |
 | `"agent_skill"` | agent | `data.agent_skills` — [GetAgentSkillItem](#getagentskillitem) |
 
 `memory_type` must match the requested owner kind: `"episode"` /
-`"profile"` require `user_id`; `"agent_case"` / `"agent_skill"`
-require `agent_id`. The mismatching combinations are rejected with
-`422`.
+`"decision"` / `"profile"` require `user_id`; `"agent_case"` /
+`"agent_skill"` require `agent_id`. The mismatching combinations are
+rejected with `422`. Principle is Meta Memory — it is not a
+`memory_type` value.
 
 ## Endpoints
 
@@ -657,12 +659,13 @@ optional final LLM rerank. Returns ranked items grouped by kind.
 | `radius` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
 | `min_score` | `number \| null` | no | `null` | `0.0 ≤ x ≤ 1.0` if set |
 | `include_profile` | `boolean` | no | `false` | — |
+| `kinds` | `array<"episode" \| "decision"> \| null` | no | `null` | user-partition only; empty list is `422` |
 | `enable_llm_rerank` | `boolean` | no | `false` | — |
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
 
 **`user_id` / `agent_id`** — **Exactly one** must be set. Determines
 which track is searched: `user_id` → user-memory (episodes /
-profiles); `agent_id` → agent-memory (cases / skills).
+decisions / profiles); `agent_id` → agent-memory (cases / skills).
 
 **`app_id` / `project_id`** — Scope identifiers; results never cross
 scopes.
@@ -702,11 +705,20 @@ independent of `radius` (which is a per-recall cosine threshold).
 **`include_profile`** — When `user_id` is set, also fetch the user's
 profile and include it in `data.profiles`. The profile is not
 ranked; `score` is `null`. Ignored when `agent_id` is set.
+Independent of `kinds`.
+
+**`kinds`** — Optional user-partition kind filter. `null` (default)
+searches episode and decision in parallel. `["decision"]` /
+`["episode"]` restrict the lanes; `["episode", "decision"]` is the
+same as omitting the field. Rejected when `agent_id` is set, when
+the list is empty, or when a value other than `"episode"` /
+`"decision"` is supplied (`"principle"` is not a kind).
 
 **`enable_llm_rerank`** — Opt-in LLM rerank pass for
 `method: "hybrid"`. Applies to `agent_case` and `agent_skill` fusion
 only; the episode hybrid path has built-in fact eviction and
-ignores this flag. Adds one LLM call per request. Ignored by
+ignores this flag. Decision HYBRID fuses with RRF and also ignores
+it. Adds one LLM call per request. Ignored by
 `keyword` / `vector` (no fusion to rerank) and `agentic` (uses its
 own cross-encoder loop).
 
@@ -716,14 +728,15 @@ it does not perturb the ranker.
 
 #### Response body
 
-`200 OK` returns a SuccessEnvelope wrapping `SearchData`. All five
+`200 OK` returns a SuccessEnvelope wrapping `SearchData`. All kind
 arrays are always present so client code can iterate without
 branching on owner type; arrays that do not apply to the requested
 owner kind stay as `[]`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `episodes` | `array<SearchEpisodeItem>` | Populated when `user_id` is set |
+| `episodes` | `array<SearchEpisodeItem>` | Populated when `user_id` is set (unless `kinds` excludes `"episode"`) |
+| `decisions` | `array<SearchDecisionItem>` | Populated when `user_id` is set (unless `kinds` excludes `"decision"`). HYBRID fuses BM25 + vector with RRF (not `arank`) |
 | `profiles` | `array<SearchProfileItem>` | Populated when `user_id` is set **and** `include_profile=true` |
 | `agent_cases` | `array<SearchAgentCaseItem>` | Populated when `agent_id` is set |
 | `agent_skills` | `array<SearchAgentSkillItem>` | Populated when `agent_id` is set |
@@ -750,6 +763,27 @@ query within this episode (already nested, no separate call needed).
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
 | `score` | `number` | Fused retrieval score for this episode |
 | `atomic_facts` | `array<SearchAtomicFactItem>` | Sub-facts extracted from the same episode that matched the query |
+
+#### SearchDecisionItem
+
+User-track decision hit. `score` is the fused retrieval score (RRF
+on hybrid; raw BM25 / cosine on keyword / vector). There is no
+`sender_ids` field — tags are labels, not conversation participants.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | `<user_id>_dc_<YYYYMMDD>_<NNN>` |
+| `user_id` | `string \| null` | Owner of this decision |
+| `app_id` | `string` | Scope where the decision lives |
+| `project_id` | `string` | Scope where the decision lives |
+| `session_id` | `string \| null` | Originating session; `null` when the extract did not bind one |
+| `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
+| `title` | `string` | Short title of the trade-off |
+| `decision` | `string` | Decision body (the retrieval / embed anchor) |
+| `reason` | `string` | Why the trade-off was made |
+| `impact` | `string \| null` | Optional downstream effect |
+| `tags` | `array<string>` | Caller-supplied labels |
+| `score` | `number` | Fused retrieval score for this decision |
 
 #### SearchAtomicFactItem
 
@@ -880,6 +914,7 @@ Response (real capture):
                 ]
             }
         ],
+        "decisions": [],
         "profiles": [],
         "agent_cases": [],
         "agent_skills": [],
@@ -910,15 +945,16 @@ for UI browsing, exports, or filtered scans.
 | `filters` | [FilterNode](#filternode-filter-dsl) `\| null` | no | `null` | — |
 
 **`user_id` / `agent_id`** — **Exactly one** must be set, and it must
-match the track implied by `memory_type` (`"episode"` / `"profile"`
-require `user_id`; `"agent_case"` / `"agent_skill"` require
+match the track implied by `memory_type` (`"episode"` / `"decision"` /
+`"profile"` require `user_id`; `"agent_case"` / `"agent_skill"` require
 `agent_id`).
 
 **`app_id` / `project_id`** — Scope identifiers.
 
 **`memory_type`** — Which item kind to list; see
 [GetMemoryType](#getmemorytype). The route populates exactly one of
-the four arrays in `data` based on this value.
+the kind arrays in `data` based on this value. `"principle"` is not
+a valid value.
 
 **`page`** — 1-indexed page number. Together with `page_size`
 determines the window. The response's `total_count` reports how many
@@ -938,13 +974,14 @@ predicate-based filtering before pagination.
 
 #### Response body
 
-`200 OK` returns a SuccessEnvelope wrapping `GetData`. The four
+`200 OK` returns a SuccessEnvelope wrapping `GetData`. The kind
 arrays are always present so client code can iterate without
 branching on `memory_type`; exactly one is populated.
 
 | Field | Type | Notes |
 |---|---|---|
 | `episodes` | `array<GetEpisodeItem>` | Populated when `memory_type="episode"` |
+| `decisions` | `array<GetDecisionItem>` | Populated when `memory_type="decision"` |
 | `profiles` | `array<GetProfileItem>` | Populated when `memory_type="profile"` |
 | `agent_cases` | `array<GetAgentCaseItem>` | Populated when `memory_type="agent_case"` |
 | `agent_skills` | `array<GetAgentSkillItem>` | Populated when `memory_type="agent_skill"` |
@@ -970,6 +1007,25 @@ sub-facts).
 | `subject` | `string` | One-line subject |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | — |
+
+#### GetDecisionItem
+
+Same shape as [SearchDecisionItem](#searchdecisionitem) **minus**
+`score` (listing is unranked).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | `<user_id>_dc_<YYYYMMDD>_<NNN>` |
+| `user_id` | `string \| null` | Owner |
+| `app_id` | `string` | Scope |
+| `project_id` | `string` | Scope |
+| `session_id` | `string \| null` | Originating session; `null` when unbound |
+| `timestamp` | `string` | ISO-8601 with timezone offset — see [Conventions](#conventions) |
+| `title` | `string` | Short title of the trade-off |
+| `decision` | `string` | Decision body |
+| `reason` | `string` | Why the trade-off was made |
+| `impact` | `string \| null` | Optional downstream effect |
+| `tags` | `array<string>` | Caller-supplied labels |
 
 #### GetProfileItem
 
@@ -1051,6 +1107,7 @@ Response (real capture):
                 "type": "Conversation"
             }
         ],
+        "decisions": [],
         "profiles": [],
         "agent_cases": [],
         "agent_skills": [],

@@ -2,20 +2,21 @@
 
 Hard partition by ``owner_type``:
 
-* ``user``  → ``episodes`` (+ ``profiles`` when ``include_profile=true``)
+* ``user``  → ``episodes`` + ``decisions`` (``kinds`` can restrict
+  either lane; ``profiles`` when ``include_profile=true``)
 * ``agent`` → ``agent_cases`` + ``agent_skills``
 
 Per kind, :func:`memory.search.adapter.resolve_pipeline` decides whether
 the path is "single-route recall, no fusion" (``KEYWORD`` / ``VECTOR``)
-or "sparse + dense → everalgo.rank" (``HYBRID`` / ``AGENTIC``). Component
-guards (embedding / cross-encoder / LLM) raise early when a method is
-selected without its prerequisites.
+or "sparse + dense → fusion" (``HYBRID``). Episode HYBRID uses the
+heap-expand pipeline; Decision HYBRID uses :func:`everalgo.rank.fusion.rrf`
+and never ``arank``. ``AGENTIC`` still only drives the episode (and
+agent) graphs; the decision lane runs the same sparse+dense+rrf path
+so ``kinds=["decision"]`` + agentic is not an empty response.
 
-``HYBRID`` defaults to **no LLM rerank** — the response comes back
-straight after the heap-expand pipeline (RRF-ordered expansion → LR-calibrated
-global top-N competition with fact eviction). ``enable_llm_rerank`` is
-**ignored** for the hierarchy path. ``AGENTIC`` keeps its own
-internal cross-encoder rerank loop; the flag is ignored there.
+``enable_llm_rerank`` is **ignored** for the episode hierarchy path
+and for the decision rrf path. ``AGENTIC`` keeps its own internal
+cross-encoder rerank loop; the flag is ignored there.
 
 ``SearchEpisodeItem.atomic_facts`` is populated **only** when the HYBRID
 pipeline runs over episodes. The other methods leave it empty: there is
@@ -63,6 +64,7 @@ from .dto import (
     SearchAgentCaseItem,
     SearchAgentSkillItem,
     SearchData,
+    SearchDecisionItem,
     SearchEpisodeItem,
     SearchMethod,
     SearchProfileItem,
@@ -70,12 +72,13 @@ from .dto import (
     SearchResponse,
     UnprocessedMessageDTO,
 )
-from .filters import compile_filters
+from .filters import compile_filters, compile_filters_for_decision
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .shaper import (
     reshape_hybrid_output,
     shape_agent_case_from_candidate,
     shape_agent_skill_from_candidate,
+    shape_decision_from_candidate,
     shape_episode_from_candidate,
 )
 from .skill_hybrid import search_agent_skills_hybrid
@@ -91,6 +94,7 @@ if TYPE_CHECKING:
         AgentCaseRecaller,
         AgentSkillRecaller,
         AtomicFactRecaller,
+        DecisionRecaller,
         EpisodeRecaller,
         ProfileRecaller,
     )
@@ -139,7 +143,7 @@ def _top_score(data: SearchData) -> float:
 
     Profiles are excluded — they are a KV fetch with no query-relevance score.
     """
-    items = [*data.episodes, *data.agent_cases, *data.agent_skills]
+    items = [*data.episodes, *data.decisions, *data.agent_cases, *data.agent_skills]
     return max((item.score for item in items), default=0.0)
 
 
@@ -160,6 +164,7 @@ class SearchManager:
         *,
         episode_recaller: EpisodeRecaller,
         atomic_fact_recaller: AtomicFactRecaller,
+        decision_recaller: DecisionRecaller,
         agent_case_recaller: AgentCaseRecaller,
         agent_skill_recaller: AgentSkillRecaller,
         profile_recaller: ProfileRecaller,
@@ -170,6 +175,7 @@ class SearchManager:
     ) -> None:
         self._ep = episode_recaller
         self._fact = atomic_fact_recaller
+        self._decision = decision_recaller
         self._case = agent_case_recaller
         self._skill = agent_skill_recaller
         self._profile = profile_recaller
@@ -214,13 +220,22 @@ class SearchManager:
             self._validate_components(req)
 
             if req.owner_type == "user":
-                episodes, profiles, unprocessed = await asyncio.gather(
+                decision_where = compile_filters_for_decision(
+                    req.filters,
+                    owner_id=req.owner_id,
+                    owner_type=req.owner_type,
+                    app_id=req.app_id,
+                    project_id=req.project_id,
+                )
+                episodes, decisions, profiles, unprocessed = await asyncio.gather(
                     self._search_episodes(req, where),
+                    self._search_decisions(req, decision_where),
                     self._fetch_profile(req),
                     self._load_unprocessed(req),
                 )
                 data = SearchData(
                     episodes=episodes,
+                    decisions=decisions,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
                 )
@@ -241,6 +256,7 @@ class SearchManager:
                 span,
                 {
                     "episodes": [e.id for e in data.episodes],
+                    "decisions": [d.id for d in data.decisions],
                     "agent_cases": [c.id for c in data.agent_cases],
                     "agent_skills": [s.id for s in data.agent_skills],
                 },
@@ -330,6 +346,8 @@ class SearchManager:
     async def _search_episodes(
         self, req: SearchRequest, where: str
     ) -> list[SearchEpisodeItem]:
+        if not _wants_episodes(req):
+            return []
         if req.method == SearchMethod.AGENTIC:
             return await search_episodes_agentic(
                 req.query,
@@ -432,6 +450,44 @@ class SearchManager:
             for ep in (shape_episode_from_candidate(c) for c in ep_candidates)
             if ep is not None
         ]
+
+    # ── Decisions ───────────────────────────────────────────────────
+
+    async def _search_decisions(
+        self, req: SearchRequest, where: str
+    ) -> list[SearchDecisionItem]:
+        """User-partition Decision lane.
+
+        ``AGENTIC`` is remapped to HYBRID here: the agentic graph only
+        serves episodes. Decision still runs sparse + dense + ``rrf`` so
+        ``kinds=["decision"]`` + agentic is not an empty response.
+        ``enable_llm_rerank`` is ignored (Decision is not an ``arank``
+        ``memory_type``).
+        """
+        if not _wants_decisions(req):
+            return []
+        effective = (
+            SearchMethod.HYBRID if req.method == SearchMethod.AGENTIC else req.method
+        )
+        fusion_mode, _ = resolve_pipeline(effective, "decision")
+        top_k = self._top_k(req.top_k)
+
+        if fusion_mode is None:
+            cands = await self._single_route_recall(self._decision, req, where, top_k)
+            shaped = (shape_decision_from_candidate(c) for c in cands[:top_k])
+            return [item for item in shaped if item is not None]
+
+        sparse, dense, _ = await self._recall_sparse_dense(
+            self._decision, req, where, top_k
+        )
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": "rrf", "kind": "decision"},
+        ):
+            fused = rrf(sparse, dense)
+        shaped = (shape_decision_from_candidate(c) for c in fused[:top_k])
+        return [item for item in shaped if item is not None]
 
     # ── Agent cases ─────────────────────────────────────────────────
 
@@ -582,7 +638,9 @@ class SearchManager:
 
     async def _single_route_recall(
         self,
-        recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
+        recaller: (
+            EpisodeRecaller | DecisionRecaller | AgentCaseRecaller | AgentSkillRecaller
+        ),
         req: SearchRequest,
         where: str,
         top_k: int,
@@ -606,7 +664,9 @@ class SearchManager:
 
     async def _recall_sparse_dense(
         self,
-        recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
+        recaller: (
+            EpisodeRecaller | DecisionRecaller | AgentCaseRecaller | AgentSkillRecaller
+        ),
         req: SearchRequest,
         where: str,
         top_k: int,
@@ -816,6 +876,12 @@ class SearchManager:
         """
         method = req.method
         is_agent_hybrid = method == SearchMethod.HYBRID and req.owner_type == "agent"
+        # AGENTIC's cross-encoder/LLM graph serves episodes (user) and
+        # cases/skills (agent). kinds=["decision"] remaps to rrf and
+        # must not demand rerank/LLM.
+        needs_agentic_graph = method == SearchMethod.AGENTIC and (
+            req.owner_type == "agent" or _wants_episodes(req)
+        )
 
         needs_embedding = method in (
             SearchMethod.VECTOR,
@@ -849,7 +915,7 @@ class SearchManager:
                 ),
             )
 
-        if method == SearchMethod.AGENTIC and (
+        if needs_agentic_graph and (
             not get_rerank_capability().available or self._reranker is None
         ):
             raise ProviderNotConfiguredError(
@@ -869,7 +935,7 @@ class SearchManager:
                     "rerank lane (needs a configured [rerank] provider)"
                 ),
             )
-        if method == SearchMethod.AGENTIC and self._llm is None:
+        if needs_agentic_graph and self._llm is None:
             raise ProviderNotConfiguredError(
                 provider="llm",
                 feature=_feature_name(method, req.owner_type),
@@ -888,6 +954,16 @@ def _scored_as_candidate(scored) -> Candidate:  # type: ignore[no-untyped-def]
         source="other",
         metadata=dict(scored.metadata),
     )
+
+
+def _wants_episodes(req: SearchRequest) -> bool:
+    """Whether the user-partition episode lane should run."""
+    return req.owner_type == "user" and (req.kinds is None or "episode" in req.kinds)
+
+
+def _wants_decisions(req: SearchRequest) -> bool:
+    """Whether the user-partition decision lane should run."""
+    return req.owner_type == "user" and (req.kinds is None or "decision" in req.kinds)
 
 
 def _feature_name(method: SearchMethod, owner_type: str) -> str:

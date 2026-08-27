@@ -42,6 +42,24 @@ def test_hybrid_skill_picks_skill_hybrid() -> None:
     assert fm == "skill_hybrid"
 
 
+def test_hybrid_decision_picks_rrf() -> None:
+    fm, cfg = resolve_pipeline(SearchMethod.HYBRID, "decision")
+    assert fm == "rrf"
+    assert cfg is None
+
+
+def test_keyword_decision_skips_everalgo() -> None:
+    fm, cfg = resolve_pipeline(SearchMethod.KEYWORD, "decision")
+    assert fm is None
+    assert cfg is None
+
+
+def test_vector_decision_skips_everalgo() -> None:
+    fm, cfg = resolve_pipeline(SearchMethod.VECTOR, "decision")
+    assert fm is None
+    assert cfg is None
+
+
 def test_agentic_method_raises_value_error() -> None:
     """AGENTIC (a valid enum member) raises ValueError from resolve_pipeline.
 
