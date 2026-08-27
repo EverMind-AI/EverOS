@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any, ClassVar
+
+from .protocols import IndexRepository
 
 
 class MilvusIndexBackend:
@@ -11,15 +14,17 @@ class MilvusIndexBackend:
     name: ClassVar[str] = "milvus"
 
     @property
-    def repositories(self):  # type: ignore[no-untyped-def]
-        return _milvus().ALL_REPOS
+    def repositories(self) -> tuple[IndexRepository[Any], ...]:
+        return tuple(_milvus().ALL_REPOS)
 
     async def connect(self) -> Any:
         return await _milvus().get_client()
 
     async def startup(self) -> Any:
         client = await self.connect()
-        await self.verify_business_schemas()
+        # ensure_collection creates a missing collection and drift-checks an
+        # existing one in a single round trip, so unlike the LanceDB backend
+        # there is no separate verify step to run first.
         await self.ensure_business_indexes()
         return client
 
@@ -30,16 +35,16 @@ class MilvusIndexBackend:
         await _milvus().ensure_business_indexes()
 
     async def verify_business_schemas(self) -> None:
-        # Verification tolerates absent collections; ensure_collection creates
-        # them immediately afterwards and verifies every existing collection.
-        for repo in self.repositories:
-            await repo.ensure_collection()
+        # Same call as ensure_business_indexes: ensure_collection creates a
+        # missing collection and drift-checks an existing one. Kept distinct
+        # because the port and the CLI both address verification by name.
+        await self.ensure_business_indexes()
 
     async def drop_business_tables(self) -> list[str]:
         return await _milvus().drop_business_tables()
 
 
-def _milvus():  # type: ignore[no-untyped-def]
+def _milvus() -> ModuleType:
     # Keep pymilvus genuinely optional for default LanceDB installations.
     from everos.infra.persistence import milvus
 

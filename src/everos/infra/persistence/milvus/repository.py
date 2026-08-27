@@ -10,20 +10,24 @@ from typing import Any, ClassVar
 from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
 
-from everos.component.utils.datetime import ensure_utc, from_timestamp, to_timestamp_ms
+from everos.component.utils.datetime import (
+    ensure_utc,
+    from_timestamp_ms,
+    to_timestamp_ms,
+)
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index.predicate import (
-    Predicate,
-    all_of,
-    eq,
-    one_of,
-)
 from everos.infra.persistence.index.schema import (
     IndexField,
     IndexFieldKind,
     IndexSchema,
     schema_for,
+)
+from everos.infra.persistence.predicate import (
+    Predicate,
+    all_of,
+    eq,
+    one_of,
 )
 
 from .milvus_manager import MilvusSchemaMismatchError, collection_name, get_client
@@ -35,7 +39,6 @@ _DUMMY_VECTOR_FIELD = "_everos_dummy_vector"
 _DUMMY_VECTOR_DIMENSION = 2
 _SPARSE_SUFFIX = "__sparse"
 _PRESENT_SUFFIX = "__present"
-_UPDATE_FETCH_LIMIT = 10_000
 
 
 class MilvusValueLimitError(ValueError):
@@ -72,12 +75,16 @@ class MilvusRepoBase[T: BaseModel]:
 
     @classmethod
     def _reset_collection_cache(cls) -> None:
+        # Only the readiness set is cleared. Dropping _collection_locks would
+        # hand a fresh Lock to the next caller while another task still holds
+        # the old one, so ensure_collection would stop being mutually
+        # exclusive exactly when a drop/rebuild is in flight.
         cls._ready_collections.clear()
-        cls._collection_locks.clear()
 
     @classmethod
     def _reset_locks_for_tests(cls) -> None:
         cls._write_locks.clear()
+        cls._collection_locks.clear()
         cls._reset_collection_cache()
 
     async def ensure_collection(self) -> None:
@@ -167,26 +174,26 @@ class MilvusRepoBase[T: BaseModel]:
             await _run(client.upsert, self.collection_name, payload)
 
     async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
-        rows = await self._query_raw(
-            where, limit=_UPDATE_FETCH_LIMIT, include_vectors=True
-        )
-        if not rows:
-            return
-        if len(rows) == _UPDATE_FETCH_LIMIT:
-            logger.warning(
-                "milvus_update_truncated",
-                table=self.table_name,
-                limit=_UPDATE_FETCH_LIMIT,
-            )
-        patched: list[dict[str, Any]] = []
-        for row in rows:
-            merged = dict(row)
-            for key, value in updates.items():
-                self._write_field_value(merged, key, value)
-            self._validate_raw_record(merged)
-            patched.append(merged)
+        """Read-modify-write the matching rows.
+
+        Milvus has no partial-column update, so the whole row is read back and
+        re-upserted. Both halves must hold the same lock: with the read
+        outside it, two concurrent updates to one row (backfill writing
+        ``vector`` while reflection writes ``deprecated_by``) each overwrite
+        the other's column with the value they read before it landed.
+        """
         client = await get_client()
         async with self._write_lock(self.collection_name):
+            rows = await self._scan_raw(where, include_vectors=True)
+            if not rows:
+                return
+            patched: list[dict[str, Any]] = []
+            for row in rows:
+                merged = dict(row)
+                for key, value in updates.items():
+                    self._write_field_value(merged, key, value)
+                self._validate_raw_record(merged)
+                patched.append(merged)
             await _run(client.upsert, self.collection_name, patched)
 
     async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
@@ -472,7 +479,7 @@ class MilvusRepoBase[T: BaseModel]:
             limit=limit,
         )
 
-    def _build_collection_schema(self):  # type: ignore[no-untyped-def]
+    def _build_collection_schema(self) -> Any:
         schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
         for field in self.index_schema.fields:
             self._add_schema_field(schema, field)
@@ -672,7 +679,9 @@ class MilvusRepoBase[T: BaseModel]:
         for field in self.index_schema.fields:
             if field.kind is IndexFieldKind.DATETIME:
                 value = row.get(_datetime_storage_field(field.name))
-                out[field.name] = None if value is None else from_timestamp(int(value))
+                out[field.name] = (
+                    None if value is None else from_timestamp_ms(int(value))
+                )
             elif field.kind is IndexFieldKind.DENSE_VECTOR:
                 if field.name in row:
                     out[field.name] = (

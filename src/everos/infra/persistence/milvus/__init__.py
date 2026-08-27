@@ -35,12 +35,6 @@ async def ensure_business_indexes() -> None:
         await repo.ensure_collection()
 
 
-async def verify_business_schemas() -> None:
-    """Fail loud if existing Milvus collections drift from EverOS schemas."""
-    for repo in ALL_REPOS:
-        await repo.verify_collection()
-
-
 async def drop_business_tables() -> list[str]:
     """Drop every configured Milvus collection and return their names."""
     client = await get_client()
@@ -81,5 +75,4 @@ __all__ = [
     "get_client",
     "knowledge_topic_repo",
     "user_profile_repo",
-    "verify_business_schemas",
 ]

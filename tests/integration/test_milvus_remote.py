@@ -236,3 +236,77 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         == 103
     )
     assert await episode_repo.count() == 0
+
+
+async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
+    """Milvus has no partial-column update, so update() re-upserts whole rows.
+
+    The only prior coverage ran against ``user_profile``, which carries no
+    vector column — so the read-back-and-re-upsert of a 1024-d vector (the
+    path backfill and reflection both take) was never exercised remotely.
+    """
+    from everos.infra.persistence.index import episode_repo, eq
+
+    now = dt.datetime(2026, 3, 1, 12, 0, tzinfo=dt.UTC)
+    row = _episode(
+        row_id="u1_vec_update",
+        entry_id="vec_update",
+        session_id="vector-update",
+        text="vector bearing episode",
+        vector_axis=7,
+        subject_axis=11,
+        timestamp=now,
+    )
+    await episode_repo.upsert([row])
+
+    await episode_repo.update(
+        {"deprecated_by": "u1_replacement"}, where=eq("id", "u1_vec_update")
+    )
+
+    stored = await episode_repo.get_by_id("u1_vec_update")
+    assert stored is not None
+    assert stored.deprecated_by == "u1_replacement"
+    # The untouched columns must survive the round-trip intact.
+    assert stored.vector is not None
+    assert stored.subject_vector is not None
+    assert stored.vector[7] == pytest.approx(1.0)
+    assert stored.subject_vector[11] == pytest.approx(1.0)
+    assert stored.timestamp == now
+    assert stored.sender_ids == ["user"]
+    assert stored.episode == "vector bearing episode"
+
+    await episode_repo.delete_by_md_path(
+        "test_app/test_project/users/u1/episodes/day.md"
+    )
+
+
+async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
+    """Epoch-ms values below 1e12 must not be re-read as epoch seconds.
+
+    ``to_timestamp_ms`` always writes milliseconds, so the read side has to
+    parse milliseconds unconditionally. A seconds-vs-ms heuristic sends any
+    pre-2001-09-09 instant into the year 30000 and raises on the way back.
+    """
+    from everos.infra.persistence.index import episode_repo, eq
+
+    old = dt.datetime(1999, 1, 1, tzinfo=dt.UTC)
+    row = _episode(
+        row_id="u1_pre2001",
+        entry_id="pre2001",
+        session_id="old-instants",
+        text="an episode from before the ms/seconds threshold",
+        vector_axis=3,
+        subject_axis=5,
+        timestamp=old,
+    )
+    await episode_repo.upsert([row])
+
+    stored = await episode_repo.get_by_id("u1_pre2001")
+    assert stored is not None
+    assert stored.timestamp == old
+
+    assert await episode_repo.count_where(eq("timestamp", old)) == 1
+
+    await episode_repo.delete_by_md_path(
+        "test_app/test_project/users/u1/episodes/day.md"
+    )

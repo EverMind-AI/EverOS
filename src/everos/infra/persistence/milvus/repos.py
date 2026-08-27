@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from everos.component.utils.datetime import from_timestamp
-from everos.infra.persistence.index.predicate import all_of, eq, gt, is_null
 from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
@@ -16,6 +15,7 @@ from everos.infra.persistence.lancedb import (
     KnowledgeTopic,
     UserProfile,
 )
+from everos.infra.persistence.predicate import all_of, eq, gt, is_null
 
 from .repository import MilvusRepoBase
 
@@ -60,7 +60,12 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
             eq("project_id", project_id),
             is_null("deprecated_by"),
         )
-        rows = await self.find_where(predicate, limit=limit or 20_000)
+        # A plain query(limit=...) cannot cross Milvus' 16,384-row window, so
+        # the ceiling has to be applied through the iterator instead.
+        raw = await self._scan_raw(
+            predicate, include_vectors=True, max_rows=limit or 20_000
+        )
+        rows = [self._model_from_milvus(row) for row in raw]
         rows.sort(key=lambda row: row.timestamp)
         if columns is None:
             return rows

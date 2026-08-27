@@ -105,6 +105,27 @@ def test_record_conversion_stores_every_dense_vector_with_presence() -> None:
     assert missing["subject_vector"] == [0.0] * 1024
 
 
+def test_datetime_round_trip_is_exact_below_the_ms_heuristic() -> None:
+    """Epoch ms are written unconditionally, so they must be read the same way.
+
+    ``from_timestamp`` treats anything under 1e12 as *seconds*, so a
+    pre-2001-09-09 instant stored as ms comes back in the year 30000 — or
+    raises ``ValueError: year ... is out of range`` on the way out. The
+    physical datetime column has to bypass that heuristic entirely.
+    """
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    for moment in (
+        dt.datetime(1970, 1, 2, tzinfo=dt.UTC),
+        dt.datetime(1999, 1, 1, tzinfo=dt.UTC),
+        dt.datetime(2001, 9, 8, tzinfo=dt.UTC),
+        dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+    ):
+        stored = milvus_repo._to_milvus_record(_episode(timestamp=moment))
+        assert "timestamp_ms" in stored
+        restored = milvus_repo._restore_row(stored)
+        assert restored["timestamp"] == moment, f"round-trip broke at {moment}"
+
+
 def test_update_fetch_preserves_dummy_vector_for_scalar_only_tables() -> None:
     milvus_repo = user_profile_repo._repo()  # type: ignore[attr-defined]
     assert "_everos_dummy_vector" in milvus_repo._output_fields(include_vectors=True)
