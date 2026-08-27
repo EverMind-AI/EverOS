@@ -89,6 +89,23 @@ class FilterError(InvalidInputError):
     """A caller-supplied filter expression is invalid or malformed."""
 
 
+class EmbeddingInputError(InvalidInputError):
+    """The embedding provider rejected the input itself, not the request.
+
+    Deliberately in the domain branch rather than under
+    :class:`EmbeddingServiceError`: the cascade worker retries the whole
+    ``ExternalServiceError`` branch, and a text the provider refuses -- over the
+    model's token limit, empty, malformed -- is refused identically every time.
+    Retrying it burns the row's budget and, because the worker holds its slot
+    across the backoff, blocks the rows queued behind it. Measured once at
+    8 unembeddable rows stalling 220 good ones.
+
+    A row that raises this is marked permanently failed and surfaces in
+    ``cascade fix``, which is the correct destination: the md has to change
+    before the embedding can ever succeed.
+    """
+
+
 class PathTraversalError(DomainError):
     """A write target resolved outside the configured memory root.
 

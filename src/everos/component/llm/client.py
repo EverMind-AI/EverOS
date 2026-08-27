@@ -74,6 +74,7 @@ class LLMNotConfiguredError(RuntimeError):
 
 _llm_client: LLMClient | None = None
 _multimodal_client: LLMClient | None = None
+_decider_client: LLMClient | None = None
 
 
 def get_llm_client() -> LLMClient:
@@ -101,6 +102,8 @@ def get_llm_client() -> LLMClient:
             model=llm_cfg.model,
             api_key=api_key,
             base_url=llm_cfg.base_url,
+            timeout=llm_cfg.timeout_seconds,
+            extra=dict(llm_cfg.extra),
         )
     )
     # Wrap for OTel token capture only when tracing is on — keeps the
@@ -114,6 +117,55 @@ def get_llm_client() -> LLMClient:
     _llm_client = _LoggingLLMClient(client)
     logger.info("llm_client_built", model=llm_cfg.model)
     return _llm_client
+
+
+def get_decider_llm_client() -> LLMClient:
+    """Return the singleton retrieval-decider client.
+
+    Falls back to :func:`get_llm_client` when ``[decider]`` names no model, so a config
+    that predates the section keeps its current behaviour exactly -- the decider then is
+    the extraction model, as it always was.
+
+    Raises:
+        LLMNotConfiguredError: When ``[decider]`` sets a model but leaves ``api_key`` or
+            ``base_url`` unset, and no usable ``[llm]`` fallback exists.
+    """
+    global _decider_client
+    if _decider_client is not None:
+        return _decider_client
+    settings = load_settings()
+    cfg = settings.decider
+    if not cfg.model:
+        return get_llm_client()
+    api_key = cfg.api_key.get_secret_value() if cfg.api_key is not None else None
+    # A local server needs no real key; fall back to the main section's credentials so
+    # only `model` has to be set to point the decider at a different hosted model.
+    if not api_key or not cfg.base_url:
+        llm_cfg = settings.llm
+        api_key = api_key or (
+            llm_cfg.api_key.get_secret_value() if llm_cfg.api_key is not None else None
+        )
+        base_url = cfg.base_url or llm_cfg.base_url
+    else:
+        base_url = cfg.base_url
+    if not api_key or not base_url:
+        raise LLMNotConfiguredError(
+            missing_config_error("decider api_key and base_url", "decider")
+        )
+    client: LLMClient = build_client(
+        LLMConfig(
+            model=cfg.model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=cfg.timeout_seconds,
+            extra=dict(cfg.extra),
+        )
+    )
+    if settings.observability.enabled:
+        client = UsageRecordingClient(client)
+    _decider_client = _LoggingLLMClient(client)
+    logger.info("decider_client_built", model=cfg.model, base_url=base_url)
+    return _decider_client
 
 
 def get_multimodal_llm_client() -> LLMClient:

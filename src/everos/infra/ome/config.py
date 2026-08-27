@@ -6,6 +6,7 @@ as StartupValidationError instead of being silently ignored.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated, Self
 
@@ -65,6 +66,40 @@ class StrategyOverride(BaseModel):
         return self
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read a positive int from the environment, ignoring anything unparseable.
+
+    A malformed value must not take the process down at import time; the field's own
+    ``gt=0`` still rejects a parsed non-positive number.
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float | None) -> float | None:
+    """Read a timeout (seconds) from the environment; ``"0"`` / ``"off"`` disable it.
+
+    Same tolerance as :func:`_env_int` -- a malformed value falls back to the
+    default rather than failing at import. An explicit zero or ``off`` maps to
+    ``None`` so an operator can turn the ceiling off without editing code.
+    """
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"0", "off", "none", "false"}:
+        return None
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else None
+
+
 class TomlRoot(BaseModel):
     """Top-level TOML schema for ome.toml."""
 
@@ -95,11 +130,39 @@ class OMEConfig(BaseModel):
     max_concurrent_runs: Annotated[
         int,
         Field(
+            default_factory=lambda: _env_int("EVEROS_OME_MAX_CONCURRENT_RUNS", 20),
             gt=0,
             description="Engine-wide cap on concurrent strategy invocations "
-            "(asyncio.Semaphore in Runner).",
+            "(asyncio.Semaphore in Runner). Override with "
+            "EVEROS_OME_MAX_CONCURRENT_RUNS. The default suits an interactive "
+            "install; a bulk ingest of many conversations is throttled by it long "
+            "before the machine is, since each slot spends almost all its time "
+            "waiting on a remote extraction call rather than using CPU.",
         ),
-    ] = 20
+    ]
+    run_timeout_seconds: Annotated[
+        float | None,
+        Field(
+            default_factory=lambda: _env_float(
+                "EVEROS_OME_RUN_TIMEOUT_SECONDS", 1800.0
+            ),
+            description="Wall-clock ceiling on one strategy attempt; None "
+            "disables it. Override with EVEROS_OME_RUN_TIMEOUT_SECONDS "
+            "(0/off disables). Without a ceiling, a coroutine parked on an "
+            "await that carries no deadline of its own -- an asyncio.Lock held "
+            "by another stuck coroutine, a connection-pool wait -- keeps its "
+            "max_concurrent_runs slot forever: it never raises, so it never "
+            "retries, and its record stays RUNNING. Enough of them and the "
+            "engine runs nothing at all, observed with 60 of 64 slots parked on "
+            "one lock, starving every other strategy for 6.7 hours until it was "
+            "killed by hand. crash_recovery_timeout_seconds does not cover this "
+            "-- it reclaims orphans from a PREVIOUS process, not live coroutines "
+            "in this one. The default is deliberately generous (30 min against a "
+            "measured worst case near 7 min for a 38-subject profile pass): a "
+            "deadlock backstop, not a latency target, since killing slow-but-"
+            "healthy work would trade a stall for lost extractions.",
+        ),
+    ]
     max_retries: Annotated[
         int,
         Field(

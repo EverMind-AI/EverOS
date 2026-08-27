@@ -38,6 +38,7 @@ from .lifespans import (
     SqliteLifespanProvider,
 )
 from .routes import (
+    cascade,
     get,
     health,
     knowledge,
@@ -139,12 +140,16 @@ def create_app(
     app.include_router(get.router, prefix="/api/v1")
     app.include_router(ome.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
+    # Operational, not a memory API: it stops a background subsystem. Mounted on
+    # both prefixes so a caller does not have to know which one this build serves.
+    app.include_router(cascade.router, prefix="/api/v1")
     # v2 — cloud-aligned name, same routers.
     app.include_router(memorize.router, prefix="/api/v2")
     app.include_router(search.router, prefix="/api/v2")
     app.include_router(get.router, prefix="/api/v2")
     app.include_router(ome.router, prefix="/api/v2")
     app.include_router(knowledge.router, prefix="/api/v2")
+    app.include_router(cascade.router, prefix="/api/v2")
 
     logger.info("app_created", docs_enabled=enable_docs)
     return app
