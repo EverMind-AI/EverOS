@@ -4,7 +4,8 @@
 Public surface:
 
 - :class:`EmbeddingProvider` — Protocol every provider satisfies.
-- :class:`EmbeddingServiceError` — provider-side failure.
+- :class:`EmbeddingServiceError` — provider-side failure (retryable).
+- :class:`EmbeddingInputError` — the provider rejected the input (permanent).
 - :class:`EmbeddingError` — backward-compat alias for ``EmbeddingServiceError``.
 - :class:`EmbeddingCapability` — soft-dependency wrapper around an
   optional :class:`EmbeddingProvider` (``available`` / ``embed_or_none``
@@ -26,6 +27,7 @@ External usage::
     vec = await provider.embed("hello")
 """
 
+from everos.core.errors import EmbeddingInputError as EmbeddingInputError
 from everos.core.errors import EmbeddingServiceError as EmbeddingServiceError
 
 from .accessor import get_embedding_capability as get_embedding_capability
@@ -38,6 +40,7 @@ from .protocol import EmbeddingProvider as EmbeddingProvider
 __all__ = [
     "EmbeddingCapability",
     "EmbeddingError",
+    "EmbeddingInputError",
     "EmbeddingProvider",
     "EmbeddingServiceError",
     "OpenAIEmbeddingProvider",
