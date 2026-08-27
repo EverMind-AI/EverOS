@@ -642,48 +642,74 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 
 ## EverMind 生态
 
-EverMind 是一个面向长期记忆、自进化 Agent、AI-native interfaces 和记忆评测的开源生态。
+EverMind 将记忆研究、可直接使用的产品与实际集成连接为一个开源生态。
 
 <table>
 <tr>
-<th colspan="2">EverMind 开源生态</th>
+<th colspan="2">产品</th>
 </tr>
 <tr>
-<td><strong>Memory Runtime</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverOS">EverOS</a> - 本地记忆操作系统，以及有研究支撑的 Agent 和用户记忆 runtime。</td>
+<td><strong><a href="https://github.com/EverMind-AI/EverOS">EverOS</a></strong></td>
+<td>本地优先、Markdown 原生的 Agent 与用户长期记忆运行时。</td>
 </tr>
 <tr>
-<td><strong>Self-Improving Agent Harness</strong></td>
-<td><a href="https://github.com/EverMind-AI/Raven">Raven</a> - The Self-Improving Agent Harness，把记忆、主动性、上下文控制和 skill evolution 带进终端原生 Agent。</td>
+<td><strong><a href="https://github.com/EverMind-AI/Raven">Raven</a></strong></td>
+<td>以记忆为核心的自进化 Agent Harness，具备主动性、上下文控制与 Skill 进化能力。</td>
 </tr>
 <tr>
-<td><strong>算法引擎</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a> - stateless extraction、ranking、parsing 和 memory operators，为 EverOS 提供算法能力。</td>
+<td><strong><a href="https://github.com/EverMind-AI/EverMe">EverMe（CLI）</a></strong></td>
+<td>面向跨设备、跨 Agent 个人记忆的 CLI 与 Agent 插件套件。</td>
 </tr>
 <tr>
-<td><strong>Hypergraph Memory</strong></td>
-<td><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a> - 面向长期对话的 hypergraph memory，拥有独立的 benchmark-backed topic -> episode -> fact 检索方法。</td>
+<th colspan="2">研究与评测</th>
 </tr>
 <tr>
-<td><strong>Benchmarks</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a> · <a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a> - conversational memory 和 Agent self-evolution 的评测套件。</td>
+<td><strong><a href="https://github.com/EverMind-AI/SkillCorpus">SkillCorpus</a></strong></td>
+<td>将分散的 Agent Skill 整理为可检索语料库，并提供检索与评测工具。</td>
 </tr>
 <tr>
-<td><strong>Long-Context Research</strong></td>
-<td><a href="https://github.com/EverMind-AI/MSA">MSA</a> - Memory Sparse Attention，用于可扩展 latent memory 和 100M-token contexts。</td>
+<td><strong><a href="https://github.com/EverMind-AI/EverAlgo">EverAlgo</a></strong></td>
+<td>为 EverOS 提供无状态的提取、排序、解析与记忆算法。</td>
 </tr>
 <tr>
-<td><strong>个人记忆层</strong></td>
-<td><a href="https://github.com/EverMind-AI/EverMe">EverMe</a> - CLI 和 Agent plugin suite，用于跨设备、跨 Agent 的个人记忆。</td>
+<td><strong><a href="https://github.com/EverMind-AI/HyperMem">HyperMem</a></strong></td>
+<td>基于超图的分层记忆架构，用于由粗到细的长期对话检索。</td>
 </tr>
 <tr>
-<td><strong>开发者集成</strong></td>
-<td><a href="https://github.com/EverMind-AI/evermem-claude-code">evermem-claude-code</a> · <a href="https://github.com/EverMind-AI/everos-plugins">everos-plugins</a> - AI coding agents 的 plugins、skills 和 migration tooling。</td>
+<td><strong><a href="https://github.com/EverMind-AI/MSA">MSA</a></strong></td>
+<td>面向可扩展潜在记忆与一亿 Token 上下文的 Memory Sparse Attention。</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EverMemBench">EverMemBench</a></strong></td>
+<td>从事实召回、应用推理和个性化泛化三个层面评测记忆系统。</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/EverMind-AI/EvoAgentBench">EvoAgentBench</a></strong></td>
+<td>纵向评测 Agent 自进化、迁移效率、错误规避和 Skill 使用能力。</td>
+</tr>
+<tr>
+<th colspan="2"><a href="https://github.com/EverMind-AI/plugins">插件与集成</a></th>
+</tr>
+<tr>
+<td><strong><a href="https://docs.openclaw.ai">OpenClaw</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/openclaw">OpenClaw 插件</a>，自动管理召回、写入与会话记忆生命周期。</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/hermes">Hermes 插件</a>，为 Hermes 会话提供持久记忆。</td>
+</tr>
+<tr>
+<td><strong><a href="https://github.com/deepseek-ai/DeepSeek-Harness">DeepSeek Harness</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/dsh">DSH 插件</a>，让 DeepSeek Harness Agent 使用长期记忆。</td>
+</tr>
+<tr>
+<td><strong><a href="https://dify.ai">Dify</a></strong></td>
+<td><a href="https://github.com/EverMind-AI/plugins/tree/main/dify">本地版</a>与<a href="https://github.com/EverMind-AI/plugins/tree/main/dify_cloud">云端版</a>工具，在工作流和 Agent 中显式搜索与写入记忆。</td>
 </tr>
 </table>
 
-这些仓库共同构成 EverMind 的 research-to-runtime stack：新的记忆方法、
-可复用算法、benchmark evidence，以及可落地的 Agent 集成。
+这些项目共同构成 EverMind 从研究到运行时的完整链路：将方法与评测转化为
+可复用的记忆基础设施、产品和 Agent 集成。
 
 <br>
 <div align="right">
