@@ -46,8 +46,10 @@ from .predicate import (
     In,
     IsNull,
     Predicate,
+    Scalar,
     all_of,
     any_of,
+    compare,
     contains,
     eq,
     gt,
@@ -58,12 +60,18 @@ from .predicate import (
     ne,
     one_of,
 )
-from .protocols import IndexBackend, IndexRepository
+from .protocols import (
+    AgentSkillIndexRepository,
+    EpisodeIndexRepository,
+    IndexBackend,
+    IndexRepository,
+)
 from .router import (
     RoutedAgentSkillRepository,
     RoutedEpisodeRepository,
     RoutedIndexRepository,
 )
+from .schema import IndexField, IndexFieldKind, IndexSchema, schema_for
 
 AgentCase = _lancedb.AgentCase
 AgentSkill = _lancedb.AgentSkill
@@ -144,20 +152,26 @@ __all__ = [
     "ALL_REPOS",
     "AgentCase",
     "AgentSkill",
+    "AgentSkillIndexRepository",
     "All",
     "AnyOf",
     "AtomicFact",
     "Comparison",
     "Contains",
     "Episode",
+    "EpisodeIndexRepository",
     "Foresight",
     "In",
     "IndexBackend",
+    "IndexField",
+    "IndexFieldKind",
     "IndexRepository",
+    "IndexSchema",
     "IsNull",
     "KnowledgeTopic",
     "ParentType",
     "Predicate",
+    "Scalar",
     "UserProfile",
     "active_backend",
     "agent_case_repo",
@@ -165,6 +179,7 @@ __all__ = [
     "all_of",
     "any_of",
     "atomic_fact_repo",
+    "compare",
     "connect",
     "contains",
     "drop_business_tables",
@@ -181,6 +196,7 @@ __all__ = [
     "ne",
     "one_of",
     "repo_for_schema",
+    "schema_for",
     "shutdown",
     "startup",
     "user_profile_repo",

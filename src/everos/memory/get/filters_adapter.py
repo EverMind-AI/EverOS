@@ -15,9 +15,8 @@ operator allow-list, timestamp / array-column rendering).
 
 from __future__ import annotations
 
-from everos.infra.persistence.index.predicate import Predicate
+from everos.infra.persistence.index import Predicate
 from everos.memory.search import FilterNode, compile_filters
-from everos.memory.search.filters import compile_filters_for_backends
 
 
 def compile_filters_for_get(
@@ -34,23 +33,6 @@ def compile_filters_for_get(
     stable name rather than reaching into ``memory.search``.
     """
     return compile_filters(
-        filters,
-        owner_id=owner_id,
-        owner_type=owner_type,
-        app_id=app_id,
-        project_id=project_id,
-    )
-
-
-def compile_filters_for_get_backends(
-    filters: FilterNode | None,
-    *,
-    owner_id: str,
-    owner_type: str,
-    app_id: str = "default",
-    project_id: str = "default",
-) -> Predicate:
-    return compile_filters_for_backends(
         filters,
         owner_id=owner_id,
         owner_type=owner_type,

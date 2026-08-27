@@ -96,6 +96,12 @@ def is_null(field: str) -> Predicate:
 
 
 def all_of(*predicates: Predicate | None) -> Predicate:
+    """AND the given predicates, flattening nested ``All`` and dropping ``None``.
+
+    An empty result is rejected rather than rendered: adapters emit ``""`` for
+    an empty group, and an empty filter means *match every row* — a silent
+    "delete everything" if it ever reached :meth:`IndexRepository.delete`.
+    """
     children: list[Predicate] = []
     for predicate in predicates:
         if predicate is None:
@@ -104,10 +110,18 @@ def all_of(*predicates: Predicate | None) -> Predicate:
             children.extend(predicate.children)
         else:
             children.append(predicate)
+    if not children:
+        raise ValueError("all_of requires at least one non-None predicate")
     return All(tuple(children))
 
 
 def any_of(*predicates: Predicate | None) -> Predicate:
+    """OR the given predicates, flattening nested ``AnyOf`` and dropping ``None``.
+
+    Empty is rejected for the same reason as :func:`all_of`, and the inversion
+    is worse here: an empty OR means "match nothing" but would render as
+    "match everything".
+    """
     children: list[Predicate] = []
     for predicate in predicates:
         if predicate is None:
@@ -116,6 +130,8 @@ def any_of(*predicates: Predicate | None) -> Predicate:
             children.extend(predicate.children)
         else:
             children.append(predicate)
+    if not children:
+        raise ValueError("any_of requires at least one non-None predicate")
     return AnyOf(tuple(children))
 
 

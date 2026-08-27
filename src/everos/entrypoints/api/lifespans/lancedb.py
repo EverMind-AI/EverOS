@@ -35,6 +35,7 @@ from everos.infra.persistence.index import (
     ALL_REPOS,
     active_backend,
     is_null,
+    schema_for,
 )
 from everos.infra.persistence.index import (
     shutdown as shutdown_index,
@@ -42,7 +43,6 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.index import (
     startup as startup_index,
 )
-from everos.infra.persistence.index.schema import schema_for
 
 logger = get_logger(__name__)
 

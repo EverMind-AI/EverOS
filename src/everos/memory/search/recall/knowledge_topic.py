@@ -30,31 +30,6 @@ from .base import (
 )
 
 
-def _merge_bm25_results(
-    per_column: tuple[list[dict], ...],
-    *,
-    limit: int,
-) -> list[dict]:
-    """Merge multi-column BM25 results by id, keeping max score."""
-    best: dict[str, dict] = {}
-    for rows in per_column:
-        for r in rows:
-            rid = r.get("id")
-            if not isinstance(rid, str):
-                continue
-            score = float(r.get("_score", 0.0))
-            existing = best.get(rid)
-            if existing is None or score > float(existing.get("_score", 0.0)):
-                merged = dict(r)
-                merged["_score"] = score
-                best[rid] = merged
-    return sorted(
-        best.values(),
-        key=lambda r: float(r.get("_score", 0.0)),
-        reverse=True,
-    )[:limit]
-
-
 class KnowledgeTopicRecaller:
     """BM25 (dual-column) + vector recall over the LanceDB ``knowledge_topic`` table.
 

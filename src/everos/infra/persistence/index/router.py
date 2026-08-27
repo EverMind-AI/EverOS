@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
 from everos.config import load_settings
 
 from .predicate import Predicate
-from .protocols import IndexRepository
+from .protocols import (
+    AgentSkillIndexRepository,
+    EpisodeIndexRepository,
+    IndexRepository,
+)
 
 
 class RoutedIndexRepository[T: BaseModel]:
@@ -193,6 +197,9 @@ class RoutedIndexRepository[T: BaseModel]:
 
 
 class RoutedEpisodeRepository(RoutedIndexRepository[Any]):
+    def _repo(self) -> EpisodeIndexRepository[Any]:
+        return cast(EpisodeIndexRepository[Any], super()._repo())
+
     async def count_by_owner(
         self,
         owner_id: str,
@@ -201,7 +208,7 @@ class RoutedEpisodeRepository(RoutedIndexRepository[Any]):
         project_id: str = "default",
         parent_type: str | None = None,
     ) -> int:
-        return await self._repo().count_by_owner(  # type: ignore[attr-defined]
+        return await self._repo().count_by_owner(
             owner_id,
             app_id=app_id,
             project_id=project_id,
@@ -219,7 +226,7 @@ class RoutedEpisodeRepository(RoutedIndexRepository[Any]):
         columns: Sequence[str] | None = None,
         limit: int | None = None,
     ) -> list[Any]:
-        return await self._repo().list_by_owner_after_ts(  # type: ignore[attr-defined]
+        return await self._repo().list_by_owner_after_ts(
             owner_id=owner_id,
             after_ts=after_ts,
             parent_type=parent_type,
@@ -231,8 +238,11 @@ class RoutedEpisodeRepository(RoutedIndexRepository[Any]):
 
 
 class RoutedAgentSkillRepository(RoutedIndexRepository[Any]):
+    def _repo(self) -> AgentSkillIndexRepository[Any]:
+        return cast(AgentSkillIndexRepository[Any], super()._repo())
+
     async def count_in_cluster(self, *, owner_id: str, cluster_id: str) -> int:
-        return await self._repo().count_in_cluster(  # type: ignore[attr-defined]
+        return await self._repo().count_in_cluster(
             owner_id=owner_id,
             cluster_id=cluster_id,
         )
@@ -240,7 +250,7 @@ class RoutedAgentSkillRepository(RoutedIndexRepository[Any]):
     async def find_in_cluster(
         self, *, owner_id: str, cluster_id: str, limit: int
     ) -> list[Any]:
-        return await self._repo().find_in_cluster(  # type: ignore[attr-defined]
+        return await self._repo().find_in_cluster(
             owner_id=owner_id,
             cluster_id=cluster_id,
             limit=limit,
@@ -254,7 +264,7 @@ class RoutedAgentSkillRepository(RoutedIndexRepository[Any]):
         query_vector: Sequence[float],
         top_k: int,
     ) -> list[Any]:
-        return await self._repo().find_topk_relevant_in_cluster(  # type: ignore[attr-defined]
+        return await self._repo().find_topk_relevant_in_cluster(
             owner_id=owner_id,
             cluster_id=cluster_id,
             query_vector=query_vector,

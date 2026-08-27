@@ -54,6 +54,7 @@ from everos.infra.persistence.index import (
     Foresight,
     IndexRepository,
     KnowledgeTopic,
+    Predicate,
     agent_case_repo,
     agent_skill_repo,
     any_of,
@@ -64,8 +65,8 @@ from everos.infra.persistence.index import (
     is_null,
     knowledge_topic_repo,
     repo_for_schema,
+    schema_for,
 )
-from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 from everos.infra.persistence.sqlite import cluster_repo, get_engine
 from everos.memory.cascade.worker import (
@@ -268,7 +269,7 @@ _BUSINESS_SCHEMA_NAMES = {
 }
 if _TABLE_SPEC_NAMES != _BUSINESS_SCHEMA_NAMES:
     raise RuntimeError(
-        f"_TABLE_SPECS drift: BUSINESS_SCHEMAS_WITH_VECTOR has "
+        f"_TABLE_SPECS drift: the vector-carrying index repos have "
         f"{_BUSINESS_SCHEMA_NAMES}, _TABLE_SPECS covers "
         f"{_TABLE_SPEC_NAMES}. Update _TABLE_SPECS to include every "
         f"business table with a nullable vector column."
@@ -348,7 +349,7 @@ class _PhaseResult:
     blocked_by_server: bool = False
 
 
-def _null_filter(spec: _TableSpec):  # type: ignore[no-untyped-def]
+def _null_filter(spec: _TableSpec) -> Predicate:
     """Where-clause the scan uses to spot rows that need (some) embedding.
 
     Episode carries a ``subject_vector`` alongside ``vector`` — the two

@@ -12,8 +12,9 @@ from typing import Any, Final, Literal
 
 from everos.component.utils.datetime import ensure_utc, from_iso_format, from_timestamp
 from everos.core.errors import FilterError as FilterError
-from everos.infra.persistence.index.predicate import (
+from everos.infra.persistence.index import (
     Predicate,
+    Scalar,
     all_of,
     any_of,
     compare,
@@ -69,24 +70,6 @@ def compile_filters(
         if compiled is not None:
             base.append(compiled)
     return all_of(*base)
-
-
-def compile_filters_for_backends(
-    node: FilterNode | None,
-    *,
-    owner_id: str,
-    owner_type: str,
-    app_id: str = "default",
-    project_id: str = "default",
-) -> Predicate:
-    """Compatibility name for callers migrating from rendered filters."""
-    return compile_filters(
-        node,
-        owner_id=owner_id,
-        owner_type=owner_type,
-        app_id=app_id,
-        project_id=project_id,
-    )
 
 
 def _compile_node(raw: dict[str, Any]) -> Predicate | None:
@@ -173,7 +156,7 @@ def _compile_op_clause(spec: _FieldSpec, field: str, op: str, value: Any) -> Pre
     )
 
 
-def _normalize_literal(value: Any, kind: _FieldKind, field: str):  # type: ignore[no-untyped-def]
+def _normalize_literal(value: Any, kind: _FieldKind, field: str) -> Scalar:
     if kind == "str":
         return _require_str(value, field)
     if kind == "ts":
@@ -220,6 +203,5 @@ __all__ = [
     "ALLOWED_FIELDS",
     "RESERVED_FIELDS",
     "compile_filters",
-    "compile_filters_for_backends",
     "compile_predicate",
 ]

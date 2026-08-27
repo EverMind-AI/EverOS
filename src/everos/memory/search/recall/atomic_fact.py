@@ -38,7 +38,6 @@ from .base import (
 _NOISE_COLUMNS = frozenset(
     {"vector", "_distance", "_score", "created_at", "updated_at"}
 )
-_MAX_FACT_RECALL_LIMIT = 1024
 
 
 class AtomicFactRecaller:
@@ -162,12 +161,7 @@ class AtomicFactRecaller:
     ) -> list[dict[str, Any]]:
         """Construct and execute the LanceDB query for parent_id IN (...)."""
         full_where = all_of(where, one_of("parent_id", list(parent_to_eps)))
-        # Keep one portable ceiling: Milvus/Zilliz reject larger search topK
-        # values, while fact expansion only needs a bounded competition pool.
-        limit = min(
-            per_episode * max(len(parent_to_eps), 1),
-            _MAX_FACT_RECALL_LIMIT,
-        )
+        limit = per_episode * max(len(parent_to_eps), 1)
         if query_vector:
             return await atomic_fact_repo.dense_search(
                 query_vector, full_where, limit=limit

@@ -34,7 +34,7 @@ from .dto import (
     GetRequest,
     GetResponse,
 )
-from .filters_adapter import compile_filters_for_get_backends
+from .filters_adapter import compile_filters_for_get
 
 if TYPE_CHECKING:
     from everos.infra.persistence.index import (
@@ -70,7 +70,7 @@ class GetManager:
     async def get(self, req: GetRequest) -> GetResponse:
         request_id = resolve_request_id()
         descending = req.sort_order == "desc"
-        where = compile_filters_for_get_backends(
+        where = compile_filters_for_get(
             req.filters,
             owner_id=req.owner_id,
             owner_type=req.owner_type,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import re
 from collections.abc import Sequence
@@ -154,11 +155,12 @@ class LanceIndexRepository[T: BaseModel]:
         where: Predicate | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        return await self._repo.search(
-            vector=vector,
-            where=_render_optional(where),
-            limit=limit,
-        )
+        if vector is not None:
+            # Route through dense_search so the metric is pinned to cosine.
+            # LanceRepoBase.search leaves distance_type at the table default
+            # (L2), which would not match the Milvus adapter's COSINE.
+            return await self.dense_search(vector, where, limit=limit)
+        return await self._repo.search(where=_render_optional(where), limit=limit)
 
     async def sparse_search(
         self,
@@ -173,15 +175,19 @@ class LanceIndexRepository[T: BaseModel]:
         if not clean_terms or not fields:
             return []
         table = await _lancedb.get_table(self.table_name, self.schema)
-        best: dict[str, dict[str, Any]] = {}
-        for field in fields:
+        expression = _render_optional(where)
+
+        async def _query_one(field: str) -> list[dict[str, Any]]:
             query = build_or_query(clean_terms, field)
             assert query is not None
             builder = table.query().nearest_to_text(query)
-            expression = _render_optional(where)
             if expression:
                 builder = builder.where(expression)
-            rows = await builder.limit(limit).to_list()
+            return await builder.limit(limit).to_list()
+
+        per_column = await asyncio.gather(*(_query_one(field) for field in fields))
+        best: dict[str, dict[str, Any]] = {}
+        for rows in per_column:
             for row in rows:
                 rid = row.get("id")
                 if not isinstance(rid, str):

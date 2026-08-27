@@ -227,6 +227,8 @@ forbidden_modules = [
     "everos.infra.persistence.markdown.**",
     "everos.infra.persistence.lancedb.**",
     "everos.infra.persistence.sqlite.**",
+    "everos.infra.persistence.index.**",
+    "everos.infra.persistence.milvus.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -253,6 +255,12 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.lancedb",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.milvus",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.router",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.schema",
 ]
 
 [[tool.importlinter.contracts]]

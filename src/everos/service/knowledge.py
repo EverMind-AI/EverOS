@@ -44,6 +44,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.core.persistence.markdown import dump_frontmatter, parse_frontmatter
+from everos.infra.persistence.index import Predicate, all_of, eq
 from everos.infra.persistence.markdown import (
     KnowledgeWriter,
     ensure_taxonomy,
@@ -1148,7 +1149,7 @@ def _validate_scope_id(value: str, name: str) -> None:
         raise ValueError(f"{name} contains invalid characters: {value!r}")
 
 
-def compile_knowledge_where(app_id: str, project_id: str):  # type: ignore[no-untyped-def]
+def compile_knowledge_where(app_id: str, project_id: str) -> Predicate:
     """Build a backend-neutral predicate scoped to the given tenant.
 
     Args:
@@ -1163,9 +1164,6 @@ def compile_knowledge_where(app_id: str, project_id: str):  # type: ignore[no-un
     """
     _validate_scope_id(app_id, "app_id")
     _validate_scope_id(project_id, "project_id")
-
-    from everos.infra.persistence.index import all_of, eq
-
     return all_of(eq("app_id", app_id), eq("project_id", project_id))
 
 
@@ -1174,7 +1172,7 @@ def compile_knowledge_where(app_id: str, project_id: str):  # type: ignore[no-un
 
 async def _base_retrieve(
     recaller: KnowledgeTopicRecaller,
-    where: str,
+    where: Predicate,
     *,
     method: str,
     query: str,
@@ -1289,7 +1287,7 @@ def _require_search_providers() -> tuple[EmbeddingProvider, RerankProvider]:
 
 async def _run_category_pipeline(
     query: str,
-    where: str,
+    where: Predicate,
     *,
     method: str,
     vector: list[float],

@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -135,9 +136,7 @@ _VERBOSE_OPTION_HELP = (
 
 
 @asynccontextmanager
-async def _runtime(  # type: ignore[no-untyped-def]
-    *, verify: bool = True, ensure: bool = True
-):
+async def _runtime(*, verify: bool = True, ensure: bool = True) -> AsyncIterator[None]:
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
     The CLI uses the same lazy, process-wide singletons the API lifespan
