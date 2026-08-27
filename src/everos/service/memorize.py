@@ -50,6 +50,7 @@ from everos.memory.strategies import (
     extract_foresight,
     extract_principles,
     extract_user_profile,
+    reflect_decisions,
     reflect_episodes,
     trigger_decision_clustering,
     trigger_profile_clustering,
@@ -131,6 +132,7 @@ _STRATEGIES_REQUIRE_EMBED = (
     trigger_profile_clustering,
     trigger_decision_clustering,
     reflect_episodes,
+    reflect_decisions,
 )
 """Strategies whose body re-embeds or consumes a re-embedded cluster.
 

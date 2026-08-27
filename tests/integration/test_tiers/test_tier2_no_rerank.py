@@ -173,6 +173,7 @@ async def test_ome_registers_embed_dependent_strategies(
         extract_foresight,
         extract_principles,
         extract_user_profile,
+        reflect_decisions,
         reflect_episodes,
         trigger_decision_clustering,
         trigger_profile_clustering,
@@ -193,6 +194,7 @@ async def test_ome_registers_embed_dependent_strategies(
             trigger_skill_clustering,
             extract_agent_skill,
             reflect_episodes,
+            reflect_decisions,
         )
     }
     assert all_strategy_names <= registered_names

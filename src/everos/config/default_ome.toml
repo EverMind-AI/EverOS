@@ -74,6 +74,12 @@
 # enabled = false
 # cron = "0 2 * * 1"
 
+# Decision reflection. Same cadence, independently default-off. Merges
+# kind=decision sqlite clusters into one Decision (not a Principle).
+# [strategies.reflect_decisions]
+# enabled = false
+# cron = "0 2 * * 1"
+
 # ── Agent-memory pipeline ───────────────────────────────────────────────
 
 # Agent case extraction (runs per agent memcell). One per tool call cycle.

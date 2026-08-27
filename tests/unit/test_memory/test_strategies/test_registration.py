@@ -15,6 +15,7 @@ from everos.memory.strategies import (
     extract_foresight,
     extract_principles,
     extract_user_profile,
+    reflect_decisions,
     reflect_episodes,
     trigger_decision_clustering,
     trigger_profile_clustering,
@@ -34,6 +35,7 @@ def test_strategies_are_re_exported_from_package() -> None:
         (trigger_decision_clustering, "trigger_decision_clustering"),
         (extract_user_profile, "extract_user_profile"),
         (extract_principles, "extract_principles"),
+        (reflect_decisions, "reflect_decisions"),
         (reflect_episodes, "reflect_episodes"),
     ]:
         assert fn.meta.name == name
@@ -64,5 +66,6 @@ async def test_get_engine_registers_all_strategies(
         "trigger_decision_clustering",
         "extract_user_profile",
         "extract_principles",
+        "reflect_decisions",
         "reflect_episodes",
     }

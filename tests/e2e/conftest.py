@@ -74,6 +74,7 @@ _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("everos.memory.strategies.extract_principles", ("_writer", "_decision_reader")),
     ("everos.memory.strategies.extract_agent_case", ("_writer",)),
     ("everos.memory.strategies.extract_agent_skill", ("_writer",)),
+    ("everos.memory.strategies.reflect_decisions", ("_writer",)),
 )
 
 
