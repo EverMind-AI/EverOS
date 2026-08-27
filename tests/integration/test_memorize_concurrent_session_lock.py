@@ -60,7 +60,7 @@ def _boundary_response(boundaries: list[int]) -> str:
 
 
 def _episode_response(title: str = "T", content: str = "B") -> str:
-    return json.dumps({"title": title, "content": content})
+    return json.dumps({"title": title, "content": content, "summary": content})
 
 
 def _make_extract_all_llm() -> FakeLLMClient:
@@ -100,6 +100,7 @@ async def memorize_env_locked(
     svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
     client_mod = importlib.import_module("everos.component.llm.client")
     lock_mod = importlib.import_module("everos.service._session_lock")
 
@@ -115,6 +116,7 @@ async def memorize_env_locked(
     monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
     monkeypatch.setattr(af_mod, "_writer", None, raising=False)
     monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
+    monkeypatch.setattr(dc_mod, "_writer", None, raising=False)
     lock_mod._reset_for_tests()
 
     started: dict[str, Any] = {"engine": None}
@@ -139,6 +141,7 @@ async def memorize_env_locked(
         # memcell + buffer cycle; downstream strategies are a separate story).
         mock_af = AsyncMock(return_value=[])
         mock_fs = AsyncMock(return_value=[])
+        mock_dc = AsyncMock(return_value=[])
         monkeypatch.setattr(
             af_mod,
             "AtomicFactExtractor",
@@ -148,6 +151,11 @@ async def memorize_env_locked(
             fs_mod,
             "ForesightExtractor",
             lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
+        )
+        monkeypatch.setattr(
+            dc_mod,
+            "DecisionExtractor",
+            lambda *a, **k: type("M", (), {"aextract": mock_dc})(),
         )
 
         engine = svc._get_engine()

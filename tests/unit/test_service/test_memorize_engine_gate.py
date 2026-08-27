@@ -24,6 +24,7 @@ _svc = importlib.import_module("everos.service.memorize")
 
 _ALWAYS = {
     "extract_atomic_facts",
+    "extract_decision",
     "extract_foresight",
     "extract_agent_case",
     "extract_user_profile",
@@ -70,7 +71,7 @@ def _registered_names() -> set[str]:
 def test_all_strategies_registered_when_embed_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Embed available → all 8 strategies register."""
+    """Embed available → all 9 strategies register."""
     _set_embed_available(monkeypatch, available=True)
     names = _registered_names()
     assert names >= _ALWAYS | _REQUIRE_EMBED

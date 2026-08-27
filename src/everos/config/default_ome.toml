@@ -38,6 +38,13 @@
 # [strategies.extract_foresight]
 # enabled = true
 
+# Decision extraction (runs per memcell). One LLM call for the whole
+# slice, then one md copy per user sender. Enabled by default (unlike
+# extract_foresight) so Search can consume decisions once that route
+# lands. Uncomment only to turn it off for evaluation runs:
+# [strategies.extract_decision]
+# enabled = false
+
 # Profile clustering trigger (fires on each EpisodeExtracted event).
 # [strategies.trigger_profile_clustering]
 # enabled = true

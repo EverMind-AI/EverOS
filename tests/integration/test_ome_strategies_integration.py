@@ -106,8 +106,10 @@ async def test_emit_dispatches_both_strategies_to_success(
     monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
     _af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     _fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    _dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
     monkeypatch.setattr(_af_mod, "_writer", None, raising=False)
     monkeypatch.setattr(_fs_mod, "_writer", None, raising=False)
+    monkeypatch.setattr(_dc_mod, "_writer", None, raising=False)
 
     fake_fact = AtomicFact(
         owner_id="u_alice", content="hi", timestamp=1_700_000_000_000
@@ -127,6 +129,9 @@ async def test_emit_dispatches_both_strategies_to_success(
             "everos.memory.strategies.extract_foresight.ForesightExtractor"
         ) as mock_fs,
         patch(
+            "everos.memory.strategies.extract_decision.DecisionExtractor"
+        ) as mock_dc,
+        patch(
             "everos.memory.strategies.extract_atomic_facts.get_llm_client",
             return_value=object(),
         ),
@@ -134,10 +139,15 @@ async def test_emit_dispatches_both_strategies_to_success(
             "everos.memory.strategies.extract_foresight.get_llm_client",
             return_value=object(),
         ),
+        patch(
+            "everos.memory.strategies.extract_decision.get_llm_client",
+            return_value=object(),
+        ),
         capture_logs() as logs,
     ):
         mock_af.return_value.aextract_from_text = AsyncMock(return_value=[fake_fact])
         mock_fs.return_value.aextract = AsyncMock(return_value=[fake_foresight])
+        mock_dc.return_value.aextract = AsyncMock(return_value=[])
 
         # Ensure the sqlite dir exists before the engine creates ome.db.
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)

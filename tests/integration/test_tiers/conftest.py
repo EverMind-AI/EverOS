@@ -100,7 +100,7 @@ def _boundary_response(boundaries: list[int]) -> str:
 
 
 def _episode_response(title: str = "Test Subject", content: str = "Test body") -> str:
-    return json.dumps({"title": title, "content": content})
+    return json.dumps({"title": title, "content": content, "summary": content})
 
 
 def make_fake_llm(
@@ -114,7 +114,7 @@ def make_fake_llm(
     Mirrors ``tests/integration/test_memorize_integration.py``'s
     ``_make_fake_llm``: pops one ``boundaries=...`` entry per boundary
     prompt seen, every episode prompt gets the same canned
-    ``{title, content}``. Any other prompt (atomic facts / foresight /
+    ``{title, content, summary}``. Any other prompt (atomic facts / foresight /
     profile / agent case background strategies) also falls through to
     the episode-shaped response; those strategies run as OME background
     jobs that log-and-continue on a parse failure, so they never affect
@@ -150,6 +150,7 @@ _MEMORIZE_SINGLETONS: tuple[str, ...] = (
 _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("everos.memory.strategies.extract_atomic_facts", ("_writer",)),
     ("everos.memory.strategies.extract_foresight", ("_writer",)),
+    ("everos.memory.strategies.extract_decision", ("_writer",)),
     ("everos.memory.strategies.extract_user_profile", ("_writer", "_reader")),
     ("everos.memory.strategies.extract_agent_case", ("_writer",)),
     ("everos.memory.strategies.extract_agent_skill", ("_writer",)),

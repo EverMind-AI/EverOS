@@ -11,6 +11,7 @@ from everos.memory.strategies import (
     extract_agent_case,
     extract_agent_skill,
     extract_atomic_facts,
+    extract_decision,
     extract_foresight,
     extract_user_profile,
     reflect_episodes,
@@ -22,6 +23,7 @@ from everos.memory.strategies import (
 def test_strategies_are_re_exported_from_package() -> None:
     for fn, name in [
         (extract_atomic_facts, "extract_atomic_facts"),
+        (extract_decision, "extract_decision"),
         (extract_foresight, "extract_foresight"),
         (extract_agent_case, "extract_agent_case"),
         (trigger_skill_clustering, "trigger_skill_clustering"),
@@ -49,6 +51,7 @@ async def test_get_engine_registers_all_strategies(
     names = {m.name for m in engine._registry.all()}
     assert names == {
         "extract_atomic_facts",
+        "extract_decision",
         "extract_foresight",
         "extract_agent_case",
         "trigger_skill_clustering",

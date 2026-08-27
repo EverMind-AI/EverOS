@@ -46,6 +46,7 @@ from everos.memory.strategies import (
     extract_agent_case,
     extract_agent_skill,
     extract_atomic_facts,
+    extract_decision,
     extract_foresight,
     extract_user_profile,
     reflect_episodes,
@@ -114,6 +115,7 @@ def _get_agent_pipeline() -> AgentMemoryPipeline:
 
 _STRATEGIES_ALWAYS = (
     extract_atomic_facts,
+    extract_decision,
     extract_foresight,
     extract_agent_case,
     extract_user_profile,

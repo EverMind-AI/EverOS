@@ -7,6 +7,7 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    DecisionExtracted,
     SkillClusterUpdated,
     UserPipelineStarted,
 )
@@ -129,3 +130,44 @@ def test_skill_cluster_updated_carries_case_vector() -> None:
         SkillClusterUpdated.model_validate(payload).model_dump_json()
     )
     assert event.case_vector == [0.1, 0.2, 0.3]
+
+
+def test_decision_extracted_topic_is_module_qualified() -> None:
+    assert DecisionExtracted.topic() == "everos.memory.events:DecisionExtracted"
+
+
+def test_decision_extracted_roundtrip_json() -> None:
+    event = DecisionExtracted(
+        memcell_id="mc_a",
+        decision_entry_id="dc_20260517_00000001",
+        title="Use Rust on device",
+        decision_text="Device Runtime uses Rust.",
+        reason="Need deterministic latency.",
+        impact="Keep Python in the agent runtime.",
+        tags=["runtime"],
+        decision_timestamp_ms=1_700_000_000_000,
+        owner_id="u_alice",
+        session_id="s1",
+    )
+    restored = DecisionExtracted.model_validate_json(event.model_dump_json())
+    assert restored.decision_entry_id == "dc_20260517_00000001"
+    assert restored.decision_text == "Device Runtime uses Rust."
+    assert restored.tags == ["runtime"]
+    assert restored.impact == "Keep Python in the agent runtime."
+    assert restored.source == "pipeline"
+
+
+def test_decision_extracted_source_defaults_to_pipeline() -> None:
+    event = DecisionExtracted(
+        memcell_id="mc_a",
+        decision_entry_id="dc_1",
+        title="T",
+        decision_text="D",
+        reason="R",
+        decision_timestamp_ms=1,
+        owner_id="u_alice",
+    )
+    assert event.source == "pipeline"
+    assert event.impact is None
+    assert event.tags == []
+    assert event.session_id is None

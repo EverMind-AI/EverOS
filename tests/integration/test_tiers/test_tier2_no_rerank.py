@@ -169,6 +169,7 @@ async def test_ome_registers_embed_dependent_strategies(
         extract_agent_case,
         extract_agent_skill,
         extract_atomic_facts,
+        extract_decision,
         extract_foresight,
         extract_user_profile,
         reflect_episodes,
@@ -180,6 +181,7 @@ async def test_ome_registers_embed_dependent_strategies(
         strategy.meta.name
         for strategy in (
             extract_atomic_facts,
+            extract_decision,
             extract_foresight,
             extract_agent_case,
             extract_user_profile,

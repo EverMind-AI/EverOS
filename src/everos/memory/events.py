@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from everalgo.types import MemCell
+from pydantic import Field
 
 from everos.infra.ome.events import BaseEvent
 
@@ -10,10 +11,11 @@ from everos.infra.ome.events import BaseEvent
 class UserPipelineStarted(BaseEvent):
     """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
 
-    Hot-path emit, so atomic_fact / foresight / clustering strategies can
-    start in parallel with the in-pipeline Episode extraction. Carries the
-    algo-side ``MemCell`` so crash recovery has the full payload (OME
-    serialises events to JSON via Pydantic v2 nested-model handling).
+    Hot-path emit, so atomic_fact / foresight / decision / clustering
+    strategies can start in parallel with the in-pipeline Episode
+    extraction. Carries the algo-side ``MemCell`` so crash recovery has
+    the full payload (OME serialises events to JSON via Pydantic v2
+    nested-model handling).
     """
 
     memcell_id: str
@@ -55,6 +57,35 @@ class EpisodeExtracted(BaseEvent):
     episode_entry_id: str
     episode_text: str
     episode_timestamp_ms: int
+    owner_id: str
+    session_id: str | None = None
+    app_id: str = "default"
+    project_id: str = "default"
+    source: str = "pipeline"
+
+
+class DecisionExtracted(BaseEvent):
+    """Fired once per Decision after ``extract_decision`` writes its md.
+
+    Carries ``decision_text`` so downstream clustering (gate 6a) can work
+    without racing cascade / polling LanceDB. ``decision_timestamp_ms``
+    stamps algo-side ``Cluster.last_ts``. One memcell can produce multiple
+    decisions, each fanned out once per user sender, so this event fires
+    per written entry, not per-memcell.
+
+    ``source`` is ``"pipeline"`` for extractor output. Reflection later
+    emits the same event with ``source="reflection"`` so clustering can
+    skip a re-cluster of an already-merged decision.
+    """
+
+    memcell_id: str
+    decision_entry_id: str
+    title: str
+    decision_text: str
+    reason: str
+    impact: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    decision_timestamp_ms: int
     owner_id: str
     session_id: str | None = None
     app_id: str = "default"

@@ -1,0 +1,21 @@
+# Custom prompt slot for DecisionExtractor.aextract.
+#
+# Default behaviour
+#   Leave this slot disabled (``enabled: false``). The strategy will pass
+#   ``prompt=None`` through to algo, which falls back to the everalgo
+#   bundled default prompt — see:
+#     everalgo/user_memory/prompts/en/decision.py
+#     (the strategy calls ``aextract`` with no ``sender_id``; the
+#      whole-memcell ``DECISION_GENERATION_PROMPT`` is the only path)
+#
+# To customise
+#   1. Read the algo default at the path above; note the required
+#      placeholders ``{CONVERSATION_TEXT}`` and ``{language_rule}``.
+#   2. Replace the ``template`` body below with your prompt.
+#   3. Flip ``enabled`` to ``true``.
+#
+# When ``enabled: false`` or ``template`` is empty, the strategy sends
+# ``prompt=None`` and the algo default is used (zero override cost).
+
+enabled: false
+template: ""

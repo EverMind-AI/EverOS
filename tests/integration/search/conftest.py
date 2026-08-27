@@ -97,12 +97,14 @@ def _reset_memorize_singletons(mp: pytest.MonkeyPatch) -> None:
     client_mod = importlib.import_module("everos.component.llm.client")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
 
     for attr in _MEMORIZE_SINGLETONS:
         mp.setattr(svc, attr, None, raising=False)
     mp.setattr(client_mod, "_llm_client", None, raising=False)
     mp.setattr(af_mod, "_writer", None, raising=False)
     mp.setattr(fs_mod, "_writer", None, raising=False)
+    mp.setattr(dc_mod, "_writer", None, raising=False)
 
 
 # ── Session corpus: ingest once ────────────────────────────────────────
