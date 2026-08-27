@@ -92,21 +92,6 @@ class AgentCaseExtracted(BaseEvent):
     project_id: str = "default"
 
 
-class ProfileClusterUpdated(BaseEvent):
-    """Fired after the user-memory cluster strategy has merged a new
-    memcell into a cluster.
-
-    Drives the profile-extraction strategy; ``cluster_id`` is the new
-    or merged cluster the source memcell now belongs to.
-    """
-
-    memcell_id: str
-    cluster_id: str
-    owner_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-
-
 class SkillClusterUpdated(BaseEvent):
     """Fired after the agent-case cluster strategy has merged a new
     case into a cluster.

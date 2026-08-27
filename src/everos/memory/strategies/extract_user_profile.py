@@ -1,57 +1,67 @@
-"""extract_user_profile strategy — synthesise the user's profile from clusters.
+"""extract_user_profile strategy — synthesise a profile from the memcell that landed.
 
-Dual-trigger strategy: profile extraction must run whether or not embedding
-is configured, so it listens on **two** events and gates itself so exactly
-one path fires per memcell (see :func:`_profile_applies`):
+Single trigger: :class:`EpisodeExtracted` with ``source == "pipeline"``, one dispatch
+per extracted episode. The profile is a function of the memcell that just arrived and
+nothing else, which is the same contract ``extract_episode`` and
+``extract_atomic_facts`` already have.
 
-- **Cluster path** (Tier 2+, embedding available): fires on
-  :class:`ProfileClusterUpdated`, emitted by ``trigger_profile_clustering``
-  after it assigns a memcell to a cluster. Pulls the relevant memcells
-  across all "fresh" clusters (:func:`_select_via_cluster`).
-- **Direct path** (Tier 1, no embedding): fires on :class:`EpisodeExtracted`
-  directly. ``trigger_profile_clustering`` is always registered, but its
-  per-dispatch body-guard returns early when
-  :func:`get_embedding_capability` reports unavailable, so no
-  ``ProfileClusterUpdated`` is ever emitted in Tier 1 — this direct
-  path is the sole route to profile extraction there. Pulls memcells
-  via a scalar LanceDB timestamp filter, no embedding required
-  (:func:`_select_via_timestamp`).
+It used to have a second, cluster-driven path. ``trigger_profile_clustering`` emitted
+:class:`ProfileClusterUpdated` per episode, and this strategy selected "every member of
+every cluster fresher than the profile". Three things were wrong with it:
 
-Both paths converge on the same LLM extraction + markdown persist tail of
-``extract_user_profile`` — only memcell *selection* differs.
+- **Re-reading.** A cluster stays fresh for as long as it keeps receiving memcells, and
+  a single-project corpus funnels nearly everything into one: measured on EverMemBench
+  topic 01, 2 of 122 clusters held 441 of 595 members, the largest 321. Every
+  extraction therefore re-sent hundreds of already-merged memcells -- 8.7x the
+  necessary volume -- while the UPDATE prompt was already carrying the full current
+  profile those memcells had been merged into.
+- **Cost for nothing.** Reaching the same set cost one embedding call, one read of the
+  owner's entire cluster list (122-251 rows), and one LanceDB fetch of every fresh
+  cluster's members, most of which were then discarded.
+- **Tier-dependent output.** The cluster path only ran when embedding was available, so
+  the same data produced a different profile depending on tier.
 
-Opensource parity (``mem_memorize.py`` Phase 2):
+Clustering itself still runs: ``agentic`` retrieval and Reflection both read
+``cluster_repo``. It simply no longer gates the profile.
 
-- **Throttle** (both paths): ``total_count % profile_extraction_interval
-  == 0``; default interval = 1 (every memcell triggers a re-extraction).
-  Applied at strategy entry so cluster and direct paths honor the same
-  gate. ``total_count`` is ``sum(c.count for c in user_clusters)`` on the
-  cluster path and :meth:`episode_repo.count_by_owner` on the direct
-  path — both express "cumulative units of source-memory for this owner"
-  and stay ~1:1 in the extract → memcell → episode → cluster pipeline.
-- **Target clusters**: every cluster whose ``last_ts`` is newer than the
-  user's existing profile timestamp, plus the current cluster (so the
-  freshly-arrived memcell is always counted even when its cluster's
-  ``last_ts`` is older than the profile baseline).
-- **Input shape**: raw chat messages — algo's ``_render_conversation``
-  unwraps the items list. The sqlite ``memcell.payload_json`` column is
-  the long-term archive that lets us replay this beyond
-  ``unprocessed_buffer``'s lifetime.
+Throttle: ``total_count % PROFILE_EXTRACTION_INTERVAL == 0`` over the owner's
+memcell-parented episode count. ``EVEROS_PROFILE_EXTRACTION_INTERVAL=1`` (the default)
+means every memcell updates the profile; the counter query is skipped entirely at that
+value.
 
-Single-sender assumption today: ``event.owner_id`` is treated as the
-profile subject. Multi-user clusters land their additional sender's
-profile in a follow-up turn (each cluster gets re-evaluated on every
-``ProfileClusterUpdated`` for any participating user).
+Input shape: raw chat messages -- algo's ``_render_conversation`` unwraps the items
+list. The sqlite ``memcell.payload_json`` column is the long-term archive that lets
+this replay beyond ``unprocessed_buffer``'s lifetime.
+
+Who the profile is about is :data:`PROFILE_SUBJECT`. The default (``owner``) treats
+``event.owner_id`` as the subject, which holds whenever an owner is one person: the
+ingest fans each Episode out to every ``sender_id`` in the memcell, so a two-person
+dialogue already produces one owner -- and one profile -- per participant.
+
+It stops holding when many people deliberately share one owner, which is how a group
+chat keeps retrieval in a single partition. There ``owner`` hands the extractor every
+speaker's turns under one name and gets a composite of nobody; ``sender`` writes one
+profile per real speaker instead.
 """
 
 from __future__ import annotations
 
-from everalgo.clustering import Cluster as AlgoCluster
+import contextlib
+import json
+import os
+import re
+import time
+from typing import Any
+
+import anyio
+from everalgo.types import ChatMessage as AlgoChatMessage
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.types import Profile as AlgoProfile
 from everalgo.user_memory import ProfileExtractor
+from everalgo.user_memory.prompts.en.profile import (
+    PROFILE_INITIAL_EXTRACTION_PROMPT,
+)
 
-from everos.component.embedding import get_embedding_capability
 from everos.component.llm import get_llm_client
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
@@ -65,20 +75,60 @@ from everos.infra.persistence.markdown import (
     ProfileWriter,
     UserProfileFrontmatter,
 )
-from everos.infra.persistence.sqlite import cluster_repo, memcell_repo
+from everos.infra.persistence.sqlite import memcell_repo
 from everos.memory._partition_locks import get_partition_lock
-from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
+from everos.memory.events import EpisodeExtracted
 
 logger = get_logger(__name__)
 
-PROFILE_EXTRACTION_INTERVAL = 1
+PROFILE_EXTRACTION_INTERVAL = int(os.getenv("EVEROS_PROFILE_EXTRACTION_INTERVAL", "1"))
 """Opensource parity: re-extract on every Nth clustered memcell.
-``N=1`` matches the opensource default; tune via :class:`Settings` once
-the storage budget for profile re-extractions becomes a concern."""
+
+``N=1`` matches the opensource default and stays the default here. It means the profile
+is rewritten once per extracted episode, and the body of this strategy is a read → LLM
+merge → overwrite: ingesting 1240 episodes for one owner spends 1240 merge calls, and
+the row keeps changing until the last one lands. A run that reads the profile while
+ingest is still finishing therefore sees a different profile per question -- measured on
+one conversation: 140 distinct versions across 269 searches, with the summary ranging
+from 165 to 2445 characters.
+
+The env var is how a benchmark run raises it without moving the library default away
+from
+opensource parity."""
 
 PROFILE_MIN_MEMCELLS = 1
 """Opensource parity: skip when the candidate cluster set holds fewer
 than ``N`` memcells across all selected clusters."""
+
+SUBJECT_OWNER = "owner"
+SUBJECT_SENDER = "sender"
+PROFILE_SUBJECT = os.getenv("EVEROS_PROFILE_SUBJECT", SUBJECT_OWNER)
+"""Who a profile describes: the owner (default) or each real speaker.
+
+``owner`` treats ``event.owner_id`` as the profile subject. That is correct
+whenever the owner is one person -- the ingest fans an Episode out to every
+``sender_id`` in a memcell, so a two-person dialogue already yields one owner
+(and one profile) per participant.
+
+``sender`` treats the owner as a **group**: episodes stay in the owner's
+partition, and one profile is written per distinct speaker found in the
+memcells. This is the only correct shape when many people share an owner --
+otherwise the extractor is handed N people's turns and told they are one
+person, and it dutifully synthesises a composite of somebody who does not
+exist. Costs one LLM call per speaker per extraction, so raise
+``EVEROS_PROFILE_EXTRACTION_INTERVAL`` alongside it."""
+
+_SUBJECT_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+PROFILE_TRACE_ENV = "EVEROS_PROFILE_TRACE_DUMP"
+"""Env var naming a JSONL path; unset disables the dump.
+
+Separate from ``EVEROS_LLMMR_TRACE_DUMP`` on purpose. That one is the retrieval
+trace, written per server from a single-threaded event loop, so its appends cannot
+interleave. Profile extraction is an OME strategy running concurrently across owners,
+so its records would interleave into the retrieval file and be unreadable. It also
+answers a different question: retrieval trace explains WHICH episodes reached the
+answer, this one explains WHERE a profile's content came from."""
 
 
 _writer: ProfileWriter | None = None
@@ -100,69 +150,14 @@ def _get_reader() -> ProfileReader:
 
 
 def _profile_applies(event: BaseEvent) -> bool:
-    """Route exactly one path per memcell to ``extract_user_profile``.
+    """One dispatch per pipeline-extracted episode. Reflection's merged episodes
+    (``source != "pipeline"``) are excluded: their source memcells were already
+    merged into the profile when they first arrived.
 
-    - :class:`ProfileClusterUpdated` always applies: it is only ever
-      emitted by ``trigger_profile_clustering``, whose per-dispatch
-      body-guard short-circuits (returns before emit) whenever
-      :func:`get_embedding_capability` reports unavailable. Accepting
-      this event unconditionally is therefore safe — it can only arrive
-      when embedding is available, so it never overlaps with the direct
-      path below.
-    - :class:`EpisodeExtracted` applies only for pipeline-sourced
-      episodes (not Reflection's merged episodes) while embedding is
-      unavailable. Once embedding is available, ``trigger_profile_clustering``
-      runs to completion and owns the same memcell via
-      ``ProfileClusterUpdated`` — so the direct path must stand down
-      here to avoid a double extraction. This check is a live capability
-      read (not a registration-time snapshot), so a Tier 3→1 downgrade
-      mid-process is picked up on the next event.
+    No embedding-capability read and no second event: the profile is a function of
+    the memcell that just landed, exactly like episode and atomic_fact extraction.
     """
-    if isinstance(event, ProfileClusterUpdated):
-        return True
-    if isinstance(event, EpisodeExtracted):
-        return event.source == "pipeline" and not get_embedding_capability().available
-    return False
-
-
-async def _select_via_cluster(
-    event: ProfileClusterUpdated,
-    last_profile_ts: int,
-    user_clusters: list[AlgoCluster],
-) -> list[str]:
-    """Cluster path (Tier 2+): resolve memcells via the user's cluster set.
-
-    The caller (:func:`extract_user_profile`) already fetched
-    ``user_clusters`` for the strategy-entry throttle; we take it as a
-    parameter to avoid a redundant :meth:`cluster_repo.list_for_owner`
-    round-trip. Behavior of the selection step itself is unchanged from
-    the pre-dual-trigger implementation.
-    """
-    # Pick clusters fresher than the existing profile (always include
-    # the one we just updated).
-    target_clusters = [
-        c
-        for c in user_clusters
-        if c.last_ts > last_profile_ts or c.id == event.cluster_id
-    ]
-    if not target_clusters:
-        return []
-
-    # Resolve cluster members (episode entry_ids) → memcell_ids.
-    # Cluster members store episode entry_ids. To reach the memcell
-    # payloads we look up each episode's parent_id (= memcell_id)
-    # in LanceDB, skipping merged episodes (parent_type=cluster)
-    # whose source memcells were already processed before Reflection.
-    entry_ids = [m for c in target_clusters for m in c.members]
-    episodes = await episode_repo.find_by_owner_entries(
-        event.owner_id,
-        entry_ids,
-        app_id=event.app_id,
-        project_id=event.project_id,
-    )
-    return [
-        ep.parent_id for ep in episodes if ep.parent_type == "memcell" and ep.parent_id
-    ]
+    return isinstance(event, EpisodeExtracted) and event.source == "pipeline"
 
 
 async def _select_via_timestamp(
@@ -211,88 +206,72 @@ async def _select_via_timestamp(
 
 @offline_strategy(
     name="extract_user_profile",
-    trigger=Immediate(on=[ProfileClusterUpdated, EpisodeExtracted]),
+    trigger=Immediate(on=[EpisodeExtracted]),
     applies_to=_profile_applies,
     emits=[],
     max_retries=2,
 )
-async def extract_user_profile(
-    event: ProfileClusterUpdated | EpisodeExtracted, ctx: StrategyContext
-) -> None:
+async def extract_user_profile(event: EpisodeExtracted, ctx: StrategyContext) -> None:
     # Serialise on owner_id: user.md is a single per-user file and the
     # body is a read → LLM merge → overwrite sequence. Different users
     # run fully in parallel.
+    #
+    # Per-sender mode takes the lock per subject inside the loop instead. Each
+    # subject owns its own file, so an owner-wide lock buys no extra safety and
+    # costs the whole group: it serialises every task for the owner across all N
+    # subjects, so one slow subject blocks the other N-1 AND every queued task.
+    # Measured on a 38-speaker owner: 60 of the 64 OME slots ended up parked on
+    # this one lock waiting for a single subject, which starved every other
+    # strategy on the process and stalled the run for 6.7 hours.
     partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
-    async with get_partition_lock("extract_user_profile", partition):
-        existing = await _get_reader().read(
-            event.owner_id,
-            schema=UserProfileFrontmatter,
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
-        last_profile_ts = existing[0].profile_timestamp_ms if existing else 0
-
-        # Unified throttle: both paths gate on "cumulative units of
-        # source-memory for this owner". Cluster path sums cluster
-        # counts (pre-refactor semantics); direct path counts owner
-        # episode rows in LanceDB. Applied here so a bumped interval
-        # (e.g. 10x to cap LLM cost) throttles both Tier 1 and Tier 2+
-        # equally instead of only the cluster path.
-        user_clusters: list[AlgoCluster] | None
-        if isinstance(event, ProfileClusterUpdated):
-            user_clusters = await cluster_repo.list_for_owner(
+    guard: contextlib.AbstractAsyncContextManager[Any] = (
+        contextlib.nullcontext()
+        if PROFILE_SUBJECT == SUBJECT_SENDER
+        else get_partition_lock("extract_user_profile", partition)
+    )
+    async with guard:
+        if PROFILE_SUBJECT == SUBJECT_SENDER:
+            # A group owner has no single profile to watermark against; the
+            # per-subject files carry the timestamps instead.
+            existing = None
+            last_profile_ts = await _subject_baseline_ts(
+                event.owner_id, event.app_id, event.project_id
+            )
+        else:
+            existing = await _get_reader().read(
                 event.owner_id,
-                "user_memory",
+                schema=UserProfileFrontmatter,
                 app_id=event.app_id,
                 project_id=event.project_id,
             )
-            total_count = sum(c.count for c in user_clusters)
-        else:
-            user_clusters = None
-            # Scope the counter to parent_type='memcell' so it matches
-            # _select_via_timestamp's selector below — otherwise Reflection-
-            # merged rows (parent_type='cluster') inflate the throttle count
-            # without ever being selectable, firing the gate at the wrong cadence.
-            # TODO(profile-counter): reads LanceDB and therefore races the
-            # cascade daemon in the same way _select_via_timestamp used to
-            # (fresh Tier-1 install → count=0 until cascade catches up).
-            # The throttle only needs a monotonic per-owner integer, so a
-            # stale-but-monotonic value is acceptable for now; the followup
-            # is to source this from a sqlite ``memcell`` count-by-owner
-            # query — see PR #361 review finding M4.
+            last_profile_ts = existing[0].profile_timestamp_ms if existing else 0
+
+        # Throttle on "cumulative units of source-memory for this owner", scoped to
+        # parent_type='memcell' so it matches `_select_via_timestamp`'s selector --
+        # otherwise Reflection-merged rows (parent_type='cluster') inflate the count
+        # without ever being selectable, firing the gate at the wrong cadence.
+        # TODO(profile-counter): reads LanceDB and therefore races the cascade daemon
+        # the same way `_select_via_timestamp` used to (fresh install -> count=0 until
+        # cascade catches up). The throttle only needs a monotonic per-owner integer,
+        # so a stale-but-monotonic value is acceptable; the followup is to source it
+        # from a sqlite ``memcell`` count-by-owner query -- PR #361 review finding M4.
+        if PROFILE_EXTRACTION_INTERVAL > 1:
             total_count = await episode_repo.count_by_owner(
                 event.owner_id,
                 app_id=event.app_id,
                 project_id=event.project_id,
                 parent_type="memcell",
             )
+            if total_count % PROFILE_EXTRACTION_INTERVAL != 0:
+                logger.info(
+                    "profile_extraction_throttled",
+                    owner_id=event.owner_id,
+                    total_count=total_count,
+                    interval=PROFILE_EXTRACTION_INTERVAL,
+                )
+                return
 
-        if (
-            PROFILE_EXTRACTION_INTERVAL > 1
-            and total_count % PROFILE_EXTRACTION_INTERVAL != 0
-        ):
-            logger.info(
-                "profile_extraction_throttled",
-                owner_id=event.owner_id,
-                total_count=total_count,
-                interval=PROFILE_EXTRACTION_INTERVAL,
-                path="cluster"
-                if isinstance(event, ProfileClusterUpdated)
-                else "direct",
-            )
-            return
-
-        # Memcell selection is the only part that differs by trigger; the
-        # LLM extraction + persist tail below is shared by both paths.
-        # user_clusters is always populated on the cluster branch above,
-        # so the fallback to [] here is unreachable — it exists purely to
-        # satisfy the type checker without an assert.
-        if isinstance(event, ProfileClusterUpdated):
-            memcell_ids = await _select_via_cluster(
-                event, last_profile_ts, user_clusters or []
-            )
-        else:
-            memcell_ids = await _select_via_timestamp(event, last_profile_ts)
+        memcell_ids = await _select_via_timestamp(event, last_profile_ts)
 
         if len(memcell_ids) < PROFILE_MIN_MEMCELLS:
             logger.info(
@@ -312,30 +291,446 @@ async def extract_user_profile(
         if not algo_memcells:
             return
 
-        # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
-        old_profile = _to_algo_profile(existing[0]) if existing else None
         extractor = ProfileExtractor(llm=get_llm_client())
-        new_profile = await extractor.aextract(
-            algo_memcells, sender_id=event.owner_id, old_profile=old_profile
-        )
+        if PROFILE_SUBJECT == SUBJECT_SENDER:
+            subjects = _subjects_of(algo_memcells)
+            if not subjects:
+                logger.info(
+                    "profile_extraction_no_subjects",
+                    owner_id=event.owner_id,
+                    memcell_count=len(algo_memcells),
+                )
+                return
+            # Sequential on purpose: the whole block already holds the owner's
+            # partition lock, and one LLM call per speaker fanned out at once
+            # would spike a group of 20+ into the provider's rate limit.
+            written = 0
+            for subject in subjects:
+                written += await _extract_one_subject(
+                    algo_memcells,
+                    subject=subject,
+                    owner_id=event.owner_id,
+                    app_id=event.app_id,
+                    project_id=event.project_id,
+                    extractor=extractor,
+                )
+            summary_mode = f"{written}/{len(subjects)} subjects"
+        else:
+            # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
+            old_profile = _to_algo_profile(existing[0]) if existing else None
+            t0 = time.perf_counter()
+            new_profile, retried = await _aextract_language_checked(
+                extractor,
+                algo_memcells,
+                sender_id=event.owner_id,
+                old_profile=old_profile,
+            )
+            elapsed = time.perf_counter() - t0
 
-        # Write the fresh profile back to users/<user_id>/user.md.
-        await _persist_profile(
-            new_profile,
-            owner_id=event.owner_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
+            # Write the fresh profile back to users/<user_id>/user.md.
+            await _persist_profile(
+                new_profile,
+                owner_id=event.owner_id,
+                app_id=event.app_id,
+                project_id=event.project_id,
+            )
+            summary_mode = "UPDATE" if old_profile is not None else "INIT"
+            _append_trace(
+                {
+                    "kind": "profile_extract",
+                    "owner_id": event.owner_id,
+                    # Owner-is-subject: no name, the owner IS who this describes.
+                    "subject": "",
+                    "mode": summary_mode,
+                    "candidates": len(algo_memcells),
+                    "memcells_used": len(algo_memcells),
+                    "memcell_chars": sum(
+                        len(str(getattr(i, "content", "")))
+                        for mc in algo_memcells
+                        for i in mc.items
+                    ),
+                    "own_profile_ts_ms": last_profile_ts,
+                    "before": _profile_shape(old_profile),
+                    "after": _profile_shape(new_profile),
+                    "summary": str(new_profile.summary or "")[:400],
+                    "cjk_in_summary": len(_CJK.findall(str(new_profile.summary or ""))),
+                    "language_retried": retried,
+                    "elapsed_s": round(elapsed, 3),
+                }
+            )
     logger.info(
         "user_profile_extracted",
         owner_id=event.owner_id,
-        path="cluster" if isinstance(event, ProfileClusterUpdated) else "direct",
         memcell_count=len(algo_memcells),
-        mode="UPDATE" if old_profile is not None else "INIT",
+        subject=PROFILE_SUBJECT,
+        mode=summary_mode,
     )
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+
+LANGUAGE_RETRY = os.getenv("EVEROS_PROFILE_LANGUAGE_RETRY", "1") != "0"
+"""Retry an INIT whose output language does not match its input.
+
+The bundled INIT prompt carries a ``CRITICAL LANGUAGE RULE`` ("output in the SAME
+language as the input conversation") and states that this call FIXES the profile's
+language -- every later update and compaction preserves it. Measured on EverMemBench
+topic 01 with gpt-4.1-mini: **8 of 36 INIT calls (22%) ignored it**, producing Chinese
+profiles from an all-English corpus, and all 31 subjects that were extracted more than
+once kept their first language with zero exceptions. So one non-compliant coin flip
+poisons that person's profile for the rest of the run.
+
+Input volume does not predict it (Mann-Whitney p=0.458 over the 36 INIT calls), so
+waiting for more evidence before the first extraction does not help. Retrying the one
+call that decides does. Only INIT is checked -- UPDATE emits index-addressed ops onto
+an existing profile and inherits its language by design."""
+
+_LANGUAGE_DIRECTIVE = (
+    "\n\nThe conversation above is written in {lang}. Your ENTIRE output -- every "
+    "summary, category, description and trait -- MUST be written in {lang}. Do not "
+    "translate it into any other language. This overrides any other instruction."
+)
+
+
+def _cjk_ratio(text: str) -> float:
+    """Share of CJK characters, over non-whitespace length."""
+    body = "".join(text.split())
+    return len(_CJK.findall(body)) / len(body) if body else 0.0
+
+
+def _language_mismatch(source: str, produced: str) -> bool:
+    """Whether ``produced`` switched scripts away from ``source``.
+
+    Deliberately coarse: it only fires when one side is essentially free of CJK and
+    the other is substantially CJK. A profile legitimately quoting a few Chinese
+    product names out of an English corpus stays under the 5% floor, and a Chinese
+    corpus answered in English is caught by the same rule in reverse. Anything
+    subtler than a script switch is not something a ratio can judge, and guessing
+    would retry calls that were fine.
+    """
+    src, out = _cjk_ratio(source), _cjk_ratio(produced)
+    return (src < 0.01 and out > 0.05) or (src > 0.05 and out < 0.01)
+
+
+def _profile_text(profile: AlgoProfile) -> str:
+    """Everything the extractor emitted, for the language check."""
+    extras = profile.model_dump(exclude={"owner_id", "timestamp"})
+    return json.dumps(extras, ensure_ascii=False, default=str)
+
+
+def _source_language(memcells: list[AlgoMemCell]) -> str:
+    """Name the input's language for the retry directive."""
+    text = "".join(str(getattr(i, "content", "")) for mc in memcells for i in mc.items)
+    return "Chinese" if _cjk_ratio(text) > 0.05 else "English"
+
+
+async def _aextract_language_checked(
+    extractor: ProfileExtractor,
+    memcells: list[AlgoMemCell],
+    *,
+    sender_id: str,
+    old_profile: AlgoProfile | None,
+) -> tuple[AlgoProfile, bool]:
+    """``aextract`` plus one INIT-only language retry. Returns (profile, retried)."""
+    profile = await extractor.aextract(
+        memcells, sender_id=sender_id, old_profile=old_profile
+    )
+    if old_profile is not None or not LANGUAGE_RETRY:
+        return profile, False
+    source = "".join(
+        str(getattr(i, "content", "")) for mc in memcells for i in mc.items
+    )
+    if not _language_mismatch(source, _profile_text(profile)):
+        return profile, False
+    lang = _source_language(memcells)
+    logger.warning(
+        "user_profile_language_retry",
+        owner_id=getattr(profile, "owner_id", ""),
+        subject=sender_id,
+        source_language=lang,
+    )
+    # Append to the bundled prompt rather than replacing it: an override is a whole
+    # template, and a copy in our config would silently diverge the day everalgo
+    # edits its own.
+    retried = await extractor.aextract(
+        memcells,
+        sender_id=sender_id,
+        old_profile=None,
+        prompt=PROFILE_INITIAL_EXTRACTION_PROMPT
+        + _LANGUAGE_DIRECTIVE.format(lang=lang),
+    )
+    # Keep the retry even if it also failed: a second sample is no worse than the
+    # first, and pretending otherwise would need a third call to break the tie.
+    return retried, True
+
+
+def _trace_path() -> str | None:
+    """Read per call, so a run can toggle the dump without re-importing."""
+    return os.getenv(PROFILE_TRACE_ENV, "").strip() or None
+
+
+def _append_trace(record: dict[str, Any]) -> None:
+    """Append one profile-extraction record as a JSON line.
+
+    Diagnostic side-channel. Every failure is logged and swallowed: losing a trace
+    line must never lose a profile. ``default=str`` because algo profile items are
+    heterogeneous dicts that may carry non-JSON scalars.
+    """
+    path = _trace_path()
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception as err:
+        logger.warning("user_profile_trace_dump_error", error=str(err)[:200])
+
+
+def _profile_shape(profile: AlgoProfile | None) -> dict[str, Any]:
+    """The measurable shape of a profile: what grew, and how big it got.
+
+    Recorded before and after each merge so a reader can see the delta without
+    diffing free text -- ``explicit_info`` / ``implicit_traits`` counts are what the
+    algo's compact threshold (45) and cap (30) act on, and ``chars`` is what lands in
+    the answer prompt when the profile is injected.
+    """
+    if profile is None:
+        return {"exists": False}
+    return {
+        "exists": True,
+        "explicit_info": len(list(getattr(profile, "explicit_info", []) or [])),
+        "implicit_traits": len(list(getattr(profile, "implicit_traits", []) or [])),
+        "summary_chars": len(str(getattr(profile, "summary", "") or "")),
+    }
+
+
+def _subject_slug(subject: str) -> str:
+    """Filename-safe form of a subject name (``"Lan Ye"`` -> ``"Lan_Ye"``).
+
+    The slug only has to locate the file; :attr:`UserProfileFrontmatter.subject`
+    carries the real name, and the LanceDB row id is keyed on that, so two
+    names that slugify alike collide on disk but not in the index. The write
+    path detects that collision rather than silently overwriting.
+    """
+    return _SUBJECT_UNSAFE.sub("_", subject).strip("._-") or "unnamed"
+
+
+def _subject_filename(subject: str) -> str:
+    """``users/<owner>/`` filename holding ``subject``'s profile."""
+    return f"user.{_subject_slug(subject)}.md"
+
+
+def _subjects_of(memcells: list[AlgoMemCell]) -> list[str]:
+    """Distinct real speakers across ``memcells``, first-seen order.
+
+    Prefers ``sender_name`` over ``sender_id``: a group ingest pins every
+    message's ``sender_id`` to the batch owner (that is what keeps retrieval
+    in one partition) and carries the person's name alongside. Only
+    ``role == "user"`` turns count -- an assistant is never a profile subject,
+    and :meth:`ProfileExtractor.aextract` rejects one outright.
+    """
+    seen: list[str] = []
+    for cell in memcells:
+        for item in cell.items:
+            if not isinstance(item, AlgoChatMessage) or item.role != "user":
+                continue
+            subject = (item.sender_name or item.sender_id or "").strip()
+            if subject and subject not in seen:
+                seen.append(subject)
+    return seen
+
+
+def _speaks_in(memcell: AlgoMemCell, subject: str) -> bool:
+    """Whether ``subject`` has a user turn in ``memcell``.
+
+    A memcell is a whole slice of conversation, so keeping only the ones a subject
+    spoke in still hands the extractor everyone else's surrounding turns -- what it
+    drops is the meetings that person never attended, which is not evidence about
+    them in the first place.
+    """
+    return any(
+        isinstance(item, AlgoChatMessage)
+        and item.role == "user"
+        and (item.sender_name or item.sender_id or "").strip() == subject
+        for item in memcell.items
+    )
+
+
+def _retarget(memcells: list[AlgoMemCell], subject: str) -> list[AlgoMemCell]:
+    """Copy ``memcells`` with user turns re-keyed from name to ``sender_id``.
+
+    :meth:`ProfileExtractor.aextract` validates ``sender_id`` against the
+    memcells' own user senders and will not accept a name that only appears in
+    ``sender_name``. Rewriting the copy is what lets a real person be the
+    target while the persisted memcell keeps the owner as its sender. It also
+    stops the rendered transcript from claiming ``Lan Ye(user_id:01)``.
+    """
+    out: list[AlgoMemCell] = []
+    for cell in memcells:
+        clone = cell.model_copy(deep=True)
+        for item in clone.items:
+            if isinstance(item, AlgoChatMessage) and item.role == "user":
+                item.sender_id = (item.sender_name or item.sender_id or "").strip()
+        out.append(clone)
+    return out
+
+
+async def _subject_baseline_ts(owner_id: str, app_id: str, project_id: str) -> int:
+    """Oldest participant-profile timestamp under ``owner_id`` (0 when none).
+
+    The **minimum**, not the maximum: memcell selection runs once and feeds
+    every subject from the same set, so watermarking on the freshest subject
+    would starve the ones that lag behind.
+    """
+    own = _get_reader().path_for(
+        owner_id,
+        schema=UserProfileFrontmatter,
+        app_id=app_id,
+        project_id=project_id,
+    )
+    oldest: int | None = None
+    async for path in anyio.Path(own.parent).glob("user.*.md"):
+        parsed = await _get_reader().read(
+            owner_id,
+            schema=UserProfileFrontmatter,
+            app_id=app_id,
+            project_id=project_id,
+            filename=path.name,
+        )
+        if parsed is None:
+            continue
+        ts = parsed[0].profile_timestamp_ms
+        oldest = ts if oldest is None else min(oldest, ts)
+    return oldest or 0
+
+
+async def _extract_one_subject(
+    memcells: list[AlgoMemCell],
+    *,
+    subject: str,
+    owner_id: str,
+    app_id: str,
+    project_id: str,
+    extractor: ProfileExtractor,
+) -> bool:
+    """Synthesise and persist one subject's profile. False = skipped.
+
+    Serialised per ``(owner, subject)`` -- the granularity of the file actually
+    being rewritten. Two tasks for the same owner now block each other only when
+    they reach the *same* speaker; previously they contended on the owner for the
+    entire N-subject pass, which is how one stuck subject took a whole process
+    down (see the caller).
+    """
+    async with get_partition_lock(
+        "extract_user_profile", f"{app_id}:{project_id}:{owner_id}::{subject}"
+    ):
+        return await _extract_one_subject_locked(
+            memcells,
+            subject=subject,
+            owner_id=owner_id,
+            app_id=app_id,
+            project_id=project_id,
+            extractor=extractor,
+        )
+
+
+async def _extract_one_subject_locked(
+    memcells: list[AlgoMemCell],
+    *,
+    subject: str,
+    owner_id: str,
+    app_id: str,
+    project_id: str,
+    extractor: ProfileExtractor,
+) -> bool:
+    """Body of :func:`_extract_one_subject`; caller holds the subject's lock."""
+    filename = _subject_filename(subject)
+    prior = await _get_reader().read(
+        owner_id,
+        schema=UserProfileFrontmatter,
+        app_id=app_id,
+        project_id=project_id,
+        filename=filename,
+    )
+    if prior is not None and prior[0].subject and prior[0].subject != subject:
+        # Two names slugified onto one file. Writing would destroy the other
+        # person's profile, so refuse and say whose.
+        logger.error(
+            "user_profile_subject_slug_collision",
+            owner_id=owner_id,
+            subject=subject,
+            occupied_by=prior[0].subject,
+            filename=filename,
+        )
+        return False
+    # Per-subject watermark, not the owner-wide one. Participants advance at wildly
+    # different rates -- a rarely-speaking member's profile stays old, and the
+    # owner-wide baseline is the MINIMUM across all of them, so it lags behind by
+    # however long the quietest member has been silent. Filtering on that baseline
+    # alone would hand a regular speaker every memcell since the quietest member last
+    # spoke instead of the one that just arrived.
+    own_ts = prior[0].profile_timestamp_ms if prior is not None else 0
+    mine = [mc for mc in memcells if mc.timestamp > own_ts and _speaks_in(mc, subject)]
+    if not mine:
+        # Present in the candidate set only because somebody else spoke, or already
+        # merged. Nothing to re-read: the profile already encodes it.
+        _append_trace(
+            {
+                "kind": "profile_extract",
+                "owner_id": owner_id,
+                "subject": subject,
+                "skipped": "no_new_memcells",
+                "candidates": len(memcells),
+                "own_profile_ts_ms": own_ts,
+            }
+        )
+        return False
+
+    old_profile = _to_algo_profile(prior[0]) if prior is not None else None
+    t0 = time.perf_counter()
+    new_profile, retried = await _aextract_language_checked(
+        extractor,
+        _retarget(mine, subject),
+        sender_id=subject,
+        old_profile=old_profile,
+    )
+    elapsed = time.perf_counter() - t0
+    await _persist_profile(
+        new_profile,
+        owner_id=owner_id,
+        app_id=app_id,
+        project_id=project_id,
+        subject=subject,
+    )
+    _append_trace(
+        {
+            "kind": "profile_extract",
+            "owner_id": owner_id,
+            "subject": subject,
+            # INIT fixes the profile's language and writes it whole; UPDATE emits
+            # index-addressed ops onto it. Which one ran explains both the cost of the
+            # call and whether a language choice was made here.
+            "mode": "UPDATE" if old_profile is not None else "INIT",
+            # Candidates the owner-level selector produced vs what this subject
+            # actually read: the gap is the per-subject filter doing its job.
+            "candidates": len(memcells),
+            "memcells_used": len(mine),
+            "memcell_chars": sum(
+                len(str(getattr(i, "content", ""))) for mc in mine for i in mc.items
+            ),
+            "own_profile_ts_ms": own_ts,
+            "before": _profile_shape(old_profile),
+            "after": _profile_shape(new_profile),
+            "summary": str(new_profile.summary or "")[:400],
+            "cjk_in_summary": len(_CJK.findall(str(new_profile.summary or ""))),
+            "language_retried": retried,
+            "elapsed_s": round(elapsed, 3),
+        }
+    )
+    return True
 
 
 def _to_algo_profile(fm: UserProfileFrontmatter) -> AlgoProfile:
@@ -352,15 +747,26 @@ def _to_algo_profile(fm: UserProfileFrontmatter) -> AlgoProfile:
 
 
 async def _persist_profile(
-    profile: AlgoProfile, *, owner_id: str, app_id: str, project_id: str
+    profile: AlgoProfile,
+    *,
+    owner_id: str,
+    app_id: str,
+    project_id: str,
+    subject: str = "",
 ) -> None:
-    """Write the freshly extracted profile to ``users/<user_id>/user.md``."""
+    """Write the freshly extracted profile under ``users/<user_id>/``.
+
+    ``subject`` empty writes the owner's own ``user.md``; a subject writes
+    ``user.<slug>.md`` and records the real name in the frontmatter, which is
+    what the cascade keys the LanceDB row id on.
+    """
     extras = profile.model_dump(exclude={"owner_id", "summary", "timestamp"})
     explicit_info = extras.get("explicit_info") or []
     implicit_traits = extras.get("implicit_traits") or []
     frontmatter = UserProfileFrontmatter(
-        id=f"profile_{owner_id}",
+        id=f"profile_{owner_id}::{subject}" if subject else f"profile_{owner_id}",
         user_id=owner_id,
+        subject=subject,
         summary=profile.summary,
         explicit_info=list(explicit_info),
         implicit_traits=list(implicit_traits),
@@ -372,4 +778,5 @@ async def _persist_profile(
         body=profile.summary,
         app_id=app_id,
         project_id=project_id,
+        filename=_subject_filename(subject) if subject else None,
     )

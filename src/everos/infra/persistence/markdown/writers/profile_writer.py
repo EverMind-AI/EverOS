@@ -5,6 +5,7 @@ in the EverOS Markdown First spec). Each profile lives at a fixed
 filename under the agent or user directory::
 
     users/<user_id>/user.md          ← user profile
+    users/<user_id>/user.<slug>.md   ← one participant of a group owner
     users/<user_id>/behaviors.md     ← user behaviour patterns
     agents/<agent_id>/agent.md       ← agent playbook
     agents/<agent_id>/soul.md        ← agent identity / values
@@ -15,9 +16,10 @@ and :class:`BaseDailyWriter` (per-date append + entry markers), the
 profile writer is the simplest of the three:
 
 - **Upsert, not append.** Each ``write`` overwrites the file in full.
-- **Fixed path.** Caller passes ``scope_id`` only — no ``name``
-  parameter; the filename is fixed by the schema's
-  ``PROFILE_FILENAME`` ClassVar.
+- **Fixed path.** The filename comes from the schema's
+  ``PROFILE_FILENAME`` ClassVar; callers that hold several profiles under
+  one scope (a group owner, one file per participant) override it with
+  the ``filename`` argument.
 - **No business hooks.** No frontmatter merging, no entry-id
   generation. The caller hands in a fully-built schema instance.
 
@@ -62,6 +64,7 @@ class ProfileWriter:
         body: str,
         app_id: str = "default",
         project_id: str = "default",
+        filename: str | None = None,
     ) -> Path:
         """Upsert ``<app>/<project>/<scope>/<scope_id>/<PROFILE_FILENAME>``.
 
@@ -73,11 +76,18 @@ class ProfileWriter:
             body: Profile body text. Trailing newline is normalised.
             app_id: App scope segment (defaults to the ``"default"`` space).
             project_id: Project scope segment (defaults to ``"default"``).
+            filename: Overrides the schema's ``PROFILE_FILENAME`` — how a
+                group owner keeps one file per participant
+                (``user.<slug>.md``) beside its own ``user.md``. Must stay a
+                single path component so the kind's ``PROFILE_GLOB`` still
+                finds it.
 
         Returns:
             Absolute path of the written profile file.
         """
-        path = self._resolve_path(scope_id, type(frontmatter), app_id, project_id)
+        path = self._resolve_path(
+            scope_id, type(frontmatter), app_id, project_id, filename
+        )
         head_meta = frontmatter.model_dump(exclude_none=False)
         return await self._writer.write_markdown(
             path,
@@ -92,9 +102,10 @@ class ProfileWriter:
         schema: type[BaseFrontmatter],
         app_id: str = "default",
         project_id: str = "default",
+        filename: str | None = None,
     ) -> Path:
         """Return the profile path (no IO check)."""
-        return self._resolve_path(scope_id, schema, app_id, project_id)
+        return self._resolve_path(scope_id, schema, app_id, project_id, filename)
 
     # ── Internals ─────────────────────────────────────────────────────────
 
@@ -104,9 +115,10 @@ class ProfileWriter:
         schema: type[BaseFrontmatter],
         app_id: str,
         project_id: str,
+        filename: str | None = None,
     ) -> Path:
         scope_dir = getattr(schema, "SCOPE_DIR", "")
-        filename = getattr(schema, "PROFILE_FILENAME", None)
+        filename = filename or getattr(schema, "PROFILE_FILENAME", None)
         if not scope_dir:
             raise TypeError(
                 f"{schema.__name__} missing ``SCOPE_DIR`` ClassVar — "

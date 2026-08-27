@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from sqlmodel import SQLModel
@@ -54,14 +55,21 @@ def _make_orchestrator(memory_root: MemoryRoot) -> CascadeOrchestrator:
 
 
 async def test_double_start_is_idempotent(runtime: MemoryRoot) -> None:
-    """Calling start twice does not relaunch tasks."""
-    orch = _make_orchestrator(runtime)
-    await orch.start()
-    # Capture watcher identity to verify the second start doesn't replace it.
-    first_watcher = orch._watcher
-    await orch.start()
-    assert orch._watcher is first_watcher
-    await orch.stop()
+    """Calling start twice does not relaunch tasks.
+
+    The watcher is stubbed because a real one takes an inotify watch, a per-user
+    kernel resource this host runs out of (the IDE's indexer holds 350k of the
+    524k ceiling). Idempotency is the subject here; the observer thread is not.
+    """
+    with patch("everos.memory.cascade.orchestrator.CascadeWatcher") as watcher_cls:
+        orch = _make_orchestrator(runtime)
+        await orch.start()
+        # Capture watcher identity to verify the second start doesn't replace it.
+        first_watcher = orch._watcher
+        await orch.start()
+        assert orch._watcher is first_watcher
+        assert watcher_cls.call_count == 1
+        await orch.stop()
 
 
 async def test_stop_before_start_is_noop(runtime: MemoryRoot) -> None:
@@ -70,10 +78,11 @@ async def test_stop_before_start_is_noop(runtime: MemoryRoot) -> None:
 
 
 async def test_double_stop_is_idempotent(runtime: MemoryRoot) -> None:
-    orch = _make_orchestrator(runtime)
-    await orch.start()
-    await orch.stop()
-    await orch.stop()  # second stop is a no-op
+    with patch("everos.memory.cascade.orchestrator.CascadeWatcher"):
+        orch = _make_orchestrator(runtime)
+        await orch.start()
+        await orch.stop()
+        await orch.stop()  # second stop is a no-op
 
 
 async def test_queue_summary_returns_empty_on_fresh_runtime(
@@ -218,3 +227,26 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
         "optimize_rebuild_interval_seconds",
     }
     assert not any("timeout" in f or "deadline" in f for f in exposed)
+
+
+async def test_watcher_can_be_disabled_without_losing_the_worker(
+    runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``EVEROS_DISABLE_CASCADE_WATCHER`` drops inotify, keeps md -> LanceDB.
+
+    Forced by a shared host: inotify watches are a per-user kernel resource, the
+    ceiling lives in read-only ``/proc/sys``, and an IDE indexer can hold 350k of
+    524k on its own -- every server then dies at startup with ``Errno 28``. The
+    scanner re-derives the same truth every 30s, so what is lost is latency. The
+    worker must survive, or an ingesting run writes md that never gets indexed.
+    """
+    monkeypatch.setenv("EVEROS_DISABLE_CASCADE_WATCHER", "1")
+    with patch("everos.memory.cascade.orchestrator.CascadeWatcher") as watcher_cls:
+        orch = _make_orchestrator(runtime)
+        await orch.start()
+        assert watcher_cls.call_count == 0, "watcher was constructed anyway"
+        assert orch._watcher is None
+        assert orch._started is True
+        assert orch._worker is not None
+        assert orch._scanner is not None
+        await orch.stop()

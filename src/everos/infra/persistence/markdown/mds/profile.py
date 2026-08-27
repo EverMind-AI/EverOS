@@ -1,6 +1,8 @@
 """UserProfile frontmatter — single-file profile markdown for users.
 
-Path: ``users/<user_id>/user.md``.
+Paths: ``users/<user_id>/user.md`` when the owner is the subject, and
+``users/<user_id>/user.<slug>.md`` (one per participant) when the owner is a
+group. Both carry this schema; ``subject`` distinguishes them.
 
 Carries the LLM-synthesised user profile: a free-form ``summary`` plus the
 two evidence buckets emitted by :class:`everalgo.user_memory.ProfileExtractor`
@@ -21,8 +23,19 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     """Frontmatter for ``users/<user_id>/user.md``."""
 
     PROFILE_FILENAME: ClassVar[str] = "user.md"
+    PROFILE_GLOB: ClassVar[str | None] = "user*.md"
+    """Covers ``user.md`` and every ``user.<slug>.md`` participant file.
+    ``behaviors.md`` is a different kind, so the prefix is unambiguous."""
 
     type: Literal["user_profile"] = "user_profile"
+
+    subject: str = ""
+    """Who this profile describes, when that is not ``user_id`` itself.
+
+    Empty (the default) is the owner-is-subject shape at
+    ``users/<user_id>/user.md``. A group owner writes one file per
+    participant at ``users/<user_id>/user.<slug>.md`` and names the
+    participant here; ``user_id`` stays the retrieval partition."""
 
     summary: str = ""
     """Free-form one-paragraph summary of the user — the retrieval anchor."""

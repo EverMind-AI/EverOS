@@ -28,7 +28,14 @@ class UserProfile(BaseLanceTable):
     # No BM25 columns: profile recall is KV-by-owner today.
 
     id: str
-    """PK = ``owner_id`` (one row per user)."""
+    """PK. ``owner_id`` when the owner is its own subject, else
+    ``<owner_id>::<subject>``.
+
+    The subject rides the PK rather than a column of its own on purpose: a new
+    column is schema drift, and the guard in
+    :mod:`everos.infra.persistence.lancedb` refuses to open every store built
+    before it. Readers recover the subject by stripping the ``owner_id`` prefix
+    — unambiguous because ``owner_id`` is path-safe and cannot contain ``:``."""
 
     owner_id: str
     owner_type: str
