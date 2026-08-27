@@ -25,6 +25,7 @@ External usage::
         SearchDecisionItem,
         SearchEpisodeItem,
         SearchMethod,
+        SearchPrincipleItem,
         SearchProfileItem,
         SearchRequest,
         SearchResponse,
@@ -46,6 +47,7 @@ from .dto import SearchData as SearchData
 from .dto import SearchDecisionItem as SearchDecisionItem
 from .dto import SearchEpisodeItem as SearchEpisodeItem
 from .dto import SearchMethod as SearchMethod
+from .dto import SearchPrincipleItem as SearchPrincipleItem
 from .dto import SearchProfileItem as SearchProfileItem
 from .dto import SearchRequest as SearchRequest
 from .dto import SearchResponse as SearchResponse
@@ -68,6 +70,7 @@ __all__ = [
     "SearchDecisionItem",
     "SearchEpisodeItem",
     "SearchMethod",
+    "SearchPrincipleItem",
     "SearchProfileItem",
     "SearchRequest",
     "SearchResponse",

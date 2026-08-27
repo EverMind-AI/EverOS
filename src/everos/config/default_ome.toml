@@ -59,6 +59,12 @@
 # [strategies.extract_user_profile]
 # enabled = true
 
+# Principle extraction (runs after decision clustering). Unions every
+# kind=decision sqlite cluster into one principles.md per user. LLM,
+# not embed — registered in ALWAYS. Uncomment only to turn it off:
+# [strategies.extract_principles]
+# enabled = false
+
 # ── Reflection ──────────────────────────────────────────────────────────
 
 # Offline memory consolidation. Disabled by default. To enable,

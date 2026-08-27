@@ -63,6 +63,7 @@ def _build_manager(
         agent_case_recaller=None,  # type: ignore[arg-type]
         agent_skill_recaller=None,  # type: ignore[arg-type]
         profile_recaller=None,  # type: ignore[arg-type]
+        principle_recaller=None,  # type: ignore[arg-type]
         embedding=_StubEmbedding() if embedding_present else None,  # type: ignore[arg-type]
         reranker=_StubReranker() if reranker_present else None,  # type: ignore[arg-type]
         llm_client=_StubLLM() if llm_present else None,

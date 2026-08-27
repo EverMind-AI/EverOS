@@ -29,6 +29,7 @@ _ALWAYS = {
     "extract_foresight",
     "extract_agent_case",
     "extract_user_profile",
+    "extract_principles",
 }
 _REQUIRE_EMBED = {
     "trigger_profile_clustering",
@@ -73,7 +74,7 @@ def _registered_names() -> set[str]:
 def test_all_strategies_registered_when_embed_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Embed available → all 10 strategies register."""
+    """Embed available → all 11 strategies register."""
     _set_embed_available(monkeypatch, available=True)
     names = _registered_names()
     assert names >= _ALWAYS | _REQUIRE_EMBED

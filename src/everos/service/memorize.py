@@ -48,6 +48,7 @@ from everos.memory.strategies import (
     extract_atomic_facts,
     extract_decision,
     extract_foresight,
+    extract_principles,
     extract_user_profile,
     reflect_episodes,
     trigger_decision_clustering,
@@ -120,6 +121,7 @@ _STRATEGIES_ALWAYS = (
     extract_foresight,
     extract_agent_case,
     extract_user_profile,
+    extract_principles,
 )
 """LLM-only strategies — no embed dependency, always registered."""
 

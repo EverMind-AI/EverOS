@@ -12,6 +12,7 @@ External usage::
         AgentSkillRecaller,
         ProfileRecaller,
         KnowledgeTopicRecaller,
+        PrincipleRecaller,
     )
 """
 
@@ -25,6 +26,7 @@ from .base import row_to_candidate as row_to_candidate
 from .decision import DecisionRecaller as DecisionRecaller
 from .episode import EpisodeRecaller as EpisodeRecaller
 from .knowledge_topic import KnowledgeTopicRecaller as KnowledgeTopicRecaller
+from .principle import PrincipleRecaller as PrincipleRecaller
 from .profile import ProfileRecaller as ProfileRecaller
 
 __all__ = [
@@ -35,6 +37,7 @@ __all__ = [
     "EpisodeRecaller",
     "KindRecaller",
     "KnowledgeTopicRecaller",
+    "PrincipleRecaller",
     "ProfileRecaller",
     "RecallerDeps",
     "cosine_score_from_distance",

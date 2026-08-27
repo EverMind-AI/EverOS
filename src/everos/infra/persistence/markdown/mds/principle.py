@@ -15,11 +15,21 @@ The markdown body is a human-readable list and is not indexed.
 
 from __future__ import annotations
 
+import uuid
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from everos.core.persistence.markdown import ProfilePathMixin, UserScopedFrontmatter
+
+
+def mint_principle_id() -> str:
+    """Mint a fresh principle id (``pr_<12hex>``).
+
+    EverAlgo ``Principle`` has no id; EverOS assigns one at write time
+    so cascade can explode a stable Lance PK ``<owner_id>_<principle_id>``.
+    """
+    return f"pr_{uuid.uuid4().hex[:12]}"
 
 
 class PrincipleItem(BaseModel):

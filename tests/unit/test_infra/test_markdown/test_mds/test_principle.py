@@ -13,8 +13,16 @@ from everos.infra.persistence.markdown import (
     PrincipleItem,
     ProfileReader,
     ProfileWriter,
+    mint_principle_id,
     render_principles_body,
 )
+
+
+def test_mint_principle_id_shape() -> None:
+    pid = mint_principle_id()
+    assert pid.startswith("pr_")
+    assert len(pid) == 15
+    assert pid != mint_principle_id()
 
 
 def test_schema_pins_profile_chassis() -> None:

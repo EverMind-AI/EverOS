@@ -128,9 +128,7 @@ async def test_emit_dispatches_both_strategies_to_success(
         patch(
             "everos.memory.strategies.extract_foresight.ForesightExtractor"
         ) as mock_fs,
-        patch(
-            "everos.memory.strategies.extract_decision.DecisionExtractor"
-        ) as mock_dc,
+        patch("everos.memory.strategies.extract_decision.DecisionExtractor") as mock_dc,
         patch(
             "everos.memory.strategies.extract_atomic_facts.get_llm_client",
             return_value=object(),

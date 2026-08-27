@@ -40,6 +40,7 @@ from .mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
 from .mds import PrincipleFrontmatter as PrincipleFrontmatter
 from .mds import PrincipleItem as PrincipleItem
 from .mds import UserProfileFrontmatter as UserProfileFrontmatter
+from .mds import mint_principle_id as mint_principle_id
 from .mds import render_principles_body as render_principles_body
 from .readers import AgentCaseReader as AgentCaseReader
 from .readers import AgentSkillReader as AgentSkillReader
@@ -91,6 +92,7 @@ __all__ = [
     "ProfileWriter",
     "UserProfileFrontmatter",
     "ensure_taxonomy",
+    "mint_principle_id",
     "parse_taxonomy",
     "render_principles_body",
 ]

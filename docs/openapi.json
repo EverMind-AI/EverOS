@@ -3407,6 +3407,13 @@
             "type": "array",
             "title": "Profiles"
           },
+          "principles": {
+            "items": {
+              "$ref": "#/components/schemas/SearchPrincipleItem"
+            },
+            "type": "array",
+            "title": "Principles"
+          },
           "agent_cases": {
             "items": {
               "$ref": "#/components/schemas/SearchAgentCaseItem"
@@ -3708,6 +3715,77 @@
         "title": "SearchMethod",
         "description": "Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."
       },
+      "SearchPrincipleItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "source_entry_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Entry Ids"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "title",
+          "statement",
+          "timestamp"
+        ],
+        "title": "SearchPrincipleItem",
+        "description": "One engineering principle — KV fetch, not a ranked kind.\n\n``score`` is always ``None`` (no query-relevance). ``id`` is the\nLance PK ``<owner_id>_<principle_id>``. Agent owners never receive\nthis array."
+      },
       "SearchProfileItem": {
         "properties": {
           "id": {
@@ -3841,6 +3919,11 @@
           "include_profile": {
             "type": "boolean",
             "title": "Include Profile",
+            "default": false
+          },
+          "include_principles": {
+            "type": "boolean",
+            "title": "Include Principles",
             "default": false
           },
           "kinds": {

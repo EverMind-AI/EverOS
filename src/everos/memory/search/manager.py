@@ -3,7 +3,8 @@
 Hard partition by ``owner_type``:
 
 * ``user``  → ``episodes`` + ``decisions`` (``kinds`` can restrict
-  either lane; ``profiles`` when ``include_profile=true``)
+  either lane; ``profiles`` when ``include_profile=true``;
+  ``principles`` when ``include_principles=true``)
 * ``agent`` → ``agent_cases`` + ``agent_skills``
 
 Per kind, :func:`memory.search.adapter.resolve_pipeline` decides whether
@@ -67,6 +68,7 @@ from .dto import (
     SearchDecisionItem,
     SearchEpisodeItem,
     SearchMethod,
+    SearchPrincipleItem,
     SearchProfileItem,
     SearchRequest,
     SearchResponse,
@@ -96,6 +98,7 @@ if TYPE_CHECKING:
         AtomicFactRecaller,
         DecisionRecaller,
         EpisodeRecaller,
+        PrincipleRecaller,
         ProfileRecaller,
     )
 
@@ -141,7 +144,8 @@ _UNPROCESSED_TRACK = "memorize"
 def _top_score(data: SearchData) -> float:
     """Max relevance score across scored result items (0.0 when empty).
 
-    Profiles are excluded — they are a KV fetch with no query-relevance score.
+    Profiles and principles are excluded — they are KV fetches with no
+    query-relevance score.
     """
     items = [*data.episodes, *data.decisions, *data.agent_cases, *data.agent_skills]
     return max((item.score for item in items), default=0.0)
@@ -168,6 +172,7 @@ class SearchManager:
         agent_case_recaller: AgentCaseRecaller,
         agent_skill_recaller: AgentSkillRecaller,
         profile_recaller: ProfileRecaller,
+        principle_recaller: PrincipleRecaller,
         embedding: EmbeddingProvider | None,
         reranker: RerankProvider | None,
         llm_client: LLMClient | None,
@@ -179,6 +184,7 @@ class SearchManager:
         self._case = agent_case_recaller
         self._skill = agent_skill_recaller
         self._profile = profile_recaller
+        self._principle = principle_recaller
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
@@ -227,16 +233,24 @@ class SearchManager:
                     app_id=req.app_id,
                     project_id=req.project_id,
                 )
-                episodes, decisions, profiles, unprocessed = await asyncio.gather(
+                (
+                    episodes,
+                    decisions,
+                    profiles,
+                    principles,
+                    unprocessed,
+                ) = await asyncio.gather(
                     self._search_episodes(req, where),
                     self._search_decisions(req, decision_where),
                     self._fetch_profile(req),
+                    self._fetch_principles(req),
                     self._load_unprocessed(req),
                 )
                 data = SearchData(
                     episodes=episodes,
                     decisions=decisions,
                     profiles=profiles,
+                    principles=principles,
                     unprocessed_messages=unprocessed,
                 )
             else:  # "agent"
@@ -257,6 +271,7 @@ class SearchManager:
                 {
                     "episodes": [e.id for e in data.episodes],
                     "decisions": [d.id for d in data.decisions],
+                    "principles": [p.id for p in data.principles],
                     "agent_cases": [c.id for c in data.agent_cases],
                     "agent_skills": [s.id for s in data.agent_skills],
                 },
@@ -633,6 +648,13 @@ class SearchManager:
         if not req.include_profile or req.owner_type != "user":
             return []
         return await self._profile.fetch(req.owner_id)
+
+    async def _fetch_principles(self, req: SearchRequest) -> list[SearchPrincipleItem]:
+        if not req.include_principles or req.owner_type != "user":
+            return []
+        return await self._principle.fetch(
+            req.owner_id, app_id=req.app_id, project_id=req.project_id
+        )
 
     # ── Recall helpers ──────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
-from everos.memory.search.dto import SearchMethod, SearchRequest
+from everos.memory.search.dto import SearchMethod, SearchPrincipleItem, SearchRequest
 from everos.memory.search.manager import SearchManager
 
 # ── Stubs ───────────────────────────────────────────────────────────────
@@ -261,6 +261,22 @@ class _StubProfileRecaller:
         return []
 
 
+class _StubPrincipleRecaller:
+    def __init__(self, items: list | None = None) -> None:
+        self._items = items or []
+        self.fetch_calls: list[tuple[str, str, str]] = []
+
+    async def fetch(
+        self,
+        owner_id: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list:
+        self.fetch_calls.append((owner_id, app_id, project_id))
+        return list(self._items)
+
+
 class _StubEmbedding:
     def __init__(self, dim: int = 4) -> None:
         self.dim = dim
@@ -291,6 +307,7 @@ def _build_manager(
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
+    principle_recaller: _StubPrincipleRecaller | None = None,
 ) -> SearchManager:
     ep_recaller = _StubEpisodeRecaller(episode_sparse or [], episode_dense or [])
     return SearchManager(
@@ -304,6 +321,7 @@ def _build_manager(
             skill_sparse or [], skill_dense or [], skill_by_case
         ),
         profile_recaller=_StubProfileRecaller(),
+        principle_recaller=principle_recaller or _StubPrincipleRecaller(),
         embedding=embedding,
         reranker=reranker,
         llm_client=llm_client,
@@ -442,6 +460,7 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
         agent_case_recaller=_StubAgentCaseRecaller([], []),
         agent_skill_recaller=_StubAgentSkillRecaller([], []),
         profile_recaller=_StubProfileRecaller(),
+        principle_recaller=_StubPrincipleRecaller(),
         embedding=None,
         reranker=None,
         llm_client=None,
@@ -961,6 +980,76 @@ async def test_agent_owner_ignores_include_profile() -> None:
     mgr = _build_manager()
     resp = await mgr.search(_agent_req(include_profile=True))
     assert resp.data.profiles == []
+
+
+async def test_include_principles_false_leaves_principles_empty() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        source_entry_ids=["dc_20260101_0001"],
+        timestamp=_ts(),
+        score=None,
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_user_req())
+    assert resp.data.principles == []
+    assert recaller.fetch_calls == []
+
+
+async def test_include_principles_true_returns_kv_items() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        source_entry_ids=["dc_20260101_0001"],
+        timestamp=_ts(),
+        score=None,
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_user_req(include_principles=True))
+    assert [p.id for p in resp.data.principles] == ["u_alice_pr_aaaaaaaaaaaa"]
+    assert resp.data.principles[0].score is None
+    assert recaller.fetch_calls == [("alice", "default", "default")]
+
+
+async def test_include_principles_independent_of_kinds() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        timestamp=_ts(),
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+        principle_recaller=recaller,
+    )
+    resp = await mgr.search(_user_req(kinds=["episode"], include_principles=True))
+    assert [e.id for e in resp.data.episodes] == ["ep_1"]
+    assert resp.data.decisions == []
+    assert [p.title for p in resp.data.principles] == ["Prefer Rust"]
+
+
+async def test_agent_owner_ignores_include_principles() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        timestamp=_ts(),
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_agent_req(include_principles=True))
+    assert resp.data.principles == []
+    assert recaller.fetch_calls == []
 
 
 # ── Top-k behaviour ───────────────────────────────────────────────────

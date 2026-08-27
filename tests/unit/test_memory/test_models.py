@@ -243,9 +243,7 @@ def test_decision_from_algo_owner_id_caller_supplied() -> None:
 def test_decision_from_algo_overrides_stale_algo_owner_id() -> None:
     """Fan-out still wins when the LLM smuggles a non-None owner_id."""
     algo = _algo_decision(owner_id="PLACEHOLDER")
-    dc = Decision.from_algo(
-        algo, owner_id="u_alice", session_id="s1", parent_id="mc_a"
-    )
+    dc = Decision.from_algo(algo, owner_id="u_alice", session_id="s1", parent_id="mc_a")
     assert dc.owner_id == "u_alice"
 
 
