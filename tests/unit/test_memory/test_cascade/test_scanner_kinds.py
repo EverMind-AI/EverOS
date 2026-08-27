@@ -37,6 +37,15 @@ def _make_decision_md(root: Path) -> Path:
     return p
 
 
+def _make_principles_md(root: Path) -> Path:
+    """Create a plausible principles.md under the memory root."""
+    d = root / "default_app" / "default_project" / "users" / "u1"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "principles.md"
+    p.write_text("ok")
+    return p
+
+
 def _make_agent_skill_md(root: Path) -> Path:
     """Create a plausible SKILL.md under the memory root."""
     d = (
@@ -60,12 +69,14 @@ def test_collect_scan_inputs_default_scans_all_kinds(tmp_path: Path) -> None:
     _make_episode_md(tmp_path)
     _make_agent_skill_md(tmp_path)
     _make_decision_md(tmp_path)
+    _make_principles_md(tmp_path)
 
     inputs = _collect_scan_inputs(tmp_path)
     kinds = {i.kind for i in inputs}
     assert "episode" in kinds
     assert "agent_skill" in kinds
     assert "decision" in kinds
+    assert "principle" in kinds
 
 
 def test_collect_scan_inputs_with_kinds_filter_restricts_to_named(

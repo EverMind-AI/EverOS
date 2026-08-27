@@ -1,6 +1,6 @@
 """Tests for the cascade kind registry.
 
-Verify the 9 registered kinds' globs match the right paths and reject
+Verify the registered kinds' globs match the right paths and reject
 noise (random ``.md``, swp files, profile-style paths). ``match_kind``
 must walk the registry in declared order and pick the first matching
 spec.
@@ -34,6 +34,10 @@ from everos.memory.cascade import KIND_REGISTRY, match_kind
             "decision",
         ),
         (
+            "default_app/default_project/users/u1/principles.md",
+            "principle",
+        ),
+        (
             "default_app/default_project/agents/a1/.cases/agent_case-2026-05-14.md",
             "agent_case",
         ),
@@ -63,6 +67,7 @@ def test_match_kind_recognises_registered_paths(path: str, expected_kind: str) -
         # would otherwise find nothing while the watcher matched, a split brain).
         "users/u1/episodes/episode-2026-05-14.md",
         "users/u1/decisions/decision-2026-05-14.md",
+        "users/u1/principles.md",
         # Dot-prefixed decisions dir is not the product path.
         "users/u1/.decisions/decision-2026-05-14.md",
         "default_app/default_project/users/u1/.decisions/decision-2026-05-14.md",
@@ -72,8 +77,12 @@ def test_match_kind_rejects_unregistered_paths(path: str) -> None:
     assert match_kind(path) is None
 
 
-def test_registry_has_exactly_nine_kinds() -> None:
-    """The registry pins the cascade surface — no silent registration."""
+def test_registry_has_exactly_ten_kinds() -> None:
+    """The registry pins the cascade surface — no silent registration.
+
+    ``principle`` is a cascade projection name (Meta Memory), not a
+    product Kind; it still occupies one KindSpec so md can reach Lance.
+    """
     names = [s.name for s in KIND_REGISTRY]
     assert names == [
         "episode",
@@ -83,6 +92,7 @@ def test_registry_has_exactly_nine_kinds() -> None:
         "agent_case",
         "agent_skill",
         "user_profile",
+        "principle",
         "knowledge_document",
         "knowledge_topic",
     ]

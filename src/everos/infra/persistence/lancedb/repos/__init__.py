@@ -29,6 +29,7 @@ from .decision import decision_repo as decision_repo
 from .episode import episode_repo as episode_repo
 from .foresight import foresight_repo as foresight_repo
 from .knowledge_topic import knowledge_topic_repo as knowledge_topic_repo
+from .principle import principle_repo as principle_repo
 from .user_profile import user_profile_repo as user_profile_repo
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     "episode_repo",
     "foresight_repo",
     "knowledge_topic_repo",
+    "principle_repo",
     "user_profile_repo",
 ]

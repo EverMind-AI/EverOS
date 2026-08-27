@@ -26,6 +26,7 @@ from everos.infra.persistence.lancedb import (
     Episode,
     Foresight,
     KnowledgeTopic,
+    Principle,
     UserProfile,
     agent_case_repo,
     agent_skill_repo,
@@ -34,6 +35,7 @@ from everos.infra.persistence.lancedb import (
     episode_repo,
     foresight_repo,
     knowledge_topic_repo,
+    principle_repo,
     user_profile_repo,
 )
 from everos.infra.persistence.markdown import (
@@ -45,6 +47,7 @@ from everos.infra.persistence.markdown import (
     ForesightDailyFrontmatter,
     KnowledgeDocumentFrontmatter,
     KnowledgeTopicFrontmatter,
+    PrincipleFrontmatter,
     UserProfileFrontmatter,
 )
 
@@ -59,6 +62,7 @@ from .handlers import (
     HandlerDeps,
     KnowledgeDocumentHandler,
     KnowledgeTopicHandler,
+    PrincipleHandler,
     UserProfileHandler,
 )
 
@@ -145,6 +149,13 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
         lance_schema=UserProfile,
         lance_repo=user_profile_repo,
         handler_factory=UserProfileHandler,
+    ),
+    KindSpec(
+        name="principle",
+        frontmatter_schema=PrincipleFrontmatter,
+        lance_schema=Principle,
+        lance_repo=principle_repo,
+        handler_factory=PrincipleHandler,
     ),
     KindSpec(
         name="knowledge_document",

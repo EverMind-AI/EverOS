@@ -153,5 +153,6 @@ def test_non_knowledge_handlers_always_registered(
         "agent_case",
         "agent_skill",
         "user_profile",
+        "principle",
     ):
         assert kind in handlers

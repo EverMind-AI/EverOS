@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DecisionHandler` + `KIND_REGISTRY` kind `decision`.** Markdown → Lance projection; embed only the Decision body (soft dependency); dual BM25 `decision_tokens` / `reason_tokens`. `deprecated_by` still from chassis `deprecated_entries`.
 - **Search `data.decisions` + Get `memory_type=decision`.** User-partition Decision recall (`DecisionRecaller`: dual BM25 + cosine) fused with `rrf` (never `arank`). `kinds` filters the episode / decision lanes (`principle` is not a kind). Get lists Decision rows with `deprecated_by IS NULL`; there is no `GetMemoryType.PRINCIPLE`.
 - **`trigger_decision_clustering` OME strategy.** On `DecisionExtracted(source=pipeline)` embeds `decision_text` and geometry-merges into sqlite clusters with `kind=decision` / `member_type=decision` (not the `user_memory` episode track). Emits `DecisionClusterUpdated` with a row snapshot. Cascade Phase 2 backfill synthesizes the same events for existing Lance decision rows (`parent_type=memcell`). Embed missing → debug no-op.
+- **`principles.md` + Lance `principle` + `PrincipleHandler`.** Single-file rewrite via existing `ProfileWriter` (`users/<id>/principles.md`, `type=principle`). Cascade explodes the frontmatter list into N KV rows (`id=<owner_id>_<pr_…>`). No vector, no BM25, not in `_TABLE_SPECS` / `BUSINESS_SCHEMAS_WITH_VECTOR`. `KIND_REGISTRY` name `principle` is the cascade projection only — not a product Kind.
 
 ### Changed
 

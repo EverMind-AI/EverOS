@@ -13,6 +13,7 @@ External usage::
         AgentCase,
         AgentSkill,
         UserProfile,
+        Principle,
         KnowledgeTopic,
         ParentType,
     )
@@ -26,6 +27,7 @@ from .decision import Decision as Decision
 from .episode import Episode as Episode
 from .foresight import Foresight as Foresight
 from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
+from .principle import Principle as Principle
 from .user_profile import UserProfile as UserProfile
 
 __all__ = [
@@ -37,5 +39,6 @@ __all__ = [
     "Foresight",
     "KnowledgeTopic",
     "ParentType",
+    "Principle",
     "UserProfile",
 ]

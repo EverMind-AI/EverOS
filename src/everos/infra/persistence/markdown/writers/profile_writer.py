@@ -5,6 +5,7 @@ in the EverOS Markdown First spec). Each profile lives at a fixed
 filename under the agent or user directory::
 
     users/<user_id>/user.md          ← user profile
+    users/<user_id>/principles.md    ← engineering principles (meta)
     users/<user_id>/behaviors.md     ← user behaviour patterns
     agents/<agent_id>/agent.md       ← agent playbook
     agents/<agent_id>/soul.md        ← agent identity / values

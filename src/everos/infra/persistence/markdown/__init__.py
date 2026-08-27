@@ -37,7 +37,10 @@ from .mds import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
 from .mds import ForesightDailyFrontmatter as ForesightDailyFrontmatter
 from .mds import KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter
 from .mds import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
+from .mds import PrincipleFrontmatter as PrincipleFrontmatter
+from .mds import PrincipleItem as PrincipleItem
 from .mds import UserProfileFrontmatter as UserProfileFrontmatter
+from .mds import render_principles_body as render_principles_body
 from .readers import AgentCaseReader as AgentCaseReader
 from .readers import AgentSkillReader as AgentSkillReader
 from .readers import AtomicFactReader as AtomicFactReader
@@ -82,9 +85,12 @@ __all__ = [
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
     "KnowledgeWriter",
+    "PrincipleFrontmatter",
+    "PrincipleItem",
     "ProfileReader",
     "ProfileWriter",
     "UserProfileFrontmatter",
     "ensure_taxonomy",
     "parse_taxonomy",
+    "render_principles_body",
 ]

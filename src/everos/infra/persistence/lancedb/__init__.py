@@ -13,10 +13,10 @@ External usage::
     from everos.infra.persistence.lancedb import (
         get_connection, get_table, dispose_connection,
         Episode, AtomicFact, Decision, Foresight, AgentCase, AgentSkill,
-        UserProfile, KnowledgeTopic,
+        UserProfile, Principle, KnowledgeTopic,
         episode_repo, atomic_fact_repo, decision_repo, foresight_repo,
         agent_case_repo, agent_skill_repo, user_profile_repo,
-        knowledge_topic_repo,
+        principle_repo, knowledge_topic_repo,
     )
 
 Three index kinds: scalar / BM25 / vector. Tables are created lazily on
@@ -44,6 +44,7 @@ from .repos import decision_repo as decision_repo
 from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
 from .repos import knowledge_topic_repo as knowledge_topic_repo
+from .repos import principle_repo as principle_repo
 from .repos import user_profile_repo as user_profile_repo
 from .tables import AgentCase as AgentCase
 from .tables import AgentSkill as AgentSkill
@@ -53,6 +54,7 @@ from .tables import Episode as Episode
 from .tables import Foresight as Foresight
 from .tables import KnowledgeTopic as KnowledgeTopic
 from .tables import ParentType as ParentType
+from .tables import Principle as Principle
 from .tables import UserProfile as UserProfile
 
 _BUSINESS_SCHEMAS = (
@@ -63,6 +65,7 @@ _BUSINESS_SCHEMAS = (
     AgentCase,
     AgentSkill,
     UserProfile,
+    Principle,
     KnowledgeTopic,
 )
 
@@ -184,8 +187,9 @@ BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[BaseLanceTable], ...] = (
 )
 """Business schemas whose ``vector`` column needs the v2 nullability
 migration. ``Episode.subject_vector`` was already nullable in v1.1.1 and
-is intentionally left out of this migration. ``UserProfile`` has no
-vector column; ``knowledge_document`` has no LanceDB table."""
+is intentionally left out of this migration. ``UserProfile`` and
+``Principle`` have no vector column; ``knowledge_document`` has no
+LanceDB table."""
 
 
 async def migrate_table_schemas() -> None:
@@ -382,6 +386,7 @@ __all__ = [
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",
     "ParentType",
+    "Principle",
     "UserProfile",
     "agent_case_repo",
     "agent_skill_repo",
@@ -397,6 +402,7 @@ __all__ = [
     "knowledge_topic_repo",
     "migrate_fts_indexes",
     "migrate_table_schemas",
+    "principle_repo",
     "user_profile_repo",
     "verify_business_schemas",
 ]

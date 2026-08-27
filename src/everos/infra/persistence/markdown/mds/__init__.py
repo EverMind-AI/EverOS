@@ -33,6 +33,9 @@ from .knowledge_document import (
     KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
 )
 from .knowledge_topic import KnowledgeTopicFrontmatter as KnowledgeTopicFrontmatter
+from .principle import PrincipleFrontmatter as PrincipleFrontmatter
+from .principle import PrincipleItem as PrincipleItem
+from .principle import render_principles_body as render_principles_body
 from .profile import UserProfileFrontmatter as UserProfileFrontmatter
 
 __all__ = [
@@ -44,5 +47,8 @@ __all__ = [
     "ForesightDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
+    "PrincipleFrontmatter",
+    "PrincipleItem",
     "UserProfileFrontmatter",
+    "render_principles_body",
 ]
