@@ -9,6 +9,7 @@ External usage:
         extract_foresight,
         extract_user_profile,
         reflect_episodes,
+        trigger_decision_clustering,
         trigger_profile_clustering,
         trigger_skill_clustering,
     )
@@ -21,6 +22,9 @@ from .extract_decision import extract_decision as extract_decision
 from .extract_foresight import extract_foresight as extract_foresight
 from .extract_user_profile import extract_user_profile as extract_user_profile
 from .reflect_episodes import reflect_episodes as reflect_episodes
+from .trigger_decision_clustering import (
+    trigger_decision_clustering as trigger_decision_clustering,
+)
 from .trigger_profile_clustering import (
     trigger_profile_clustering as trigger_profile_clustering,
 )
@@ -36,6 +40,7 @@ __all__ = [
     "extract_foresight",
     "extract_user_profile",
     "reflect_episodes",
+    "trigger_decision_clustering",
     "trigger_profile_clustering",
     "trigger_skill_clustering",
 ]

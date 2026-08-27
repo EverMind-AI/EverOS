@@ -49,6 +49,11 @@
 # [strategies.trigger_profile_clustering]
 # enabled = true
 
+# Decision clustering trigger (fires on each DecisionExtracted event).
+# Sqlite kind=decision (not user_memory). Uncomment only to turn it off:
+# [strategies.trigger_decision_clustering]
+# enabled = false
+
 # User-profile extraction (runs after clustering trigger fires). Set
 # enabled = false to skip in evaluation runs.
 # [strategies.extract_user_profile]

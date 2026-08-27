@@ -183,9 +183,12 @@ def _print_vectors_estimate(total_rows: int, total_tokens: int) -> None:
     )
 
 
-def _print_clusters_estimate(episode_count: int, case_count: int) -> None:
+def _print_clusters_estimate(
+    episode_count: int, case_count: int, *, decision_count: int = 0
+) -> None:
     typer.echo(f"  episodes to cluster:     {episode_count:,}")
-    typer.echo(f"  agent cases to cluster:  {case_count:,}\n")
+    typer.echo(f"  agent cases to cluster:  {case_count:,}")
+    typer.echo(f"  decisions to cluster:    {decision_count:,}\n")
     typer.echo(
         "  Uses your embedding provider (and LLM for agent-case merges) — "
         "cost depends on provider pricing.\n"
@@ -268,8 +271,10 @@ class TyperPresenter:
     def estimate_vectors(self, rows: int, tokens: int) -> None:
         _print_vectors_estimate(rows, tokens)
 
-    def estimate_clusters(self, episodes: int, cases: int) -> None:
-        _print_clusters_estimate(episodes, cases)
+    def estimate_clusters(
+        self, episodes: int, cases: int, *, decisions: int = 0
+    ) -> None:
+        _print_clusters_estimate(episodes, cases, decision_count=decisions)
 
     def estimate_skills(self, cases: int, clusters: int) -> None:
         _print_skills_estimate(cases, clusters)

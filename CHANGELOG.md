@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`extract_decision` OME strategy (`enabled=True`) + `DecisionExtracted` (`source=pipeline`).** One `DecisionExtractor` call per memcell (no `sender_id`); EverOS fans out one daily-log copy per user sender and emits `DecisionExtracted` after each write. An empty list is success.
 - **`DecisionHandler` + `KIND_REGISTRY` kind `decision`.** Markdown → Lance projection; embed only the Decision body (soft dependency); dual BM25 `decision_tokens` / `reason_tokens`. `deprecated_by` still from chassis `deprecated_entries`.
 - **Search `data.decisions` + Get `memory_type=decision`.** User-partition Decision recall (`DecisionRecaller`: dual BM25 + cosine) fused with `rrf` (never `arank`). `kinds` filters the episode / decision lanes (`principle` is not a kind). Get lists Decision rows with `deprecated_by IS NULL`; there is no `GetMemoryType.PRINCIPLE`.
+- **`trigger_decision_clustering` OME strategy.** On `DecisionExtracted(source=pipeline)` embeds `decision_text` and geometry-merges into sqlite clusters with `kind=decision` / `member_type=decision` (not the `user_memory` episode track). Emits `DecisionClusterUpdated` with a row snapshot. Cascade Phase 2 backfill synthesizes the same events for existing Lance decision rows (`parent_type=memcell`). Embed missing → debug no-op.
 
 ### Changed
 

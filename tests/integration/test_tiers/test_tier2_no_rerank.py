@@ -173,6 +173,7 @@ async def test_ome_registers_embed_dependent_strategies(
         extract_foresight,
         extract_user_profile,
         reflect_episodes,
+        trigger_decision_clustering,
         trigger_profile_clustering,
         trigger_skill_clustering,
     )
@@ -186,6 +187,7 @@ async def test_ome_registers_embed_dependent_strategies(
             extract_agent_case,
             extract_user_profile,
             trigger_profile_clustering,
+            trigger_decision_clustering,
             trigger_skill_clustering,
             extract_agent_skill,
             reflect_episodes,

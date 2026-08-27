@@ -15,6 +15,7 @@ from everos.memory.strategies import (
     extract_foresight,
     extract_user_profile,
     reflect_episodes,
+    trigger_decision_clustering,
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
@@ -29,6 +30,7 @@ def test_strategies_are_re_exported_from_package() -> None:
         (trigger_skill_clustering, "trigger_skill_clustering"),
         (extract_agent_skill, "extract_agent_skill"),
         (trigger_profile_clustering, "trigger_profile_clustering"),
+        (trigger_decision_clustering, "trigger_decision_clustering"),
         (extract_user_profile, "extract_user_profile"),
         (reflect_episodes, "reflect_episodes"),
     ]:
@@ -57,6 +59,7 @@ async def test_get_engine_registers_all_strategies(
         "trigger_skill_clustering",
         "extract_agent_skill",
         "trigger_profile_clustering",
+        "trigger_decision_clustering",
         "extract_user_profile",
         "reflect_episodes",
     }

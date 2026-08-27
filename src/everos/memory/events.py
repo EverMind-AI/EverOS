@@ -138,6 +138,30 @@ class ProfileClusterUpdated(BaseEvent):
     project_id: str = "default"
 
 
+class DecisionClusterUpdated(BaseEvent):
+    """Fired after the decision cluster strategy has merged a new
+    decision into a sqlite cluster (``kind=decision``).
+
+    Snapshot fields (title / body / reason / impact / tags / timestamp)
+    ride along so a later principle-extraction strategy can consume the
+    triggering row without racing cascade. Defaults keep OME run_record
+    back-compat if an older payload is still queued.
+    """
+
+    memcell_id: str
+    decision_entry_id: str
+    cluster_id: str
+    owner_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+    title: str = ""
+    decision_text: str = ""
+    reason: str = ""
+    impact: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    decision_timestamp_ms: int = 0
+
+
 class SkillClusterUpdated(BaseEvent):
     """Fired after the agent-case cluster strategy has merged a new
     case into a cluster.

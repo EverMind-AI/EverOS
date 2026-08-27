@@ -7,6 +7,7 @@ from everalgo.types import ChatMessage, MemCell
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
+    DecisionClusterUpdated,
     DecisionExtracted,
     SkillClusterUpdated,
     UserPipelineStarted,
@@ -171,3 +172,44 @@ def test_decision_extracted_source_defaults_to_pipeline() -> None:
     assert event.impact is None
     assert event.tags == []
     assert event.session_id is None
+
+
+def test_decision_cluster_updated_topic_is_module_qualified() -> None:
+    assert DecisionClusterUpdated.topic() == (
+        "everos.memory.events:DecisionClusterUpdated"
+    )
+
+
+def test_decision_cluster_updated_roundtrip_json() -> None:
+    event = DecisionClusterUpdated(
+        memcell_id="mc_a",
+        decision_entry_id="dc_20260517_00000001",
+        cluster_id="cl_dec00000001",
+        owner_id="u_alice",
+        title="Use Rust on device",
+        decision_text="Device Runtime uses Rust.",
+        reason="Need deterministic latency.",
+        impact="Keep Python in the agent runtime.",
+        tags=["runtime"],
+        decision_timestamp_ms=1_700_000_000_000,
+    )
+    restored = DecisionClusterUpdated.model_validate_json(event.model_dump_json())
+    assert restored.decision_entry_id == "dc_20260517_00000001"
+    assert restored.cluster_id == "cl_dec00000001"
+    assert restored.decision_text == "Device Runtime uses Rust."
+    assert restored.tags == ["runtime"]
+
+
+def test_decision_cluster_updated_snapshot_defaults_for_back_compat() -> None:
+    event = DecisionClusterUpdated(
+        memcell_id="mc_a",
+        decision_entry_id="dc_1",
+        cluster_id="cl_1",
+        owner_id="u_alice",
+    )
+    assert event.title == ""
+    assert event.decision_text == ""
+    assert event.reason == ""
+    assert event.impact is None
+    assert event.tags == []
+    assert event.decision_timestamp_ms == 0

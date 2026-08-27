@@ -614,7 +614,7 @@ async def test_phase_clusters_preflight_before_scan(
     _isolated_root: Path, monkeypatch
 ) -> None:
     """Phase 2 mirrors Phase 1: capability preflight fires before
-    ``_scan_all_rows`` walks Episode + AgentCase."""
+    ``_scan_all_rows`` walks Episode + AgentCase + Decision."""
     monkeypatch.setattr(
         _backfill, "get_embedding_capability", lambda: _FakeCapabilityMissing()
     )
