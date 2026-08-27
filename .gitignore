@@ -260,8 +260,16 @@ evaluation/src/adapters/*/prompts/profile/*.json
 
 # Locomo source dataset (downloadable, not source code)
 data/locomo10.json
+# Benchmark inputs live here (benchmarks/configs/*.toml default to it), and they are
+# large, redistributable only by their own authors, and not ours to ship. The directory
+# itself is kept so a fresh clone has somewhere obvious to put them.
+benchmarks/data/*
+!benchmarks/data/.gitkeep
 evaluation/data/locomo/locomo10.json
 evaluation/locomo_evaluation/data/locomo10.json
+# Benchmark inputs live here (benchmarks/configs/*.toml default to it), and they are
+# large, redistributable only by their own authors, and not ours to ship. The directory
+# itself is kept so a fresh clone has somewhere obvious to put them.
 
 # Legacy src kept locally for migration reference; not under version control.
 src_old/
@@ -280,3 +288,62 @@ benchmarks/.env
 
 # Local everos runtime data (memory root, indexes, OME state)
 .everos*/
+
+# ---------------------------------------------------------------------------
+# Internal-only benchmark scaffolding — kept in the working tree, never shipped
+# ---------------------------------------------------------------------------
+# These exist to run ablations on this machine, not to let anyone reproduce a
+# published number. Two things make them unshippable rather than merely
+# unpolished: they hardcode absolute paths into a private workspace
+# (/Evermind/..., /root/fullrun, /root/.everos_bench), and the audit set compares
+# against reference harnesses that live outside this repository and are not
+# published — so a user who cloned this would get code that cannot run at all.
+#
+# The shippable harness is what remains: run.py + config.py + adapters/ +
+# configs/ + metrics/ + scripts/reproduce.sh + README.md + .env.example.
+
+# Everything that measures something OTHER than a benchmark's published number:
+# extraction-backbone arms, retrieval-policy arms, and the two store helpers that
+# only those flows use (rewriting an existing store's episodes with a different
+# extractor, and waiting for the index to catch up afterwards). Both sweep drivers
+# read checkpoints out of a private path, and one needs a train/test split file
+# from another repository, so neither can run anywhere else.
+#
+# The shipped surface is the reproduction and nothing else: reproduce.sh + run.py +
+# config.py + adapters/ + configs/ + metrics/ + README.md + .env.example.
+benchmarks/ablations/
+
+# Migration audit. Every file here resolves paths under Evaluation/ to diff this
+# harness against the reference implementations it was ported from; without that
+# checkout none of it executes. MIGRATION*.md are the internal record of that
+# port, not user documentation.
+benchmarks/audit/
+
+# Tests that require the same absent checkout. benchmark_parity_env.py says it
+# plainly: 269 of the 395 benchmark tests skip when the references are missing,
+# and `make test` still reports success — so shipping them hands users a suite
+# that is permanently green and permanently vacuous.
+tests/unit/benchmark_parity_env.py
+tests/unit/test_benchmark_differential.py
+tests/unit/test_benchmark_differential_audit.py
+tests/unit/test_benchmark_differential_lme_emb.py
+tests/unit/test_benchmark_differential_phases.py
+tests/unit/test_benchmark_differential_pool.py
+tests/unit/test_benchmark_differential_surface.py
+tests/unit/test_benchmark_parity.py
+tests/unit/test_benchmark_parity_gate.py
+tests/unit/test_benchmark_parity_reported.py
+# Also diffs against LoCoMo/EverOS/test_locomo.py (line 27), so it belongs here
+# rather than in the shipped suite.
+tests/unit/test_benchmark_client_and_gate.py
+
+# Pins the ablation tooling above, so it goes with it. A test whose subject is not
+# shipped would fail at import on a fresh clone, not skip.
+tests/unit/test_benchmark_reextract_sampling.py
+tests/unit/test_benchmark_metrics_and_reextract.py
+tests/unit/test_benchmark_store_tools.py
+tests/unit/test_benchmark_ablation_tools.py
+
+# Hardcodes four store paths on this machine (/root/smoke_*). Marked `slow` so
+# it is deselected by default, but the paths would still be published.
+tests/unit/test_multiround_per_store.py

@@ -157,11 +157,15 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# LoCoMo benchmark embeds LLM prompts (ANSWER_PROMPT / JUDGE_*_PROMPT) and
-# verbose argparse help strings as multi-line string literals. Line breaks
-# would change what the LLM actually sees or noise the --help output, so
-# E501 is silenced for this file only.
-"benchmarks/run.py" = ["E501"]
+# The four dataset adapters hold the answer and judge prompts as multi-line string
+# literals, copied byte-for-byte from each benchmark's reference harness. Rewrapping one
+# changes what the model is shown and so changes the score, which is the opposite of what
+# this code is for. Every long line in these four files is inside such a literal --
+# nothing outside one is exempted, and no other file under benchmarks/ is.
+"benchmarks/adapters/locomo.py" = ["E501"]
+"benchmarks/adapters/longmemeval.py" = ["E501"]
+"benchmarks/adapters/subtlememory.py" = ["E501"]
+"benchmarks/adapters/evermembench.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -171,6 +175,14 @@ asyncio_mode = "auto"
 addopts = "-v --tb=short -m 'not slow and not live_llm'"
 filterwarnings = [
     "error",
+    # tzlocal (via APScheduler, imported by the OME engine): a container with no
+    # /etc/timezone and no /etc/localtime warns and falls back to UTC. Under `error`
+    # that aborts COLLECTION for every test that imports the app -- measured at 50
+    # files here -- so `make test` fails on a clean container for a reason unrelated
+    # to any test. The fallback is already what this project wants: the display
+    # timezone comes solely from EVEROS_MEMORY__TIMEZONE, never from the OS (see
+    # .claude/rules/datetime-handling.md), so tzlocal's guess is never read.
+    "ignore:Can not find any timezone configuration:UserWarning",
     # jieba 0.42.1: unescaped backslashes in regex strings (upstream
     # unmaintained; no fix available).  Python 3.12 emits
     # SyntaxWarning for invalid escape sequences.
