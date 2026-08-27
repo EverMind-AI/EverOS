@@ -1,4 +1,4 @@
-"""Per-kind ``_build_row`` mapping for the 3 non-Episode daily-log handlers.
+"""Per-kind ``_build_row`` mapping for the 4 non-Episode daily-log handlers.
 
 The diff loop (read → sha256 → 3-way diff → upsert/delete) lives on
 :class:`BaseDailyLogHandler` and is exercised by
@@ -8,7 +8,7 @@ the right LanceDB columns get populated?
 
 Each kind gets one happy-path test (all fields present) plus a
 focused error-path test (missing required inline field). Sharing one
-file avoids 3 nearly-identical fixture stacks.
+file avoids nearly-identical fixture stacks.
 """
 
 from __future__ import annotations
@@ -20,9 +20,11 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot, StructuredEntry
+from everos.infra.persistence.lancedb import Decision as LanceDecision
 from everos.memory.cascade.handlers import (
     AgentCaseHandler,
     AtomicFactHandler,
+    DecisionHandler,
     ForesightHandler,
     HandlerDeps,
 )
@@ -193,6 +195,179 @@ async def test_foresight_optional_evidence_left_none(tmp_path) -> None:  # type:
     assert row.start_time is None
     assert row.end_time is None
     assert row.duration_days is None
+
+
+# ── Decision ─────────────────────────────────────────────────────────────
+
+
+async def test_decision_build_row_maps_sections_and_tags(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    handler = DecisionHandler(_deps(tmp_path))
+    row = await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="users/u1/decisions/decision-2026-05-14.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_id": "mc_1",
+                "tags": "[runtime, rust]",
+            },
+            sections={
+                "Title": "Use Rust for the device Runtime",
+                "Decision": "Ship the device Runtime in Rust.",
+                "Reason": "Need deterministic latency without a GC pause.",
+                "Impact": "Device builds take longer to compile.",
+            },
+        ),
+    )
+    assert row.id == "u1_dc_20260514_0001"
+    assert row.title == "Use Rust for the device Runtime"
+    assert row.decision == "Ship the device Runtime in Rust."
+    assert row.decision_tokens == "Ship the device Runtime in Rust."
+    assert row.reason == "Need deterministic latency without a GC pause."
+    assert row.reason_tokens == "Need deterministic latency without a GC pause."
+    assert row.impact == "Device builds take longer to compile."
+    assert row.tags == ["runtime", "rust"]
+    assert row.parent_id == "mc_1"
+    assert row.parent_type == "memcell"
+    assert row.timestamp == _dt.datetime(2026, 5, 14, 10, 0, tzinfo=_dt.UTC)
+    assert len(row.vector) == 1024
+    assert "sender_ids" not in LanceDecision.model_fields
+
+
+async def test_decision_embed_is_fed_decision_body_only(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Vector source is the Decision body, not Title / Reason / Impact."""
+    import everos.component.embedding.accessor as acc
+
+    class _RecordingEmbedder(EmbeddingProvider):
+        dim = 1024
+
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+
+        async def embed(self, text: str) -> list[float]:
+            self.texts.append(text)
+            return [0.0] * self.dim
+
+        async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
+            return [await self.embed(t) for t in texts]
+
+    recorder = _RecordingEmbedder()
+    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=recorder))
+    handler = DecisionHandler(_deps(tmp_path))
+    await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="x.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_id": "mc_1",
+            },
+            sections={
+                "Title": "Use Rust for the device Runtime",
+                "Decision": "Ship the device Runtime in Rust.",
+                "Reason": "Need deterministic latency without a GC pause.",
+                "Impact": "Device builds take longer to compile.",
+            },
+        ),
+    )
+    assert recorder.texts == ["Ship the device Runtime in Rust."]
+
+
+async def test_decision_optional_impact_left_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    handler = DecisionHandler(_deps(tmp_path))
+    row = await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="x.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_id": "mc_1",
+            },
+            sections={
+                "Title": "t",
+                "Decision": "d",
+                "Reason": "r",
+            },
+        ),
+    )
+    assert row.impact is None
+    assert row.reason_tokens == "r"
+
+
+@pytest.mark.parametrize("tags_inline", [None, "[]"])
+async def test_decision_empty_tags_are_empty_list(
+    tmp_path, tags_inline: str | None
+) -> None:  # type: ignore[no-untyped-def]
+    inline = {
+        "owner_id": "u1",
+        "session_id": "s1",
+        "timestamp": "2026-05-14T10:00:00+00:00",
+        "parent_id": "mc_1",
+    }
+    if tags_inline is not None:
+        inline["tags"] = tags_inline
+    handler = DecisionHandler(_deps(tmp_path))
+    row = await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="x.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline=inline,
+            sections={"Title": "t", "Decision": "d", "Reason": "r"},
+        ),
+    )
+    assert row.tags == []
+
+
+async def test_decision_empty_reason_still_tokenizes(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    handler = DecisionHandler(_deps(tmp_path))
+    row = await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="x.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_id": "mc_1",
+            },
+            sections={"Title": "t", "Decision": "d", "Reason": ""},
+        ),
+    )
+    assert row.reason == ""
+    assert row.reason_tokens == ""
+
+
+async def test_decision_missing_timestamp_raises(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    handler = DecisionHandler(_deps(tmp_path))
+    with pytest.raises(ValueError, match="timestamp"):
+        await handler._build_row(
+            owner_id="u1",
+            owner_type="user",
+            md_path="x.md",
+            entry=_entry(
+                "dc_20260514_0001",
+                inline={"owner_id": "u1", "session_id": "s1", "parent_id": "mc_1"},
+                sections={"Title": "t", "Decision": "d", "Reason": "r"},
+            ),
+        )
 
 
 # ── AgentCase ────────────────────────────────────────────────────────────

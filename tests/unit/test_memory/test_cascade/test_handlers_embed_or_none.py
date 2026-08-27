@@ -24,6 +24,7 @@ from everos.memory.cascade.handlers import (
     AgentCaseHandler,
     AgentSkillHandler,
     AtomicFactHandler,
+    DecisionHandler,
     ForesightHandler,
     HandlerDeps,
 )
@@ -127,6 +128,34 @@ async def test_foresight_handler_writes_null_vector_when_embed_unavailable(
     )
     assert row.vector is None
     assert row.foresight_tokens == "user will book lunch"
+
+
+async def test_decision_handler_writes_null_vector_when_embed_unavailable(
+    memory_root: MemoryRoot,
+) -> None:
+    handler = DecisionHandler(_deps(memory_root))
+    row = await handler._build_row(
+        owner_id="u1",
+        owner_type="user",
+        md_path="x.md",
+        entry=_entry(
+            "dc_20260514_0001",
+            inline={
+                "owner_id": "u1",
+                "session_id": "s1",
+                "timestamp": "2026-05-14T10:00:00+00:00",
+                "parent_id": "mc_1",
+            },
+            sections={
+                "Title": "Use Rust for the device Runtime",
+                "Decision": "Ship the device Runtime in Rust.",
+                "Reason": "Need deterministic latency without a GC pause.",
+            },
+        ),
+    )
+    assert row.vector is None
+    assert row.decision_tokens == "Ship the device Runtime in Rust."
+    assert row.reason_tokens == "Need deterministic latency without a GC pause."
 
 
 async def test_agent_case_handler_writes_null_vector_when_embed_unavailable(

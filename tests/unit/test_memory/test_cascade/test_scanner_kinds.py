@@ -28,6 +28,15 @@ def _make_episode_md(root: Path) -> Path:
     return p
 
 
+def _make_decision_md(root: Path) -> Path:
+    """Create a plausible decision daily-log file under the memory root."""
+    d = root / "default_app" / "default_project" / "users" / "u1" / "decisions"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "decision-2026-01-01.md"
+    p.write_text("ok")
+    return p
+
+
 def _make_agent_skill_md(root: Path) -> Path:
     """Create a plausible SKILL.md under the memory root."""
     d = (
@@ -47,14 +56,16 @@ def _make_agent_skill_md(root: Path) -> Path:
 
 def test_collect_scan_inputs_default_scans_all_kinds(tmp_path: Path) -> None:
     """Default (``kinds=None``) walks every :data:`KIND_REGISTRY` path
-    glob — episode + skill both surface."""
+    glob — episode + skill + decision all surface."""
     _make_episode_md(tmp_path)
     _make_agent_skill_md(tmp_path)
+    _make_decision_md(tmp_path)
 
     inputs = _collect_scan_inputs(tmp_path)
     kinds = {i.kind for i in inputs}
     assert "episode" in kinds
     assert "agent_skill" in kinds
+    assert "decision" in kinds
 
 
 def test_collect_scan_inputs_with_kinds_filter_restricts_to_named(

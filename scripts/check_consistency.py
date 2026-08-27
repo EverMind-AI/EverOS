@@ -17,8 +17,8 @@ Two modes:
   --mode readonly             Bypass the lifespan stack, open LanceDB with
                               a fresh read connection, read md directly.
                               Safe even on an active corpus, but only
-                              covers the three daily-log kinds (episode /
-                              atomic_fact / foresight).
+                              covers the four daily-log kinds (episode /
+                              atomic_fact / foresight / decision).
 
 Examples:
   scripts/check_consistency.py ~/.everos-locomo-all-kv-fast
@@ -84,7 +84,13 @@ async def _scan_monotonicity(corpus: Path) -> list[MonotonicityReport]:
     """Walk all daily-log md files; report id-counter monotonicity per file."""
     from everos.core.persistence import MarkdownReader
 
-    daily_dirs = ("/episodes/", "/.atomic_facts/", "/.foresights/", "/.agent_cases/")
+    daily_dirs = (
+        "/episodes/",
+        "/.atomic_facts/",
+        "/.foresights/",
+        "/decisions/",
+        "/.agent_cases/",
+    )
     reports: list[MonotonicityReport] = []
     for md in sorted(corpus.rglob("*.md")):
         rel = md.relative_to(corpus).as_posix()
@@ -208,14 +214,16 @@ async def run_lifespan_mode(corpus: Path) -> int:
 async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> int:
     """Direct LanceDB read + md read; no lifespan / cascade / ome started.
 
-    Covers the three daily-log kinds; agent_case + user_profile + agent_skill
-    are NOT checked in this mode (use --mode lifespan on an idle corpus
-    snapshot for full coverage).
+    Covers the four daily-log kinds (episode / atomic_fact / foresight /
+    decision); agent_case + user_profile + agent_skill are NOT checked
+    in this mode (use --mode lifespan on an idle corpus snapshot for
+    full coverage).
     """
     import lancedb
 
     from everos.core.persistence import MarkdownReader
     from everos.memory.cascade.handlers.atomic_fact import AtomicFactHandler
+    from everos.memory.cascade.handlers.decision import DecisionHandler
     from everos.memory.cascade.handlers.episode import EpisodeHandler
     from everos.memory.cascade.handlers.foresight import ForesightHandler
     from tests._consistency_assertions import _daily_log_sha_for_entry
@@ -226,6 +234,7 @@ async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> in
         ("episode", "episodes", "episode-", EpisodeHandler),
         ("atomic_fact", ".atomic_facts", "atomic_fact-", AtomicFactHandler),
         ("foresight", ".foresights", "foresight-", ForesightHandler),
+        ("decision", "decisions", "decision-", DecisionHandler),
     ]
 
     # Pick owners

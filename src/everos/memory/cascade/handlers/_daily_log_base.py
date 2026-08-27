@@ -1,7 +1,7 @@
 """Shared diff / dispatch loop for every daily-log cascade handler.
 
-The 4 daily-log kinds (episode / atomic_fact / foresight / agent_case)
-all do the same three-way reconcile against LanceDB:
+The 5 daily-log kinds (episode / atomic_fact / foresight / decision /
+agent_case) all do the same three-way reconcile against LanceDB:
 
 1. Parse the md into structured entries.
 2. Fetch existing rows for the same ``md_path``.
@@ -52,7 +52,7 @@ class ParsedEntry:
 
 
 class BaseDailyLogHandler(Handler):
-    """Common chassis for the 4 daily-log cascade handlers.
+    """Common chassis for the 5 daily-log cascade handlers.
 
     Subclass requirements:
 

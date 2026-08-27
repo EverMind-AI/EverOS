@@ -1,6 +1,6 @@
 """Cascade handlers — one per kind, sharing the :class:`Handler` chassis.
 
-Four daily-log handlers (episode / atomic_fact / foresight /
+Five daily-log handlers (episode / atomic_fact / foresight / decision /
 agent_case) inherit :class:`BaseDailyLogHandler` for the shared
 read / diff / upsert / delete loop; the per-kind subclass only
 declares its repo binding and ``_build_row`` mapping. ``agent_skill``,
@@ -14,6 +14,7 @@ from .agent_skill import AgentSkillHandler as AgentSkillHandler
 from .atomic_fact import AtomicFactHandler as AtomicFactHandler
 from .base import Handler as Handler
 from .base import HandlerDeps as HandlerDeps
+from .decision import DecisionHandler as DecisionHandler
 from .episode import EpisodeHandler as EpisodeHandler
 from .foresight import ForesightHandler as ForesightHandler
 from .knowledge_document import KnowledgeDocumentHandler as KnowledgeDocumentHandler
@@ -24,6 +25,7 @@ __all__ = [
     "AgentCaseHandler",
     "AgentSkillHandler",
     "AtomicFactHandler",
+    "DecisionHandler",
     "EpisodeHandler",
     "ForesightHandler",
     "Handler",
