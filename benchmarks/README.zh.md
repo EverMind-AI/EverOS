@@ -123,19 +123,33 @@ cp benchmarks/.env.example benchmarks/.env
 ### 多轮 decider(可选)
 
 `llm_multiround` 检索会跑一个 **decider**:读候选记忆、挑出 core 集合、
-提出补充子查询。默认它跑和抽取相同的模型,无需额外配置。
+提出补充子查询。已发表的数字用的是**独立的** decider,每份配置都写明了它:
 
-要给它单独的模型,**两个必须成对设置**:
+```toml
+decider_model    = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"
+```
+
+模型有默认值,**端点没有** —— 我们无法替你指定一个提供该模型的端点。
+所以开箱即用时,运行会打印:
+
+```
+decider  no endpoint for qwen3.6-27B (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.
+         ⚠ This is NOT the published configuration -- the published numbers were
+         produced with a separate decider, so this run is not comparable to them.
+```
+
+然后用抽取模型当 decider 继续跑。**这是一次有效的运行,只是不是已发表的那一臂。**
+要复现已发表的臂,自行部署 `qwen3.6-27B`(或别的 decider)并**成对设置**:
 
 ```bash
 BENCH_DECIDER_MODEL=<模型名>
 BENCH_DECIDER_BASE_URL=<提供该模型的端点>
 ```
 
-只设一个,正是这个运行器在启动时专门检查的那种故障:
-把模型名发到不提供该模型的端点,每次调用都返回 404,而检索循环会**退回到固定的
-top-N core 并照常报出一个完整结果**。`run.py` 会在第一个问题之前探测 decider,
-不应答就拒绝启动。
+只设模型、而端点并不提供它,是这个运行器不会放行的那种故障:
+每次调用都 404,检索循环退回到固定的 top-N core,而运行**照常报出一个完整结果**。
+`run.py` 会在第一个问题之前向 decider 发一次真实补全,不应答就拒绝启动。
 
 ---
 

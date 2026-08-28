@@ -11,7 +11,7 @@ All four run through one pipeline and differ only in a per-dataset adapter.
 names an owner, what counts as gold evidence, how its judge grades. Nothing else
 in the runner knows which benchmark it is running.
 
-> 中文版见 [README.zh.md](README.zh.md)。
+> Also available in Chinese: [README.zh.md](README.zh.md).
 
 ---
 
@@ -130,21 +130,37 @@ model overrides.
 ### The multi-round decider (optional)
 
 `llm_multiround` retrieval runs a *decider* that reads candidate memories, picks
-the core set, and asks follow-up sub-queries. By default it runs the same model as
-extraction, which needs no extra configuration.
+the core set, and asks follow-up sub-queries. The published numbers used a
+**separate** decider, which each config names:
 
-To give it its own model, set **both** together:
+```toml
+decider_model    = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"
+```
+
+The model has a default; **the endpoint does not**, because there is no endpoint
+we can name that serves it for you. So out of the box the run prints:
+
+```
+decider  no endpoint for qwen3.6-27B (set BENCH_DECIDER_BASE_URL); falling back to the [llm] model.
+         ⚠ This is NOT the published configuration -- the published numbers were
+         produced with a separate decider, so this run is not comparable to them.
+```
+
+and continues with the extraction model as the decider. That is a working run; it
+is simply not the published arm. To reproduce the published arm, serve
+`qwen3.6-27B` (or another decider) and set **both**:
 
 ```bash
 BENCH_DECIDER_MODEL=<model name>
 BENCH_DECIDER_BASE_URL=<endpoint serving it>
 ```
 
-Setting only one is the failure this runner checks for at startup: a model name
-sent to an endpoint that does not serve it returns 404 on every call, and the
-retrieval loop then falls back to a fixed top-ranked core **and still reports a
-complete result**. `run.py` probes the decider before the first question and
-refuses to start if it does not answer.
+Setting only the model, with an endpoint that does not serve it, is the failure
+this runner will not let you have: the model 404s on every call, the retrieval
+loop falls back to a fixed top-ranked core, and the run **still reports a complete
+result**. `run.py` sends one real completion to the decider before the first
+question and refuses to start if it does not answer.
 
 ---
 
