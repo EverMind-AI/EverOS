@@ -705,6 +705,10 @@ integrations into one open-source ecosystem.
 <td><a href="https://github.com/EverMind-AI/plugins/tree/main/dsh">DSH plugin</a> for memory-aware DeepSeek Harness agents.</td>
 </tr>
 <tr>
+<td><strong>DeepSeek Harness Handbook</strong></td>
+<td><a href="https://github.com/sandbaseai/deepseek-harness-handbook">Independent multilingual field guide</a> for profiles, plugins, MCP, sandboxing, and agent-runtime troubleshooting.</td>
+</tr>
+<tr>
 <td><strong><a href="https://dify.ai">Dify</a></strong></td>
 <td><a href="https://github.com/EverMind-AI/plugins/tree/main/dify">Self-hosted</a> and <a href="https://github.com/EverMind-AI/plugins/tree/main/dify_cloud">cloud</a> tools for explicit memory search and storage in workflows and agents.</td>
 </tr>
