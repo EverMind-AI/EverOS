@@ -310,3 +310,50 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
     await episode_repo.delete_by_md_path(
         "test_app/test_project/users/u1/episodes/day.md"
     )
+
+
+async def test_verify_accepts_a_collection_this_adapter_just_created() -> None:
+    """The decisive check for physical schema verification.
+
+    Every offline test builds its fake ``describe_collection`` reply from the
+    same descriptor the verifier compares against, so they can only prove that
+    creation and verification agree with each other. Whether that descriptor
+    matches what Milvus actually stores and reports back — VARCHAR lengths it
+    may normalize, flags it may omit, the analyzer it attaches for BM25 — can
+    only be established against a real server.
+
+    The fixture creates the collections with a fresh prefix, so verification
+    never runs during setup; dropping the process-local readiness cache forces
+    the existing-collection path.
+    """
+    from everos.infra.persistence.index import ALL_REPOS, episode_repo
+    from everos.infra.persistence.milvus.repository import MilvusRepoBase
+
+    await episode_repo.upsert(
+        [
+            _episode(
+                row_id="u1_verify",
+                entry_id="verify",
+                session_id="verify",
+                text="a row so the collection is not empty",
+                vector_axis=1,
+                subject_axis=2,
+                timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
+            )
+        ]
+    )
+
+    for repo in ALL_REPOS:
+        milvus_repo = repo._repo()  # type: ignore[attr-defined]
+        await milvus_repo.ensure_collection()
+
+    MilvusRepoBase._reset_collection_cache()
+
+    for repo in ALL_REPOS:
+        # Raises MilvusSchemaMismatchError if our declaration and the server's
+        # description disagree on any field.
+        await repo._repo().verify_collection()  # type: ignore[attr-defined]
+
+    await episode_repo.delete_by_md_path(
+        "test_app/test_project/users/u1/episodes/day.md"
+    )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
@@ -43,6 +44,100 @@ _PRESENT_SUFFIX = "__present"
 
 class MilvusValueLimitError(ValueError):
     """A row exceeds a documented Milvus VARCHAR, array, or vector limit."""
+
+
+@dataclass(frozen=True)
+class _PhysicalField:
+    """One Milvus column exactly as EverOS declares it.
+
+    The same descriptor drives collection creation and startup verification,
+    so a reported mismatch always means the server disagrees with us — never
+    that the builder and the checker have drifted apart from each other.
+    """
+
+    name: str
+    datatype: DataType
+    is_primary: bool = False
+    nullable: bool = False
+    dim: int | None = None
+    element_type: DataType | None = None
+    max_length: int | None = None
+    max_capacity: int | None = None
+    enable_analyzer: bool = False
+
+    def create_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"field_name": self.name, "datatype": self.datatype}
+        if self.is_primary:
+            kwargs["is_primary"] = True
+        if self.element_type is not None:
+            kwargs["element_type"] = self.element_type
+        if self.max_length is not None:
+            kwargs["max_length"] = self.max_length
+        if self.max_capacity is not None:
+            kwargs["max_capacity"] = self.max_capacity
+        if self.dim is not None:
+            kwargs["dim"] = self.dim
+        if self.enable_analyzer:
+            kwargs["enable_analyzer"] = True
+        if self.nullable:
+            kwargs["nullable"] = True
+        return kwargs
+
+    def mismatches(self, actual: dict[str, Any]) -> list[str]:
+        """Report how a server-reported field differs from this declaration.
+
+        ``describe_collection`` omits ``nullable`` and ``is_primary`` when they
+        are false and omits ``element_type`` for non-array columns, so absence
+        is unambiguous and can be compared strictly. ``max_length`` and
+        ``max_capacity`` are reported only for the types that carry them and
+        the server may normalize them, so they are advisory: a wrong length
+        surfaces as a loud write rejection anyway, whereas a wrong datatype or
+        dimension is the kind that fails opaquely much later.
+        """
+        params = actual.get("params") or {}
+        out: list[str] = []
+        if actual.get("type") != self.datatype:
+            out.append(
+                f"{self.name}: datatype {_name_of(actual.get('type'))} "
+                f"!= expected {_name_of(self.datatype)}"
+            )
+        if bool(actual.get("is_primary", False)) != self.is_primary:
+            out.append(
+                f"{self.name}: is_primary {actual.get('is_primary', False)} "
+                f"!= expected {self.is_primary}"
+            )
+        if bool(actual.get("nullable", False)) != self.nullable:
+            out.append(
+                f"{self.name}: nullable {actual.get('nullable', False)} "
+                f"!= expected {self.nullable}"
+            )
+        if self.dim is not None and params.get("dim") != self.dim:
+            out.append(f"{self.name}: dim {params.get('dim')} != expected {self.dim}")
+        if self.element_type is not None and actual.get("element_type") != (
+            self.element_type
+        ):
+            out.append(
+                f"{self.name}: element_type {_name_of(actual.get('element_type'))} "
+                f"!= expected {_name_of(self.element_type)}"
+            )
+        return out
+
+    def soft_mismatches(self, actual: dict[str, Any]) -> list[str]:
+        """Advisory-only limit drift (see :meth:`mismatches`)."""
+        params = actual.get("params") or {}
+        out: list[str] = []
+        for key, want in (
+            ("max_length", self.max_length),
+            ("max_capacity", self.max_capacity),
+        ):
+            got = params.get(key)
+            if want is not None and got is not None and int(got) != want:
+                out.append(f"{self.name}: {key} {got} != declared {want}")
+        return out
+
+
+def _name_of(datatype: Any) -> str:
+    return getattr(datatype, "name", repr(datatype))
 
 
 class MilvusRepoBase[T: BaseModel]:
@@ -140,17 +235,48 @@ class MilvusRepoBase[T: BaseModel]:
         )
 
     async def verify_collection(self) -> None:
+        """Reject a collection whose physical schema disagrees with ours.
+
+        A name-only check waves through a collection whose columns happen to
+        share our names but carry the wrong datatype, primary key, nullability
+        or vector dimension — a stale model, or a ``collection_prefix``
+        collision with someone else's data. That collection starts fine and
+        then fails opaquely on the first write or search. Comparing the
+        physical shape turns it back into a startup error with a recovery
+        path.
+        """
         client = await get_client()
         description = await _run(client.describe_collection, self.collection_name)
-        actual = {field["name"] for field in description.get("fields", [])}
-        expected = set(self._stored_field_names())
-        missing = expected - actual
-        stale = actual - expected
-        if missing or stale:
+        reported = {
+            field["name"]: field
+            for field in description.get("fields", [])
+            if "name" in field
+        }
+        expected = {physical.name: physical for physical in self._physical_fields()}
+
+        missing = sorted(set(expected) - set(reported))
+        stale = sorted(set(reported) - set(expected))
+        drift: list[str] = []
+        advisory: list[str] = []
+        for name, physical in expected.items():
+            actual = reported.get(name)
+            if actual is None:
+                continue
+            drift.extend(physical.mismatches(actual))
+            advisory.extend(physical.soft_mismatches(actual))
+
+        if advisory:
+            logger.warning(
+                "milvus_collection_limit_drift",
+                collection=self.collection_name,
+                details=advisory,
+            )
+        if missing or stale or drift:
             raise MilvusSchemaMismatchError(
                 f"Milvus collection {self.collection_name!r} schema drift: "
-                f"missing={sorted(missing)}, stale={sorted(stale)}. The index is "
-                "rebuildable from markdown; run `everos cascade rebuild`."
+                f"missing={missing}, stale={stale}, incompatible={drift}. "
+                "The index is rebuildable from markdown; run "
+                "`everos cascade rebuild`."
             )
 
     async def add(self, records: Sequence[T]) -> None:
@@ -481,20 +607,10 @@ class MilvusRepoBase[T: BaseModel]:
 
     def _build_collection_schema(self) -> Any:
         schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
-        for field in self.index_schema.fields:
-            self._add_schema_field(schema, field)
-        if not self.index_schema.vector_fields:
-            schema.add_field(
-                field_name=_DUMMY_VECTOR_FIELD,
-                datatype=DataType.FLOAT_VECTOR,
-                dim=_DUMMY_VECTOR_DIMENSION,
-            )
+        for physical in self._physical_fields():
+            schema.add_field(**physical.create_kwargs())
         for field in self.index_schema.bm25_fields:
             sparse_name = _sparse_field(field)
-            schema.add_field(
-                field_name=sparse_name,
-                datatype=DataType.SPARSE_FLOAT_VECTOR,
-            )
             schema.add_function(
                 Function(
                     name=f"{field}_bm25",
@@ -505,73 +621,97 @@ class MilvusRepoBase[T: BaseModel]:
             )
         return schema
 
-    def _add_schema_field(self, schema: Any, field: IndexField) -> None:
+    def _physical_fields(self) -> tuple[_PhysicalField, ...]:
+        """Every Milvus column this table declares, in creation order."""
+        out: list[_PhysicalField] = []
+        for field in self.index_schema.fields:
+            out.extend(self._physical_for(field))
+        if not self.index_schema.vector_fields:
+            out.append(
+                _PhysicalField(
+                    name=_DUMMY_VECTOR_FIELD,
+                    datatype=DataType.FLOAT_VECTOR,
+                    dim=_DUMMY_VECTOR_DIMENSION,
+                )
+            )
+        out.extend(
+            _PhysicalField(
+                name=_sparse_field(field),
+                datatype=DataType.SPARSE_FLOAT_VECTOR,
+            )
+            for field in self.index_schema.bm25_fields
+        )
+        return tuple(out)
+
+    def _physical_for(self, field: IndexField) -> list[_PhysicalField]:
+        is_bm25 = field.name in self.index_schema.bm25_fields
         if field.kind is IndexFieldKind.STRING:
-            kwargs: dict[str, Any] = {
-                "field_name": field.name,
-                "datatype": DataType.VARCHAR,
-                "max_length": field.max_length,
-            }
-            if field.primary:
-                kwargs["is_primary"] = True
-            elif field.nullable and field.name not in self.index_schema.bm25_fields:
-                kwargs["nullable"] = True
-            if field.name in self.index_schema.bm25_fields:
-                kwargs["enable_analyzer"] = True
-            schema.add_field(**kwargs)
-        elif field.kind is IndexFieldKind.STRING_ARRAY:
-            schema.add_field(
-                field_name=field.name,
-                datatype=DataType.ARRAY,
-                element_type=DataType.VARCHAR,
-                max_capacity=field.max_capacity,
-                max_length=field.max_length,
-                nullable=field.nullable,
-            )
-        elif field.kind is IndexFieldKind.FLOAT:
-            schema.add_field(
-                field_name=field.name,
-                datatype=DataType.DOUBLE,
-                nullable=field.nullable,
-            )
-        elif field.kind is IndexFieldKind.INTEGER:
-            schema.add_field(
-                field_name=field.name,
-                datatype=DataType.INT64,
-                nullable=field.nullable,
-            )
-        elif field.kind is IndexFieldKind.DATETIME:
-            schema.add_field(
-                field_name=_datetime_storage_field(field.name),
-                datatype=DataType.INT64,
-                nullable=field.nullable,
-            )
-        elif field.kind is IndexFieldKind.DENSE_VECTOR:
-            schema.add_field(
-                field_name=field.name,
-                datatype=DataType.FLOAT_VECTOR,
-                dim=field.dimension,
-            )
-            schema.add_field(
-                field_name=_present_field(field.name),
-                datatype=DataType.BOOL,
-            )
-        else:  # pragma: no cover - enum exhaustiveness guard
-            raise TypeError(f"unsupported index field kind: {field.kind}")
+            return [
+                _PhysicalField(
+                    name=field.name,
+                    datatype=DataType.VARCHAR,
+                    is_primary=field.primary,
+                    # A BM25 input is written as "" rather than null so the
+                    # analyzer always has something to tokenize.
+                    nullable=field.nullable and not field.primary and not is_bm25,
+                    max_length=field.max_length,
+                    enable_analyzer=is_bm25,
+                )
+            ]
+        if field.kind is IndexFieldKind.STRING_ARRAY:
+            return [
+                _PhysicalField(
+                    name=field.name,
+                    datatype=DataType.ARRAY,
+                    nullable=field.nullable,
+                    element_type=DataType.VARCHAR,
+                    max_length=field.max_length,
+                    max_capacity=field.max_capacity,
+                )
+            ]
+        if field.kind is IndexFieldKind.FLOAT:
+            return [
+                _PhysicalField(
+                    name=field.name,
+                    datatype=DataType.DOUBLE,
+                    nullable=field.nullable,
+                )
+            ]
+        if field.kind is IndexFieldKind.INTEGER:
+            return [
+                _PhysicalField(
+                    name=field.name,
+                    datatype=DataType.INT64,
+                    nullable=field.nullable,
+                )
+            ]
+        if field.kind is IndexFieldKind.DATETIME:
+            return [
+                _PhysicalField(
+                    name=_datetime_storage_field(field.name),
+                    datatype=DataType.INT64,
+                    nullable=field.nullable,
+                )
+            ]
+        if field.kind is IndexFieldKind.DENSE_VECTOR:
+            return [
+                _PhysicalField(
+                    name=field.name,
+                    datatype=DataType.FLOAT_VECTOR,
+                    dim=field.dimension,
+                ),
+                # Milvus cannot store a null dense vector, so a logical null is
+                # a zero vector plus this presence marker.
+                _PhysicalField(
+                    name=_present_field(field.name),
+                    datatype=DataType.BOOL,
+                ),
+            ]
+        # pragma: no cover - enum exhaustiveness guard
+        raise TypeError(f"unsupported index field kind: {field.kind}")
 
     def _stored_field_names(self) -> list[str]:
-        names: list[str] = []
-        for field in self.index_schema.fields:
-            if field.kind is IndexFieldKind.DATETIME:
-                names.append(_datetime_storage_field(field.name))
-            else:
-                names.append(field.name)
-            if field.kind is IndexFieldKind.DENSE_VECTOR:
-                names.append(_present_field(field.name))
-        if not self.index_schema.vector_fields:
-            names.append(_DUMMY_VECTOR_FIELD)
-        names.extend(_sparse_field(field) for field in self.index_schema.bm25_fields)
-        return names
+        return [physical.name for physical in self._physical_fields()]
 
     def _output_fields(self, *, include_vectors: bool) -> list[str]:
         fields: list[str] = []
