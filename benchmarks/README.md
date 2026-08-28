@@ -19,11 +19,13 @@ uv sync
 |---|---|---|
 | LoCoMo | `benchmarks/data/locomo10.json` | [snap-research/locomo](https://github.com/snap-research/locomo) |
 | LongMemEval | `benchmarks/data/longmemeval_s.json` | [xiaowu0162/longmemeval](https://huggingface.co/datasets/xiaowu0162/longmemeval) |
-| EverMemBench | `benchmarks/data/evermembench.json` [^1] | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
-| SubtleMemory | `benchmarks/data/subtlememory/` [^2] | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
+| EverMemBench | `benchmarks/data/evermembench.json` | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
+| SubtleMemory | `benchmarks/data/subtlememory/` | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
 
-[^1]: Download the snapshot to `benchmarks/data/raw/EverMemBench-Dynamic/`, then run `python -m benchmarks.adapters.evermembench` once.
-[^2]: Keep the `persona_0` .. `persona_9` directory layout.
+> **EverMemBench** — download the snapshot to `benchmarks/data/raw/EverMemBench-Dynamic/`,
+> then run `python -m benchmarks.adapters.evermembench` once.
+>
+> **SubtleMemory** — keep the `persona_0` .. `persona_9` directory layout.
 
 ## 3. Configure the environment
 
@@ -87,6 +89,25 @@ benchmarks/results/<Dataset>/<run>/
 
 `run_spec.json` records the models actually served and the `everalgo` package
 versions, which determine what a store contains.
+
+## 6. Results
+
+Each benchmark's published number, produced by the configuration in
+`benchmarks/configs/<dataset>.toml`.
+
+| Benchmark | Questions | Accuracy | Decider | Answer model |
+|---|---|---|---|---|
+| LoCoMo | 1,540 | **94.42** | `deepseek/deepseek-v4-flash-0731` | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
+
+> **EverMemBench** — scores as the mean of its nine category columns, which is
+> how the benchmark reports it.
+>
+> **SubtleMemory** — routes each question between two answer contracts on whether
+> fact extraction found a conflict; the adapter does this automatically.
+
 
 ---
 

@@ -19,11 +19,13 @@ uv sync
 |---|---|---|
 | LoCoMo | `benchmarks/data/locomo10.json` | [snap-research/locomo](https://github.com/snap-research/locomo) |
 | LongMemEval | `benchmarks/data/longmemeval_s.json` | [xiaowu0162/longmemeval](https://huggingface.co/datasets/xiaowu0162/longmemeval) |
-| EverMemBench | `benchmarks/data/evermembench.json` [^1] | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
-| SubtleMemory | `benchmarks/data/subtlememory/` [^2] | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
+| EverMemBench | `benchmarks/data/evermembench.json` | [EverMind-AI/EverMemBench-Dynamic](https://huggingface.co/datasets/EverMind-AI/EverMemBench-Dynamic) |
+| SubtleMemory | `benchmarks/data/subtlememory/` | [Yummytanmo/SubtleMemory](https://huggingface.co/datasets/Yummytanmo/SubtleMemory) |
 
-[^1]: 将快照下载到 `benchmarks/data/raw/EverMemBench-Dynamic/`,然后执行一次 `python -m benchmarks.adapters.evermembench`。
-[^2]: 保留 `persona_0` .. `persona_9` 目录结构。
+> **EverMemBench** —— 将快照下载到 `benchmarks/data/raw/EverMemBench-Dynamic/`,
+> 然后执行一次 `python -m benchmarks.adapters.evermembench`。
+>
+> **SubtleMemory** —— 保留 `persona_0` .. `persona_9` 目录结构。
 
 ## 3. 配置环境
 
@@ -85,6 +87,23 @@ benchmarks/results/<Dataset>/<run>/
 ```
 
 `run_spec.json` 记录实际提供服务的模型,以及决定库内容的 `everalgo` 包版本。
+
+## 6. 结果
+
+各评测的已发表数字,由 `benchmarks/configs/<dataset>.toml` 的配置产出。
+
+| 评测 | 题量 | 准确率 | decider | 答题模型 |
+|---|---|---|---|---|
+| LoCoMo | 1,540 | **94.42** | `deepseek/deepseek-v4-flash-0731` | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
+
+> **EverMemBench** —— 按其九个类目列的均值计分,这是该评测自身的报告方式。
+>
+> **SubtleMemory** —— 按事实抽取是否发现冲突,在两套答题契约之间逐题路由,
+> 适配器自动完成。
+
 
 ---
 

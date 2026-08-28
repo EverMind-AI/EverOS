@@ -97,7 +97,7 @@ EVEROS_PROFILE_SUBJECT = "sender"       # one profile per speaker: the owner is 
 
 # --- ANSWER ----------------------------------------------------------------
 [answer]
-model = "openai/gpt-4.1-mini"
+model = "google/gemini-3-flash-preview"
 temperature = 0.0
 max_tokens = 1000
 timeout = 300.0

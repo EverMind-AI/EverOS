@@ -117,7 +117,7 @@ def test_the_longmemeval_baseline_still_names_the_reference_models() -> None:
     # deleted `longmemeval_qwen38.toml` leaked `qwen3.8-27b` into this baseline once;
     # pinning the default here is what turns that class of drift back into a failure.
     assert base["decider_model"] == "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
-    assert base["answer"]["model"] == "openai/gpt-4.1-mini"
+    assert base["answer"]["model"] == "google/gemini-3.6-flash"
     assert base["providers"] == {}
 
 

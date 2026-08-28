@@ -15,7 +15,7 @@ batch_size = 50                         # messages per /memory/add call
 cascade_timeout = 7200                  # seconds to wait for extraction to drain before a conversation counts as done
 backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
 backbone_base_url = ""                  # empty = OpenRouter
-decider_model = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
+decider_model = "${BENCH_DECIDER_MODEL:-deepseek/deepseek-v4-flash-0731}"
                                         # model, which is the single-model setup that
                                         # works with no extra configuration. Our
                                         # published numbers used qwen3.6-27B here; set

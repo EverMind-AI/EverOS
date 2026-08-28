@@ -48,7 +48,7 @@ EVEROS_PROFILE_EXTRACTION_INTERVAL = "50"  # rewrite the profile every 50th epis
 
 # --- ANSWER ----------------------------------------------------------------
 [answer]
-model = "openai/gpt-4.1-mini"
+model = "google/gemini-3.6-flash"
 temperature = 0.0
 max_tokens = 32768
 timeout = 300.0
