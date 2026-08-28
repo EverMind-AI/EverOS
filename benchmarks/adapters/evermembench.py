@@ -17,11 +17,16 @@ separation. Reproduce that check after touching this function.
 
 from __future__ import annotations
 
+import argparse
+import collections
 import json
 import os
 import pathlib
 import re
+from collections.abc import Iterator
+from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from ._profile import render_profile_lines, with_profile_block
@@ -32,7 +37,7 @@ name = "evermembench"
 # The dataset's raw release, needed only to recover session NAMES (the converted
 # file keeps dia-ids). Read from the environment so this file names the input
 # instead of carrying one machine's copy of it; `EVERMEMBENCH_RAW_ROOT` overrides,
-# and the default is where `convert_evermembench.py` puts it.
+# and the default is where the converter in this module puts it.
 # `or`, not `.get(k, default)`: the shipped .env.example declares this key EMPTY so the
 # default wins, and `.get` returns "" for a key that is set-but-empty. That made RAW_ROOT
 # the empty string, so every path became "/01/dialogue.json" -- absolute, rooted at /.
@@ -53,24 +58,46 @@ def _group_order(group: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-@lru_cache(maxsize=8)
-def _session_index_map(topic: str, raw_root: str) -> tuple[tuple[int, str], ...]:
+def iter_raw_sessions(
+    topic: str, raw_root: str | pathlib.Path
+) -> Iterator[tuple[int, str, str, list[dict[str, Any]]]]:
+    """Yield ``(session_index, date, group, messages)`` from the raw release.
+
+    One session per non-empty (date, group) pair, ordered by date then by group
+    NUMBER, numbered from 1. This is the whole of EverMemBench's session identity,
+    and both readers of the raw release go through here: the converter that writes
+    `evermembench.json`, and `_session_index_map`, which translates the gold
+    session names the QA cites into the positional names the store uses.
+
+    They used to spell the rule separately -- the converter numbering forward and
+    rolling back on an all-blank session, this one skipping it up front. Equivalent
+    on the released data (verified: 3,570 sessions either way), but a rule that
+    decides gold alignment should not be written down twice, because the failure
+    when they drift is silent: every session id shifts by one and gold matches the
+    wrong session while every stage still reports success.
+    """
     rows = json.loads(
         pathlib.Path(f"{raw_root}/{topic}/dialogue.json").read_text(encoding="utf-8")
     )
-    out: list[tuple[int, str]] = []
     idx = 0
     for row in sorted(rows, key=lambda r: r["date"]):
         date = row["date"]
         for group in sorted(row["dialogues"], key=_group_order):
             msgs = row["dialogues"][group]
             if not isinstance(msgs, list) or not msgs:
-                continue
+                continue  # a group can be null on a given date
             if not any((m.get("dialogue") or "") for m in msgs):
-                continue
+                continue  # present but entirely blank: carries no memory
             idx += 1
-            out.append((idx, f"{topic}_{group.replace(' ', '_')}_{date}"))
-    return tuple(out)
+            yield idx, date, group, msgs
+
+
+@lru_cache(maxsize=8)
+def _session_index_map(topic: str, raw_root: str) -> tuple[tuple[int, str], ...]:
+    return tuple(
+        (idx, f"{topic}_{group.replace(' ', '_')}_{date}")
+        for idx, date, group, _ in iter_raw_sessions(topic, raw_root)
+    )
 
 
 # Sessions are laid out one day apart, messages 30s apart. Only the ORDER is
@@ -137,7 +164,7 @@ def categories() -> dict[str, str]:
 def sessions_of(unit: dict) -> list[dict]:
     """Sessions come pre-flattened as session_<N> / session_<N>_date_time.
 
-    convert_evermembench.py already collapsed (date, group) pairs into that numbering
+    The converter below already collapsed (date, group) pairs into that numbering
     and stamped every turn with its dia_id, which is exactly what gold_of() resolves
     against -- so this reads the converted structure rather than re-deriving the order.
     """
@@ -487,3 +514,212 @@ def parse_judge_label(content: str) -> str:
         upper = content.upper()
         label = "CORRECT" if "CORRECT" in upper and "WRONG" not in upper else "WRONG"
     return label
+
+
+# --------------------------------------------------------------------- convert
+# The raw release -> the `evermembench.json` this adapter reads. It lives here
+# rather than in its own script because it shares `iter_raw_sessions` above with
+# the gold-session translation: one rule, one place.
+#
+# Run it as:  python -m benchmarks.adapters.evermembench
+ALL_TOPICS = ["01", "02", "03", "04", "05"]
+_BENCH = pathlib.Path(__file__).resolve().parent.parent
+_RAW_DYNAMIC = _BENCH / "data" / "raw" / "EverMemBench-Dynamic"
+
+
+# LoCoMo's own timestamp shape, e.g. "1:56 pm on 8 May, 2023". Kept identical to
+# EverMemOS/evaluation/src/converters/longmemeval_converter.py so the string
+# round-trips through test_locomo._parse_session_timestamp.
+_OUT_TS = "%-I:%M %p on %-d %B, %Y"
+_IN_TS = "%Y-%m-%d %H:%M:%S"
+
+
+def format_timestamp(src: str) -> str:
+    """Convert "2025-01-09 09:32:15" -> "9:32 am on 9 January, 2025"."""
+    dt = datetime.strptime(src.strip(), _IN_TS)
+    out = dt.strftime(_OUT_TS).lower()
+    # Re-capitalise the month ("9:32 am on 9 january, 2025" -> "... January ...").
+    parts = out.split(" ")
+    parts[4] = parts[4].capitalize()
+    return " ".join(parts)
+
+
+def parse_message_index(spec: str) -> list[int]:
+    """Expand a reference spec like "1, 4-6, 8" into [1, 4, 5, 6, 8]."""
+    out: list[int] = []
+    for chunk in str(spec).split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            lo, hi = chunk.split("-", 1)
+            out.extend(range(int(lo), int(hi) + 1))
+        else:
+            out.append(int(chunk))
+    return out
+
+
+def convert_topic(topic: str, raw_root: Path) -> tuple[dict, dict]:
+    """Convert one topic into a locomo_style conversation + a stats dict."""
+    qa_src = json.loads(
+        (raw_root / topic / f"qa_{topic}.json").read_text(encoding="utf-8")
+    )
+
+    conversation: dict = {}
+    # (date, group) -> {message_index: dia_id}, used to resolve QA evidence.
+    dia_lookup: dict[tuple[str, str], dict[int, str]] = {}
+    speaker_msgs: collections.Counter[str] = collections.Counter()
+    session_idx = 0
+    n_msgs = 0
+    n_chars = 0
+
+    # 1. Sessions come from the one shared walk; see iter_raw_sessions.
+    for session_idx, date, group, msgs in iter_raw_sessions(topic, raw_root):
+        turns = []
+        per_index: dict[int, str] = {}
+        for msg in msgs:
+            text = msg.get("dialogue") or ""
+            if not text:
+                continue  # the loader would drop these anyway
+            dia_id = f"D{session_idx}:{msg['message_index']}"
+            per_index[int(msg["message_index"])] = dia_id
+            turns.append({"speaker": msg["speaker"], "dia_id": dia_id, "text": text})
+            speaker_msgs[msg["speaker"]] += 1
+            n_chars += len(text)
+        # iter_raw_sessions already dropped all-blank pairs, so `turns` is
+        # non-empty here; the old rollback that made that true is gone with it.
+        conversation[f"session_{session_idx}"] = turns
+        conversation[f"session_{session_idx}_date_time"] = format_timestamp(
+            msgs[0]["time"]
+        )
+        dia_lookup[(date, group)] = per_index
+        n_msgs += len(turns)
+
+    # 2. speaker_a / speaker_b are contract-mandatory; pick the two loudest.
+    top = [s for s, _ in speaker_msgs.most_common(2)]
+    while len(top) < 2:  # degenerate topic guard
+        top.append(f"speaker_{len(top)}")
+    conversation["speaker_a"], conversation["speaker_b"] = top[0], top[1]
+
+    # 3. QA: resolve R -> dia_ids, derive category from the id prefix.
+    qa: list[dict] = []
+    unresolved = 0
+    for item in qa_src:
+        evidence: list[str] = []
+        for ref in item.get("R") or []:
+            per_index = dia_lookup.get((ref["date"], ref["group"]))
+            if per_index is None:
+                unresolved += 1
+                continue
+            for mi in parse_message_index(ref["message_index"]):
+                dia_id = per_index.get(mi)
+                if dia_id is None:
+                    unresolved += 1
+                else:
+                    evidence.append(dia_id)
+        prefix = re.match(r"^(.+?)_Top", item["id"])
+        entry = {
+            "question_id": item["id"],
+            "question": item["Q"],
+            "answer": item["A"],
+            "evidence": evidence,
+            "category": prefix.group(1) if prefix else "unknown",
+        }
+        options = item.get("options")
+        if options:
+            entry["options"] = options
+            # A/B/C/D letter -> option prose, for a free-form judge.
+            entry["answer_text"] = options.get(str(item["A"]).strip(), item["A"])
+        qa.append(entry)
+
+    conv = {
+        "qa": qa,
+        "conversation": conversation,
+        "sample_id": topic,
+        "speakers": sorted(speaker_msgs),
+    }
+    stats = {
+        "topic": topic,
+        "sessions": session_idx,
+        "messages": n_msgs,
+        "chars": n_chars,
+        "speakers": len(speaker_msgs),
+        "qa": len(qa),
+        "qa_src": len(qa_src),
+        "mcq": sum(1 for q in qa if q.get("options")),
+        "evidence_refs": sum(len(q["evidence"]) for q in qa),
+        "unresolved_refs": unresolved,
+        "categories": collections.Counter(q["category"] for q in qa),
+    }
+    return conv, stats
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--topics", nargs="+", default=ALL_TOPICS)
+    ap.add_argument("--raw-root", default=str(_RAW_DYNAMIC))
+    ap.add_argument("--out", default=str(_BENCH / "data" / "evermembench.json"))
+    ap.add_argument(
+        "--also-write",
+        default=str(_BENCH / "data" / "evermembench.json"),
+        help="second identical path (the harness's default name); '' to skip",
+    )
+    args = ap.parse_args()
+
+    raw_root = Path(args.raw_root)
+    out: list[dict] = []
+    totals: collections.Counter[str] = collections.Counter()
+    cats: collections.Counter[str] = collections.Counter()
+
+    print(
+        f"{'topic':<7}{'sessions':>9}{'msgs':>8}{'spk':>5}"
+        f"{'chars':>12}{'QA':>6}{'MCQ':>6}{'evid':>8}{'unres':>7}"
+    )
+    for topic in args.topics:
+        conv, st = convert_topic(topic, raw_root)
+        out.append(conv)
+        print(
+            f"{topic:<7}{st['sessions']:>9}{st['messages']:>8}{st['speakers']:>5}"
+            f"{st['chars']:>12,}{st['qa']:>6}{st['mcq']:>6}"
+            f"{st['evidence_refs']:>8}{st['unresolved_refs']:>7}"
+        )
+        for k in (
+            "sessions",
+            "messages",
+            "chars",
+            "qa",
+            "mcq",
+            "evidence_refs",
+            "unresolved_refs",
+        ):
+            totals[k] += st[k]
+        cats.update(st["categories"])
+        assert st["qa"] == st["qa_src"], f"QA count drift on topic {topic}"
+
+    print(
+        f"\nTOTAL conversations={len(out)} sessions={totals['sessions']:,} "
+        f"messages={totals['messages']:,} chars={totals['chars']:,} "
+        f"(~{totals['chars'] // 4:,} tokens) QA={totals['qa']:,} "
+        f"MCQ={totals['mcq']:,} evidence_dia_ids={totals['evidence_refs']:,} "
+        f"unresolved={totals['unresolved_refs']}"
+    )
+    print("categories: " + ", ".join(f"{k}={v}" for k, v in cats.most_common()))
+
+    for path in [args.out] + ([args.also_write] if args.also_write else []):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(
+            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"wrote {path} ({Path(path).stat().st_size / 1e6:.1f} MB)")
+    print(
+        "\nowner mapping for build: list index i -> topic "
+        f"{{{', '.join(f'{i}:{t}' for i, t in enumerate(args.topics))}}}"
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+
+if __name__ == "__main__":
+    main()

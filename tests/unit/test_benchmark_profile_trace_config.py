@@ -137,3 +137,20 @@ def test_every_benchmark_disables_the_inotify_watcher(name: str) -> None:
     assert raw["retrieval_env"]["EVEROS_DISABLE_CASCADE_WATCHER"] == "1"
     # The worker must survive: this is an ingesting run.
     assert "EVEROS_DISABLE_CASCADE" not in raw["retrieval_env"]
+
+
+def test_smoke_does_not_discard_an_explicit_conv_list() -> None:
+    """``--smoke`` narrows a run; it must not silently replace ``--conv``.
+
+    It used to assign ``[0, 1]`` unconditionally, so ``--conv 0 --smoke`` ran two
+    conversations and scored 20 questions while the operator had asked for one. The
+    override left no trace in the output -- the banner printed the conversations it
+    had chosen, not the ones it was given -- so the only way to catch it was to count
+    graded rows against what you expected.
+    """
+    src = (_BENCH / "run.py").read_text()
+    i = src.index("if args.smoke and not _conv_given:")
+    assert "_conv_given = args.conv is not None" in src[:i]
+    # The guard has to sit on the assignment itself, not merely exist somewhere.
+    assert src[i : i + 200].lstrip().startswith("if args.smoke and not _conv_given:")
+    assert "if args.smoke:\n        args.conv = [0, 1]" not in src

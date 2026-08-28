@@ -3713,8 +3713,13 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
 
     # Resolve --conv against the config: `all` and bare ranges both need the declared
     # conversation count, which only the config knows.
+    _conv_given = args.conv is not None
     args.conv = _parse_conv_spec(args.conv, config.conversations)
-    if args.smoke:
+    # --smoke narrows the run, so it picks the conversations only when the caller did
+    # not. It used to assign [0, 1] unconditionally, which threw away an explicit
+    # --conv without saying so: `--conv 0 --smoke` ran two conversations and reported
+    # 20 questions, and the only way to notice was to count the rows.
+    if args.smoke and not _conv_given:
         args.conv = [0, 1]
 
     # Model overrides exist so a re-run under a different backbone does not need a whole
