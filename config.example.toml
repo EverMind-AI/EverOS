@@ -56,19 +56,15 @@ max_concurrent  = 5
 #
 # [lancedb]
 # read_consistency_seconds = 5.0
-
-# ── Optional Milvus derived index ─────────────────────
-# Markdown remains the source of truth. Set the index backend to Milvus
-# when you want the rebuildable vector/BM25 index to live in an external
-# Milvus Server or Zilliz Cloud deployment. Embedded Milvus Lite and local
-# database paths are not supported.
 #
 # [index]
-# backend = "milvus"
+# backend = "lancedb"  # or "milvus"
 #
+# # Required only when index.backend = "milvus". Install with:
+# #   pip install "everos[milvus]"
 # [milvus]
-# uri = "http://localhost:19530"   # required remote endpoint
-# token = ""                       # required for Zilliz Cloud/auth-enabled Milvus
-# db_name = ""                     # use a dedicated database when available
+# uri = "http://127.0.0.1:19530"  # Milvus Server or Zilliz Cloud endpoint
+# token = ""                       # e.g. "root:Milvus" or cloud token
+# db_name = ""
 # consistency_level = "Session"
-# collection_prefix = "everos"     # make unique on a shared database
+# collection_prefix = "everos"

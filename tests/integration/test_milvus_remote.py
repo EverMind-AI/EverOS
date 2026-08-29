@@ -100,6 +100,7 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         UserProfile,
         episode_repo,
         eq,
+        is_null,
         user_profile_repo,
     )
     from everos.memory.search import FilterNode
@@ -176,7 +177,6 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         sort_by="timestamp",
         page=1,
         page_size=1,
-        max_fetch=10,
     )
     assert total == 2
     assert len(page) == 1
@@ -208,10 +208,31 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         assert updated_profile is not None
         assert updated_profile.summary == "updated profile"
 
+    # Exercise the logical-null mapping for physical Milvus vector fields and
+    # the iterator-backed scan path. This also guards against reintroducing the
+    # old implicit 100-row maintenance cap.
+    null_vector_rows = []
+    for index in range(101):
+        row = _episode(
+            row_id=f"u1_null_{index}",
+            entry_id=f"null_{index}",
+            session_id="null-vectors",
+            text=f"unembedded memory {index}",
+            vector_axis=0,
+            subject_axis=0,
+            timestamp=now + dt.timedelta(minutes=index + 1),
+        )
+        null_vector_rows.append(
+            row.model_copy(update={"vector": None, "subject_vector": None})
+        )
+    await episode_repo.upsert(null_vector_rows)
+    assert await episode_repo.count_where(is_null("vector")) == 101
+    assert len(await episode_repo.scan()) == 103
+
     assert (
         await episode_repo.delete_by_md_path(
             "test_app/test_project/users/u1/episodes/day.md"
         )
-        == 2
+        == 103
     )
     assert await episode_repo.count() == 0

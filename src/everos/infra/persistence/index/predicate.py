@@ -1,4 +1,4 @@
-"""Compatibility re-exports for the shared derived-index predicate AST."""
+"""Public predicate API for the derived-index boundary."""
 
 from everos.infra.persistence.predicate import All as All
 from everos.infra.persistence.predicate import AnyOf as AnyOf

@@ -17,7 +17,11 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import KnowledgeTopic, knowledge_topic_repo
+from everos.infra.persistence.index import (
+    KnowledgeTopic,
+    Predicate,
+    knowledge_topic_repo,
+)
 
 from .base import (
     RecallerDeps,
@@ -66,7 +70,7 @@ class KnowledgeTopicRecaller:
         self._deps = deps
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -91,7 +95,7 @@ class KnowledgeTopicRecaller:
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Cosine ANN over the ``summary`` vector (1024-d)."""
         if not vector:

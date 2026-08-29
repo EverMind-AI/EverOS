@@ -18,10 +18,8 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.lancedb import Episode
-from everos.infra.persistence.lancedb.predicate import render_predicate
+from everos.infra.persistence.index import Comparison, Episode, Predicate
 from everos.infra.persistence.markdown import EpisodeWriter
-from everos.infra.persistence.predicate import Predicate
 from everos.memory.cascade.handlers import HandlerDeps
 from everos.memory.cascade.handlers.episode import EpisodeHandler
 
@@ -61,11 +59,8 @@ class _FakeEpisodeRepo:
         self.rows: list[Episode] = []
 
     async def find_where(self, where: Predicate, *, limit: int = 100) -> list[Episode]:
-        # Honour only the md_path = '...' filter the handler emits.
-        rendered = render_predicate(where)
-        prefix = "md_path = '"
-        if rendered.startswith(prefix):
-            md_path = rendered[len(prefix) :].rstrip("'")
+        if isinstance(where, Comparison) and where.field == "md_path":
+            md_path = str(where.value)
             return [r for r in self.rows if r.md_path == md_path]
         return []
 
@@ -78,7 +73,7 @@ class _FakeEpisodeRepo:
         self.rows = list(by_id.values())
 
     async def delete(self, predicate: Predicate) -> None:
-        self.deletes.append(render_predicate(predicate))
+        self.deletes.append(predicate)
 
     async def delete_by_md_path(self, md_path: str) -> int:
         before = len(self.rows)
@@ -107,7 +102,7 @@ def stub_embedder(monkeypatch: pytest.MonkeyPatch) -> _StubEmbedder:
 
 @pytest.fixture
 def fake_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeEpisodeRepo:
-    """Swap the class-level ``lance_repo`` on EpisodeHandler.
+    """Swap the class-level ``index_repo`` on EpisodeHandler.
 
     After the BaseDailyLogHandler refactor, the repo binding is a
     ClassVar resolved at class-definition time; patching the module
@@ -116,7 +111,7 @@ def fake_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeEpisodeRepo:
     from everos.memory.cascade.handlers.episode import EpisodeHandler
 
     repo = _FakeEpisodeRepo()
-    monkeypatch.setattr(EpisodeHandler, "lance_repo", repo)
+    monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
     return repo
 
 

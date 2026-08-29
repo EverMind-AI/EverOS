@@ -192,11 +192,17 @@ class MilvusRepoBase[T: BaseModel]:
     async def optimize(self, *, cleanup_older_than: dt.timedelta | None = None) -> None:
         """Milvus indexes and compaction are service-managed."""
 
+    async def prune(self, older_than: dt.timedelta) -> None:
+        """Milvus compaction and retention are service-managed."""
+
     async def rebuild_indexes(self) -> None:
         """Milvus AUTOINDEX maintenance is service-managed."""
 
     async def count(self) -> int:
         return await self._count_where(None)
+
+    async def count_where(self, where: Predicate | None = None) -> int:
+        return await self._count_where(where)
 
     async def _count_where(self, where: Predicate | None) -> int:
         await self.ensure_collection()
@@ -231,6 +237,46 @@ class MilvusRepoBase[T: BaseModel]:
         rows = await self.find_where(where, limit=1)
         return rows[0] if rows else None
 
+    async def scan(self, where: Predicate | None = None) -> list[T]:
+        """Stream every matching row without a fixed query-window cap."""
+        rows = await self._scan_raw(where, include_vectors=True)
+        return [self._model_from_milvus(row) for row in rows]
+
+    async def _scan_raw(
+        self,
+        where: Predicate | None,
+        *,
+        include_vectors: bool,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read through Milvus' iterator, optionally stopping at a soft cap.
+
+        A normal ``query(limit=...)`` cannot cross Milvus' 16,384-row result
+        window. The public pagination contract deliberately allows a 20,000
+        candidate window, so both maintenance scans and paginated reads must
+        use the iterator API.
+        """
+        await self.ensure_collection()
+        client = await get_client()
+        iterator = await _run(
+            client.query_iterator,
+            self.collection_name,
+            batch_size=1000,
+            limit=-1,
+            filter=self._expr(where),
+            output_fields=self._output_fields(include_vectors=include_vectors),
+        )
+        rows: list[dict[str, Any]] = []
+        try:
+            while batch := await _run(iterator.next):
+                rows.extend(batch)
+                if max_rows is not None and len(rows) >= max_rows:
+                    del rows[max_rows:]
+                    break
+        finally:
+            await _run(iterator.close)
+        return rows
+
     async def find_where_paginated(
         self,
         where: Predicate,
@@ -242,7 +288,11 @@ class MilvusRepoBase[T: BaseModel]:
         max_fetch: int = 20_000,
     ) -> tuple[list[T], int]:
         total = await self._count_where(where)
-        raw = await self._query_raw(where, limit=max_fetch, include_vectors=True)
+        raw = await self._scan_raw(
+            where,
+            include_vectors=True,
+            max_rows=max_fetch,
+        )
         if total > len(raw):
             logger.warning(
                 "milvus_find_where_paginated_truncated",
@@ -690,6 +740,7 @@ class MilvusRepoBase[T: BaseModel]:
         return render_predicate(
             where,
             datetime_fields=self.index_schema.datetime_fields,
+            vector_fields={field.name for field in self.index_schema.vector_fields},
         )
 
 

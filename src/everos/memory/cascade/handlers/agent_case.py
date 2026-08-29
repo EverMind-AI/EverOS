@@ -42,7 +42,7 @@ class AgentCaseHandler(BaseDailyLogHandler):
     """Cascade handler for ``agents/<a>/.cases/agent_case-*.md``."""
 
     kind = "agent_case"
-    lance_repo = agent_case_repo
+    index_repo = agent_case_repo
     content_change_keys = (
         "section:TaskIntent",
         "section:Approach",

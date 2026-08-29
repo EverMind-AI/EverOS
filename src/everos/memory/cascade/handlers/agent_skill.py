@@ -64,7 +64,7 @@ class AgentSkillHandler(Handler):
     ``agents/<a>/skills/skill_<n>/SKILL.md`` + ``references/*.md``."""
 
     kind = "agent_skill"
-    lance_repo: ClassVar[Any] = agent_skill_repo
+    index_repo: ClassVar[Any] = agent_skill_repo
     """Exposed for ``CascadeWorker._optimize_touched_kinds`` — see the
     matching note on :class:`UserProfileHandler`."""
 

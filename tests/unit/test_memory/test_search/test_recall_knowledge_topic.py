@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.index import KnowledgeTopic
+from everos.infra.persistence.index import KnowledgeTopic, all_of, eq
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.recall.knowledge_topic import KnowledgeTopicRecaller
 
@@ -64,7 +64,7 @@ def recaller() -> KnowledgeTopicRecaller:
     return KnowledgeTopicRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
 
 
-_WHERE = "app_id = 'app' AND project_id = 'proj'"
+_WHERE = all_of(eq("app_id", "app"), eq("project_id", "proj"))
 
 
 # ---------------------------------------------------------------------------

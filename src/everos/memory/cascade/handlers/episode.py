@@ -50,7 +50,7 @@ class EpisodeHandler(BaseDailyLogHandler):
     """Cascade handler for ``users/<u>/episodes/episode-*.md``."""
 
     kind = "episode"
-    lance_repo = episode_repo
+    index_repo = episode_repo
     content_change_keys = (
         "section:Subject",
         "section:Summary",

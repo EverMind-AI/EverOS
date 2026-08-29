@@ -59,10 +59,7 @@ class AtomicFactRecaller:
         if not terms:
             return []
         rows = await atomic_fact_repo.sparse_search(
-            terms,
-            where,
-            columns=AtomicFact.BM25_FIELDS,
-            limit=limit,
+            terms, where, columns=AtomicFact.BM25_FIELDS, limit=limit
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
@@ -165,10 +162,12 @@ class AtomicFactRecaller:
     ) -> list[dict[str, Any]]:
         """Construct and execute the LanceDB query for parent_id IN (...)."""
         full_where = all_of(where, one_of("parent_id", list(parent_to_eps)))
-        # Milvus server / Zilliz Cloud reject search topK values above 1024.
-        # The fact expansion only needs a bounded candidate pool for top-N
-        # competition, so keep the same cap for every derived-index backend.
-        limit = min(per_episode * max(len(parent_to_eps), 1), _MAX_FACT_RECALL_LIMIT)
+        # Keep one portable ceiling: Milvus/Zilliz reject larger search topK
+        # values, while fact expansion only needs a bounded competition pool.
+        limit = min(
+            per_episode * max(len(parent_to_eps), 1),
+            _MAX_FACT_RECALL_LIMIT,
+        )
         if query_vector:
             return await atomic_fact_repo.dense_search(
                 query_vector, full_where, limit=limit

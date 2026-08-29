@@ -1,4 +1,9 @@
-"""Backend-neutral predicate tree shared by derived-index adapters."""
+"""Backend-neutral predicate tree for rebuildable derived indexes.
+
+Application and memory code construct these nodes.  A storage adapter owns
+the rendering into its physical query language, so backend syntax never leaks
+above :mod:`everos.infra.persistence`.
+"""
 
 from __future__ import annotations
 

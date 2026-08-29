@@ -335,17 +335,17 @@ class _FakeLanceRepo:
 
 
 class _OkHandlerWithRepo(_OkHandler):
-    """OK handler exposing a fake ``lance_repo`` for scheduler tests."""
+    """OK handler exposing a fake ``index_repo`` for scheduler tests."""
 
     def __init__(self, repo: _FakeLanceRepo) -> None:
         super().__init__()
-        self.lance_repo = repo
+        self.index_repo = repo
 
 
-async def test_schedule_optimize_noop_when_handler_has_no_lance_repo(
+async def test_schedule_optimize_noop_when_handler_has_no_index_repo(
     patched_repo: _FakeRepo,
 ) -> None:
-    """Test stubs without ``lance_repo`` should not even register state."""
+    """Test stubs without ``index_repo`` should not even register state."""
     w = CascadeWorker(
         {"episode": _OkHandler()},
         retry_backoff_seconds=0,
@@ -515,7 +515,7 @@ async def test_optimize_failure_does_not_crash_drain_loop(
     class _HandlerWithFailingRepo(_OkHandler):
         def __init__(self) -> None:
             super().__init__()
-            self.lance_repo = _FailingRepo()
+            self.index_repo = _FailingRepo()
 
     patched_repo.batch = [_Row(md_path="a.md")]
     w = CascadeWorker(

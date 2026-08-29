@@ -35,6 +35,7 @@ def render_predicate(
     predicate: Predicate | None,
     *,
     datetime_fields: Collection[str] = (),
+    vector_fields: Collection[str] = (),
 ) -> str:
     """Render a predicate using Milvus operators and physical field names."""
     if predicate is None:
@@ -53,11 +54,13 @@ def render_predicate(
             f"{_literal(predicate.value)})"
         )
     if isinstance(predicate, IsNull):
+        if predicate.field in vector_fields:
+            return f"{_field(predicate.field, ())}__present == false"
         return f"{_field(predicate.field, datetime_fields)} is null"
     if isinstance(predicate, All):
-        return _render_group(predicate.children, "and", datetime_fields)
+        return _render_group(predicate.children, "and", datetime_fields, vector_fields)
     if isinstance(predicate, AnyOf):
-        return _render_group(predicate.children, "or", datetime_fields)
+        return _render_group(predicate.children, "or", datetime_fields, vector_fields)
     raise TypeError(f"unsupported predicate: {type(predicate).__name__}")
 
 
@@ -65,9 +68,15 @@ def _render_group(
     children: tuple[Predicate, ...],
     operator: str,
     datetime_fields: Collection[str],
+    vector_fields: Collection[str],
 ) -> str:
     rendered = [
-        render_predicate(child, datetime_fields=datetime_fields) for child in children
+        render_predicate(
+            child,
+            datetime_fields=datetime_fields,
+            vector_fields=vector_fields,
+        )
+        for child in children
     ]
     rendered = [item for item in rendered if item]
     if not rendered:

@@ -50,7 +50,6 @@ def compile_filters_for_get_backends(
     app_id: str = "default",
     project_id: str = "default",
 ) -> Predicate:
-    """Compile ``/get`` filters for every derived index backend."""
     return compile_filters_for_backends(
         filters,
         owner_id=owner_id,

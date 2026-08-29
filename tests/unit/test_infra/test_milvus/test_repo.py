@@ -7,13 +7,21 @@ import datetime as dt
 import pytest
 
 from everos.config import load_settings
-from everos.infra.persistence.index import Episode, episode_repo, user_profile_repo
+from everos.infra.persistence.index import (
+    Episode,
+    IndexRepository,
+    episode_repo,
+    is_null,
+    user_profile_repo,
+)
 from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.milvus import repository
 from everos.infra.persistence.milvus.milvus_manager import (
     MilvusConfigurationError,
     _resolve_uri,
 )
+from everos.infra.persistence.milvus.predicate import render_predicate
+from everos.infra.persistence.milvus.repos import ALL_REPOS
 from everos.infra.persistence.milvus.repository import (
     MilvusRepoBase,
     MilvusValueLimitError,
@@ -74,6 +82,14 @@ def test_neutral_schema_tracks_every_model_field_and_dense_vector() -> None:
         "vector",
         "subject_vector",
     ]
+    assert all(isinstance(repo, IndexRepository) for repo in ALL_REPOS)
+
+
+def test_null_vector_predicate_targets_presence_marker() -> None:
+    assert (
+        render_predicate(is_null("vector"), vector_fields={"vector"})
+        == "vector__present == false"
+    )
 
 
 def test_record_conversion_stores_every_dense_vector_with_presence() -> None:

@@ -2,8 +2,7 @@
 
 Public API:
     from everos.config import (
-        Settings, MemorySettings, SqliteSettings, IndexSettings, LanceDBSettings,
-        MilvusSettings,
+        Settings, MemorySettings, SqliteSettings, LanceDBSettings,
         LLMSettings, EmbeddingSettings, RerankSettings,
         BoundaryDetectionSettings, CascadeSettings,
         load_settings, resolve_root,

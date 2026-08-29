@@ -6,7 +6,7 @@ between md state and LanceDB state:
 
 * ``frontmatter.entry_count == N``
 * number of ``<!-- entry:... -->`` blocks == N
-* ``lance_repo.count_rows(md_path=...) == N``
+* ``index_repo.count_rows(md_path=...) == N``
 * lance ``entry_id`` set == md ``entry_id`` set
 
 This is the strict counterpart to the loose ``>=`` assertions in

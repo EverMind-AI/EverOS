@@ -18,7 +18,7 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import AgentCase, agent_case_repo
+from everos.infra.persistence.index import AgentCase, Predicate, agent_case_repo
 
 from .base import (
     RecallerDeps,
@@ -38,7 +38,7 @@ class AgentCaseRecaller:
         self._deps = deps
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -52,10 +52,7 @@ class AgentCaseRecaller:
         if not terms:
             return []
         merged_rows = await agent_case_repo.sparse_search(
-            terms,
-            where,
-            columns=AgentCase.BM25_FIELDS,
-            limit=limit,
+            terms, where, columns=AgentCase.BM25_FIELDS, limit=limit
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
@@ -63,7 +60,7 @@ class AgentCaseRecaller:
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         if not vector:
             return []

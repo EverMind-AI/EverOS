@@ -35,7 +35,7 @@ class AtomicFactHandler(BaseDailyLogHandler):
     """Cascade handler for ``users/<u>/.atomic_facts/atomic_fact-*.md``."""
 
     kind = "atomic_fact"
-    lance_repo = atomic_fact_repo
+    index_repo = atomic_fact_repo
     content_change_keys = ("section:Fact",)
     """Only ``Fact`` matters — it's both the embedded text AND the
     BM25 source. Audit inline is excluded."""

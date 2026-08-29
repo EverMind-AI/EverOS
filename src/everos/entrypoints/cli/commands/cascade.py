@@ -15,7 +15,7 @@ without standing up the FastAPI app:
   vectors, build clusters, extract skills. See
   :func:`everos.entrypoints.cli.commands._backfill_cmd.run_backfill`
   for the phase orchestration.
-- ``cascade rebuild`` — drop every business derived-index table and re-index
+- ``cascade rebuild`` — drop every business LanceDB table and re-index
   all md from scratch. Recovery for a drifted / corrupt index; safe
   because md is the source of truth and un-extracted buffered messages
   are preserved. Skips the schema-verify guard (which the drift would
@@ -47,14 +47,11 @@ from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.index import (
-    active_backend,
     connect,
     drop_business_tables,
     ensure_business_indexes,
+    shutdown,
     verify_business_schemas,
-)
-from everos.infra.persistence.index import (
-    shutdown as shutdown_index,
 )
 from everos.infra.persistence.sqlite import (
     dispose_engine,
@@ -71,7 +68,7 @@ logger = get_logger(__name__)
 
 app = typer.Typer(
     name="cascade",
-    help="Inspect and operate the markdown → derived-index sync queue",
+    help="Inspect and operate the md → LanceDB sync queue",
     no_args_is_help=True,
 )
 
@@ -141,7 +138,7 @@ _VERBOSE_OPTION_HELP = (
 async def _runtime(  # type: ignore[no-untyped-def]
     *, verify: bool = True, ensure: bool = True
 ):
-    """Stand up SQLite + the configured index the way the API lifespan would.
+    """Stand up sqlite + lancedb the same way the API lifespan would.
 
     The CLI uses the same lazy, process-wide singletons the API lifespan
     does. They are **per-process**: a running daemon has its own
@@ -167,20 +164,14 @@ async def _runtime(  # type: ignore[no-untyped-def]
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     await connect()
-    if active_backend() == "milvus":
-        if ensure:
-            await ensure_business_indexes()
-        if verify:
-            await verify_business_schemas()
-    else:
-        if verify:
-            await verify_business_schemas()
-        if ensure:
-            await ensure_business_indexes()
+    if verify:
+        await verify_business_schemas()
+    if ensure:
+        await ensure_business_indexes()
     try:
         yield
     finally:
-        await shutdown_index()
+        await shutdown()
         await dispose_engine()
 
 
@@ -460,7 +451,7 @@ def rebuild(
         typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
     ] = False,
 ) -> None:
-    """Rebuild the configured derived index from markdown.
+    """Rebuild the LanceDB index from markdown (recover from schema drift).
 
     **Stop the ``everos server`` first** — this is the one cascade command
     that is not safe alongside a live daemon. It drops and recreates the
@@ -468,13 +459,13 @@ def rebuild(
     the dropped dataset; the command refuses to start while a server holds
     the OME lock.
 
-    Drops every business table or collection and re-indexes all markdown from
+    Drops every business LanceDB table and re-indexes all md from
     scratch. Markdown is the source of truth, so no memory content is
     lost, and this is the safe recovery from a drifted / corrupt
     index (e.g. the ``verify_business_schemas`` startup failure):
 
-    - unlike deleting ``~/.everos/.index/lancedb`` on the default backend, it
-      re-populates already-indexed entries (that command leaves the cascade queue
+    - unlike ``rm -rf ~/.everos/.index/lancedb``, it re-populates
+      already-indexed entries (that command leaves the cascade queue
       marked ``done``, so nothing re-indexes and the index comes back
       empty);
     - unlike ``rm -rf ~/.everos/.index``, it preserves SQLite state that
@@ -485,7 +476,7 @@ def rebuild(
         typer.echo(
             "error: a server (or another exclusive CLI phase) is running on "
             "this memory root.\n"
-            "  cascade rebuild drops and recreates the derived index; a live "
+            "  cascade rebuild drops and recreates the LanceDB tables; a live "
             "daemon holds cached\n"
             "  table handles and would keep writing to the dropped dataset. "
             "Stop `everos server`\n"
@@ -495,7 +486,7 @@ def rebuild(
         raise typer.Exit(code=3)
     if not yes:
         typer.confirm(
-            "Drop all derived-index business data and re-index from markdown? "
+            "Drop all LanceDB business tables and re-index from markdown? "
             "(requires the server to be stopped)",
             abort=True,
         )
@@ -516,7 +507,7 @@ def rebuild(
             typer.echo(f"reset {cleared} cascade queue row(s)")
             dropped = await drop_business_tables()
             typer.echo(
-                f"dropped {len(dropped)} derived-index table(s): "
+                f"dropped {len(dropped)} LanceDB table(s): "
                 f"{', '.join(dropped) or '(none)'}"
             )
             # Recreate the tables (current schema) + FTS indexes.

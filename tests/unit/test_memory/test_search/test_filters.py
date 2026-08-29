@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from everos.infra.persistence.lancedb.predicate import render_predicate as render_lance
-from everos.infra.persistence.milvus.predicate import render_predicate as render_milvus
+from everos.infra.persistence.index.lancedb import render_predicate
 from everos.memory.search import (
     FilterError,
     FilterNode,
@@ -13,12 +12,11 @@ from everos.memory.search import (
 from everos.memory.search import (
     compile_filters as compile_filter_ast,
 )
-from everos.memory.search.filters import compile_filters_for_backends
 
 
 def compile_filters(*args, **kwargs):  # type: ignore[no-untyped-def]
-    """Render the neutral result through LanceDB for legacy syntax assertions."""
-    return render_lance(compile_filter_ast(*args, **kwargs))
+    """Render the neutral AST through LanceDB for syntax assertions."""
+    return render_predicate(compile_filter_ast(*args, **kwargs))
 
 
 # ── Base injection ───────────────────────────────────────────────────────
@@ -275,40 +273,3 @@ def test_compile_filters_excludes_deprecated_by_for_user() -> None:
 def test_compile_filters_omits_deprecated_by_for_agent() -> None:
     result = compile_filters(None, owner_id="agent_1", owner_type="agent")
     assert "deprecated_by" not in result
-
-
-# ── Backend-specific rendering ─────────────────────────────────────────
-
-
-def test_compile_filters_for_backends_preserves_lancedb_default() -> None:
-    filters = compile_filters_for_backends(None, owner_id="u_a", owner_type="user")
-    lancedb = render_lance(filters)
-    milvus = render_milvus(filters)
-    assert "owner_id = 'u_a'" in lancedb
-    assert 'owner_id == "u_a"' in milvus
-    assert "deprecated_by IS NULL" in lancedb
-    assert "deprecated_by is null" in milvus
-
-
-def test_compile_filters_for_milvus_timestamp_and_array() -> None:
-    node = FilterNode.model_validate(
-        {"timestamp": {"gte": 1704067200000}, "sender_id": "u_jason"}
-    )
-    filters = compile_filters_for_backends(node, owner_id="u_a", owner_type="user")
-    milvus = render_milvus(filters, datetime_fields={"timestamp"})
-    lancedb = render_lance(filters)
-    assert "timestamp_ms >= 1704067200000" in milvus
-    assert 'array_contains(sender_ids, "u_jason")' in milvus
-    assert "TIMESTAMP '" in lancedb
-    assert "array_has(sender_ids, 'u_jason')" in lancedb
-
-
-def test_compile_filters_for_milvus_escapes_string_literals() -> None:
-    node = FilterNode.model_validate({"session_id": "ses's"})
-    filters = compile_filters_for_backends(node, owner_id="al'ice", owner_type="user")
-    milvus = render_milvus(filters)
-    lancedb = render_lance(filters)
-    assert 'owner_id == "al\'ice"' in milvus
-    assert 'session_id == "ses\'s"' in milvus
-    assert "owner_id = 'al''ice'" in lancedb
-    assert "session_id = 'ses''s'" in lancedb

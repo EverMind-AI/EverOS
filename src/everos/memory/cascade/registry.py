@@ -66,7 +66,7 @@ class KindSpec:
     ``frontmatter_schema`` carries the ``path_glob()`` classmethod the
     scanner uses to enumerate eligible files; the same schema is also
     the contract the reader / writer share at the markdown layer.
-    ``lance_schema`` + ``lance_repo`` describe the destination side.
+    ``index_schema`` + ``index_repo`` describe the destination side.
     ``handler_factory`` is a callable that receives the shared
     :class:`HandlerDeps` bundle and returns the kind's :class:`Handler`.
     """
@@ -74,8 +74,8 @@ class KindSpec:
     name: str
     frontmatter_schema: type[BaseFrontmatter]
     handler_factory: type[Handler]
-    lance_schema: type | None = None
-    lance_repo: object | None = None
+    index_schema: type | None = None
+    index_repo: object | None = None
 
     def path_glob(self) -> str:
         """Glob (relative to memory root) for every md this kind covers."""
@@ -96,58 +96,58 @@ KIND_REGISTRY: tuple[KindSpec, ...] = (
     KindSpec(
         name="episode",
         frontmatter_schema=EpisodeDailyFrontmatter,
-        lance_schema=Episode,
-        lance_repo=episode_repo,
+        index_schema=Episode,
+        index_repo=episode_repo,
         handler_factory=EpisodeHandler,
     ),
     KindSpec(
         name="atomic_fact",
         frontmatter_schema=AtomicFactDailyFrontmatter,
-        lance_schema=AtomicFact,
-        lance_repo=atomic_fact_repo,
+        index_schema=AtomicFact,
+        index_repo=atomic_fact_repo,
         handler_factory=AtomicFactHandler,
     ),
     KindSpec(
         name="foresight",
         frontmatter_schema=ForesightDailyFrontmatter,
-        lance_schema=Foresight,
-        lance_repo=foresight_repo,
+        index_schema=Foresight,
+        index_repo=foresight_repo,
         handler_factory=ForesightHandler,
     ),
     KindSpec(
         name="agent_case",
         frontmatter_schema=AgentCaseDailyFrontmatter,
-        lance_schema=AgentCase,
-        lance_repo=agent_case_repo,
+        index_schema=AgentCase,
+        index_repo=agent_case_repo,
         handler_factory=AgentCaseHandler,
     ),
     KindSpec(
         name="agent_skill",
         frontmatter_schema=AgentSkillFrontmatter,
-        lance_schema=AgentSkill,
-        lance_repo=agent_skill_repo,
+        index_schema=AgentSkill,
+        index_repo=agent_skill_repo,
         handler_factory=AgentSkillHandler,
     ),
     KindSpec(
         name="user_profile",
         frontmatter_schema=UserProfileFrontmatter,
-        lance_schema=UserProfile,
-        lance_repo=user_profile_repo,
+        index_schema=UserProfile,
+        index_repo=user_profile_repo,
         handler_factory=UserProfileHandler,
     ),
     KindSpec(
         name="knowledge_document",
         frontmatter_schema=KnowledgeDocumentFrontmatter,
         handler_factory=KnowledgeDocumentHandler,
-        lance_schema=None,
-        lance_repo=None,
+        index_schema=None,
+        index_repo=None,
     ),
     KindSpec(
         name="knowledge_topic",
         frontmatter_schema=KnowledgeTopicFrontmatter,
         handler_factory=KnowledgeTopicHandler,
-        lance_schema=KnowledgeTopic,
-        lance_repo=knowledge_topic_repo,
+        index_schema=KnowledgeTopic,
+        index_repo=knowledge_topic_repo,
     ),
 )
 """Every cascade kind, evaluated in declaration order by :func:`match_kind`."""

@@ -22,8 +22,7 @@ pipeline runs over episodes. The other methods leave it empty: there is
 no query-relevance score we can assign to a fact pulled by parent_id
 alone, and emitting ``score=0.0`` facts would muddy the contract.
 
-The manager never writes to storage; it only reads the derived index +
-markdown.
+The manager never writes to storage; it only reads LanceDB + markdown.
 """
 
 from __future__ import annotations

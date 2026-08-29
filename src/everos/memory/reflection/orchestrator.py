@@ -801,14 +801,14 @@ class ReflectionOrchestrator:
             to_deprecate=to_deprecate,
             merged_entry_id=merged_entry_id,
         )
-        deprecated_ep_count = await self._deprecate_index_episodes(
+        deprecated_ep_count = await self._deprecate_lance_episodes(
             entry_ids=to_deprecate,
             owner_id=owner_id,
             app_id=app_id,
             project_id=project_id,
             merged_entry_id=merged_entry_id,
         )
-        deprecated_fact_count = await self._deprecate_index_facts(
+        deprecated_fact_count = await self._deprecate_lance_facts(
             parent_ids=to_deprecate,
             owner_id=owner_id,
             merged_entry_id=merged_entry_id,
@@ -835,7 +835,7 @@ class ReflectionOrchestrator:
         original_ids = {mid for mid, _ in original_members}
         return original_ids & current_ids
 
-    async def _deprecate_index_episodes(
+    async def _deprecate_lance_episodes(
         self,
         *,
         entry_ids: set[str],
@@ -844,10 +844,10 @@ class ReflectionOrchestrator:
         project_id: str,
         merged_entry_id: str,
     ) -> int:
-        """Mark deprecated episodes in the active derived index by entry_id.
+        """Mark deprecated episodes in LanceDB by entry_id.
 
         Returns:
-            Number of derived-index update calls issued.
+            Number of LanceDB update calls issued.
         """
         coros: list[Any] = [
             self._episode_store.update(
@@ -865,14 +865,14 @@ class ReflectionOrchestrator:
             await asyncio.gather(*coros)
         return len(coros)
 
-    async def _deprecate_index_facts(
+    async def _deprecate_lance_facts(
         self,
         *,
         parent_ids: set[str],
         owner_id: str,
         merged_entry_id: str,
     ) -> int:
-        """Mark deprecated atomic facts in the active derived index.
+        """Mark deprecated atomic facts in LanceDB.
 
         Args:
             parent_ids: Parent IDs (memcell or episode) whose facts to deprecate.
@@ -880,7 +880,7 @@ class ReflectionOrchestrator:
             merged_entry_id: Entry ID of the replacement merged episode.
 
         Returns:
-            Total number of derived-index update calls issued.
+            Total number of LanceDB update calls issued.
         """
         if not parent_ids:
             return 0

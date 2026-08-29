@@ -39,7 +39,7 @@ class UserProfileHandler(Handler):
     """Cascade handler for ``users/<user_id>/user.md``."""
 
     kind = "user_profile"
-    lance_repo: ClassVar[Any] = user_profile_repo
+    index_repo: ClassVar[Any] = user_profile_repo
     """Exposed for ``CascadeWorker._optimize_touched_kinds`` — the
     worker discovers the LanceDB repo to optimize via this attribute,
     mirroring the daily-log handlers that bind it through

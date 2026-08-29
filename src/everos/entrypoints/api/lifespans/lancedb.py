@@ -1,4 +1,4 @@
-"""Derived-index lifespan provider (HTTP API entrypoint).
+"""LanceDB lifespan provider (HTTP API entrypoint).
 
 Startup:
     Open the connection via ``get_connection`` (lazy, idempotent).
@@ -32,7 +32,9 @@ from fastapi import FastAPI
 from everos.core.lifespan import LifespanProvider
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
+    ALL_REPOS,
     active_backend,
+    is_null,
 )
 from everos.infra.persistence.index import (
     shutdown as shutdown_index,
@@ -40,10 +42,7 @@ from everos.infra.persistence.index import (
 from everos.infra.persistence.index import (
     startup as startup_index,
 )
-from everos.infra.persistence.lancedb import (
-    BUSINESS_SCHEMAS_WITH_VECTOR,
-    get_table,
-)
+from everos.infra.persistence.index.schema import schema_for
 
 logger = get_logger(__name__)
 
@@ -63,14 +62,16 @@ async def _log_unbackfilled_hint() -> None:
     startup.
     """
     total_null = 0
-    for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
+    for repo in ALL_REPOS:
+        logical_schema = schema_for(repo.schema)
+        if not any(field.name == "vector" for field in logical_schema.vector_fields):
+            continue
         try:
-            table = await get_table(schema.TABLE_NAME, schema)
-            count = await table.count_rows(filter="vector IS NULL")
+            count = await repo.count_where(is_null("vector"))
         except Exception as exc:
             logger.warning(
                 "unbackfilled_check_failed",
-                schema=schema.__name__,
+                schema=repo.schema.__name__,
                 error=repr(exc),
             )
             continue
@@ -88,7 +89,7 @@ async def _log_unbackfilled_hint() -> None:
 
 
 class LanceDBLifespanProvider(LifespanProvider):
-    """Manage the configured derived index for the app lifecycle.
+    """Manage the LanceDB connection + table cache for the app lifecycle.
 
     Startup runs four steps:
 
@@ -105,11 +106,10 @@ class LanceDBLifespanProvider(LifespanProvider):
         super().__init__(name="lancedb", order=order)
 
     async def startup(self, app: FastAPI) -> Any:
-        backend = active_backend()
         conn = await startup_index()
-        if backend == "lancedb":
+        if active_backend() == "lancedb":
             await _log_unbackfilled_hint()
-        logger.info("derived_index_ready", backend=backend)
+        logger.info("derived_index_ready", backend=active_backend())
         return conn
 
     async def shutdown(self, app: FastAPI) -> None:

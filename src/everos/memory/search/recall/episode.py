@@ -7,7 +7,6 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
     Episode,
     Predicate,
@@ -36,10 +35,6 @@ def _inject_parent_id(candidates: list[Candidate]) -> list[Candidate]:
     ]
 
 
-logger = get_logger(__name__)
-_FETCH_ALL_OWNER_LIMIT = 10_000
-
-
 class EpisodeRecaller:
     """BM25 + vector recall over the LanceDB ``episode`` table."""
 
@@ -65,10 +60,7 @@ class EpisodeRecaller:
         if not terms:
             return []
         rows = await episode_repo.sparse_search(
-            terms,
-            where,
-            columns=Episode.BM25_FIELDS,
-            limit=limit,
+            terms, where, columns=Episode.BM25_FIELDS, limit=limit
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
@@ -113,10 +105,7 @@ class EpisodeRecaller:
         if not vector:
             return []
         rows = await episode_repo.dense_search(
-            vector,
-            where,
-            limit=limit,
-            vector_field="subject_vector",
+            vector, where, limit=limit, vector_field="subject_vector"
         )
         return [
             row_to_candidate(
@@ -141,15 +130,13 @@ class EpisodeRecaller:
         ``Candidate.id`` against ``Cluster.members``. Both are now
         episode entry_ids regardless of parent_type.
 
-        The scan is capped at :data:`_FETCH_ALL_OWNER_LIMIT` to bound memory.
-        Hitting the cap is logged because cluster matching may be incomplete.
+        No ``limit`` — the full owner partition is required for cluster
+        membership matching.
         """
-        rows = await episode_repo.search(where=where, limit=_FETCH_ALL_OWNER_LIMIT)
-        if len(rows) == _FETCH_ALL_OWNER_LIMIT:
-            logger.warning(
-                "episode_owner_scan_truncated",
-                limit=_FETCH_ALL_OWNER_LIMIT,
-            )
+        rows = [
+            record.model_dump(mode="python")
+            for record in await episode_repo.scan(where)
+        ]
         result: list[Candidate] = []
         for r in rows:
             entry_id = r.get("entry_id")

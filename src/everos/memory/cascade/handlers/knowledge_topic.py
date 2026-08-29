@@ -57,7 +57,7 @@ class KnowledgeTopicHandler(Handler):
     ``knowledge/{category}/{doc_title}/<n>_<name>.md``."""
 
     kind = "knowledge_topic"
-    lance_repo: ClassVar[Any] = knowledge_topic_repo
+    index_repo: ClassVar[Any] = knowledge_topic_repo
 
     content_change_keys: ClassVar[tuple[str, ...]] = (
         "frontmatter:summary",

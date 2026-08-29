@@ -23,10 +23,8 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.lancedb import AgentCase
-from everos.infra.persistence.lancedb.predicate import render_predicate
+from everos.infra.persistence.index import AgentCase, Comparison, Predicate
 from everos.infra.persistence.markdown import AgentCaseWriter
-from everos.infra.persistence.predicate import Predicate
 from everos.memory.cascade.handlers import HandlerDeps
 from everos.memory.cascade.handlers.agent_case import AgentCaseHandler
 
@@ -66,10 +64,8 @@ class _FakeAgentCaseRepo:
     async def find_where(
         self, where: Predicate, *, limit: int = 100
     ) -> list[AgentCase]:
-        rendered = render_predicate(where)
-        prefix = "md_path = '"
-        if rendered.startswith(prefix):
-            md_path = rendered[len(prefix) :].rstrip("'")
+        if isinstance(where, Comparison) and where.field == "md_path":
+            md_path = str(where.value)
             return [r for r in self.rows if r.md_path == md_path]
         return []
 
@@ -81,7 +77,7 @@ class _FakeAgentCaseRepo:
         self.rows = list(by_id.values())
 
     async def delete(self, predicate: Predicate) -> None:
-        self.deletes.append(render_predicate(predicate))
+        self.deletes.append(predicate)
 
     async def delete_by_md_path(self, md_path: str) -> int:
         before = len(self.rows)
@@ -116,7 +112,7 @@ def no_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def fake_repo(monkeypatch: pytest.MonkeyPatch) -> _FakeAgentCaseRepo:
     repo = _FakeAgentCaseRepo()
-    monkeypatch.setattr(AgentCaseHandler, "lance_repo", repo)
+    monkeypatch.setattr(AgentCaseHandler, "index_repo", repo)
     return repo
 
 

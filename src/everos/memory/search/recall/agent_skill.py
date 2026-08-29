@@ -53,10 +53,7 @@ class AgentSkillRecaller:
         if not terms:
             return []
         merged_rows = await agent_skill_repo.sparse_search(
-            terms,
-            where,
-            columns=AgentSkill.BM25_FIELDS,
-            limit=limit,
+            terms, where, columns=AgentSkill.BM25_FIELDS, limit=limit
         )
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))

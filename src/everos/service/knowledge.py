@@ -1156,7 +1156,7 @@ def compile_knowledge_where(app_id: str, project_id: str):  # type: ignore[no-un
         project_id: Tenant project identifier.
 
     Returns:
-        Predicate safe for either derived-index backend.
+        Predicate safe for the active derived-index backend.
 
     Raises:
         ValueError: If either id contains invalid characters.

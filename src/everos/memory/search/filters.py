@@ -1,7 +1,7 @@
 """Validate the public filter DSL and build a backend-neutral predicate.
 
-Storage-specific syntax is intentionally absent from this module. LanceDB and
-Milvus render the resulting predicate in their own persistence packages.
+Storage-specific syntax is intentionally absent from this module. Adapters
+render the resulting predicate in their own persistence packages.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def compile_filters_for_backends(
     app_id: str = "default",
     project_id: str = "default",
 ) -> Predicate:
-    """Compatibility name; one predicate is rendered by the active backend."""
+    """Compatibility name for callers migrating from rendered filters."""
     return compile_filters(
         node,
         owner_id=owner_id,

@@ -43,6 +43,15 @@ def _mock_table(rows: list[dict[str, Any]]) -> MagicMock:
     return tbl
 
 
+def _mock_records(rows: list[dict[str, Any]]) -> list[MagicMock]:
+    records: list[MagicMock] = []
+    for row in rows:
+        record = MagicMock()
+        record.model_dump.return_value = row
+        records.append(record)
+    return records
+
+
 _ALICE_WHERE = eq("owner_id", "alice")
 
 
@@ -62,9 +71,9 @@ async def test_fetch_all_for_owner_returns_entry_id_keyed_candidates(
         _make_row("ep_2", "mc_2"),
     ]
     with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+        "everos.memory.search.recall.episode.episode_repo.scan",
         new_callable=AsyncMock,
-        return_value=rows,
+        return_value=_mock_records(rows),
     ):
         result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
 
@@ -79,9 +88,9 @@ async def test_fetch_all_for_owner_stores_episode_id_in_metadata(
     """metadata['episode_id'] carries the real LanceDB episode id for final shaping."""
     rows = [_make_row("ep_abc", "mc_xyz")]
     with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+        "everos.memory.search.recall.episode.episode_repo.scan",
         new_callable=AsyncMock,
-        return_value=rows,
+        return_value=_mock_records(rows),
     ):
         result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
 
@@ -108,9 +117,9 @@ async def test_fetch_all_for_owner_skips_rows_without_entry_id(
         },
     ]
     with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+        "everos.memory.search.recall.episode.episode_repo.scan",
         new_callable=AsyncMock,
-        return_value=rows,
+        return_value=_mock_records(rows),
     ):
         result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
 
@@ -135,9 +144,9 @@ async def test_fetch_all_for_owner_merged_episode_uses_entry_id(
         ),
     ]
     with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+        "everos.memory.search.recall.episode.episode_repo.scan",
         new_callable=AsyncMock,
-        return_value=rows,
+        return_value=_mock_records(rows),
     ):
         result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
 
@@ -160,9 +169,9 @@ async def test_fetch_all_for_owner_mixed_regular_and_merged(
         ),
     ]
     with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+        "everos.memory.search.recall.episode.episode_repo.scan",
         new_callable=AsyncMock,
-        return_value=rows,
+        return_value=_mock_records(rows),
     ):
         result = await recaller.fetch_all_for_owner(_ALICE_WHERE)
 

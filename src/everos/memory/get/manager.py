@@ -12,7 +12,7 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 Reads only — never writes. Filters are compiled through
 :func:`compile_filters_for_get` so the column allow-list stays
 shared with :mod:`memory.search`. Pagination + in-memory sort
-runs through the configured derived index repository.
+runs through :meth:`LanceRepoBase.find_where_paginated`.
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from .dto import (
 from .filters_adapter import compile_filters_for_get_backends
 
 if TYPE_CHECKING:
-    from everos.core.persistence.lancedb import LanceRepoBase
     from everos.infra.persistence.index import (
         AgentCase,
         AgentSkill,
         Episode,
+        IndexRepository,
         UserProfile,
     )
 
@@ -49,16 +49,16 @@ logger = get_logger(__name__)
 
 
 class GetManager:
-    """Dispatch ``GetRequest`` to the matching derived index repo and
+    """Dispatch ``GetRequest`` to the matching LanceDB-backed repo and
     shape rows into the public DTO."""
 
     def __init__(
         self,
         *,
-        episode_repo: LanceRepoBase[Episode],
-        agent_case_repo: LanceRepoBase[AgentCase],
-        agent_skill_repo: LanceRepoBase[AgentSkill],
-        user_profile_repo: LanceRepoBase[UserProfile],
+        episode_repo: IndexRepository[Episode],
+        agent_case_repo: IndexRepository[AgentCase],
+        agent_skill_repo: IndexRepository[AgentSkill],
+        user_profile_repo: IndexRepository[UserProfile],
     ) -> None:
         self._ep = episode_repo
         self._case = agent_case_repo
@@ -187,7 +187,7 @@ class GetManager:
 
     async def _fetch_profile(self, owner_id: str) -> list[GetProfileItem]:
         """Fetch the owner's single profile row from the ``user_profile``
-        Derived index row (kept in sync with ``users/<id>/user.md`` by cascade).
+        LanceDB table (kept in sync with ``users/<id>/user.md`` by cascade).
 
         Profile is one-row-per-owner KV — there is no pagination / sort /
         filter surface, so at most one item is returned. Mirrors the

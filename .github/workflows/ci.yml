@@ -126,8 +126,8 @@ jobs:
       - name: Integration tests
         run: make integration
 
-  milvus-integration:
-    name: Milvus Server integration
+  integration-milvus:
+    name: integration tests (Milvus 2.6)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -144,14 +144,14 @@ jobs:
       - name: Install dependencies (frozen)
         run: make install-deps
 
-      - name: Start Milvus Server
+      - name: Start Milvus 2.6.22
         run: |
-          curl -fsSL \
-            https://github.com/milvus-io/milvus/releases/download/v2.6.22/milvus-standalone-docker-compose.yml \
-            -o /tmp/milvus-compose.yml
+          curl --fail --location --retry 3 \
+            --output /tmp/milvus-compose.yml \
+            https://github.com/milvus-io/milvus/releases/download/v2.6.22/milvus-standalone-docker-compose.yml
           docker compose -f /tmp/milvus-compose.yml up -d
-          for attempt in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9091/healthz; then
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:9091/healthz >/dev/null; then
               exit 0
             fi
             sleep 2
@@ -159,13 +159,13 @@ jobs:
           docker compose -f /tmp/milvus-compose.yml logs
           exit 1
 
-      - name: Milvus derived-index contract
+      - name: Milvus repository contract
         env:
           EVEROS_TEST_MILVUS_URI: http://127.0.0.1:19530
           EVEROS_TEST_MILVUS_FULL_STARTUP: "1"
-        run: uv run pytest tests/integration/test_milvus_remote.py -v
+        run: uv run --frozen pytest tests/integration/test_milvus_remote.py -v
 
-      - name: Stop Milvus Server
+      - name: Stop Milvus
         if: always()
         run: docker compose -f /tmp/milvus-compose.yml down -v
 

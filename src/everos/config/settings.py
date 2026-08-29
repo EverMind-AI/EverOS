@@ -377,18 +377,13 @@ class CascadeSettings(BaseModel):
 
 
 class IndexSettings(BaseModel):
-    """Derived-index backend selection."""
+    """Rebuildable derived-index backend selection."""
 
     backend: Literal["lancedb", "milvus"] = "lancedb"
 
 
 class MilvusSettings(BaseModel):
-    """Remote Milvus Server or Zilliz Cloud connection settings.
-
-    Embedded Milvus Lite is intentionally unsupported. Deployments that select
-    the Milvus backend must configure an external endpoint and should use a
-    unique database or collection prefix when sharing a cluster.
-    """
+    """Remote Milvus Server or Zilliz Cloud connection settings."""
 
     uri: str = ""
     token: SecretStr = SecretStr("")

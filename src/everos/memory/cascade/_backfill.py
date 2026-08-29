@@ -42,26 +42,30 @@ from everos.component.utils.datetime import to_timestamp_ms
 from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, MemoryRoot, SQLModel
-from everos.core.persistence.lancedb import BaseLanceTable, LanceRepoBase
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
 from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.infra.persistence.index import (
+    ALL_REPOS,
     AgentCase,
     AgentSkill,
     AtomicFact,
     Episode,
     Foresight,
+    IndexRepository,
     KnowledgeTopic,
     agent_case_repo,
     agent_skill_repo,
+    any_of,
     atomic_fact_repo,
     episode_repo,
     eq,
     foresight_repo,
+    is_null,
     knowledge_topic_repo,
+    repo_for_schema,
 )
-from everos.infra.persistence.lancedb import BUSINESS_SCHEMAS_WITH_VECTOR, get_table
+from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 from everos.infra.persistence.sqlite import cluster_repo, get_engine
 from everos.memory.cascade.worker import (
@@ -223,8 +227,8 @@ class _TableSpec:
     ``subject`` column — mirrors ``EpisodeHandler._build_row``.
     """
 
-    schema: type[BaseLanceTable]
-    repo: LanceRepoBase[Any]
+    schema: type[Any]
+    repo: IndexRepository[Any]
     text_of: Callable[[dict[str, Any]], str]
     subject_of: Callable[[dict[str, Any]], str | None] | None = None
 
@@ -257,7 +261,11 @@ _TABLE_SPECS: tuple[_TableSpec, ...] = (
 # touches. Fail loud at import time so any drift shows up before a test
 # even starts.
 _TABLE_SPEC_NAMES = {spec.schema.TABLE_NAME for spec in _TABLE_SPECS}
-_BUSINESS_SCHEMA_NAMES = {s.TABLE_NAME for s in BUSINESS_SCHEMAS_WITH_VECTOR}
+_BUSINESS_SCHEMA_NAMES = {
+    repo.schema.TABLE_NAME
+    for repo in ALL_REPOS
+    if schema_for(repo.schema).vector_fields
+}
 if _TABLE_SPEC_NAMES != _BUSINESS_SCHEMA_NAMES:
     raise RuntimeError(
         f"_TABLE_SPECS drift: BUSINESS_SCHEMAS_WITH_VECTOR has "
@@ -340,12 +348,7 @@ class _PhaseResult:
     blocked_by_server: bool = False
 
 
-def _q(value: str) -> str:
-    """Defensive SQL-quote escape (mirrors the lancedb repo convention)."""
-    return value.replace("'", "''")
-
-
-def _null_filter(spec: _TableSpec) -> str:
+def _null_filter(spec: _TableSpec):  # type: ignore[no-untyped-def]
     """Where-clause the scan uses to spot rows that need (some) embedding.
 
     Episode carries a ``subject_vector`` alongside ``vector`` — the two
@@ -362,8 +365,8 @@ def _null_filter(spec: _TableSpec) -> str:
     query, so they keep the round-1 filter.
     """
     if spec.schema.TABLE_NAME == Episode.TABLE_NAME:
-        return "vector IS NULL OR subject_vector IS NULL"
-    return "vector IS NULL"
+        return any_of(is_null("vector"), is_null("subject_vector"))
+    return is_null("vector")
 
 
 class _RowSkipped:
@@ -456,8 +459,8 @@ async def _scan_null_vector_backlog() -> tuple[list[_TableBacklog], int]:
     backlog: list[_TableBacklog] = []
     scan_failed = 0
     for spec in _TABLE_SPECS:
-        table = await get_table(spec.schema.TABLE_NAME, spec.schema)
-        raw_rows = await table.query().where(_null_filter(spec)).to_list()
+        records = await spec.repo.scan(_null_filter(spec))
+        raw_rows = [record.model_dump(mode="python") for record in records]
         rows: list[_NullVectorRow] = []
         for raw in raw_rows:
             row = _extract_row(raw, spec, tokenizer)
@@ -917,7 +920,7 @@ class _ClusterPhaseResult:
     blocked_by_capability: str | None = None
 
 
-async def _scan_all_rows(schema: type[BaseLanceTable]) -> list[dict[str, Any]]:
+async def _scan_all_rows(schema: type[Any]) -> list[dict[str, Any]]:
     """Fetch every row of ``schema``'s table, no filter.
 
     Phase 2 doesn't care whether a row already carries a vector — the
@@ -934,11 +937,8 @@ async def _scan_all_rows(schema: type[BaseLanceTable]) -> list[dict[str, Any]]:
     apply it themselves on the returned rows — this helper stays a plain
     unfiltered fetch shared by every business table.
     """
-    table = await get_table(schema.TABLE_NAME, schema)
-    total = await table.count_rows()
-    if total == 0:
-        return []
-    return await table.query().limit(total).to_list()
+    records = await repo_for_schema(schema).scan()
+    return [record.model_dump(mode="python") for record in records]
 
 
 def _episode_row_to_event(raw: dict[str, Any]) -> EpisodeExtracted:

@@ -250,7 +250,6 @@ ignore_imports = [
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.tables",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
-    "everos.infra.persistence.index -> everos.infra.persistence.lancedb.predicate",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
@@ -282,7 +281,5 @@ dev = [
     # [otel] stack is always present in the dev / CI environment.
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
-    # Milvus tests must run in every dev/CI environment. The client package
-    # intentionally excludes the embedded milvus-lite extra.
     "pymilvus>=3.0.0",
 ]

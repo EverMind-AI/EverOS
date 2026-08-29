@@ -28,7 +28,6 @@ import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
-from everos.infra.persistence.lancedb.predicate import render_predicate
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 
@@ -107,25 +106,25 @@ class _StubEpisodeRecaller:
         self.last_where: str | None = None
 
     async def sparse_recall(
-        self, query: str, where: Any, *, limit: int
+        self, query: str, where: str, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = render_predicate(where)
+        self.last_where = where
         return list(self._sparse[:limit])
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Any, *, limit: int
+        self, vector: Sequence[float], where: str, *, limit: int
     ) -> list[Candidate]:
-        self.last_where = render_predicate(where)
+        self.last_where = where
         return list(self._dense[:limit])
 
     async def fetch_by_parent_ids(
-        self, parent_ids: Sequence[str], where: Any
+        self, parent_ids: Sequence[str], where: str
     ) -> list[Candidate]:
         by_parent = {str(c.metadata.get("parent_id", "")): c for c in self._dense}
         return [by_parent[p] for p in parent_ids if p in by_parent]
 
     async def fetch_by_entry_ids(
-        self, entry_ids: Sequence[str], where: Any
+        self, entry_ids: Sequence[str], where: str
     ) -> list[Candidate]:
         by_entry = {str(c.metadata.get("entry_id", "")): c for c in self._dense}
         return [by_entry[e] for e in entry_ids if e in by_entry]
@@ -153,7 +152,7 @@ class _StubAtomicFactRecaller:
     async def facts_for_episodes(
         self,
         ep_to_parents: Mapping[str, Sequence[str]],
-        where: Any,
+        where: str,
         *,
         per_episode: int,
         query_vector: Any = None,
@@ -204,7 +203,7 @@ class _StubAgentSkillRecaller:
         return list(self._dense)
 
     async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: Any, *, limit: int
+        self, case_ids: Sequence[str], where: str, *, limit: int
     ) -> list[Candidate]:
         return list(self._by_case)
 
@@ -394,8 +393,11 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     )
     await mgr.search(_user_req())
     assert recaller.last_where is not None
-    assert "owner_id = 'alice'" in recaller.last_where
-    assert "owner_type = 'user'" in recaller.last_where
+    from everos.infra.persistence.index.lancedb import render_predicate
+
+    rendered = render_predicate(recaller.last_where)
+    assert "owner_id = 'alice'" in rendered
+    assert "owner_type = 'user'" in rendered
 
 
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:

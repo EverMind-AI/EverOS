@@ -101,60 +101,26 @@ everos init --root /data/everos
 
 ### `[index]`
 
+The derived vector/BM25 index is rebuildable; Markdown remains the source of
+truth regardless of backend.
+
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `backend` | `"lancedb"` \| `"milvus"` | `"lancedb"` | Rebuildable vector/BM25 index backend used by cascade, search, and get. Markdown remains the source of truth; SQLite remains the system state store. |
+| `backend` | string | `"lancedb"` | Index implementation: `lancedb` or `milvus`. |
 
 ### `[milvus]`
 
-Milvus is optional. Install with `everos[milvus]`, then set
-`[index].backend = "milvus"`. The backend connects only to an external
-Milvus Server or Zilliz Cloud endpoint; embedded Milvus Lite and local `.db`
-paths are not supported.
+Used only when `index.backend = "milvus"`. Install the optional client with
+`pip install "everos[milvus]"`. EverOS supports a remote Milvus Server or
+Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `uri` | string | `""` | Required when the Milvus backend is selected. Must be a remote Milvus Server or Zilliz Cloud endpoint. |
-| `token` | string | `""` | Token for Zilliz Cloud or auth-enabled Milvus Server. |
-| `db_name` | string | `""` | Optional Milvus database name. Prefer a dedicated database on shared clusters. |
-| `consistency_level` | `"Strong"` \| `"Session"` \| `"Bounded"` \| `"Eventually"` | `"Session"` | Milvus consistency level for created collections. |
-| `collection_prefix` | string | `"everos"` | Prefix for EverOS collections. Must start with a letter or underscore and contain only letters, digits, and underscores. Make it unique when deployments share a database. |
-
-For a self-hosted Milvus Server, a minimal configuration is:
-
-```toml
-[index]
-backend = "milvus"
-
-[milvus]
-uri = "http://localhost:19530"
-collection_prefix = "everos"
-```
-
-Zilliz Cloud uses the same backend. Credentials can be supplied through
-environment variables:
-
-```bash
-export EVEROS_INDEX__BACKEND=milvus
-export EVEROS_MILVUS__URI="https://your-cluster-endpoint"
-export EVEROS_MILVUS__TOKEN="<api-key>"
-export EVEROS_MILVUS__DB_NAME="default"
-export EVEROS_MILVUS__COLLECTION_PREFIX="everos_prod"
-```
-
-Use a deployment secret rather than committing the token to a configuration
-file. If the memory root already contains Markdown records, stop the EverOS
-server and run `everos cascade rebuild --yes` to populate the derived index.
-
-EverOS creates seven collections and supports every dense field in the shared
-index schema, including `episode.subject_vector`. The vector dimension is owned
-by that schema (currently 1024), rather than duplicated in Milvus config.
-
-Milvus imposes limits that LanceDB does not: strings are capped at 65,535
-UTF-8 bytes, string arrays at 256 items, and each array item at 512 UTF-8
-bytes. EverOS validates these before a write and reports the exact table and
-field instead of relying on a server-side insert error. Ensure the selected
-Zilliz Cloud plan permits at least seven collections.
+| `uri` | string | `""` | Milvus Server or Zilliz Cloud URI. |
+| `token` | string | `""` | Authentication token, when required. |
+| `db_name` | string | `""` | Optional Milvus database name. |
+| `consistency_level` | string | `"Session"` | Milvus consistency level used by collections. |
+| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. |
 
 ### `[llm]`
 
@@ -285,8 +251,3 @@ Examples:
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
-| `[index] backend = "milvus"` | `EVEROS_INDEX__BACKEND=milvus` |
-| `[milvus] uri = "http://localhost:19530"` | `EVEROS_MILVUS__URI=http://localhost:19530` |
-| `[milvus] token = "..."` | `EVEROS_MILVUS__TOKEN=...` |
-| `[milvus] db_name = "default"` | `EVEROS_MILVUS__DB_NAME=default` |
-| `[milvus] collection_prefix = "everos_prod"` | `EVEROS_MILVUS__COLLECTION_PREFIX=everos_prod` |
