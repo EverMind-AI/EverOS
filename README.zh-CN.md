@@ -22,6 +22,7 @@
 <br>
 
 - [为什么选择 EverOS](#为什么选择-everos)
+- [生态集成](#生态集成)
 - [快速开始](#快速开始)
 - [使用场景](#使用场景)
 - [文档](#文档)
@@ -81,6 +82,23 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 <td><strong>Reflection</strong></td>
 <td>✅ 离线记忆进化：在 session 之间合并 episode clusters，并持续改进 profiles 和 skills</td>
 <td>❌ 通常只是 retrieval-only memory，缺少后台 consolidation 和长周期改进</td>
+</tr>
+</table>
+
+<br>
+
+## 生态集成
+
+EverOS 为下列 Agent 与工作流平台提供持久记忆，并已内置于 Raven。选择一个
+集成即可查看安装指南。
+
+<table width="100%">
+<tr>
+<td width="20%" align="center"><a href="https://github.com/EverMind-AI/plugins/tree/main/dsh"><img src="https://avatars.githubusercontent.com/u/148330874?s=200&amp;v=4" alt="DeepSeek Harness" width="72"><br><strong>DeepSeek Harness</strong></a></td>
+<td width="20%" align="center"><a href="https://github.com/EverMind-AI/plugins/tree/main/hermes"><img src="https://github.com/user-attachments/assets/477eebc4-e615-4425-921e-368d7667e491" alt="Hermes" width="72"><br><strong>Hermes</strong></a></td>
+<td width="20%" align="center"><a href="https://github.com/EverMind-AI/plugins/tree/main/openclaw"><img src="https://github.com/user-attachments/assets/01d948fe-1e2b-48e8-9b32-b8057cb3f336" alt="OpenClaw" width="72"><br><strong>OpenClaw</strong></a></td>
+<td width="20%" align="center"><a href="https://github.com/EverMind-AI/Raven"><img src="https://github.com/user-attachments/assets/27e1ea63-69d4-48b3-a884-7f0355926907" alt="Raven" width="72"><br><strong>Raven</strong></a></td>
+<td width="20%" align="center"><a href="https://github.com/EverMind-AI/plugins#plugins"><img src="docs/assets/integrations/dify.svg" alt="Dify" width="112"><br><strong>Dify</strong></a></td>
 </tr>
 </table>
 
