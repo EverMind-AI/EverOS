@@ -48,6 +48,21 @@ def _torn(path: Path, rows: list[Any]) -> None:
     path.write_text(body + "\n" + rows[0].model_dump_json()[:40], encoding="utf-8")
 
 
+def _present(path: Path) -> bool:
+    """``Path.exists()`` that answers False instead of raising on EACCES.
+
+    ``pathlib`` only swallows ENOENT / ENOTDIR / EBADF / ELOOP, so a probe for a
+    path under a directory the current user cannot stat re-raises. ``/root`` is
+    mode 0700 and CI does not run as root, so the private-shard guard below
+    raised ``PermissionError`` there and turned its skip into a failure. For a
+    guard asking "is this store on this machine", unreadable is not present.
+    """
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # A torn final line must not lock the stage
 # ---------------------------------------------------------------------------
@@ -523,7 +538,7 @@ def test_the_owner_the_search_uses_has_rows_in_the_store() -> None:
     from config import BenchmarkConfig
 
     shard = Path("/root/v3_longmemeval/store_s0")
-    if not (shard / ".index" / "lancedb").exists():
+    if not _present(shard / ".index" / "lancedb"):
         pytest.skip("LongMemEval shard not present")
     cfg = BenchmarkConfig.from_toml("longmemeval")
     if not Path(cfg.data_path).exists():
