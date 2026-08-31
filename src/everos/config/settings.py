@@ -243,7 +243,28 @@ class DeciderSettings(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
     """Provider-specific request fields for the decider. See
     :attr:`LLMSettings.extra`; kept separate so the decider and the extractor can
-    run on gateways with different vocabularies."""
+    run on gateways with different vocabularies.
+
+    The field a Qwen endpoint needs lives here::
+
+        EVEROS_DECIDER__EXTRA='
+          {"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
+
+    Without it a Qwen chat template leaves thinking ON, and an un-finetuned model
+    spends the whole budget reasoning: measured on Qwen3.5-0.8B as decider, 39.3% of
+    rounds returned nothing within the 60s deadline, each burning ~729s of retries
+    before falling back to a fixed top-3 core. A finetuned policy does not show this
+    because its targets were rendered with thinking off, so it emits the empty
+    ``<think></think>`` and stops."""
+    max_tokens: int | None = Field(default=512, ge=1)
+    """Output cap for one decider reply. The contract is a single JSON object of a
+    few dozen tokens, so this is a guard, not a budget: uncapped, a model that will
+    not stop generates until the deadline and the round is lost to a timeout rather
+    than to a parse failure that would have been visible."""
+    sdk_max_retries: int | None = 0
+    """Retries inside the OpenAI SDK. 0 because :attr:`retries` below already retries
+    at this layer, and the two multiply -- see the note in ``OpenAIProvider``. None
+    keeps the SDK default."""
 
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)

@@ -50,15 +50,25 @@ class OpenAIProvider:
         timeout: float = 60.0,
         temperature: float = 0.0,
         max_tokens: int | None = None,
+        max_retries: int | None = None,
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
-        self._client = openai.AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-        )
+        # `max_retries` is the SDK's own retry count, and it MULTIPLIES with any
+        # retry the caller does. The decider retries 3 times (4 attempts); with the
+        # SDK default of 2 (3 requests) one unanswerable round costs 4 x 3 x timeout
+        # -- measured at 728-744s against a 60s deadline, and the round still ends in
+        # the fixed top-3 fallback. Left as None the SDK default stands, so callers
+        # that do not ask are unaffected.
+        client_kwargs: dict[str, object] = {
+            "api_key": api_key,
+            "base_url": base_url,
+            "timeout": timeout,
+        }
+        if max_retries is not None:
+            client_kwargs["max_retries"] = max_retries
+        self._client = openai.AsyncOpenAI(**client_kwargs)  # type: ignore[arg-type]
 
     async def chat(
         self,

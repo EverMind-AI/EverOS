@@ -331,8 +331,19 @@ class LLMRoundDecider:
         _raw: str | None = None  # decider raw output (trace)
         for attempt in range(tune.retries + 1):
             try:
+                # max_tokens and extra come from [decider], not from the client's
+                # defaults. `extra` is where a Qwen endpoint gets
+                # `chat_template_kwargs.enable_thinking=false`: left on, an
+                # un-finetuned decider spends the whole deadline reasoning and the
+                # round is lost to a timeout -- measured at 39.3% of rounds on
+                # Qwen3.5-0.8B, each costing ~729s of nested retries before the
+                # fixed top-3 fallback. The field existed and was documented as
+                # configurable, but nothing read it, so setting it changed nothing.
+                _t = _tuning()
                 resp = await self._llm.chat(
-                    messages=[LLMChatMessage(role="user", content=prompt)]
+                    messages=[LLMChatMessage(role="user", content=prompt)],
+                    max_tokens=_t.max_tokens,
+                    **(_t.extra or {}),
                 )
                 _raw = resp.content or ""
                 _u = getattr(resp, "usage", None)
