@@ -347,3 +347,7 @@ tests/unit/test_benchmark_ablation_tools.py
 # Hardcodes four store paths on this machine (/root/smoke_*). Marked `slow` so
 # it is deselected by default, but the paths would still be published.
 tests/unit/test_multiround_per_store.py
+
+# Rendered result tables (LaTeX source + PNG); regenerated from the numbers in the
+# README, so they are output rather than source.
+benchmarks/docs/
