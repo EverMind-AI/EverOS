@@ -221,3 +221,44 @@ def test_the_diff_is_ordered_so_two_runs_report_alike(tmp_path: Path) -> None:
         "a: 0 -> 1",
         "b: 0 -> 1",
     ]
+
+
+# ── a dataset can be a directory ──────────────────────────────────────────────
+def test_a_directory_dataset_is_digested_not_skipped(tmp_path: Path) -> None:
+    """SubtleMemory's `data_path` is a directory; hashing only files left it unchecked."""
+    ddir = tmp_path / "ds"
+    (ddir / "sub").mkdir(parents=True)
+    (ddir / "a.json").write_text("one", encoding="utf-8")
+    (ddir / "sub" / "b.json").write_text("two", encoding="utf-8")
+    first = ingest_identity(
+        BenchmarkConfig(data_path=str(ddir), adapter="subtlememory"),  # type: ignore[arg-type]
+        "subtlememory",
+        _serving(),
+    )["data_digest"]
+    assert not first.startswith("unavailable")
+
+    (ddir / "sub" / "b.json").write_text("CHANGED", encoding="utf-8")
+    second = ingest_identity(
+        BenchmarkConfig(data_path=str(ddir), adapter="subtlememory"),  # type: ignore[arg-type]
+        "subtlememory",
+        _serving(),
+    )["data_digest"]
+    assert second != first, "a byte inside the directory must move the digest"
+
+
+def test_renaming_a_file_in_a_directory_dataset_moves_the_digest(tmp_path: Path) -> None:
+    """Paths are hashed alongside bytes, so a rename is a change even byte-for-byte."""
+    ddir = tmp_path / "ds"
+    ddir.mkdir()
+    (ddir / "a.json").write_text("same", encoding="utf-8")
+    cfg = BenchmarkConfig(data_path=str(ddir), adapter="subtlememory")  # type: ignore[arg-type]
+    before = ingest_identity(cfg, "subtlememory", _serving())["data_digest"]
+    (ddir / "a.json").rename(ddir / "b.json")
+    after = ingest_identity(cfg, "subtlememory", _serving())["data_digest"]
+    assert before != after
+
+
+def test_a_missing_dataset_is_reported_as_unavailable(tmp_path: Path) -> None:
+    cfg = BenchmarkConfig(data_path=str(tmp_path / "nope"), adapter="locomo")  # type: ignore[arg-type]
+    d = ingest_identity(cfg, "locomo", _serving())["data_digest"]
+    assert d.startswith("unavailable:")

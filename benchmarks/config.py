@@ -507,19 +507,32 @@ class RunSpec(BaseModel):
 
 
 def _file_digest(path: str) -> str:
-    """SHA-256 of a data file's contents, or a marker when it cannot be read.
+    """SHA-256 of a dataset's contents, whether it is one file or a directory of them.
 
     Content, not mtime or size: a regenerated dataset with the same length is exactly
     the case a resume must catch. Unreadable is reported as such rather than as a
     constant, so a missing file never silently equals another missing file.
+
+    Directories are hashed too, because SubtleMemory's dataset IS a directory --
+    `data_path` points at `benchmarks/data/subtlememory/`, and hashing only files left
+    its ingest identity reading `unavailable:...`, i.e. a dataset whose changes resume
+    could never detect. Each file contributes its relative path as well as its bytes, so
+    renaming or adding a file changes the digest even when no byte inside one does.
     """
     p = Path(path).expanduser()
-    if not path or not p.is_file():
+    if not path or not p.exists():
         return f"unavailable:{path}"
     h = hashlib.sha256()
-    with p.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
+    if p.is_dir():
+        for f in sorted(x for x in p.rglob("*") if x.is_file()):
+            h.update(str(f.relative_to(p)).encode())
+            with f.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+    else:
+        with p.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
     return h.hexdigest()[:32]
 
 
