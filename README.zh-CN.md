@@ -753,7 +753,7 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 > 一起让 EverOS 变得更好。代码、文档、benchmark reports、use-case write-ups
 > 和 integration examples 都很有价值。也欢迎在社交媒体上分享你的项目，启发更多人。
 >
-> 你可以在 𝕏 上联系 EverOS maintainer [@elliotchen200](https://x.com/elliotchen200)，
+> 你可以在 𝕏 上联系 EverOS maintainer [@elliotchen100](https://x.com/elliotchen100)，
 > 或在 GitHub 上联系 [@cyfyifanchen](https://github.com/cyfyifanchen)，获取项目更新、
 > 讨论和协作机会。
 
