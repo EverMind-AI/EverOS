@@ -106,9 +106,15 @@ class _ScriptLLM:
         self._replies = replies
         self._error_first = error_first
         self.calls: list[list[ChatMessage]] = []
+        self.kwargs: list[dict[str, Any]] = []
+        """Every call's keyword arguments. Recorded because discarding them via
+        ``**_`` is how ``max_tokens`` and ``extra`` could be added to
+        ``DeciderSettings``, documented, and never sent, with the whole suite green:
+        a stub that throws the request away cannot fail when the request is wrong."""
 
-    async def chat(self, messages: list[ChatMessage], **_: Any) -> ChatResponse:
+    async def chat(self, messages: list[ChatMessage], **kw: Any) -> ChatResponse:
         self.calls.append(messages)
+        self.kwargs.append(dict(kw))
         if self._error_first > 0:
             self._error_first -= 1
             raise RuntimeError("transient decider failure")
@@ -564,3 +570,31 @@ async def test_injected_decider_drives_the_loop_instead_of_the_prompt_llm() -> N
     assert seen[0]["core_so_far"] == "(none)", "round 0 starts with an empty core"
     assert seen[0]["has_blocks"], "the decider must receive the blocked evidence view"
     assert eps, "the loop must still produce an injection"
+
+
+# -- the settings that bound one round have to be in the outgoing request -----
+
+
+async def test_the_decider_sends_its_max_tokens_and_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[decider].max_tokens`` and ``.extra`` are per-call, not client defaults.
+
+    ``extra`` is where a Qwen endpoint is told to stop thinking. Left on, an
+    un-finetuned decider spends the whole deadline reasoning: 39.3% of rounds on
+    Qwen3.5-0.8B returned nothing inside 60s, each costing ~729s of nested retries
+    before the fixed top-3 fallback. The field was declared and documented while
+    ``chat()`` was called with the messages and nothing else, and the suite could not
+    notice because the stub discarded its keyword arguments.
+    """
+    monkeypatch.setenv("EVEROS_DECIDER__MAX_TOKENS", "256")
+    monkeypatch.setenv(
+        "EVEROS_DECIDER__EXTRA",
+        '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}',
+    )
+    llm = _ScriptLLM([_reply([0], [])])
+    await LLMRoundDecider(llm)("q", "(none)", "x", 1, 0)
+
+    (kw,) = llm.kwargs
+    assert kw["max_tokens"] == 256
+    assert kw["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

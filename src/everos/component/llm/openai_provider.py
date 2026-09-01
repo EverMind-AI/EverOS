@@ -39,6 +39,11 @@ class OpenAIProvider:
         timeout: Per-request timeout in seconds.
         temperature: Default sampling temperature (overridable per call).
         max_tokens: Default max-tokens cap (overridable per call).
+        max_retries: SDK-level retry count. ``None`` keeps the SDK default.
+        extra: Provider-specific request fields merged into every call, the
+            same role ``LLMConfig.extra`` plays for everalgo's own client.
+            Per-call ``**extra`` wins on a key collision, matching
+            ``everalgo...openai_compat._build_request_kwargs``.
     """
 
     def __init__(
@@ -51,10 +56,12 @@ class OpenAIProvider:
         temperature: float = 0.0,
         max_tokens: int | None = None,
         max_retries: int | None = None,
+        extra: Mapping[str, Any] | None = None,
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._extra: dict[str, Any] = dict(extra or {})
         # `max_retries` is the SDK's own retry count, and it MULTIPLIES with any
         # retry the caller does. The decider retries 3 times (4 attempts); with the
         # SDK default of 2 (3 requests) one unanswerable round costs 4 x 3 x timeout
@@ -93,6 +100,7 @@ class OpenAIProvider:
             request["max_tokens"] = effective_max
         if response_format is not None:
             request["response_format"] = dict(response_format)
+        request.update(self._extra)
         request.update(extra)
 
         try:

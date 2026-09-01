@@ -110,7 +110,13 @@ def test_client_passes_both_through_to_the_algo_config(
 
 
 def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The decider needs it too: it runs the same model inside every search."""
+    """The decider needs it too: it runs the same model inside every search.
+
+    Asserted on the resolved config rather than on ``build_client``: the decider is not
+    built through everalgo any more, because ``LLMConfig`` has no ``max_retries`` and
+    the decider has to be able to turn the SDK's own retries off. A test pinned to the
+    old construction call would pass while asserting about a client nobody uses.
+    """
     import everos.component.llm.client as client_mod
 
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
@@ -120,14 +126,7 @@ def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("EVEROS_DECIDER__EXTRA", NO_THINK)
     load_settings.cache_clear()
 
-    seen: list[Any] = []
-    monkeypatch.setattr(client_mod, "_decider_client", None)
-    monkeypatch.setattr(
-        client_mod, "build_client", lambda cfg: seen.append(cfg) or object()
-    )
-    client_mod.get_decider_llm_client()
-
-    (cfg,) = seen
+    cfg = client_mod.resolve_decider_config()
     assert cfg.timeout == 120.0
     assert cfg.extra == NO_THINK_PARSED
 

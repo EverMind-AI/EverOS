@@ -261,10 +261,13 @@ class DeciderSettings(BaseModel):
     few dozen tokens, so this is a guard, not a budget: uncapped, a model that will
     not stop generates until the deadline and the round is lost to a timeout rather
     than to a parse failure that would have been visible."""
-    sdk_max_retries: int | None = 0
+    sdk_max_retries: int | None = Field(default=0, ge=0)
     """Retries inside the OpenAI SDK. 0 because :attr:`retries` below already retries
     at this layer, and the two multiply -- see the note in ``OpenAIProvider``. None
-    keeps the SDK default."""
+    keeps the SDK default.
+
+    Bounded at zero: the SDK reads it as a count, so a negative value is not "fewer
+    retries" but a misconfiguration that would reach ``AsyncOpenAI`` unexamined."""
 
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)
