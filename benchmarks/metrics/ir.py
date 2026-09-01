@@ -8,6 +8,15 @@ answer different questions and were conflated once already.
 Relevance is session-level: an episode counts as relevant when its session id is in
 gold. Duplicate sessions in the list are credited once for recall and each time for
 precision, matching how a reader would experience the context.
+
+nDCG credits a session once, at its first occurrence, and its ideal ranking is
+``min(len(gold), k)`` relevant items -- gold the search never returned included. Both
+halves are load-bearing and neither works alone. An IDCG built from the retrieved
+relevance list, as this did, cannot see the gold that was missed, so half the gold
+recalled scored ``ndcg@2 = 1.0`` beside ``recall@2 = 0.5``: a ranking metric that
+reports a perfect score for a ranking with half the answer missing. Fixing only the
+IDCG then lets duplicates push nDCG above 1, because ``gold={a}`` with
+``ranked=[a, a]`` earns two gains against a one-item ideal.
 """
 
 from __future__ import annotations
@@ -47,19 +56,28 @@ def score(
         seen: set[str] = set()
         hits = 0
         precs: list[float] = []
+        # Gains for DCG: a session earns its 1 the first time it appears and nothing
+        # afterwards. Built in the same pass as average precision, which already
+        # counts a session once, so the two cannot drift apart.
+        gains: list[int] = []
         for i, s in enumerate(sessions):
             if s in g and s not in seen:
                 seen.add(s)
                 hits += 1
                 precs.append(hits / (i + 1))
+                gains.append(1)
+            else:
+                gains.append(0)
         ap.append(sum(precs) / len(g) if precs else 0.0)
         full.append(1.0 if len({s for s in sessions if s in g}) == len(g) else 0.0)
         for k in ks:
             top, rl = list(sessions[:k]), rels[:k]
             per_k[k]["recall"].append(len({s for s in top if s in g}) / len(g))
             per_k[k]["precision"].append(sum(rl) / k)
-            ideal = _dcg(sorted(rels, reverse=True)[:k])
-            per_k[k]["ndcg"].append(_dcg(rl) / ideal if ideal > 0 else 0.0)
+            # The ideal ranking is every gold item a list of k slots could hold, not
+            # every gold item this list happened to return.
+            ideal = _dcg([1] * min(len(g), k))
+            per_k[k]["ndcg"].append(_dcg(gains[:k]) / ideal if ideal > 0 else 0.0)
     if not n:
         return {"n": 0}
     out: dict[str, Any] = {

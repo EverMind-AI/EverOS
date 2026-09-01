@@ -20,16 +20,30 @@ from __future__ import annotations
 import json
 import os
 import statistics as st
+from collections.abc import Hashable, Mapping
 from typing import Any
 
+QuestionKey = tuple[str, str]
+"""``(owner_id, question)`` -- the grain a core-selection metric is defined on."""
 
-def core_sessions_from_trace(trace_path: str) -> dict[str, set[str]]:
-    """``owner_id -> {session_id}`` for the episodes the decider actually pinned.
 
-    Later records for the same owner overwrite earlier ones: the final injection is the
-    state that was scored.
+def core_sessions_from_trace(trace_path: str) -> dict[QuestionKey, set[str]]:
+    """``(owner_id, question) -> {session_id}`` for the episodes the decider pinned.
+
+    Keyed per question, not per owner. Owner alone holds only for a dataset that asks
+    one question per owner: LongMemEval's owners are ``longmemeval_<question id>``, so
+    the two grains coincide there and the dict-overwrite that used to key this looked
+    right. LoCoMo puts every question of a conversation under one owner, where the
+    same overwrite silently kept the last question's core and dropped the rest -- and
+    which one survived depended on the order the trace happened to be written in.
+
+    ``question_id`` is the natural key but the search layer cannot fill it: a
+    ``/search`` request carries a query and an owner, so the trace writes ``None``
+    there and the question text is the stable identifier available. Later records for
+    one question still overwrite earlier ones, which is intended: the final injection
+    is the state that was scored.
     """
-    out: dict[str, set[str]] = {}
+    out: dict[QuestionKey, set[str]] = {}
     if not trace_path or not os.path.exists(trace_path):
         return out
     with open(trace_path, encoding="utf-8") as fh:
@@ -46,7 +60,8 @@ def core_sessions_from_trace(trace_path: str) -> dict[str, set[str]]:
             owner = str(rec.get("owner_id") or "")
             if not owner:
                 continue
-            out[owner] = {
+            question = str(rec.get("question_id") or rec.get("question") or "")
+            out[owner, question] = {
                 str(x.get("session_id"))
                 for x in rec["injected"]
                 if x.get("is_core") and x.get("session_id")
@@ -91,20 +106,27 @@ def decider_reliability(trace_path: str) -> dict[str, Any]:
     }
 
 
-def score(core: dict[str, set[str]], gold: dict[str, set[str]]) -> dict[str, Any]:
+def score(
+    core: Mapping[Hashable, set[str]], gold: Mapping[Hashable, set[str]]
+) -> dict[str, Any]:
     """Core precision / recall / F1 against session-level gold.
 
-    Owners with empty gold are skipped rather than scored 0 -- a benchmark question with
-    no resolvable evidence says nothing about the policy. The count is reported so a bad
-    gold mapping cannot hide as a low score.
+    Both mappings must be keyed the same way -- ``core_sessions_from_trace`` returns
+    ``(owner_id, question)``, so ``gold`` has to as well. A mismatch shows up as every
+    entry counted in ``skipped_no_gold`` with ``n == 0``, which is loud; the shape it
+    replaced was silent.
+
+    Entries with empty gold are skipped rather than scored 0 -- a benchmark question
+    with no resolvable evidence says nothing about the policy. The count is reported so
+    a bad gold mapping cannot hide as a low score.
     """
     precisions: list[float] = []
     recalls: list[float] = []
     f1s: list[float] = []
     sizes: list[int] = []
     skipped = 0
-    for owner, pool in core.items():
-        g = gold.get(owner) or set()
+    for key, pool in core.items():
+        g = gold.get(key) or set()
         if not g:
             skipped += 1
             continue
