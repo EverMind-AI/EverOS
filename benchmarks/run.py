@@ -3862,9 +3862,23 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
 
 
 def _iter_servers() -> list[tuple[int, str, str]]:
-    """Every running EverOS server as (pid, port, store root), read from /proc."""
+    """Every running EverOS server as (pid, port, store root), read from /proc.
+
+    Linux only, and it says so rather than raising: process discovery here reads
+    ``cmdline`` and ``environ`` out of ``/proc``, which no other platform provides.
+    Walking it unconditionally ended ``--list-servers`` on macOS with
+    ``FileNotFoundError: [Errno 2] ... '/proc'`` -- a traceback for a command whose
+    honest answer is that it cannot look.
+    """
     out: list[tuple[int, str, str]] = []
-    for entry in Path("/proc").iterdir():
+    proc = Path("/proc")
+    if not proc.is_dir():
+        print(
+            f"  Server discovery needs /proc, which {sys.platform} does not provide; "
+            "pass --base-url to address servers directly."
+        )
+        return out
+    for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         try:

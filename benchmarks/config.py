@@ -249,23 +249,37 @@ class BenchmarkConfig(BaseModel):
         """Load config from a TOML file.
 
         Args:
-            name: Config name without .toml extension.
-            config_dir: Directory containing config files.
-                Falls back to ``benchmarks/`` relative to the repo root.
+            name: A built-in config name ("locomo"), or a path to a TOML file.
+                Anything carrying a ``.toml`` suffix or a path separator is treated
+                as a path and used as given; a bare name is resolved under
+                ``config_dir`` with ``.toml`` appended.
+            config_dir: Directory containing the built-in config files.
+                Falls back to ``benchmarks/configs/``.
 
         Raises:
-            FileNotFoundError: When the TOML file does not exist.
+            FileNotFoundError: When the TOML file does not exist. The message names
+                the path actually opened, which is the only way to tell a missing
+                file from a mis-resolved name.
         """
         if config_dir is None:
             config_dir = Path(__file__).parent / "configs"
-        # Accept a bare benchmark name ("locomo") as well as a legacy "config.locomo"
-        # form, so the CLI can take one identifier instead of a name plus a file path.
-        stem = name[len("config.") :] if name.startswith("config.") else name
-        # "config" was the file's name before the per-benchmark layout; keep it
-        # resolving to the shared defaults rather than breaking callers that still ask
-        # for it.
-        stem = "default" if stem in ("", "config") else stem
-        path = config_dir / f"{stem}.toml"
+        # `--config` is documented as pointing at a file outside benchmarks/configs/,
+        # and a suffix was appended to whatever it was given -- so a full path came
+        # back as `FileNotFoundError: /tmp/custom.toml.toml`, naming a file the caller
+        # never asked for. A name and a path are different things, so decide which one
+        # this is before resolving it.
+        if name.endswith(".toml") or os.sep in name or "/" in name:
+            path = Path(name).expanduser()
+        else:
+            # Accept a bare benchmark name ("locomo") as well as a legacy
+            # "config.locomo" form, so the CLI can take one identifier instead of a
+            # name plus a file path.
+            stem = name[len("config.") :] if name.startswith("config.") else name
+            # "config" was the file's name before the per-benchmark layout; keep it
+            # resolving to the shared defaults rather than breaking callers that still
+            # ask for it.
+            stem = "default" if stem in ("", "config") else stem
+            path = config_dir / f"{stem}.toml"
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         with open(path, "rb") as f:
