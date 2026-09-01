@@ -225,7 +225,7 @@ def test_the_diff_is_ordered_so_two_runs_report_alike(tmp_path: Path) -> None:
 
 # ── a dataset can be a directory ──────────────────────────────────────────────
 def test_a_directory_dataset_is_digested_not_skipped(tmp_path: Path) -> None:
-    """SubtleMemory's `data_path` is a directory; hashing only files left it unchecked."""
+    """SubtleMemory's `data_path` is a directory; files-only left it unchecked."""
     ddir = tmp_path / "ds"
     (ddir / "sub").mkdir(parents=True)
     (ddir / "a.json").write_text("one", encoding="utf-8")
@@ -246,7 +246,7 @@ def test_a_directory_dataset_is_digested_not_skipped(tmp_path: Path) -> None:
     assert second != first, "a byte inside the directory must move the digest"
 
 
-def test_renaming_a_file_in_a_directory_dataset_moves_the_digest(tmp_path: Path) -> None:
+def test_renaming_a_file_in_a_dir_dataset_moves_the_digest(tmp_path: Path) -> None:
     """Paths are hashed alongside bytes, so a rename is a change even byte-for-byte."""
     ddir = tmp_path / "ds"
     ddir.mkdir()
