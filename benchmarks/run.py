@@ -60,6 +60,9 @@ from config import (  # noqa: E402
     RunSpec,
     SearchResult,
     ServingSpec,
+    identity_diff,
+    ingest_identity,
+    read_identity,
     unresolved,
 )
 from tqdm import tqdm as _tqdm  # noqa: E402
@@ -3106,6 +3109,106 @@ def _collect_packages() -> dict[str, str]:
     return out
 
 
+def _ingest_identity_for_marker(
+    config: BenchmarkConfig, benchmark: str
+) -> dict[str, str]:
+    """The ingest identity as an `add.done` marker records it.
+
+    The extraction backbone is left out here on purpose: this runs inside the per-
+    conversation nested function, which has no access to the `serving` list assembled at
+    startup, and reaching for it there is what has repeatedly produced UnboundLocalError
+    after ADD had already finished. Data and adapter are the two that make a marker
+    describe a different store; the backbone is still checked at the directory level by
+    `_check_resume_identity`.
+    """
+    return {
+        k: v
+        for k, v in ingest_identity(config, benchmark).items()
+        if k != "extraction_backbone"
+    }
+
+
+class ResumeIdentityError(RuntimeError):
+    """A results directory already holds work from a different experiment."""
+
+
+def _check_resume_identity(
+    output_dir: Path,
+    ingest_new: dict[str, str],
+    read_new: dict[str, str],
+    force: bool,
+) -> list[str]:
+    """Refuse to merge two experiments; re-run reads when only the read side moved.
+
+    Must run BEFORE `_write_run_spec`, which overwrites `run_spec.json` unconditionally
+    and so destroys the only record of what the existing rows were produced with.
+
+    An ingest mismatch aborts: the stored memories are wrong for this run, and no
+    amount
+    of re-reading fixes them. A read mismatch does not -- the store is still correct, so
+    the stage files are moved aside and the read stages re-run. They are MOVED, not
+    deleted: the superseded rows are the evidence of what the directory used to hold.
+
+    Returns the notes to record in the report. An absent or unparseable old spec is not
+    an error -- a fresh directory has none, and a spec written before run identity
+    existed carries none either.
+    """
+    spec_path = output_dir / "run_spec.json"
+    if not spec_path.is_file():
+        return []
+    try:
+        old = json.loads(spec_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"run_spec.json unreadable ({type(exc).__name__}); identity unchecked"]
+
+    notes: list[str] = []
+    # An identity the old spec never recorded is UNKNOWN, not different. Specs written
+    # before run identity existed carry none at all, and treating every one of their
+    # fields as a mismatch would make every historical results directory unresumable --
+    # the opposite of the point. Only a recorded value that actually differs is a
+    # conflict.
+    old_ingest = old.get("ingest_identity") or {}
+    old_read = old.get("read_identity") or {}
+    if not old_ingest and not old_read:
+        return ["run_spec.json predates run identity; nothing to compare"]
+
+    ingest_diff = [
+        d for d in identity_diff(old_ingest, ingest_new) if "(not recorded)" not in d
+    ]
+    if ingest_diff:
+        detail = "; ".join(ingest_diff)
+        if not force:
+            raise ResumeIdentityError(
+                f"{output_dir} holds results from a different ingest: {detail}. "
+                "The stored memories were built from other inputs, so resuming would "
+                "merge two experiments into one report. Use a new --run-name, or pass "
+                "--force-reuse-dir to reuse this directory anyway (recorded in the "
+                "report)."
+            )
+        notes.append(f"FORCED over ingest mismatch: {detail}")
+
+    read_diff = [
+        d for d in identity_diff(old_read, read_new) if "(not recorded)" not in d
+    ]
+    if read_diff:
+        joined = "; ".join(read_diff)
+        notes.append(f"read identity changed, read stages re-run: {joined}")
+        moved = 0
+        for stage_file in sorted(output_dir.glob("conv*/*.jsonl")):
+            if stage_file.name.startswith("add"):
+                continue
+            target = stage_file.with_suffix(".superseded.jsonl")
+            n = 1
+            while target.exists():
+                n += 1
+                target = stage_file.with_suffix(f".superseded{n}.jsonl")
+            stage_file.rename(target)
+            moved += 1
+        if moved:
+            notes.append(f"{moved} stage file(s) set aside as *.superseded*.jsonl")
+    return notes
+
+
 def _write_run_spec(
     output_dir: Path,
     run_name: str,
@@ -3115,6 +3218,8 @@ def _write_run_spec(
     benchmark: str = "locomo",
     store_root: str = "",
     serving: list[ServingSpec] | None = None,
+    ingest_id: dict[str, str] | None = None,
+    read_id: dict[str, str] | None = None,
 ) -> None:
     """Write reproducibility snapshot to run_spec.json."""
     serving = list(serving or [])
@@ -3141,6 +3246,8 @@ def _write_run_spec(
         store_root=store_root,
         packages=_collect_packages(),
         serving=serving,
+        ingest_identity=dict(ingest_id or {}),
+        read_identity=dict(read_id or {}),
     )
     (output_dir / "run_spec.json").write_text(
         spec.model_dump_json(indent=2), encoding="utf-8"
@@ -3212,6 +3319,10 @@ def run_conversation(
     # queue has actually drained makes ADD skippable, so a restart resumes at the first
     # conversation that never finished.
     add_marker = conv_dir / "add.done"
+    # Derived from args, not from an enclosing local: this runs inside the nested
+    # per-conversation function, and reaching for a name assigned further up is what
+    # killed two runs AFTER ADD had already finished.
+    _bm = getattr(args, "benchmark", "locomo")
     add_needed = "add" in stages and not add_marker.exists()
     # A marker is only trustworthy if the store it describes still holds that owner's
     # memories. Results directories get copied and reused, so a marker can arrive from a
@@ -3229,7 +3340,20 @@ def run_conversation(
             else [args.everos_root]
         )
         _root = Path(_rl[conv_index % len(_rl)]).expanduser()
-        _owner = json.loads(add_marker.read_text()).get("owner_id", "")
+        _marker = json.loads(add_marker.read_text())
+        _owner = _marker.get("owner_id", "")
+        # A marker from another experiment does not describe this run's store. Absent is
+        # not a mismatch: markers written before run identity existed carry none, and
+        # calling those stale would re-ingest every historical directory.
+        _marker_id = _marker.get("ingest_identity")
+        if _marker_id and _marker_id != _ingest_identity_for_marker(config, _bm):
+            _now_id = _ingest_identity_for_marker(config, _bm)
+            print(
+                f"conv{conv_index}: add.done came from a different ingest "
+                f"({identity_diff(_marker_id, _now_id)}); re-ingesting"
+            )
+            add_marker.unlink(missing_ok=True)
+            add_needed = "add" in stages
         # A validation check must never abort the run. This block twice referenced
         # locals that are only assigned further down the enclosing function, and each
         # time the run died AFTER ADD had completed. `_owner_dir` was also dead code --
@@ -3412,6 +3536,12 @@ def run_conversation(
                 {
                     "owner_id": owner_id,
                     "sessions": len(sessions),
+                    # Binds the marker to the experiment that produced it. Without this
+                    # a marker is a global "this conversation was ingested once by
+                    # somebody" flag: results directories get copied between runs, and
+                    # a marker from a different dataset or extraction backbone would
+                    # skip ADD and score whatever store happened to be mounted.
+                    "ingest_identity": _ingest_identity_for_marker(config, _bm),
                     # Extraction losses are recorded, not swallowed: a conversation can
                     # be "complete" and still be missing the facts from a few malformed-
                     # JSON responses, and that has to be auditable after the fact.
@@ -3723,6 +3853,14 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
         action="store_true",
         help="Allow ADD into a store that already holds memories without this run's "
         "add.done markers. Off by default because re-adding duplicates memories.",
+    )
+    p.add_argument(
+        "--force-reuse-dir",
+        action="store_true",
+        help="Reuse a results directory whose ingest identity differs from this run's. "
+        "Off by default: the stored memories were built from other inputs, so the two "
+        "runs would merge into one unreproducible report. When passed, the mismatch is "
+        "printed and recorded in the report rather than being silent.",
     )
     p.add_argument(
         "--list-servers",
@@ -4201,15 +4339,29 @@ def _main_inner(args, config) -> None:
     output_dir = Path(_results_root(args, config)) / args.run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    _bench = getattr(args, "benchmark", "locomo")
+    _serving = _serving_from_env(config)
+    _ingest_id = ingest_identity(config, _bench, _serving)
+    _read_id = read_identity(config, _serving)
+    # Before the write, not after: _write_run_spec overwrites the spec recording what
+    # the rows already in this directory were produced with.
+    _identity_notes = _check_resume_identity(
+        output_dir, _ingest_id, _read_id, bool(getattr(args, "force_reuse_dir", False))
+    )
+    for _note in _identity_notes:
+        print(f"resume: {_note}")
+
     _write_run_spec(
         output_dir,
         args.run_name,
         config,
         args.conv,
         args.stages,
-        benchmark=getattr(args, "benchmark", "locomo"),
+        benchmark=_bench,
         store_root=str(getattr(args, "everos_root", "") or ""),
-        serving=_serving_from_env(config),
+        serving=_serving,
+        ingest_id=_ingest_id,
+        read_id=_read_id,
     )
 
     print(

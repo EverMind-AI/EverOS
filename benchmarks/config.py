@@ -7,9 +7,11 @@ reference so that numbers are directly comparable.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -477,3 +479,115 @@ class RunSpec(BaseModel):
     while this repository pins 0.4.0, so a from-scratch end-to-end run cannot reproduce
     published numbers by construction."""
     serving: list[ServingSpec] = Field(default_factory=list)
+    ingest_identity: dict[str, str] = Field(default_factory=dict)
+    """What must match for an already-ingested store to be reusable -- see
+    :func:`ingest_identity`. Empty on specs written before run identity existed,
+    which
+    resume treats as "unknown" rather than as "matches"."""
+    read_identity: dict[str, str] = Field(default_factory=dict)
+    """What must match for existing search/answer/judge rows to be reusable -- see
+    :func:`read_identity`. Separate from the ingest identity because most of what
+    changes between runs does not touch the store."""
+
+
+# =============================================================================
+# Run identity
+#
+# Resume used to skip work on row index and an `add.done` marker alone, with no check
+# that the rows it was keeping came from the same experiment. Change the model, the data
+# or the retrieval parameters in a directory that already holds results and the two runs
+# merge into one report that cannot be reproduced from either configuration -- and the
+# fresh `run_spec.json` overwrites the old one, erasing the evidence that they differed.
+#
+# The identity is deliberately TWO values, not one, because the two halves have very
+# different costs. Re-ingesting a store is hours of LLM calls; re-running search, answer
+# and judge is minutes. Collapsing them into a single hash would throw away a valid
+# store every time somebody changed `top_k`, which is the most common thing to change.
+# =============================================================================
+
+
+def _file_digest(path: str) -> str:
+    """SHA-256 of a data file's contents, or a marker when it cannot be read.
+
+    Content, not mtime or size: a regenerated dataset with the same length is exactly
+    the case a resume must catch. Unreadable is reported as such rather than as a
+    constant, so a missing file never silently equals another missing file.
+    """
+    p = Path(path).expanduser()
+    if not path or not p.is_file():
+        return f"unavailable:{path}"
+    h = hashlib.sha256()
+    with p.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:32]
+
+
+def ingest_identity(
+    config: BenchmarkConfig,
+    benchmark: str,
+    serving: Sequence[ServingSpec] = (),
+) -> dict[str, str]:
+    """What must match for an already-ingested store to be reusable.
+
+    Only three things can make stored memories wrong for the current run: different
+    source data, a different adapter reading it, or a different model writing the
+    memories. Everything else is a read-time concern.
+
+    Two things measured to be irrelevant are deliberately EXCLUDED, and excluding them
+    is the point of having two identities at all:
+
+    * ``top_k`` -- it caps how many episodes are injected into the answer prompt and has
+      no bearing on what was ingested.
+    * the ``everalgo`` version -- extraction quality across the versions in use here was
+      measured and the difference did not move the benchmark, so a bump must not throw
+      away hours of ingest. The versions are still recorded in ``RunSpec.packages`` for
+      provenance; they just do not gate resume.
+    """
+    backbone = next(
+        (s.model for s in serving if s.role in ("extraction", "backbone")), ""
+    )
+    return {
+        "data_digest": _file_digest(config.data_path),
+        "adapter": f"{benchmark}/{config.adapter}",
+        "extraction_backbone": backbone,
+    }
+
+
+def read_identity(
+    config: BenchmarkConfig,
+    serving: Sequence[ServingSpec] = (),
+) -> dict[str, str]:
+    """What must match for existing search/answer/judge rows to be reusable.
+
+    A mismatch here leaves the store alone and re-runs the read stages, because the
+    stored memories are still correct -- what changed is the questions asked of them,
+    or the models answering.
+    """
+    decider = next((s for s in serving if s.role == "decider"), None)
+    return {
+        "methods": config.methods,
+        "top_k": str(config.top_k),
+        "include_profile": str(config.include_profile),
+        "answer_model": config.answer_model,
+        "judge_model": config.judge_model,
+        "decider_model": (decider.model if decider else config.decider_model) or "",
+        "decider_endpoint": (decider.endpoint if decider else config.decider_base_url)
+        or "",
+    }
+
+
+def identity_diff(old: dict[str, str], new: dict[str, str]) -> list[str]:
+    """Human-readable differences between two identities, ignoring absent old keys.
+
+    A key missing from ``old`` is reported as unknown rather than as a change: specs
+    written before run identity existed carry no identity at all, and calling every one
+    of their fields a mismatch would make every historical directory non-resumable.
+    """
+    out = []
+    for key in sorted(new):
+        if key not in old:
+            out.append(f"{key}: (not recorded) -> {new[key]}")
+        elif old[key] != new[key]:
+            out.append(f"{key}: {old[key]} -> {new[key]}")
+    return out
