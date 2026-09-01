@@ -2706,12 +2706,21 @@ def aggregate_report(
     output_dir: Path,
     conversations: list[int],
     config: BenchmarkConfig,
+    unscorable: Sequence[int] = (),
 ) -> None:
-    """Aggregate search/answer/judge results and write report files."""
+    """Aggregate search/answer/judge results and write report files.
+
+    ``unscorable`` names conversations that produced no gradable rows -- an ingest
+    that failed, so the read stages were skipped. They are recorded in every method
+    summary rather than left to the exit code, which does not survive into the file:
+    a report covering nine of ten conversations is shaped exactly like one covering
+    all ten, and the number on the front of it is over a different population.
+    """
     all_summaries: dict[str, dict[str, Any]] = {}
     for method in config.parsed_methods:
         summary = _collect_method_summary(method, output_dir, conversations, config)
         if summary is not None:
+            summary["unscorable_conversations"] = sorted(unscorable)
             all_summaries[method] = summary
 
     report_path = output_dir / "report.json"
@@ -4310,12 +4319,31 @@ def _main_inner(args, config) -> None:
                     _tqdm.write(f"  BUDGET EXHAUSTED on conv{ci}: {e}")
 
     def _run_server_group(srv_idx: int, convs: list[int]) -> None:
-        """One server's whole pipeline: ingest its share, freeze it, then read it."""
+        """One server's whole pipeline: ingest its share, freeze it, then read it.
+
+        A conversation whose ingest failed does not get read. The `_run_pass` handler
+        above already said this was the rule -- "its store is short whatever the
+        failure dropped, and searching it would score the gap as a retrieval miss" --
+        but it only recorded the outcome, and the read pass then ran over every
+        conversation anyway. So a failed ADD still produced searches, answers and
+        judgments against a partial store, and those rows went into the report's
+        denominator. The run exits non-zero afterwards, but the report it wrote first
+        looks like any other and outlives the exit code.
+        """
         if _does_add:
             _run_pass(convs, ["add"])
             if not budget_stopped:
                 _quiesce_servers([_urls[srv_idx]])
-        if _read_stages and not budget_stopped:
+            with _res_lock:
+                ingested = [ci for ci in convs if results.get(ci, True)]
+            if len(ingested) != len(convs):
+                skipped = sorted(set(convs) - set(ingested))
+                _tqdm.write(
+                    f"  SKIPPING {_read_stages} for conv {skipped}: ingest failed, so "
+                    "there is no store to score"
+                )
+            convs = ingested
+        if _read_stages and convs and not budget_stopped:
             _run_pass(convs, _read_stages)
 
     with ThreadPoolExecutor(max_workers=_n_srv) as fleet_pool:
@@ -4350,7 +4378,7 @@ def _main_inner(args, config) -> None:
 
     # Aggregate
     if "judge" in args.stages:
-        aggregate_report(output_dir, args.conv, config)
+        aggregate_report(output_dir, args.conv, config, unscorable=failed)
 
     if failed:
         # Exit non-zero. A run whose every answer call 404'd still printed "Done" and
