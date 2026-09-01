@@ -2462,6 +2462,12 @@ def _collect_method_summary(
         "method": method,
         "total": total,
         "correct": correct,
+        # MICRO accuracy: sum(correct) / sum(total) over every graded question, so a
+        # category's weight is its question count. Not the macro mean of the
+        # per-category columns, which is a different statistic and is what the guide
+        # used to claim this was; `category_stats` below is reported, never averaged
+        # in. Pinned by tests/unit/test_benchmark_headline_definition.py so a change
+        # of definition has to be deliberate.
         "accuracy": round(correct / total, 4) if total else 0,
         "mean_accuracy": mean_accuracy,
         "max_accuracy": max_accuracy,

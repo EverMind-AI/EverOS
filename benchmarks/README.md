@@ -102,8 +102,20 @@ Each benchmark's published number, produced by the configuration in
 | EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
 | SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
 
-> **EverMemBench** — scores as the mean of its nine category columns, which is
-> how the benchmark reports it.
+> **Accuracy** is a micro accuracy for every benchmark in this table:
+> `sum(correct) / sum(total)` over all graded questions. The per-category lines in
+> `report.txt` are reported, never averaged into it, so a category with few questions
+> moves the headline less than a large one does. This note used to say EverMemBench
+> scored as the mean of its nine category columns — a macro average, which is a
+> different statistic and not what `run.py` computes.
+>
+> Two things follow, both worth knowing before comparing the number to anyone else's.
+> Five of the six rows in the published EverMemBench comparison table are the macro
+> mean of their own nine columns, so reading our figure alongside that column compares
+> two different statistics. And the "nine categories" is not something this code can
+> confirm: the adapter names three (`F_SH`, `F_MH`, `F_TP` in
+> `adapters/evermembench.py`) and derives the rest from a question-id prefix, so any
+> unlabelled id is reported under its raw key.
 >
 > **SubtleMemory** — routes each question between two answer contracts on whether
 > fact extraction found a conflict; the adapter does this automatically.
