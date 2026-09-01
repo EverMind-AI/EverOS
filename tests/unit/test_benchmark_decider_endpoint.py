@@ -41,7 +41,11 @@ def _cfg(**over: Any) -> Any:
         "decider_model": "policy",
         "decider_base_url": "http://127.0.0.1:9360/v1",
         "decider_api_key": "EMPTY",
+        "backbone_model": "",
+        "backbone_base_url": "",
+        "backbone_api_key": "",
         "retrieval_env": {},
+        "parsed_methods": ["llm_multiround"],
     }
     base.update(over)
     return type("Cfg", (), base)()
@@ -142,17 +146,117 @@ def test_empty_completion_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         run._assert_decider_answers(_cfg())
 
 
-def test_no_separate_decider_is_not_probed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the backbone decides, there is no second endpoint to check.
+def test_a_run_with_no_multiround_route_is_not_probed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hybrid run makes no decider calls, so it has no endpoint to check.
 
-    Probing anyway would fail every hybrid run, which makes no decider calls at all.
+    The gate is what the run does, not which fields are filled in: probing anyway
+    would fail a hybrid run over an endpoint it never touches.
     """
 
     def _boom(**_kw: Any) -> None:
-        raise AssertionError("must not construct a client without a decider configured")
+        raise AssertionError("must not construct a client for a run with no decider")
 
     monkeypatch.setattr(run.openai, "OpenAI", _boom)
-    run._assert_decider_answers(_cfg(decider_model="", decider_base_url=""))
+    run._assert_decider_answers(_cfg(parsed_methods=["hybrid"]))
+
+
+def test_an_inherited_endpoint_is_still_probed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`[decider].model` with no decider URL is a valid runtime config, and was skipped.
+
+    `get_decider_llm_client()` falls back to the backbone's endpoint field by field, so
+    this shape runs -- and when that endpoint does not serve the named model, every
+    decider call fails inside the benchmark instead of before its first question. The
+    old gate required both fields to be set explicitly and returned silently otherwise,
+    which left the one case the probe exists for uncovered.
+    """
+
+    class Ok(_Client):
+        def _reply(self) -> _Resp:
+            return _Resp("ready")
+
+    monkeypatch.setattr(run.openai, "OpenAI", Ok)
+    run._assert_decider_answers(
+        _cfg(
+            decider_base_url="",
+            decider_api_key="",
+            backbone_base_url="http://backbone.invalid/v1",
+            backbone_api_key="bk",
+        )
+    )
+    assert Ok.seen["base_url"] == "http://backbone.invalid/v1"
+    assert Ok.seen["api_key"] == "bk"
+    assert Ok.seen["model"] == "policy", "the decider's own model, not the backbone's"
+
+
+def test_a_fully_inherited_decider_is_probed_as_the_backbone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `[decider]` at all: the backbone decides, and nothing else probes it.
+
+    `_assert_decider_answers` is the only probe in this harness -- the comment that
+    sent this case away said the backbone had "its own probe", and it has none.
+    """
+
+    class Ok(_Client):
+        def _reply(self) -> _Resp:
+            return _Resp("ready")
+
+    monkeypatch.setattr(run.openai, "OpenAI", Ok)
+    run._assert_decider_answers(
+        _cfg(
+            decider_model="",
+            decider_base_url="",
+            decider_api_key="",
+            backbone_model="backbone",
+            backbone_base_url="http://backbone.invalid/v1",
+        )
+    )
+    assert Ok.seen["model"] == "backbone"
+    assert Ok.seen["base_url"] == "http://backbone.invalid/v1"
+
+
+def test_nothing_resolvable_says_so_instead_of_returning_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silence is what the probe exists to remove; it must not answer with silence."""
+
+    def _boom(**_kw: Any) -> None:
+        raise AssertionError("nothing to probe, so nothing should be constructed")
+
+    monkeypatch.setattr(run.openai, "OpenAI", _boom)
+    monkeypatch.delenv("EVEROS_LLM__BASE_URL", raising=False)
+    monkeypatch.delenv("EVEROS_LLM__MODEL", raising=False)
+    run._assert_decider_answers(
+        _cfg(decider_model="", decider_base_url="", decider_api_key="")
+    )
+    assert "NOT PROBED" in capsys.readouterr().out
+
+
+def test_the_probe_sends_the_decider_max_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real call is capped now, so an uncapped probe vouches for a different call.
+
+    `LLMRoundDecider.__call__` sends `[decider].max_tokens`. A probe that omits it
+    would pass on a budget the run never gets.
+    """
+
+    class Ok(_Client):
+        def _reply(self) -> _Resp:
+            return _Resp("ready")
+
+    monkeypatch.setattr(run.openai, "OpenAI", Ok)
+    monkeypatch.delenv("EVEROS_DECIDER__MAX_TOKENS", raising=False)
+    run._assert_decider_answers(_cfg())
+    assert Ok.seen["max_tokens"] == run._DECIDER_MAX_TOKENS_DEFAULT
+
+    monkeypatch.setattr(run.openai, "OpenAI", Ok)
+    run._assert_decider_answers(
+        _cfg(retrieval_env={"EVEROS_DECIDER__MAX_TOKENS": "64"})
+    )
+    assert Ok.seen["max_tokens"] == 64
 
 
 def test_probe_runs_before_the_search_stage() -> None:

@@ -2896,6 +2896,28 @@ def _serving_from_env(config: BenchmarkConfig) -> list[ServingSpec]:
     return roles
 
 
+_DECIDER_MAX_TOKENS_DEFAULT = 512
+"""Mirrors ``DeciderSettings.max_tokens``. Duplicated rather than imported because this
+harness drives EverOS as a server over HTTP and does not import it; a drift here shows
+up as a probe that caps differently from the run it vouches for."""
+
+
+def _decider_max_tokens(config: BenchmarkConfig) -> int:
+    """The reply cap the servers' decider will send, from the config or the environment.
+
+    Read from the same two places as ``_decider_extra`` for the same reason: the launch
+    scripts export one and ``retrieval_env`` carries the other, and the servers take
+    whichever is set.
+    """
+    raw = config.retrieval_env.get("EVEROS_DECIDER__MAX_TOKENS") or os.environ.get(
+        "EVEROS_DECIDER__MAX_TOKENS", ""
+    )
+    try:
+        return int(raw)
+    except ValueError:
+        return _DECIDER_MAX_TOKENS_DEFAULT
+
+
 def _decider_extra(config: BenchmarkConfig) -> dict[str, Any]:
     """``EVEROS_DECIDER__EXTRA`` as request kwargs, from the config or the environment.
 
@@ -2932,6 +2954,46 @@ class DeciderUnreachableError(RuntimeError):
     """
 
 
+_MULTIROUND_METHOD = "llm_multiround"
+"""The one search method that runs a decider. Mirrors ``SearchMethod.LLM_MULTIROUND``;
+every other method reaches no decider, so a run without it has nothing to probe."""
+
+
+def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
+    """``(model, base_url, api_key)`` the servers' decider will actually use.
+
+    The same ``[decider]`` -> ``[llm]`` fallback ``everos.component.llm.client``
+    applies, expressed against the fields this harness pushes into the servers it
+    starts (see ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
+    ``backbone_*`` becomes ``EVEROS_LLM__*``, and anything unset falls through to this
+    process's own environment).
+
+    Re-deriving the rule rather than sharing it is what the probe used to do, and it
+    got the rule wrong: it required a decider model *and* an explicit decider URL, so
+    the perfectly valid config that names only ``[decider].model`` and inherits the
+    endpoint was never probed at all -- the one shape the check exists for.
+    """
+    model = (
+        config.decider_model
+        or config.backbone_model
+        or config.retrieval_env.get("EVEROS_LLM__MODEL")
+        or os.environ.get("EVEROS_LLM__MODEL", "")
+    )
+    base_url = (
+        config.decider_base_url
+        or config.backbone_base_url
+        or config.retrieval_env.get("EVEROS_LLM__BASE_URL")
+        or os.environ.get("EVEROS_LLM__BASE_URL", "")
+    )
+    api_key = (
+        config.decider_api_key
+        or config.backbone_api_key
+        or config.retrieval_env.get("EVEROS_LLM__API_KEY")
+        or os.environ.get("EVEROS_LLM__API_KEY", "")
+    )
+    return model, base_url, api_key
+
+
 def _assert_decider_answers(config: BenchmarkConfig) -> None:
     """One real call to the configured decider, asserting it returns content.
 
@@ -2939,14 +3001,33 @@ def _assert_decider_answers(config: BenchmarkConfig) -> None:
     models it will refuse to serve, and the failure this exists to catch is exactly that
     -- a valid endpoint plus a model name it does not host. A reachability check would
     have passed while every completion 404'd.
+
+    Gated on whether a decider runs at all, not on whether two config fields happen to
+    be set together. It used to require an explicit decider model *and* an explicit
+    decider URL, which skipped the valid config that names only ``[decider].model`` and
+    inherits the endpoint from the backbone -- and that is the shape the check exists
+    for, since an inherited endpoint that does not serve the named model fails on the
+    first question rather than at startup. Runs that use no multi-round route make no
+    decider calls, so they are still not probed; probing them would fail a hybrid run
+    over an endpoint it never touches.
+
+    When a decider runs but nothing resolves, this says so rather than returning
+    quietly: a fail-fast promise that silently declines to check is the same silence it
+    was added to remove.
     """
-    if not (config.decider_model and config.decider_base_url):
-        return  # no separate decider: the backbone decides, and its own probe covers it
-    key = config.decider_api_key or "EMPTY"
-    client = openai.OpenAI(
-        api_key=key, base_url=config.decider_base_url, timeout=60.0, max_retries=0
-    )
-    where = f"{config.decider_model} @ {config.decider_base_url}"
+    if _MULTIROUND_METHOD not in config.parsed_methods:
+        return
+    model, base_url, api_key = resolve_decider_endpoint(config)
+    if not (model and base_url):
+        print(
+            "  Decider LLM: NOT PROBED -- no model and endpoint could be resolved "
+            "from [decider], the backbone, or EVEROS_LLM__*. A decider that cannot "
+            "answer degrades silently into a fixed top-3 core."
+        )
+        return
+    key = api_key or "EMPTY"
+    client = openai.OpenAI(api_key=key, base_url=base_url, timeout=60.0, max_retries=0)
+    where = f"{model} @ {base_url}"
     # The same EVEROS_DECIDER__EXTRA the servers are launched with. Without it the probe
     # is not the request the decider makes: on a qwen checkpoint served with
     # --reasoning-parser, a probe missing enable_thinking=false spends its whole budget
@@ -2955,15 +3036,18 @@ def _assert_decider_answers(config: BenchmarkConfig) -> None:
     extra = _decider_extra(config)
     try:
         resp = client.chat.completions.create(
-            model=config.decider_model,
+            model=model,
             messages=[{"role": "user", "content": "Reply with the single word: ready"}],
-            # No max_tokens, because the decider does not send one either
-            # (`RoundDecider.__call__` passes messages and nothing else). A cap here is
-            # what made this probe reject a working setup: a thinking model spends a
-            # small budget entirely on reasoning tokens and returns empty content, so
-            # the probe failed while the real call -- uncapped, bounded only by the
-            # timeout -- succeeds. Every difference between this request and the real
-            # one is a way for the check to be wrong about what it vouches for.
+            # The decider's own cap, because the decider now sends one. It did not when
+            # this probe was written -- `LLMRoundDecider.__call__` passed the messages
+            # and nothing else -- and an uncapped probe was correct then: a cap made it
+            # reject working setups, where a thinking model spent a small budget on
+            # reasoning tokens and returned empty content while the real, uncapped call
+            # succeeded. Now that the real call is capped, an uncapped probe has the
+            # same defect pointing the other way, and would vouch for a run that cannot
+            # answer inside its own budget. Every difference between this request and
+            # the real one is a way for the check to be wrong about what it vouches for.
+            max_tokens=_decider_max_tokens(config),
             temperature=0.0,
             **extra,
         )
