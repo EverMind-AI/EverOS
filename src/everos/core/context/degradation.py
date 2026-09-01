@@ -16,14 +16,25 @@ So a degraded result says so. Collected through a ``ContextVar`` rather than thr
 through call signatures for the same reason the request id is: the flag originates deep
 in the retrieval loop and is needed at the response boundary, and every layer between
 has no interest in it.
+
+WHAT THE CONTEXTVAR HOLDS, AND WHY IT IS A LIST. The variable holds a mutable sink, and
+:func:`mark_degraded` appends to it; it never rebinds the variable. Rebinding is the
+obvious implementation and it does not work here: ``asyncio.gather`` runs each argument
+in a Task, a Task starts from a *copy* of the current context, and a ``set()`` inside
+that copy is invisible to the parent that reads the result. ``SearchManager.search``
+gathers the episode route -- the one that owns the multi-round decider -- so with a
+rebinding implementation every degraded search still returned ``degraded == []``, which
+is precisely the invisibility this module exists to remove. A copied context copies the
+*binding*, not the object it points at, so a shared sink crosses the task boundary while
+a fresh sink per :func:`reset_degradations` keeps one request out of the next one.
 """
 
 from __future__ import annotations
 
 from contextvars import ContextVar, Token
 
-_degradations: ContextVar[tuple[str, ...]] = ContextVar(
-    "everos_degradations", default=()
+_degradations: ContextVar[list[str] | None] = ContextVar(
+    "everos_degradations", default=None
 )
 
 
@@ -32,29 +43,36 @@ def mark_degraded(reason: str) -> None:
 
     Repeats are collapsed: a per-question loop hits the same fallback on every round,
     and the response should say *what* degraded, not how many times.
+
+    A no-op when no sink is installed -- outside a request nothing will ever read the
+    reason, and lazily installing one here would put it in whichever task happened to
+    call first, which is the bug this module is written to avoid.
     """
     reason = (reason or "").strip()
     if not reason:
         return
-    current = _degradations.get()
-    if reason not in current:
-        _degradations.set((*current, reason))
+    sink = _degradations.get()
+    if sink is None:
+        return
+    if reason not in sink:
+        sink.append(reason)
 
 
 def get_degradations() -> tuple[str, ...]:
     """Reasons recorded for the current request, in the order first seen."""
-    return _degradations.get()
+    sink = _degradations.get()
+    return tuple(sink) if sink else ()
 
 
-def reset_degradations() -> Token[tuple[str, ...]]:
-    """Clear the record and return a token for restoring it.
+def reset_degradations() -> Token[list[str] | None]:
+    """Install a fresh sink and return a token for restoring the previous one.
 
     Called at the start of a request. Without it a long-lived task's context would
     accumulate reasons across requests and mark healthy results degraded.
     """
-    return _degradations.set(())
+    return _degradations.set([])
 
 
-def restore_degradations(token: Token[tuple[str, ...]]) -> None:
+def restore_degradations(token: Token[list[str] | None]) -> None:
     """Restore whatever was recorded before the matching reset."""
     _degradations.reset(token)

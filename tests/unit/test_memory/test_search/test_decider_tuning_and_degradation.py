@@ -17,6 +17,8 @@ response and logs at error.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from everos.config.settings import DeciderSettings
@@ -27,7 +29,8 @@ from everos.core.context import (
     restore_degradations,
 )
 from everos.memory.search import llm_multiround as lmr
-from everos.memory.search.dto import SearchData
+from everos.memory.search.dto import SearchData, SearchMethod, SearchRequest
+from everos.memory.search.manager import SearchManager
 
 _TUNING = (
     "max_rounds",
@@ -187,3 +190,93 @@ def test_the_fallback_logs_at_error_not_warning() -> None:
     block = src[src.index("fallback = list(range(min(tune.fallback_core") :][:900]
     assert 'logger.error(\n                "llm_multiround_decider_fallback"' in block
     assert 'mark_degraded("decider_fallback")' in block
+
+
+# ── The reason has to survive the trip out of the gathered route ──────────────
+
+
+class _AlwaysFailingLLM:
+    """A decider endpoint that answers nothing, which is what a 404 looks like here."""
+
+    async def chat(self, *_a: object, **_k: object) -> object:
+        raise RuntimeError("decider endpoint returned 404")
+
+
+def _degrading_manager() -> SearchManager:
+    """A manager whose episode route runs the real decider fallback and nothing else.
+
+    The subject is the trip from ``mark_degraded`` to ``SearchData.degraded``, not
+    recall, so the other two gathered routes are stubbed flat. The reason string is
+    still produced by ``llm_multiround``: a test that wrote ``"decider_fallback"``
+    itself would keep passing if the production path stopped emitting it.
+    """
+    mgr = SearchManager(
+        episode_recaller=cast("Any", None),
+        atomic_fact_recaller=cast("Any", None),
+        agent_case_recaller=cast("Any", None),
+        agent_skill_recaller=cast("Any", None),
+        profile_recaller=cast("Any", None),
+        embedding=None,
+        reranker=None,
+        llm_client=None,
+    )
+
+    async def _episodes(*_a: object, **_k: object) -> list[Any]:
+        await lmr.LLMRoundDecider(cast("Any", _AlwaysFailingLLM()))(
+            question="q",
+            core_so_far="",
+            evidence="",
+            n_candidates=3,
+            round_idx=0,
+        )
+        return []
+
+    async def _empty(*_a: object, **_k: object) -> list[Any]:
+        return []
+
+    mgr._search_episodes = _episodes  # type: ignore[method-assign]
+    mgr._fetch_profile = _empty  # type: ignore[method-assign]
+    mgr._load_unprocessed = _empty  # type: ignore[method-assign]
+    return mgr
+
+
+def _req() -> SearchRequest:
+    return SearchRequest(user_id="alice", query="q", method=SearchMethod.KEYWORD)
+
+
+async def test_a_fallback_inside_the_gathered_route_reaches_the_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The claim this PR makes, on the path it makes it about.
+
+    ``search()`` runs the episode route under ``asyncio.gather``, which wraps it in a
+    Task, and a Task starts from a copy of the context. Every unit above marks and
+    reads inside one task and so passed while the real response carried ``[]`` --
+    a degraded search was indistinguishable from a healthy one for exactly the
+    callers the field was added for.
+    """
+    monkeypatch.setenv("EVEROS_DECIDER__RETRIES", "0")
+    resp = await _degrading_manager().search(_req())
+    assert resp.data.degraded == ["decider_fallback"]
+
+
+async def test_the_next_search_is_not_marked_by_the_previous_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sink shared across tasks must still be per request.
+
+    The failure mode of the fix, rather than of the bug: one process-wide list would
+    make every later search report the first one's fallback, and a field that
+    eventually marks everything is worse than no field.
+    """
+    monkeypatch.setenv("EVEROS_DECIDER__RETRIES", "0")
+    degrading = _degrading_manager()
+    assert (await degrading.search(_req())).data.degraded == ["decider_fallback"]
+
+    healthy = _degrading_manager()
+
+    async def _clean(*_a: object, **_k: object) -> list[Any]:
+        return []
+
+    healthy._search_episodes = _clean  # type: ignore[method-assign]
+    assert (await healthy.search(_req())).data.degraded == []
