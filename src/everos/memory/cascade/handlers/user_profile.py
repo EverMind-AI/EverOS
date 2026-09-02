@@ -80,7 +80,7 @@ class UserProfileHandler(Handler):
             }
         )
 
-        row_id = owner_id
+        row_id = md_path
         prior = await user_profile_repo.get_by_id(row_id)
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(
