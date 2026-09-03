@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from pymilvus import DataType
+from pymilvus import DataType, FunctionType
 
 from everos.config import load_settings
 from everos.infra.persistence.index import (
@@ -52,19 +52,52 @@ def _describe_response(milvus_repo, *, always_params: bool = False):  # type: ig
     while ``to_dict`` omits it when empty — ``always_params`` covers that one
     known difference between the two serializations.
     """
-    fields = [
-        dict(f) for f in milvus_repo._build_collection_schema().to_dict()["fields"]
-    ]
+    schema = milvus_repo._build_collection_schema().to_dict()
+    fields = [dict(f) for f in schema["fields"]]
+    for field in fields:
+        params = field.get("params") or {}
+        if "enable_analyzer" in params:
+            field["params"] = {**params, "enable_analyzer": "true"}
     if always_params:
         for field in fields:
             field.setdefault("params", {})
-    return {"fields": fields}
+    return {
+        "fields": fields,
+        "functions": [dict(function) for function in schema.get("functions", [])],
+    }
 
 
-def _patch_describe(monkeypatch, response):  # type: ignore[no-untyped-def]
+def _index_descriptions(response):  # type: ignore[no-untyped-def]
+    indexes = {}
+    for position, field in enumerate(response["fields"]):
+        if field["type"] not in {DataType.FLOAT_VECTOR, DataType.SPARSE_FLOAT_VECTOR}:
+            continue
+        name = f"opaque_index_{position}"
+        indexes[name] = {
+            "field_name": field["name"],
+            "index_name": name,
+            "index_type": "AUTOINDEX",
+            "metric_type": (
+                "BM25" if field["type"] == DataType.SPARSE_FLOAT_VECTOR else "COSINE"
+            ),
+            "state": "Finished",
+            "params": {},
+        }
+    return indexes
+
+
+def _patch_describe(monkeypatch, response, *, indexes=None):  # type: ignore[no-untyped-def]
+    index_descriptions = _index_descriptions(response) if indexes is None else indexes
+
     class _FakeClient:
         def describe_collection(self, name: str):  # type: ignore[no-untyped-def]
             return response
+
+        def list_indexes(self, name: str):  # type: ignore[no-untyped-def]
+            return list(index_descriptions)
+
+        def describe_index(self, name: str, index_name: str):  # type: ignore[no-untyped-def]
+            return index_descriptions.get(index_name)
 
     async def _fake_get_client():  # type: ignore[no-untyped-def]
         return _FakeClient()
@@ -201,6 +234,12 @@ async def test_collection_metadata_is_cached_after_startup(
             self.describe_calls += 1
             return _describe_response(milvus_repo)
 
+        def list_indexes(self, name: str):  # type: ignore[no-untyped-def]
+            return list(_index_descriptions(_describe_response(milvus_repo)))
+
+        def describe_index(self, name: str, index_name: str):  # type: ignore[no-untyped-def]
+            return _index_descriptions(_describe_response(milvus_repo))[index_name]
+
     client = _FakeClient()
 
     async def _fake_get_client():  # type: ignore[no-untyped-def]
@@ -281,6 +320,52 @@ async def test_verify_rejects_primary_and_nullable_drift(
     assert "deprecated_by: nullable" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("reported", [None, False, "false"])
+async def test_verify_rejects_missing_or_disabled_bm25_input_analyzer(
+    monkeypatch: pytest.MonkeyPatch,
+    reported: object,
+) -> None:
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    response = _describe_response(milvus_repo)
+    for field in response["fields"]:
+        if field["name"] == "episode_tokens":
+            if reported is None:
+                field["params"].pop("enable_analyzer")
+            else:
+                field["params"]["enable_analyzer"] = reported
+    _patch_describe(monkeypatch, response)
+
+    with pytest.raises(
+        MilvusSchemaMismatchError, match="episode_tokens: enable_analyzer"
+    ):
+        await milvus_repo.verify_collection()
+
+
+@pytest.mark.parametrize(
+    ("attribute", "replacement"),
+    [
+        ("type", FunctionType.TEXTEMBEDDING),
+        ("input_field_names", ["episode"]),
+        ("output_field_names", ["vector"]),
+    ],
+)
+async def test_verify_rejects_bm25_function_mapping_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    attribute: str,
+    replacement: object,
+) -> None:
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    response = _describe_response(milvus_repo)
+    response["functions"][0][attribute] = replacement
+    _patch_describe(monkeypatch, response)
+
+    with pytest.raises(MilvusSchemaMismatchError) as excinfo:
+        await milvus_repo.verify_collection()
+    message = str(excinfo.value)
+    assert "missing_functions=" in message
+    assert "stale_functions=" in message
+
+
 async def test_verify_rejects_missing_and_stale_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -323,6 +408,74 @@ async def test_verify_treats_limit_drift_as_advisory(
     # Tolerated, but never silently: the drift has to reach the operator.
     assert [event for event, _ in warnings] == ["milvus_collection_limit_drift"]
     assert warnings[0][1]["details"] == ["subject: max_length 4096 != declared 65535"]
+
+
+@pytest.mark.parametrize(
+    ("repo_factory", "field_name", "metric"),
+    [
+        (lambda: episode_repo._repo(), "vector", "L2"),  # type: ignore[attr-defined]
+        (
+            lambda: episode_repo._repo(),  # type: ignore[attr-defined]
+            "episode_tokens__sparse",
+            "COSINE",
+        ),
+        (
+            lambda: user_profile_repo._repo(),  # type: ignore[attr-defined]
+            "_everos_dummy_vector",
+            None,
+        ),
+    ],
+)
+async def test_verify_rejects_missing_or_wrong_vector_index(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_factory,  # type: ignore[no-untyped-def]
+    field_name: str,
+    metric: str | None,
+) -> None:
+    milvus_repo = repo_factory()
+    response = _describe_response(milvus_repo)
+    indexes = _index_descriptions(response)
+    index_name = next(
+        name
+        for name, description in indexes.items()
+        if description["field_name"] == field_name
+    )
+    if metric is None:
+        indexes.pop(index_name)
+    else:
+        indexes[index_name]["metric_type"] = metric
+    _patch_describe(monkeypatch, response, indexes=indexes)
+
+    with pytest.raises(MilvusSchemaMismatchError, match="index drift") as excinfo:
+        await milvus_repo.verify_collection()
+    assert field_name in str(excinfo.value)
+
+
+async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    response = _describe_response(milvus_repo)
+    indexes = _index_descriptions(response)
+    for description in indexes.values():
+        description.update(
+            {
+                "index_name": "server_selected_name",
+                "index_type": "server-selected implementation",
+                "state": "InProgress",
+                "params": {"nlist": 2048, "server_default": True},
+            }
+        )
+    indexes["extra_scalar"] = {
+        "field_name": "owner_id",
+        "index_name": "extra_scalar",
+        "index_type": "INVERTED",
+        "state": "Finished",
+        "params": {},
+    }
+    _patch_describe(monkeypatch, response, indexes=indexes)
+
+    await milvus_repo.verify_collection()
 
 
 # Written out by hand on purpose. _describe_response() builds its fake server

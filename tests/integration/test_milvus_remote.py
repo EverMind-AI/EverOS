@@ -312,8 +312,8 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
     )
 
 
-async def test_verify_accepts_a_collection_this_adapter_just_created() -> None:
-    """The decisive check for physical schema verification.
+async def test_verify_accepts_collection_schema_functions_and_indexes() -> None:
+    """The decisive check for physical metadata verification.
 
     Every offline test builds its fake ``describe_collection`` reply from the
     same descriptor the verifier compares against, so they can only prove that
@@ -350,8 +350,8 @@ async def test_verify_accepts_a_collection_this_adapter_just_created() -> None:
     MilvusRepoBase._reset_collection_cache()
 
     for repo in ALL_REPOS:
-        # Raises MilvusSchemaMismatchError if our declaration and the server's
-        # description disagree on any field.
+        # Raises MilvusSchemaMismatchError if fields, BM25 functions, or
+        # vector index metrics disagree with our declaration.
         await repo._repo().verify_collection()  # type: ignore[attr-defined]
 
     await episode_repo.delete_by_md_path(

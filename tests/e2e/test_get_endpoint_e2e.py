@@ -726,12 +726,13 @@ async def test_get_truncates_above_max_fetch(
     # ``core/observability/logging/factory.py``); the warning surfaces via
     # the standard ``caplog`` fixture rather than direct stdout capture.
     #
-    # Assert the warning's substance, not its spelling: the two adapters name
-    # this event differently ("find_where_paginated truncated" on LanceDB,
-    # "milvus_find_where_paginated_truncated" on Milvus), and the contract
-    # here is that truncating the sort window is reported with the cap that
-    # caused it -- not that either adapter picked a particular label.
-    truncation = [r for r in caplog.records if "truncat" in r.getMessage()]
+    # Both adapters expose the same exact event so dashboards and alerts do
+    # not need backend-specific parsing.
+    truncation = [
+        record
+        for record in caplog.records
+        if "find_where_paginated truncated" in record.getMessage()
+    ]
     assert truncation, "truncating the sort window must be reported"
     assert "'max_fetch': 5" in truncation[0].getMessage()
 

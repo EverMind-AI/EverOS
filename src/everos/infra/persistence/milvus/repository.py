@@ -120,6 +120,11 @@ class _PhysicalField:
                 f"{self.name}: element_type {_name_of(actual.get('element_type'))} "
                 f"!= expected {_name_of(self.element_type)}"
             )
+        if self.enable_analyzer and not _is_true(params.get("enable_analyzer")):
+            out.append(
+                f"{self.name}: enable_analyzer "
+                f"{params.get('enable_analyzer', False)} != expected True"
+            )
         return out
 
     def soft_mismatches(self, actual: dict[str, Any]) -> list[str]:
@@ -138,6 +143,36 @@ class _PhysicalField:
 
 def _name_of(datatype: Any) -> str:
     return getattr(datatype, "name", repr(datatype))
+
+
+def _is_true(value: Any) -> bool:
+    return value is True or (isinstance(value, str) and value.casefold() == "true")
+
+
+def _function_key(
+    function: dict[str, Any],
+) -> tuple[Any, tuple[str, ...], tuple[str, ...]]:
+    return (
+        function.get("type"),
+        tuple(function.get("input_field_names") or ()),
+        tuple(function.get("output_field_names") or ()),
+    )
+
+
+def _format_function_key(
+    key: tuple[Any, tuple[str, ...], tuple[str, ...]],
+) -> str:
+    function_type, inputs, outputs = key
+    return (
+        f"type={_name_of(function_type)}, inputs={list(inputs)}, "
+        f"outputs={list(outputs)}"
+    )
+
+
+def _metric_name(metric: Any) -> str | None:
+    if metric is None:
+        return None
+    return str(getattr(metric, "name", metric)).upper()
 
 
 class MilvusRepoBase[T: BaseModel]:
@@ -235,15 +270,15 @@ class MilvusRepoBase[T: BaseModel]:
         )
 
     async def verify_collection(self) -> None:
-        """Reject a collection whose physical schema disagrees with ours.
+        """Reject a collection whose physical metadata disagrees with ours.
 
         A name-only check waves through a collection whose columns happen to
         share our names but carry the wrong datatype, primary key, nullability
         or vector dimension — a stale model, or a ``collection_prefix``
         collision with someone else's data. That collection starts fine and
         then fails opaquely on the first write or search. Comparing the
-        physical shape turns it back into a startup error with a recovery
-        path.
+        physical shape, BM25 function mapping, and field-matched vector index
+        metrics turns it back into a startup error with a recovery path.
         """
         client = await get_client()
         description = await _run(client.describe_collection, self.collection_name)
@@ -265,16 +300,98 @@ class MilvusRepoBase[T: BaseModel]:
             drift.extend(physical.mismatches(actual))
             advisory.extend(physical.soft_mismatches(actual))
 
+        expected_functions = {
+            (
+                FunctionType.BM25,
+                (field,),
+                (_sparse_field(field),),
+            )
+            for field in self.index_schema.bm25_fields
+        }
+        reported_functions = {
+            _function_key(function)
+            for function in description.get("functions", [])
+            if isinstance(function, dict)
+        }
+        missing_functions = sorted(
+            _format_function_key(key) for key in expected_functions - reported_functions
+        )
+        stale_functions = sorted(
+            _format_function_key(key) for key in reported_functions - expected_functions
+        )
+
         if advisory:
             logger.warning(
                 "milvus_collection_limit_drift",
                 collection=self.collection_name,
                 details=advisory,
             )
-        if missing or stale or drift:
+        if missing or stale or drift or missing_functions or stale_functions:
             raise MilvusSchemaMismatchError(
                 f"Milvus collection {self.collection_name!r} schema drift: "
-                f"missing={missing}, stale={stale}, incompatible={drift}. "
+                f"missing={missing}, stale={stale}, incompatible={drift}, "
+                f"missing_functions={missing_functions}, "
+                f"stale_functions={stale_functions}. "
+                "The index is rebuildable from markdown; run "
+                "`everos cascade rebuild`."
+            )
+        await self._verify_indexes(client)
+
+    async def _verify_indexes(self, client: MilvusClient) -> None:
+        """Verify only the field and metric contracts of derived indexes."""
+        expected = {field.name: "COSINE" for field in self.index_schema.vector_fields}
+        if not expected:
+            expected[_DUMMY_VECTOR_FIELD] = "COSINE"
+        expected.update(
+            {_sparse_field(field): "BM25" for field in self.index_schema.bm25_fields}
+        )
+
+        index_names = await _run(client.list_indexes, self.collection_name)
+        reported: dict[str, list[tuple[str, str | None]]] = {}
+        incompatible: list[str] = []
+        physical = {field.name: field for field in self._physical_fields()}
+        vector_types = {DataType.FLOAT_VECTOR, DataType.SPARSE_FLOAT_VECTOR}
+        for index_name in index_names:
+            description = await _run(
+                client.describe_index,
+                self.collection_name,
+                index_name,
+            )
+            if not isinstance(description, dict):
+                incompatible.append(f"index {index_name!r}: description unavailable")
+                continue
+            field_name = description.get("field_name")
+            if not isinstance(field_name, str):
+                incompatible.append(f"index {index_name!r}: field_name unavailable")
+                continue
+            declared = physical.get(field_name)
+            if field_name not in expected:
+                if declared is None or declared.datatype in vector_types:
+                    incompatible.append(
+                        f"index {index_name!r}: unexpected vector field {field_name!r}"
+                    )
+                continue
+            metric = description.get("metric_type")
+            if metric is None and isinstance(description.get("params"), dict):
+                metric = description["params"].get("metric_type")
+            reported.setdefault(field_name, []).append(
+                (str(index_name), _metric_name(metric))
+            )
+
+        missing_indexes = sorted(set(expected) - set(reported))
+        for field_name, indexes in reported.items():
+            wanted = expected[field_name]
+            for index_name, metric in indexes:
+                if metric != wanted:
+                    incompatible.append(
+                        f"{field_name}: metric_type {metric!r} != expected {wanted!r} "
+                        f"(index {index_name!r})"
+                    )
+
+        if missing_indexes or incompatible:
+            raise MilvusSchemaMismatchError(
+                f"Milvus collection {self.collection_name!r} index drift: "
+                f"missing={missing_indexes}, incompatible={incompatible}. "
                 "The index is rebuildable from markdown; run "
                 "`everos cascade rebuild`."
             )
@@ -428,7 +545,7 @@ class MilvusRepoBase[T: BaseModel]:
         )
         if total > len(raw):
             logger.warning(
-                "milvus_find_where_paginated_truncated",
+                "find_where_paginated truncated",
                 table=self.table_name,
                 total=total,
                 max_fetch=max_fetch,
