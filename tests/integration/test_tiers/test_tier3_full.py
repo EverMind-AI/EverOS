@@ -16,16 +16,14 @@ from everalgo.rank.protocols import AgenticDecision
 from everalgo.types import KnowledgeMemory
 from httpx import AsyncClient
 
-from everos.infra.persistence.lancedb import Episode, get_table
-
-from .conftest import add_and_flush, cascade_progress, seed_atomic_fact_for_episode
+from .conftest import (
+    add_and_flush,
+    cascade_progress,
+    episode_rows,
+    seed_atomic_fact_for_episode,
+)
 
 _STUB_VECTOR = [0.1] * 1024
-
-
-async def _episode_rows(owner_id: str) -> list[dict]:
-    table = await get_table(Episode.TABLE_NAME, Episode)
-    return await table.query().where(f"owner_id = '{owner_id}'").to_list()
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +34,7 @@ async def _episode_rows(owner_id: str) -> list[dict]:
 async def test_add_memory_writes_real_vector(tier3_runtime: AsyncClient) -> None:
     await add_and_flush(tier3_runtime, session_id="s_tier3_add")
 
-    rows = await _episode_rows("u_alice")
+    rows = await episode_rows("u_alice")
     assert rows and rows[0]["vector"] is not None
 
 
@@ -45,7 +43,7 @@ async def test_user_search_methods_succeed(
     tier3_runtime: AsyncClient, method: str
 ) -> None:
     await add_and_flush(tier3_runtime, session_id=f"s_tier3_{method}")
-    episode_row = (await _episode_rows("u_alice"))[0]
+    episode_row = (await episode_rows("u_alice"))[0]
     await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
 
     resp = await tier3_runtime.post(

@@ -165,6 +165,16 @@ jobs:
           EVEROS_TEST_MILVUS_FULL_STARTUP: "1"
         run: uv run --frozen pytest tests/integration/test_milvus_remote.py -v
 
+      # The contract tests above exercise the repository port directly. This
+      # drives the same request path the application does -- /add, /flush,
+      # cascade, every search method, /get -- against the remote backend, so a
+      # break anywhere between the API and Milvus surfaces here rather than in
+      # production. Deselecting the LanceDB half keeps the job to its subject.
+      - name: Milvus end-to-end (tiered API suites)
+        env:
+          EVEROS_TEST_MILVUS_URI: http://127.0.0.1:19530
+        run: uv run --frozen pytest tests/integration/test_tiers -v -k milvus
+
       - name: Stop Milvus
         if: always()
         run: docker compose -f /tmp/milvus-compose.yml down -v
