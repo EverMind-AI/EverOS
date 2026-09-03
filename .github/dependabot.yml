@@ -18,12 +18,3 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
-
-  # Standalone DeepSeek Harness plugin under examples/dsh
-  - package-ecosystem: npm
-    directory: /examples/dsh
-    schedule:
-      interval: weekly
-    groups:
-      dsh-deps:
-        patterns: ["*"]
