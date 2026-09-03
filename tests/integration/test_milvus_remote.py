@@ -60,9 +60,13 @@ async def _remote_milvus(monkeypatch: pytest.MonkeyPatch):
     finally:
         from everos.infra.persistence.index import drop_business_tables, shutdown
 
-        await drop_business_tables()
-        await shutdown()
-        load_settings.cache_clear()
+        try:
+            await drop_business_tables()
+        finally:
+            try:
+                await shutdown()
+            finally:
+                load_settings.cache_clear()
 
 
 def _episode(
