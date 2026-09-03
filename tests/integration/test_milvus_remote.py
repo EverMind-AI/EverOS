@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import os
+import re
 import uuid
 
 import pytest
@@ -27,7 +29,10 @@ pytestmark = pytest.mark.skipif(
 
 @pytest_asyncio.fixture(autouse=True)
 async def _remote_milvus(monkeypatch: pytest.MonkeyPatch):
-    prefix = f"everos_e2e_{uuid.uuid4().hex}"
+    prefix = os.environ.get(
+        "EVEROS_TEST_MILVUS_PREFIX", f"everos_e2e_{uuid.uuid4().hex}"
+    )
+    assert re.fullmatch(r"everos_e2e_[0-9a-f]{32}", prefix)
     monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
     monkeypatch.setenv("EVEROS_MILVUS__URI", _URI)
     monkeypatch.setenv(
@@ -40,9 +45,12 @@ async def _remote_milvus(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setenv("EVEROS_MILVUS__COLLECTION_PREFIX", prefix)
     load_settings.cache_clear()
+    print(f"EVEROS_E2E_PREFIX={prefix}")
 
+    from everos.core.observability.logging import configure_logging
     from everos.infra.persistence.index import episode_repo, startup
 
+    configure_logging(level="WARNING")
     try:
         if os.environ.get("EVEROS_TEST_MILVUS_FULL_STARTUP") == "1":
             await startup()
@@ -236,6 +244,149 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         == 103
     )
     assert await episode_repo.count() == 0
+
+
+async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
+    """One collection covers metadata, dense/BM25 search, and HTTP ``/get``."""
+    from importlib import import_module
+
+    from httpx import ASGITransport, AsyncClient
+
+    from everos.entrypoints.api.app import create_app
+    from everos.infra.persistence.index import Episode, episode_repo
+    from everos.infra.persistence.milvus.milvus_manager import get_client
+    from everos.memory.search import FilterNode
+    from everos.memory.search.filters import compile_filters
+
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    await milvus_repo.verify_collection()
+
+    client = await get_client()
+    description = await asyncio.to_thread(
+        client.describe_collection, milvus_repo.collection_name
+    )
+    analyzers = [
+        {
+            "field_name": field["name"],
+            "enable_analyzer": str(
+                (field.get("params") or {}).get("enable_analyzer")
+            ).casefold()
+            == "true",
+        }
+        for field in description.get("fields", [])
+        if field.get("name") == "episode_tokens"
+    ]
+    functions = [
+        {
+            "type": getattr(function.get("type"), "name", str(function.get("type"))),
+            "input_field_names": list(function.get("input_field_names") or []),
+            "output_field_names": list(function.get("output_field_names") or []),
+        }
+        for function in description.get("functions", [])
+    ]
+    indexes = []
+    for index_name in await asyncio.to_thread(
+        client.list_indexes, milvus_repo.collection_name
+    ):
+        index = await asyncio.to_thread(
+            client.describe_index, milvus_repo.collection_name, index_name
+        )
+        if not isinstance(index, dict):
+            continue
+        field_name = index.get("field_name")
+        if field_name not in {"vector", "subject_vector", "episode_tokens__sparse"}:
+            continue
+        metric = index.get("metric_type")
+        if metric is None and isinstance(index.get("params"), dict):
+            metric = index["params"].get("metric_type")
+        indexes.append({"field_name": field_name, "metric_type": str(metric).upper()})
+    indexes.sort(key=lambda item: str(item["field_name"]))
+
+    assert analyzers == [{"field_name": "episode_tokens", "enable_analyzer": True}]
+    assert functions == [
+        {
+            "type": "BM25",
+            "input_field_names": ["episode_tokens"],
+            "output_field_names": ["episode_tokens__sparse"],
+        }
+    ]
+    assert indexes == [
+        {"field_name": "episode_tokens__sparse", "metric_type": "BM25"},
+        {"field_name": "subject_vector", "metric_type": "COSINE"},
+        {"field_name": "vector", "metric_type": "COSINE"},
+    ]
+
+    now = dt.datetime(2026, 6, 1, tzinfo=dt.UTC)
+    await episode_repo.upsert(
+        [
+            _episode(
+                row_id="probe_ep1",
+                entry_id="probe_ep1",
+                session_id="probe",
+                text="red apple probe",
+                vector_axis=0,
+                subject_axis=1,
+                timestamp=now,
+            ),
+            _episode(
+                row_id="probe_ep2",
+                entry_id="probe_ep2",
+                session_id="probe",
+                text="blue banana probe",
+                vector_axis=1,
+                subject_axis=0,
+                timestamp=now + dt.timedelta(seconds=1),
+            ),
+        ]
+    )
+    where = compile_filters(
+        FilterNode.model_validate({"session_id": "probe"}),
+        owner_id="u1",
+        owner_type="user",
+        app_id="test_app",
+        project_id="test_project",
+    )
+    dense_query = [1.0] + [0.0] * 1023
+    dense = await episode_repo.dense_search(dense_query, where, limit=2)
+    sparse = await episode_repo.sparse_search(
+        ["apple"], where, columns=Episode.BM25_FIELDS, limit=2
+    )
+    assert dense[0]["id"] == "probe_ep1"
+    assert dense[0]["_distance"] == pytest.approx(0.0, abs=1e-5)
+    assert sparse[0]["id"] == "probe_ep1"
+    assert sparse[0]["_score"] > 0
+
+    get_service = import_module("everos.service.get")
+    get_service._manager = None
+    app = create_app(lifespan_providers=[])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        response = await http.post(
+            "/api/v1/memory/get",
+            json={
+                "user_id": "u1",
+                "memory_type": "episode",
+                "app_id": "test_app",
+                "project_id": "test_project",
+                "filters": {"session_id": "probe"},
+                "page": 1,
+                "page_size": 2,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["count"] == 2
+    assert body["data"]["total_count"] == 2
+
+    evidence = {
+        "analyzers": analyzers,
+        "functions": functions,
+        "indexes": indexes,
+        "dense_cosine": "passed",
+        "bm25": "passed",
+        "http_get": {"status": response.status_code, "count": 2, "total": 2},
+    }
+    print(f"EVEROS_E2E_EVIDENCE={json.dumps(evidence, sort_keys=True)}")
 
 
 async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:

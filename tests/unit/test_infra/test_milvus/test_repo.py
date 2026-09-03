@@ -451,6 +451,30 @@ async def test_verify_rejects_missing_or_wrong_vector_index(
     assert field_name in str(excinfo.value)
 
 
+async def test_verify_rejects_duplicate_same_metric_vector_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    response = _describe_response(milvus_repo)
+    indexes = _index_descriptions(response)
+    original = next(
+        description
+        for description in indexes.values()
+        if description["field_name"] == "vector"
+    )
+    indexes["duplicate_vector"] = {
+        **original,
+        "index_name": "duplicate_vector",
+    }
+    _patch_describe(monkeypatch, response, indexes=indexes)
+
+    with pytest.raises(
+        MilvusSchemaMismatchError,
+        match=r"vector: expected exactly one index, found 2",
+    ):
+        await milvus_repo.verify_collection()
+
+
 async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

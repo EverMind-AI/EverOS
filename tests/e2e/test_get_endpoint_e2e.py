@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import os
+import re
 from collections.abc import AsyncIterator
 from importlib import import_module
 from pathlib import Path
@@ -677,6 +679,7 @@ async def test_get_episodes_top_level_and_filter(client: AsyncClient) -> None:
 
 async def test_get_truncates_above_max_fetch(
     client: AsyncClient,
+    index_backend: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -693,6 +696,16 @@ async def test_get_truncates_above_max_fetch(
     # runs. Call it here so the structlog → stdlib logging bridge is
     # wired up and ``caplog`` can observe the chassis warning.
     from everos.core.observability.logging import configure_logging
+
+    if index_backend == "milvus":
+        requested_prefix = os.environ.get("EVEROS_TEST_MILVUS_PREFIX")
+        if requested_prefix:
+            assert re.fullmatch(r"everos_e2e_[0-9a-f]{32}", requested_prefix)
+            monkeypatch.setenv("EVEROS_MILVUS__COLLECTION_PREFIX", requested_prefix)
+            load_settings.cache_clear()
+        prefix = load_settings().milvus.collection_prefix
+        assert re.fullmatch(r"everos_e2e_[0-9a-f]{32}", prefix)
+        print(f"EVEROS_E2E_PREFIX={prefix}")
 
     configure_logging(level="WARNING")
 
@@ -729,12 +742,13 @@ async def test_get_truncates_above_max_fetch(
     # Both adapters expose the same exact event so dashboards and alerts do
     # not need backend-specific parsing.
     truncation = [
-        record
-        for record in caplog.records
-        if "find_where_paginated truncated" in record.getMessage()
+        record for record in caplog.records if "truncated" in record.getMessage()
     ]
     assert truncation, "truncating the sort window must be reported"
-    assert "'max_fetch': 5" in truncation[0].getMessage()
+    message = truncation[0].getMessage()
+    assert "'event': 'find_where_paginated truncated'" in message
+    assert "'total': 10" in message
+    assert "'max_fetch': 5" in message
 
 
 # ── Concurrency ─────────────────────────────────────────────────────────

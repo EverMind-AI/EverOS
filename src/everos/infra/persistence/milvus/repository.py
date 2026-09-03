@@ -381,6 +381,10 @@ class MilvusRepoBase[T: BaseModel]:
         missing_indexes = sorted(set(expected) - set(reported))
         for field_name, indexes in reported.items():
             wanted = expected[field_name]
+            if len(indexes) != 1:
+                incompatible.append(
+                    f"{field_name}: expected exactly one index, found {len(indexes)}"
+                )
             for index_name, metric in indexes:
                 if metric != wanted:
                     incompatible.append(
