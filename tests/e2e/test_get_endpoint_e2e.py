@@ -21,7 +21,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     AgentCase,
     AgentSkill,
     Episode,
@@ -29,9 +29,14 @@ from everos.infra.persistence.lancedb import (
     agent_case_repo,
     agent_skill_repo,
     episode_repo,
-    lancedb_manager,
     user_profile_repo,
 )
+from everos.infra.persistence.index import shutdown as shutdown_index
+
+# Lance keeps a process-local connection and table cache. It is not part of
+# the neutral port, but this fixture swaps EVEROS_ROOT without a lifespan, so
+# the cache has to be dropped by hand or the next test reads the old root.
+from everos.infra.persistence.lancedb import lancedb_manager
 
 # ``everos.service.__init__`` re-exports the ``get`` function under the
 # same name as the submodule (``from .get import get as get``), which
@@ -128,6 +133,7 @@ def _agent_skill(
 async def client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    index_backend: str,
 ) -> AsyncIterator[AsyncClient]:
     """Build the FastAPI app against a tmp memory root with no lifespan."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
@@ -143,7 +149,7 @@ async def client(
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await lancedb_manager.dispose_connection()
+    await shutdown_index()
     load_settings.cache_clear()
 
 

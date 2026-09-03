@@ -34,7 +34,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import shutil
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
@@ -114,10 +116,59 @@ def search_seed() -> dict[str, list[dict]]:
 # ---------------------------------------------------------------------------
 
 
+def _index_backends() -> list[str]:
+    """Backends the e2e suite runs against.
+
+    LanceDB is always exercised. Milvus joins only when a real server is
+    configured — it is a remote service with no embedded fallback, so a run
+    without ``EVEROS_TEST_MILVUS_URI`` proves nothing about it and should not
+    collect cases that suggest otherwise.
+    """
+    backends = ["lancedb"]
+    if os.environ.get("EVEROS_TEST_MILVUS_URI"):
+        backends.append("milvus")
+    return backends
+
+
+@pytest_asyncio.fixture(params=_index_backends(), ids=lambda b: f"index={b}")
+async def index_backend(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[str]:
+    """Point the derived index at one backend for the duration of a test."""
+    backend = request.param
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", backend)
+    if backend == "milvus":
+        monkeypatch.setenv("EVEROS_MILVUS__URI", os.environ["EVEROS_TEST_MILVUS_URI"])
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__TOKEN", os.environ.get("EVEROS_TEST_MILVUS_TOKEN", "")
+        )
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__DB_NAME", os.environ.get("EVEROS_TEST_MILVUS_DB_NAME", "")
+        )
+        # Collections are remote and outlive the process, so each test needs
+        # its own namespace or state leaks between them.
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__COLLECTION_PREFIX", f"everos_e2e_{uuid.uuid4().hex}"
+        )
+
+    yield backend
+
+    if backend == "milvus":
+        from everos.config import load_settings
+        from everos.infra.persistence.index import drop_business_tables, shutdown
+
+        load_settings.cache_clear()
+        try:
+            await drop_business_tables()
+        finally:
+            await shutdown()
+
+
 @pytest_asyncio.fixture
 async def core_pipeline_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    index_backend: str,
 ) -> AsyncIterator[Path]:
     """Prepare clean memory root + reset memorize singletons.
 

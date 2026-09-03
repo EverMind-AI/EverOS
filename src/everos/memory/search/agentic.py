@@ -34,6 +34,7 @@ from everalgo.types import Candidate
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
+from everos.infra.persistence.index import Predicate
 from everos.infra.persistence.sqlite import cluster_repo
 from everos.memory.search.callbacks import build_rerank_fn
 from everos.memory.search.shaper import shape_episode_from_candidate
@@ -80,7 +81,7 @@ async def search_episodes_agentic(
     query: str,
     *,
     owner_id: str,
-    where: str,
+    where: Predicate,
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,

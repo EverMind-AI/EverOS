@@ -47,7 +47,7 @@ import pytest
 
 import everos.component.embedding.accessor as _embedding_accessor
 from everos.infra.ome.records import RunStatus
-from everos.infra.persistence.lancedb import agent_case_repo, agent_skill_repo
+from everos.infra.persistence.index import agent_case_repo, agent_skill_repo
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
 from everos.service.memorize import _get_engine
 
