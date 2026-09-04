@@ -808,6 +808,28 @@
         }
       }
     },
+    "/api/v1/cascade/quiesce": {
+      "post": {
+        "tags": [
+          "cascade"
+        ],
+        "summary": "Quiesce",
+        "description": "Drain the projection queue, then stop watcher + scanner + worker.\n\nReturns when the index is a complete projection of the markdown on disk and\nnothing further will rewrite it. That ordering is the point: stopping first\nwould freeze a *partial* index, which reads as a healthy store that quietly\nfails to recall whatever had not been indexed yet.\n\nIdempotent -- a second call reports ``quiesced=false`` rather than failing.",
+        "operationId": "quiesce_api_v1_cascade_quiesce_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuiesceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/memory/add": {
       "post": {
         "tags": [
@@ -1561,6 +1583,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cascade/quiesce": {
+      "post": {
+        "tags": [
+          "cascade"
+        ],
+        "summary": "Quiesce",
+        "description": "Drain the projection queue, then stop watcher + scanner + worker.\n\nReturns when the index is a complete projection of the markdown on disk and\nnothing further will rewrite it. That ordering is the point: stopping first\nwould freeze a *partial* index, which reads as a healthy store that quietly\nfails to recall whatever had not been indexed yet.\n\nIdempotent -- a second call reports ``quiesced=false`` rather than failing.",
+        "operationId": "quiesce_api_v2_cascade_quiesce_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuiesceResponse"
                 }
               }
             }
@@ -3095,6 +3139,40 @@
         ],
         "title": "MessageItemDTO"
       },
+      "QuiesceResponse": {
+        "properties": {
+          "quiesced": {
+            "type": "boolean",
+            "title": "Quiesced"
+          },
+          "drained": {
+            "type": "integer",
+            "title": "Drained"
+          },
+          "pending_before": {
+            "type": "integer",
+            "title": "Pending Before"
+          },
+          "pending_after": {
+            "type": "integer",
+            "title": "Pending After"
+          },
+          "failed_permanent": {
+            "type": "integer",
+            "title": "Failed Permanent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quiesced",
+          "drained",
+          "pending_before",
+          "pending_after",
+          "failed_permanent"
+        ],
+        "title": "QuiesceResponse",
+        "description": "What the final drain accomplished, and what it left behind.\n\n``pending_before`` is the queue depth on arrival: a caller that expected the\nprojection to be up to date can assert it was 0 and learn otherwise. Anything\nabove 0 in ``pending_after`` means the drain could not finish -- the index is\nNOT a complete projection of the markdown, and searching it will silently\nunder-recall."
+      },
       "RunSummary": {
         "properties": {
           "run_id": {
@@ -3325,6 +3403,13 @@
             },
             "type": "array",
             "title": "Unprocessed Messages"
+          },
+          "degraded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degraded"
           }
         },
         "additionalProperties": false,
@@ -3509,7 +3594,8 @@
           "keyword",
           "vector",
           "hybrid",
-          "agentic"
+          "agentic",
+          "llm_multiround"
         ],
         "title": "SearchMethod",
         "description": "Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."
@@ -3648,6 +3734,18 @@
             "type": "boolean",
             "title": "Include Profile",
             "default": false
+          },
+          "profile_subject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Subject"
           },
           "enable_llm_rerank": {
             "type": "boolean",

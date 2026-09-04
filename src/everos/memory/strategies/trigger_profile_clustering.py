@@ -22,7 +22,7 @@ from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.triggers import Immediate
 from everos.infra.persistence.sqlite import cluster_repo, mint_cluster_id
 from everos.memory._partition_locks import get_partition_lock
-from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
+from everos.memory.events import EpisodeExtracted
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 @offline_strategy(
     name="trigger_profile_clustering",
     trigger=Immediate(on=[EpisodeExtracted]),
-    emits=[ProfileClusterUpdated],
+    emits=[],
     applies_to=lambda e: e.source == "pipeline",
     max_retries=2,
 )
@@ -127,17 +127,7 @@ async def trigger_profile_clustering(
             project_id=event.project_id,
         )
 
-        # 6. Emit ProfileClusterUpdated → downstream extract_user_profile.
         assert to_save.id is not None  # both branches above set id
-        await ctx.emit(
-            ProfileClusterUpdated(
-                memcell_id=event.memcell_id,
-                cluster_id=to_save.id,
-                owner_id=event.owner_id,
-                app_id=event.app_id,
-                project_id=event.project_id,
-            )
-        )
     logger.info(
         "profile_cluster_updated",
         memcell_id=event.memcell_id,

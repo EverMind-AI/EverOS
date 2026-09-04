@@ -58,6 +58,44 @@ model = "openai/gpt-4.1-mini"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
 
+# LLM for the multi-round retrieval decider. Separate from [llm] because the jobs
+# differ: [llm] extracts memories during ingestion, this one decides -- inside the search
+# request, round by round -- which episodes are core and what to query next. An empty
+# model falls back to [llm], which is how every store built before this section existed
+# was scored. api_key / base_url are also inherited from [llm] when left blank, so
+# pointing the decider at another hosted model needs only `model`; set base_url to run it
+# on a local vLLM / SGLang endpoint instead.
+[decider]
+# LLM for the multi-round retrieval decider, when it differs from [llm]. Left
+# empty the decider runs [llm]'s model, which is what a single-model deployment
+# wants. Override via env: EVEROS_DECIDER__MODEL / __API_KEY / __BASE_URL /
+# __TIMEOUT_SECONDS / __EXTRA.
+#
+# ⚠ model and base_url must move together. Renaming the model while leaving the
+# endpoint pointed at a server that does not host it returns 404 on every call,
+# and the retrieval loop does NOT fail on that -- it falls back to a fixed
+# top-ranked core and reports a complete result. See the fallback note in
+# everos.memory.search.llm_multiround.
+model = ""
+api_key = ""
+base_url = ""
+
+# Multi-round loop tuning. Every one of these is a real field, so `everos config`
+# prints it and a TOML can set it; the legacy EVEROS_LLMMR_* env names still take
+# precedence when exported, so launch scripts keep working unchanged.
+max_rounds = 3                 # rounds before the loop stops regardless
+seed_topk = 50                 # candidates the original question contributes
+subq_topk = 20                 # candidates each follow-up sub-query contributes
+max_subqueries = 3             # follow-ups the decider may ask for per round
+rrf_k = 60                     # RRF smoothing when fusing sparse + dense
+no_new_core_patience = 1       # stop after this many rounds add no new core
+per_subquery_guarantee = 1     # slots reserved per sub-query in the final fill
+retries = 3                    # decider retries before falling back
+retry_backoff_seconds = 0.5    # doubled per attempt
+core_overflow = false          # true = let core exceed top_k (pre-2026-08-06)
+full_text = false              # true = decider reads full episode text, not summary
+fallback_core = 3              # core size when every decider attempt fails
+
 [multimodal]
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
 # image / pdf / audio image_url parts. Override via env:

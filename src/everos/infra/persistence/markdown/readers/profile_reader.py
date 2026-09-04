@@ -37,6 +37,7 @@ class ProfileReader:
         schema: type[T],
         app_id: str = "default",
         project_id: str = "default",
+        filename: str | None = None,
     ) -> tuple[T, str] | None:
         """Read the profile file and parse its frontmatter into ``schema``.
 
@@ -47,13 +48,16 @@ class ProfileReader:
                 ``SCOPE_DIR`` (via scope mixin) and ``PROFILE_FILENAME``.
             app_id: App scope segment (defaults to the ``"default"`` space).
             project_id: Project scope segment (defaults to ``"default"``).
+            filename: Overrides the schema's ``PROFILE_FILENAME``; mirrors
+                :meth:`ProfileWriter.write` so a group owner can read back
+                one participant's file under ``<scope_id>/profiles/``.
 
         Returns:
             ``(frontmatter, body)`` on success; ``None`` if the file is
             missing. ``body`` is the raw text after the closing ``---``
             with the writer-added trailing newline stripped.
         """
-        path = self._resolve_path(scope_id, schema, app_id, project_id)
+        path = self._resolve_path(scope_id, schema, app_id, project_id, filename)
         if not await anyio.Path(path).is_file():
             return None
         parsed = await MarkdownReader.read(path)
@@ -68,9 +72,10 @@ class ProfileReader:
         schema: type[BaseFrontmatter],
         app_id: str = "default",
         project_id: str = "default",
+        filename: str | None = None,
     ) -> Path:
         """Return the profile path (no IO check)."""
-        return self._resolve_path(scope_id, schema, app_id, project_id)
+        return self._resolve_path(scope_id, schema, app_id, project_id, filename)
 
     # ── Internals — same shape as ProfileWriter ───────────────────────────
 
@@ -80,9 +85,10 @@ class ProfileReader:
         schema: type[BaseFrontmatter],
         app_id: str,
         project_id: str,
+        filename: str | None = None,
     ) -> Path:
         scope_dir = getattr(schema, "SCOPE_DIR", "")
-        filename = getattr(schema, "PROFILE_FILENAME", None)
+        filename = filename or getattr(schema, "PROFILE_FILENAME", None)
         if not scope_dir:
             raise TypeError(
                 f"{schema.__name__} missing ``SCOPE_DIR`` ClassVar — "

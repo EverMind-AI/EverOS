@@ -1,0 +1,113 @@
+# EverMemBench, the standard run: ORIGINAL merged reference stores, profile injection OFF.
+#
+# Renamed from evermembench_refstore.toml when it became the only
+# EverMemBench config. The arm it used to contrast against -- a store this harness
+# extracted itself, with profile ON, scoring 49.6% -- was deleted along with its
+# 4.4 GB store and its 2.4 GB results, deliberately: that store was killed mid-ADD by
+# ENOSPC and held only 89% of the reference episodes and 71% of its atomic facts, so
+# keeping it invited someone to mistake it for a usable EverMemBench store. Its numbers
+# survive only in the header below, as the reason these two axes were chosen.
+#
+# Point --everos-root straight at the five reference stores:
+#   Evaluation/EverMemBench/shared_stores/EverMemBench_Qwen3.6-27B_1024_sample0{1..5}
+# They already carry a built .index (760 MB each), so the copy-to-a-working-dir step
+# an earlier run used was pure waste -- it duplicated 7.6 GB into tmpfs to rebuild
+# an index that was already there. Those copies are deleted.
+# Note the reference stores carry NO profile: profile_md=0, users=0.
+#
+# Two things separate this from evermembench.toml, and both were incomparabilities in
+# the run that scored 49.6%:
+#
+#   store    that run reused a store this harness built itself, and which was
+#            and killed mid-ADD by ENOSPC: 6,386 episodes and 105,652
+#            atomic facts against the reference stores' 7,178 and 148,788 -- 89% of the
+#            episodes but only 71% of the facts, since fact extraction is the OME
+#            strategy that runs after the episode lands and got cut off. This arm points
+#            at a copy of /tmp/everos_emb_01..05 instead.
+#
+#   profile  that run injected 38 per-speaker profiles alongside the 20 episodes, and
+#            measured them at 831,145 characters against the episodes' 50,233 -- 94% of
+#            the injected context, which is how a question reached 102,770 tokens. The
+#            official evaluator has no profile concept at all (zero hits for
+#            profile|persona under EverMemBench/EverOS/src/upstream/eval/src), so this is off here.
+#
+# Everything else is evermembench.toml unchanged, so the two arms differ on exactly
+# those two axes and the pair also answers whether profile injection helps or hurts.
+
+# EverMemBench. 5 conversations of ~723 sessions each, so ADD dominates the run.
+
+adapter = "evermembench"
+data_path = "${BENCH_DATA_EVERMEMBENCH:-benchmarks/data/evermembench.json}"
+results_root = "${BENCH_EVAL_ROOT:-benchmarks/results}/EverMemBench"
+conversations = 5
+app_id = "default"                      # partition key stored in the index, not a directory name
+project_id = "default"
+
+# --- ADD -------------------------------------------------------------------
+servers = 5                             # EverOS processes, each with its own store; clamped to the conversation count
+conversations_concurrency = 5           # conversations ingested at once
+batch_size = 50                         # messages per /memory/add call
+cascade_timeout = 7200                  # seconds to wait for extraction to drain before a conversation counts as done
+backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
+backbone_base_url = ""                  # empty = OpenRouter
+decider_model = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
+                                        # model, which is the single-model setup that
+                                        # works with no extra configuration. Our
+                                        # published numbers used qwen3.6-27B here; set
+                                        # BENCH_DECIDER_MODEL + BENCH_DECIDER_BASE_URL
+                                        # together to reproduce them -- a model name
+                                        # without its endpoint 404s on every call and
+                                        # the loop falls back silently.
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
+decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
+# --- SEARCH ----------------------------------------------------------------
+methods = "llm_multiround"
+top_k = 20                              # episodes returned per question
+search_concurrency = 4                  # questions retrieved in parallel within one conversation.
+                                        # 4 x 5 servers put 20 concurrent decider calls on a
+                                        # 4-replica gateway. Measured on it: qwen3.6-27B takes
+                                        # 33.8s per call with thinking on (3.5s with it off), so a
+                                        # 5-deep queue lands at ~170s against the 180s search
+                                        # deadline -- every call timed out and search froze at
+                                        # 1391/2400 rows. The deadline below is what fixes that:
+                                        # 20 in flight over 4 replicas is a 5-deep queue at ~170s,
+                                        # which 600s clears with 3.5x headroom. Halving this too
+                                        # was an over-correction -- it measured 2.8 rows/min and
+                                        # put search 5.9 hours out for no robustness gained.
+include_profile = false                 # OFF for this arm -- see the header
+trace = true                            # export retrieval + profile-extraction traces
+
+[providers]                # OpenRouter provider pin per model vendor
+openai = "openai"
+google = "google-ai-studio"
+
+[retrieval_env]                         # exported to the EverOS servers this harness starts
+EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
+# Thinking is left ON here deliberately, against the standing "qwen always no-think"
+# rule: every published reference number on this benchmark was measured with a
+# thinking-on qwen3.6-27B decider, and switching it changes the decider's output and
+# therefore retrieval. What is raised instead is the deadline, which changes nothing the
+# decider produces. Revisit only together with a decision to re-measure the baselines.
+EVEROS_DECIDER__TIMEOUT_SECONDS = "600"   # 33.8s/call measured; 180s default left no queue headroom
+EVEROS_LLM__SEARCH_TIMEOUT_SECONDS = "600"
+EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
+                                        # the 30s scanner covers the same ground
+EVEROS_PROFILE_EXTRACTION_INTERVAL = "1"   # real-time: every memcell updates the profile
+EVEROS_PROFILE_SUBJECT = "sender"       # one profile per speaker: the owner is a 38-person group
+
+# --- ANSWER ----------------------------------------------------------------
+[answer]
+model = "google/gemini-3-flash-preview"
+temperature = 0.0
+max_tokens = 1000
+timeout = 300.0
+max_retries = 3
+concurrency = 24                        # questions answered in parallel within one conversation
+
+# --- JUDGE -----------------------------------------------------------------
+[judge]
+model = "google/gemini-3-flash-preview"
+temperature = 0.0
+runs = 1                                # independent judgements per question, majority vote
+timeout = 300.0
+max_retries = 3

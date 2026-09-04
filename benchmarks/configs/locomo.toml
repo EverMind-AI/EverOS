@@ -1,0 +1,67 @@
+# LoCoMo. Category 5 is adversarial and ungradable by a contains-judge; the adapter
+# drops it, leaving 1540 of the 2432 questions.
+
+adapter = "locomo"
+data_path = "${BENCH_DATA_LOCOMO:-benchmarks/data/locomo10.json}"
+results_root = "${BENCH_EVAL_ROOT:-benchmarks/results}/LoCoMo"
+conversations = 10
+app_id = "default"                      # partition key stored in the index, not a directory name
+project_id = "default"
+
+# --- ADD -------------------------------------------------------------------
+servers = 10                            # EverOS processes, each with its own store; clamped to the conversation count
+conversations_concurrency = 10          # conversations ingested at once
+batch_size = 50                         # messages per /memory/add call
+cascade_timeout = 7200                  # seconds to wait for extraction to drain before a conversation counts as done
+backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
+backbone_base_url = ""                  # empty = OpenRouter
+decider_model = "${BENCH_DECIDER_MODEL:-deepseek/deepseek-v4-flash-0731}"
+                                        # model, which is the single-model setup that
+                                        # works with no extra configuration. Our
+                                        # published numbers used qwen3.6-27B here; set
+                                        # BENCH_DECIDER_MODEL + BENCH_DECIDER_BASE_URL
+                                        # together to reproduce them -- a model name
+                                        # without its endpoint 404s on every call and
+                                        # the loop falls back silently.
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
+decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
+# --- SEARCH ----------------------------------------------------------------
+methods = "llm_multiround"
+top_k = 20                              # episodes returned per question
+search_concurrency = 2                  # questions retrieved in parallel within one conversation
+include_profile = false                 # OFF. The reference harness for this
+                                        # benchmark never sent the flag, so ON is a
+                                        # deviation from the published prompt, not a
+                                        # setting. Turn it on only for a declared
+                                        # ablation, and expect to beat the measured
+                                        # run-to-run noise floor first: 0.91 pp on
+                                        # LoCoMo, 1.20 pp on LongMemEval.
+trace = true                            # export retrieval + profile-extraction traces
+
+[providers]                                # OpenRouter provider pin per model vendor
+openai = "openai"
+anthropic = "anthropic"
+google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitted
+
+[retrieval_env]                         # exported to the EverOS servers this harness starts
+EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
+EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
+                                        # the 30s scanner covers the same ground
+EVEROS_PROFILE_EXTRACTION_INTERVAL = "50"  # rewrite the profile every 50th episode, not every one
+
+# --- ANSWER ----------------------------------------------------------------
+[answer]
+model = "openai/gpt-4.1-mini"
+temperature = 0.0
+max_tokens = 32768
+timeout = 300.0
+max_retries = 5
+concurrency = 20                        # questions answered in parallel within one conversation
+
+# --- JUDGE -----------------------------------------------------------------
+[judge]
+model = "openai/gpt-4o-mini"
+temperature = 0.0
+runs = 1                                # independent judgements per question, majority vote
+timeout = 300.0
+max_retries = 5

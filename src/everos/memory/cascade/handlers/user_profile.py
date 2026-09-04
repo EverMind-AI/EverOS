@@ -1,14 +1,19 @@
 """UserProfile cascade handler — md → LanceDB ``user_profile`` table.
 
-Profile is a single-file kind (mirrors AgentSkill): one
-``users/<user_id>/user.md`` per user, replaced wholesale on edit. No
-entry markers, no per-entry diff. The LanceDB row carries the typed
-projection of the frontmatter so a future query-aware lookup can run
-off LanceDB; today the recaller is KV-by-owner.
+Profile is a single-file kind (mirrors AgentSkill): each file is replaced
+wholesale on edit, with no entry markers and no per-entry diff. The LanceDB
+row carries the typed projection of the frontmatter so a future query-aware
+lookup can run off LanceDB; today the recaller is KV-by-owner.
+
+Two layouts share this handler. ``users/<user_id>/user.md`` is the
+owner-is-subject shape (``subject`` empty, row id = ``owner_id``), and
+``users/<user_id>/user.<slug>.md`` is the group shape (one file per
+participant, row id = ``<owner_id>::<subject>``). The handler keys off the
+frontmatter's ``subject``, never the path.
 
 md contract:
 
-- frontmatter: :class:`UserProfileFrontmatter` (``user_id`` /
+- frontmatter: :class:`UserProfileFrontmatter` (``user_id`` / ``subject`` /
   ``summary`` / ``explicit_info`` / ``implicit_traits`` /
   ``profile_timestamp_ms``).
 - body: free-form display text (not indexed; the structured payload
@@ -36,7 +41,7 @@ from .base import Handler
 
 
 class UserProfileHandler(Handler):
-    """Cascade handler for ``users/<user_id>/user.md``."""
+    """Cascade handler for user-profile md (both layouts above)."""
 
     kind = "user_profile"
     lance_repo: ClassVar[Any] = user_profile_repo
@@ -67,6 +72,14 @@ class UserProfileHandler(Handler):
             )
         app_id, project_id = resolve_scope(md_path)
 
+        # Empty subject = owner-is-subject, the only shape a single-person
+        # owner can have. A group owner ships one file per participant and
+        # names the participant here; ``owner_id`` stays the partition, so the
+        # row id carries the subject or the files overwrite each other. It is
+        # the id and not a column because a new column is schema drift that
+        # locks every pre-existing store out of startup.
+        subject = str(fm.get("subject", ""))
+
         summary = str(fm.get("summary", ""))
         explicit_info_json = _dump_json(fm.get("explicit_info", []))
         implicit_traits_json = _dump_json(fm.get("implicit_traits", []))
@@ -80,7 +93,7 @@ class UserProfileHandler(Handler):
             }
         )
 
-        row_id = owner_id
+        row_id = f"{owner_id}::{subject}" if subject else owner_id
         prior = await user_profile_repo.get_by_id(row_id)
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(

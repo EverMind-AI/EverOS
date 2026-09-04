@@ -21,6 +21,7 @@ External usage::
 """
 
 from .client import LLMNotConfiguredError as LLMNotConfiguredError
+from .client import get_decider_llm_client as get_decider_llm_client
 from .client import get_llm_client as get_llm_client
 from .client import get_multimodal_llm_client as get_multimodal_llm_client
 from .factory import build_llm_provider as build_llm_provider
@@ -40,6 +41,7 @@ __all__ = [
     "OpenAIProvider",
     "Usage",
     "build_llm_provider",
+    "get_decider_llm_client",
     "get_llm_client",
     "get_multimodal_llm_client",
 ]

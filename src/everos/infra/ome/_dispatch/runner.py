@@ -237,7 +237,18 @@ class Runner:
                             },
                         ),
                     ):
-                        await meta.func(event, ctx)
+                        # Timeout INSIDE the span so a killed attempt is still
+                        # attributed to the strategy that hung. TimeoutError is an
+                        # Exception, so it lands in the retry / dead-letter handler
+                        # below like any other failure -- the slot is released, the
+                        # record leaves RUNNING, and the work is retried rather than
+                        # silently abandoned.
+                        timeout = self._config.run_timeout_seconds
+                        if timeout is None:
+                            await meta.func(event, ctx)
+                        else:
+                            async with asyncio.timeout(timeout):
+                                await meta.func(event, ctx)
                 finally:
                     _CURRENT_STRATEGY.reset(token)
             except StrategyContractError as e:

@@ -161,3 +161,79 @@ def test_run_spec_includes_git_hash() -> None:
         started_at="2026-06-28T22:30:00Z",
     )
     assert spec.git_hash == "abc1234"
+
+
+def test_config_expands_environment_references() -> None:
+    """``${VAR}`` in a config is substituted from the environment on load.
+
+    The configs name their input instead of containing it -- a private gateway URL and
+    an absolute path into one workspace used to sit in the file, which leaked the
+    deployment and made the harness unrunnable anywhere else.
+    """
+    import os
+
+    from benchmarks.config import _expand_env
+
+    os.environ["_CFG_PROBE"] = "http://probe/v1"
+    try:
+        assert _expand_env("${_CFG_PROBE}") == "http://probe/v1"
+        assert _expand_env({"a": ["${_CFG_PROBE}"]}) == {"a": ["http://probe/v1"]}
+    finally:
+        del os.environ["_CFG_PROBE"]
+
+
+def test_an_unset_reference_keeps_its_own_name() -> None:
+    """Unset must NOT become "".
+
+    An endpoint that silently turns into the empty string is a connection error thirty
+    minutes into a run; the unexpanded text names the variable that is missing. A
+    ``:-`` default is honoured when one is written.
+    """
+    from benchmarks.config import _ENV_REF, _expand_env
+
+    # Both forms the pattern accepts, so a change to it has to come here first.
+    assert _ENV_REF.match("${NAME}")
+    assert _ENV_REF.match("${NAME:-default}")
+    assert not _ENV_REF.match("$NAME"), "bare $NAME must not be treated as a reference"
+    assert _expand_env("${_CFG_ABSENT}") == "${_CFG_ABSENT}"
+    assert _expand_env("${_CFG_ABSENT:-fallback}") == "fallback"
+
+
+def test_results_root_falls_back_when_its_variable_is_unset() -> None:
+    """An unresolved optional field must not be used verbatim.
+
+    `results_root` is shipped as `${BENCH_EVAL_ROOT}/<Dataset>/EverOS/results` so
+    nothing
+    in the config is specific to one machine. Used literally that creates a directory
+    named `${BENCH_EVAL_ROOT}` on the first run out of a fresh clone -- silently,
+    because
+    a path is a path. Required fields keep the literal (it names the missing variable);
+    optional ones fall back to something that works.
+    """
+    import run as run_mod
+
+    from benchmarks.config import BenchmarkConfig, unresolved
+
+    cfg = BenchmarkConfig.from_toml("locomo").model_copy(
+        update={"results_root": "${BENCH_EVAL_ROOT}/LoCoMo/EverOS/results"}
+    )
+    assert unresolved(cfg.results_root)
+    run_mod._results_root._warned = False
+    args = type("A", (), {"results_root": ""})()
+    assert run_mod._results_root(args, cfg) == "benchmarks/results"
+
+    resolved = cfg.model_copy(update={"results_root": "/tmp/eval/LoCoMo"})
+    assert run_mod._results_root(args, resolved) == "/tmp/eval/LoCoMo"
+
+    explicit = type("A", (), {"results_root": "/tmp/explicit"})()
+    assert run_mod._results_root(explicit, cfg) == "/tmp/explicit"
+
+
+def test_unresolved_recognises_only_a_real_reference() -> None:
+    """`$HOME` and a bare `{}` are not env references and must pass through."""
+    from benchmarks.config import unresolved
+
+    assert unresolved("${BENCH_EVAL_ROOT}/x")
+    assert not unresolved("/tmp/x")
+    assert not unresolved("")
+    assert not unresolved("$BENCH_EVAL_ROOT")

@@ -14,6 +14,7 @@ runs in keyword-only mode when embedding is unavailable.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import FastAPI
@@ -36,6 +37,18 @@ class CascadeLifespanProvider(LifespanProvider):
         self._orchestrator: CascadeOrchestrator | None = None
 
     async def startup(self, app: FastAPI) -> Any:
+        # A read-only retrieval server does not ingest markdown, so the cascade
+        # subsystem (watcher / scanner / worker) is pure overhead -- and its periodic
+        # scan re-enqueues a large store's whole markdown set, which starves search on a
+        # dense store badly enough to hold it at zero. Off by default (unset), so an
+        # ingesting daemon is unaffected.
+        if os.getenv("EVEROS_DISABLE_CASCADE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            logger.info("cascade_lifespan_disabled_by_env")
+            return None
         memory_root = MemoryRoot.resolve()
         memory_root.ensure()
 

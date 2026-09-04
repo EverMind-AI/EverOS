@@ -24,9 +24,29 @@ from collections.abc import Sequence
 
 import openai
 
+from everos.core.errors import EmbeddingInputError
 from everos.core.observability.tracing import memory_span, set_generation_usage
 
 from .protocol import EmbeddingServiceError
+
+# Statuses that describe the input, not the service. Retrying sends the identical
+# bytes to the identical endpoint, so the answer is identical -- while the cascade
+# worker holds its slot through every backoff and the rows behind it wait.
+# 408 and 429 are excluded on purpose: both are 4xx and both are transient.
+_PERMANENT_STATUSES = frozenset({400, 401, 403, 404, 413, 414, 422})
+
+
+def _classify(exc: openai.OpenAIError) -> Exception:
+    """Map a provider error to the retryable or the permanent branch.
+
+    Everything used to become :class:`EmbeddingServiceError`, i.e. retryable. That is
+    right for a timeout, a 429 or a 5xx, and wrong for the failure actually seen in
+    production: episodes longer than the model's context come back 400 forever.
+    """
+    status = getattr(exc, "status_code", None)
+    if status in _PERMANENT_STATUSES:
+        return EmbeddingInputError(f"embedding input rejected ({status}): {exc}")
+    return EmbeddingServiceError(str(exc))
 
 
 class OpenAIEmbeddingProvider:
@@ -111,7 +131,7 @@ class OpenAIEmbeddingProvider:
                         else openai.NOT_GIVEN,
                     )
                 except openai.OpenAIError as exc:
-                    raise EmbeddingServiceError(str(exc)) from exc
+                    raise _classify(exc) from exc
             if not response.data:
                 raise EmbeddingServiceError(
                     f"Embedding API returned empty data for {len(chunk)} inputs"

@@ -1,6 +1,6 @@
 """Tests for :func:`extract_user_profile`.
 
-Heavy mocking — the strategy threads through ``cluster_repo`` (sqlite),
+Heavy mocking — the strategy threads through ``episode_repo`` (LanceDB),
 ``memcell_repo`` (sqlite, payload deserialise), ``ProfileReader`` /
 ``ProfileWriter`` (md), and ``ProfileExtractor`` (algo). We mock all
 seams so the test exercises the orchestration only.
@@ -12,16 +12,14 @@ import asyncio
 import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
-from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Profile as AlgoProfile
 
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.infra.persistence.markdown import UserProfileFrontmatter
 from everos.memory._partition_locks import _reset_for_tests
-from everos.memory.events import ProfileClusterUpdated
+from everos.memory.events import EpisodeExtracted
 from everos.memory.strategies.extract_user_profile import extract_user_profile
 
 
@@ -34,23 +32,15 @@ def _event(
     *,
     owner_id: str = "u_alice",
     memcell_id: str = "mc_aaaaaaaaaaa1",
-    cluster_id: str = "cl_user00000001",
-) -> ProfileClusterUpdated:
-    return ProfileClusterUpdated(
+    episode_timestamp_ms: int = 1_700_000_000_000,
+) -> EpisodeExtracted:
+    """The strategy's only trigger. ``cluster_id`` is gone with the cluster path."""
+    return EpisodeExtracted(
         memcell_id=memcell_id,
-        cluster_id=cluster_id,
+        episode_entry_id=f"ep_{memcell_id}",
+        episode_text="episode narrative",
+        episode_timestamp_ms=episode_timestamp_ms,
         owner_id=owner_id,
-    )
-
-
-def _algo_cluster(*, cluster_id: str, members: list[str], last_ts: int) -> AlgoCluster:
-    return AlgoCluster(
-        id=cluster_id,
-        centroid=np.zeros(1024, dtype=np.float32),
-        count=len(members),
-        last_ts=last_ts,
-        preview=[],
-        members=members,
     )
 
 
@@ -86,7 +76,7 @@ def _memcell_row(memcell_id: str, *, sender_id: str, ts_ms: int) -> MagicMock:
 async def test_strategy_meta_is_attached() -> None:
     meta = extract_user_profile.meta
     assert meta.name == "extract_user_profile"
-    assert ProfileClusterUpdated in meta.trigger.on
+    assert list(meta.trigger.on) == [EpisodeExtracted]
     assert meta.emits == frozenset()
     assert meta.max_retries == 2
 
@@ -96,11 +86,6 @@ async def test_init_mode_writes_profile_when_no_existing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No prior profile → ProfileExtractor invoked without ``old_profile``."""
-    cluster = _algo_cluster(
-        cluster_id="cl_user00000001",
-        members=["ep_20260101_0001"],
-        last_ts=1_700_000_001_000,
-    )
     ep_rows = [_episode_row("ep_20260101_0001", "mc_aaaaaaaaaaa1")]
     mc_rows = [
         _memcell_row("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_001_000)
@@ -116,9 +101,6 @@ async def test_init_mode_writes_profile_when_no_existing(
     )
 
     with (
-        patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.episode_repo"
         ) as mock_episode_repo,
@@ -139,8 +121,12 @@ async def test_init_mode_writes_profile_when_no_existing(
             "everos.memory.strategies.extract_user_profile.ProfileWriter"
         ) as mock_writer_cls,
     ):
-        mock_cluster_repo.list_for_owner = AsyncMock(return_value=[cluster])
-        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=ep_rows)
+        # Single path: the strategy asks LanceDB for episodes newer than the
+        # profile and takes their parent memcells. `columns=["parent_id"]` makes
+        # the return raw dicts, not model rows.
+        mock_episode_repo.list_by_owner_after_ts = AsyncMock(
+            return_value=[{"parent_id": r.parent_id} for r in ep_rows]
+        )
         mock_memcell_repo.find_by_ids = AsyncMock(return_value=mc_rows)
         mock_reader_cls.return_value.read = AsyncMock(return_value=None)
         mock_writer_cls.return_value.write = AsyncMock(return_value=None)
@@ -174,11 +160,6 @@ async def test_update_mode_rehydrates_old_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Existing profile → algo Profile rehydrated and passed as old_profile."""
-    cluster = _algo_cluster(
-        cluster_id="cl_user00000001",
-        members=["ep_20260101_0001"],
-        last_ts=1_700_000_002_000,
-    )
     ep_rows = [_episode_row("ep_20260101_0001", "mc_aaaaaaaaaaa1")]
     mc_rows = [
         _memcell_row("mc_aaaaaaaaaaa1", sender_id="u_alice", ts_ms=1_700_000_002_000)
@@ -203,9 +184,6 @@ async def test_update_mode_rehydrates_old_profile(
 
     with (
         patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
-        patch(
             "everos.memory.strategies.extract_user_profile.episode_repo"
         ) as mock_episode_repo,
         patch(
@@ -225,8 +203,12 @@ async def test_update_mode_rehydrates_old_profile(
             "everos.memory.strategies.extract_user_profile.ProfileWriter"
         ) as mock_writer_cls,
     ):
-        mock_cluster_repo.list_for_owner = AsyncMock(return_value=[cluster])
-        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=ep_rows)
+        # Single path: the strategy asks LanceDB for episodes newer than the
+        # profile and takes their parent memcells. `columns=["parent_id"]` makes
+        # the return raw dicts, not model rows.
+        mock_episode_repo.list_by_owner_after_ts = AsyncMock(
+            return_value=[{"parent_id": r.parent_id} for r in ep_rows]
+        )
         mock_memcell_repo.find_by_ids = AsyncMock(return_value=mc_rows)
         mock_reader_cls.return_value.read = AsyncMock(
             return_value=(existing_fm, "prior summary")
@@ -250,16 +232,14 @@ async def test_update_mode_rehydrates_old_profile(
 
 @pytest.mark.asyncio
 async def test_skips_when_no_members(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty target cluster set (no fresh clusters) → no extractor call."""
-    # Existing profile timestamp newer than every cluster's last_ts → no
-    # target_cluster matches `last_ts > last_profile_ts`, but the current
-    # cluster_id should still force inclusion. Set the current cluster id
+    """Nothing newer than the profile → no extractor call.
+
+    `_select_via_timestamp` always includes the event's own memcell, so an empty
+    LanceDB supplement still yields one candidate id; the skip happens downstream
+    when the memcell rows come back empty.
+    """
+    # Kept from the cluster-path era: the profile timestamp is ahead of the
     # to a non-existent value to drop everything.
-    stale_cluster = _algo_cluster(
-        cluster_id="cl_other000001",
-        members=["ep_other00000"],
-        last_ts=1_600_000_000_000,
-    )
     existing_fm = UserProfileFrontmatter(
         id="profile_u_alice",
         user_id="u_alice",
@@ -271,8 +251,8 @@ async def test_skips_when_no_members(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with (
         patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
+            "everos.memory.strategies.extract_user_profile.episode_repo"
+        ) as mock_episode_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.memcell_repo"
         ) as mock_memcell_repo,
@@ -286,7 +266,7 @@ async def test_skips_when_no_members(monkeypatch: pytest.MonkeyPatch) -> None:
             "everos.memory.strategies.extract_user_profile.ProfileWriter"
         ) as mock_writer_cls,
     ):
-        mock_cluster_repo.list_for_owner = AsyncMock(return_value=[stale_cluster])
+        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[])
         mock_memcell_repo.find_by_ids = AsyncMock(return_value=[])
         mock_reader_cls.return_value.read = AsyncMock(
             return_value=(existing_fm, "prior")
@@ -297,9 +277,7 @@ async def test_skips_when_no_members(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(mod, "_writer", None, raising=False)
         monkeypatch.setattr(mod, "_reader", None, raising=False)
 
-        await extract_user_profile(
-            _event(cluster_id="cl_unknown00000"), FakeStrategyContext()
-        )
+        await extract_user_profile(_event(), FakeStrategyContext())
 
     mock_extractor_cls.return_value.aextract.assert_not_called()
     mock_writer_cls.return_value.write.assert_not_called()
@@ -326,17 +304,7 @@ async def _run_serialisation_probe(
             implicit_traits=[],
         )
 
-    cluster_a = _algo_cluster(
-        cluster_id="cl_a", members=["ep_a"], last_ts=1_700_000_000_000
-    )
-    cluster_b = _algo_cluster(
-        cluster_id="cl_b", members=["ep_b"], last_ts=1_700_000_000_000
-    )
-
     with (
-        patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
         patch(
             "everos.memory.strategies.extract_user_profile.episode_repo"
         ) as mock_episode_repo,
@@ -357,15 +325,9 @@ async def _run_serialisation_probe(
             "everos.memory.strategies.extract_user_profile.ProfileExtractor"
         ) as mock_extractor_cls,
     ):
-        mock_cluster_repo.list_for_owner = AsyncMock(
-            side_effect=lambda owner, _kind, **_kw: (
-                [cluster_a] if owner == owner_a else [cluster_b]
-            )
-        )
-        mock_episode_repo.find_by_owner_entries = AsyncMock(
-            side_effect=lambda _owner, ids, **_kw: [
-                _episode_row(ids[0], f"mc_{ids[0]}")
-            ]
+        # Single path: one episode per owner, its parent memcell is what gets read.
+        mock_episode_repo.list_by_owner_after_ts = AsyncMock(
+            side_effect=lambda **kw: [{"parent_id": f"mc_ep_{kw['owner_id']}"}]
         )
         mock_memcell_repo.find_by_ids = AsyncMock(
             side_effect=lambda ids: [
@@ -381,12 +343,8 @@ async def _run_serialisation_probe(
         monkeypatch.setattr(mod, "_writer", None, raising=False)
 
         await asyncio.gather(
-            extract_user_profile(
-                _event(owner_id=owner_a, cluster_id="cl_a"), FakeStrategyContext()
-            ),
-            extract_user_profile(
-                _event(owner_id=owner_b, cluster_id="cl_b"), FakeStrategyContext()
-            ),
+            extract_user_profile(_event(owner_id=owner_a), FakeStrategyContext()),
+            extract_user_profile(_event(owner_id=owner_b), FakeStrategyContext()),
         )
     return log
 

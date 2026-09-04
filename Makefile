@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci clean
+.PHONY: help install install-deps lint docs-check check-commits check-pr-title check-assets check-file-sizes check-deprecated-names check-github-docs check-cjk check-datetime openapi check-openapi format test integration package cov ci verify-parity clean
 
 help:
 	@echo "Targets:"
@@ -36,8 +36,8 @@ install: install-deps
 	uv run pre-commit install --hook-type commit-msg
 
 lint:
-	uv run ruff check src tests
-	uv run ruff format --check src tests
+	uv run ruff check src tests benchmarks
+	uv run ruff format --check src tests benchmarks
 	uv run lint-imports
 	uv run python scripts/check_repo_assets.py
 	uv run python scripts/check_file_sizes.py
@@ -105,11 +105,22 @@ check-openapi:
 	uv run python scripts/dump_openapi.py --check
 
 format:
-	uv run ruff check --fix src tests
-	uv run ruff format src tests
+	uv run ruff check --fix src tests benchmarks
+	uv run ruff format src tests benchmarks
 
 test:
 	uv run pytest tests/unit -v
+
+# The differential tests compare against a checkout outside this repository, so all of
+# them skip when it is absent -- 269 of the 395 benchmark tests, and `make test` still
+# reported success. This target refuses to skip: run it before any evaluation, because a
+# number produced by an unverified harness is worse than no number.
+verify-parity:
+	BENCHMARK_PARITY_STRICT=1 uv run pytest tests/unit -q -k benchmark
+	uv run python benchmarks/audit/check_parity.py
+	uv run python benchmarks/audit/check_protocol.py
+	uv run python benchmarks/audit/coverage.py
+	uv run python benchmarks/audit/partition.py
 
 integration:
 	uv run pytest tests/integration -v

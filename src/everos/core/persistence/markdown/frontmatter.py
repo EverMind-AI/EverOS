@@ -348,15 +348,24 @@ class ProfilePathMixin:
         class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
             PROFILE_FILENAME: ClassVar[str] = "user.md"
             ...
+
+    A kind that keeps several files of one schema under the same scope
+    directory declares ``PROFILE_GLOB`` too, because the cascade scanner
+    globs each kind exactly once and ``*`` does not span ``/``. Both files
+    must still sit directly under ``<scope_id>/``: a subdirectory would need
+    an extra path component the single glob cannot express.
     """
 
     PROFILE_FILENAME: ClassVar[str]
+    PROFILE_GLOB: ClassVar[str | None] = None
+    """Filename glob covering every file of this kind; ``None`` means the
+    kind has exactly one file and ``PROFILE_FILENAME`` is the pattern."""
     SCOPE_DIR: ClassVar[str]
 
     @classmethod
     def path_glob(cls) -> str:
         # Leading ``*/*/`` matches the <app>/<project> scope prefix.
-        return f"*/*/{cls.SCOPE_DIR}/*/{cls.PROFILE_FILENAME}"
+        return f"*/*/{cls.SCOPE_DIR}/*/{cls.PROFILE_GLOB or cls.PROFILE_FILENAME}"
 
 
 class UserScopedFrontmatter(BaseFrontmatter):

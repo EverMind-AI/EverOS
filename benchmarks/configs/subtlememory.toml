@@ -1,0 +1,74 @@
+# SubtleMemory. 10 personas, 1522 questions.
+
+adapter = "subtlememory"
+data_path = "${BENCH_DATA_SUBTLEMEMORY:-benchmarks/data/subtlememory}"
+results_root = "${BENCH_EVAL_ROOT:-benchmarks/results}/SubtleMemory"
+conversations = 10
+app_id = "default"                      # partition key stored in the index, not a directory name
+project_id = "default"
+
+# --- ADD -------------------------------------------------------------------
+servers = 10                            # EverOS processes, each with its own store; clamped to the conversation count
+conversations_concurrency = 10          # conversations ingested at once
+batch_size = 50                         # messages per /memory/add call
+cascade_timeout = 7200                  # seconds to wait for extraction to drain before a conversation counts as done
+backbone_model = "openai/gpt-4.1-mini"  # extracts every memory
+backbone_base_url = ""                  # empty = OpenRouter
+decider_model = "${BENCH_DECIDER_MODEL:-qwen3.6-27B}"
+                                        # model, which is the single-model setup that
+                                        # works with no extra configuration. Our
+                                        # published numbers used qwen3.6-27B here; set
+                                        # BENCH_DECIDER_MODEL + BENCH_DECIDER_BASE_URL
+                                        # together to reproduce them -- a model name
+                                        # without its endpoint 404s on every call and
+                                        # the loop falls back silently.
+decider_base_url = "${BENCH_DECIDER_BASE_URL}"   # OpenAI-compatible endpoint serving decider_model
+decider_api_key = "${BENCH_DECIDER_API_KEY}"     # any non-empty value for a self-hosted server
+# --- SEARCH ----------------------------------------------------------------
+methods = "llm_multiround"
+top_k = 20                              # episodes returned per question
+search_concurrency = 2                  # questions retrieved in parallel within one conversation
+include_profile = false                 # OFF. The reference harness for this
+                                        # benchmark never sent the flag, so ON is a
+                                        # deviation from the published prompt, not a
+                                        # setting. Turn it on only for a declared
+                                        # ablation, and expect to beat the measured
+                                        # run-to-run noise floor first: 0.91 pp on
+                                        # LoCoMo, 1.20 pp on LongMemEval.
+trace = true                            # export retrieval + profile-extraction traces
+
+[providers]                                # OpenRouter provider pin per model vendor
+openai = "openai"
+anthropic = "anthropic"
+google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitted
+
+[retrieval_env]                         # exported to the EverOS servers this harness starts
+EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
+EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
+                                        # the 30s scanner covers the same ground
+EVEROS_PROFILE_EXTRACTION_INTERVAL = "50"  # rewrite the profile every 50th episode, not every one
+
+# --- ANSWER ----------------------------------------------------------------
+# clash -> v5 routing, the reference's best-scoring arm: 71.75% against 66.56% for
+# the plain official prompt, and the only one of its sixteen configurations that
+# beats every single-prompt variant. The adapter's `answer_route` runs v5's fact
+# extractor on every question and routes only the ones where it tags a `clash`
+# (two facts answering one target incompatibly) to the two-stage answer; the rest
+# keep the official prompt byte-identical. Measured trade over 1522 questions:
+# contradictory 13.79% -> 36.60% (+86 questions) against -0.61pp on the
+# remainder (-7 questions).
+[answer]
+model = "openai/gpt-5.4"
+temperature = 0.0
+max_tokens = 16384
+timeout = 300.0
+max_retries = 5
+concurrency = 20                        # questions answered in parallel within one conversation
+
+# --- JUDGE -----------------------------------------------------------------
+[judge]
+model = "google/gemini-3.1-pro-preview"
+temperature = 0.0
+runs = 1                                # independent judgements per question, majority vote
+timeout = 300.0
+max_retries = 5

@@ -40,7 +40,12 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
-from everos.core.context import resolve_request_id
+from everos.core.context import (
+    get_degradations,
+    reset_degradations,
+    resolve_request_id,
+    restore_degradations,
+)
 from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
@@ -72,6 +77,7 @@ from .dto import (
 )
 from .filters import compile_filters
 from .hierarchy import build_ep_to_fact_parents, heap_expand
+from .llm_multiround import RoundDecider, search_episodes_llm_multiround
 from .shaper import (
     reshape_hybrid_output,
     shape_agent_case_from_candidate,
@@ -167,6 +173,7 @@ class SearchManager:
         reranker: RerankProvider | None,
         llm_client: LLMClient | None,
         search_tokenizer: Tokenizer | None = None,
+        decider_client: LLMClient | None = None,
     ) -> None:
         self._ep = episode_recaller
         self._fact = atomic_fact_recaller
@@ -176,12 +183,21 @@ class SearchManager:
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
+        # Multi-round retrieval runs its own model when [decider] configures one; the
+        # caller passes None to mean "same as extraction", which is the historical
+        # behaviour and what every store built before [decider] existed was scored with.
+        self._decider_llm = decider_client or llm_client
         self._search_tokenizer = search_tokenizer
 
     # ── Public entry ────────────────────────────────────────────────
 
     async def search(self, req: SearchRequest) -> SearchResponse:
         request_id = resolve_request_id()
+        # Cleared per search, and restored on the way out. A worker task's context is
+        # reused across requests, so without this one degraded search would mark every
+        # later healthy one -- which is worse than not reporting at all, because it
+        # trains the reader to ignore the field.
+        _deg_token = reset_degradations()
         with memory_span(
             "everos.memory.search",
             observation_type="retriever",
@@ -223,6 +239,10 @@ class SearchManager:
                     episodes=episodes,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
+                    # Read after the routes have run: a fallback deep in the
+                    # multi-round loop records itself here, and this is the last
+                    # point before the result leaves the domain.
+                    degraded=list(get_degradations()),
                 )
             else:  # "agent"
                 (cases, skills), unprocessed = await asyncio.gather(
@@ -233,6 +253,7 @@ class SearchManager:
                     agent_cases=cases,
                     agent_skills=skills,
                     unprocessed_messages=unprocessed,
+                    degraded=list(get_degradations()),
                 )
 
             # Returned hits (ids only) — content, so only when capture_content
@@ -271,6 +292,7 @@ class SearchManager:
                     method=req.method.value,
                 )
 
+            restore_degradations(_deg_token)
             return SearchResponse(request_id=request_id, data=data)
 
     # ── Unprocessed buffer ──────────────────────────────────────────
@@ -327,8 +349,33 @@ class SearchManager:
 
     # ── Episodes ────────────────────────────────────────────────────
 
+    async def search_episodes_with_decider(
+        self, req: SearchRequest, decider: RoundDecider
+    ) -> list[SearchEpisodeItem]:
+        """Run the ``llm_multiround`` loop with an injected decider.
+
+        This is the seam a Phase-2 RL policy occupies: the loop, its retrieval,
+        its block rendering and its stop conditions are EverOS's own, and only
+        the per-round decision comes from the caller. An RL environment that
+        re-implements the loop instead drifts: measured against this one, a
+        hand-built environment returned a different candidate set on 25/25
+        sampled sub-queries (Jaccard median 0.538), because the public search
+        route dispatches to the hybrid hierarchy pipeline rather than to
+        ``llm_multiround``'s per-sub-query ``rrf(sparse, dense)[:topk]``.
+        """
+        req = req.model_copy(update={"method": SearchMethod.LLM_MULTIROUND})
+        self._validate_components(req)
+        where = compile_filters(
+            req.filters,
+            owner_type=req.owner_type,
+            owner_id=req.owner_id,
+            app_id=req.app_id,
+            project_id=req.project_id,
+        )
+        return await self._search_episodes(req, where, decider=decider)
+
     async def _search_episodes(
-        self, req: SearchRequest, where: str
+        self, req: SearchRequest, where: str, *, decider: RoundDecider | None = None
     ) -> list[SearchEpisodeItem]:
         if req.method == SearchMethod.AGENTIC:
             return await search_episodes_agentic(
@@ -343,6 +390,22 @@ class SearchManager:
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
+            )
+
+        if req.method == SearchMethod.LLM_MULTIROUND:
+            return await search_episodes_llm_multiround(
+                req.query,
+                owner_id=req.owner_id,
+                where=where,
+                app_id=req.app_id,
+                project_id=req.project_id,
+                episode_recaller=self._ep,
+                atomic_fact_recaller=self._fact,
+                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                llm=self._decider_llm,  # type: ignore[arg-type]
+                top_k=self._top_k(req.top_k),
+                reranker=self._reranker,  # type: ignore[arg-type]
+                decider=decider,
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
@@ -576,7 +639,7 @@ class SearchManager:
     async def _fetch_profile(self, req: SearchRequest) -> list[SearchProfileItem]:
         if not req.include_profile or req.owner_type != "user":
             return []
-        return await self._profile.fetch(req.owner_id)
+        return await self._profile.fetch(req.owner_id, subject=req.profile_subject)
 
     # ── Recall helpers ──────────────────────────────────────────────
 
@@ -821,6 +884,7 @@ class SearchManager:
             SearchMethod.VECTOR,
             SearchMethod.HYBRID,
             SearchMethod.AGENTIC,
+            SearchMethod.LLM_MULTIROUND,
         )
         if needs_embedding and (
             not get_embedding_capability().available or self._embedding is None
@@ -829,6 +893,18 @@ class SearchManager:
                 provider="embedding",
                 feature=_feature_name(method, req.owner_type),
             )
+
+        if method == SearchMethod.LLM_MULTIROUND:
+            if req.owner_type == "agent":
+                raise RuntimeError(
+                    "method='llm_multiround' is only supported for user memory; "
+                    "provide user_id instead of agent_id"
+                )
+            if self._llm is None:
+                raise ProviderNotConfiguredError(
+                    provider="llm",
+                    feature=_feature_name(method, req.owner_type),
+                )
 
         # agent HYBRID cross-encoder lane (enable_llm_rerank=False, the
         # default) reaches ``search_agent_skills_hybrid``, which needs a

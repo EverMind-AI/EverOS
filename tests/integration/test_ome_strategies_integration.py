@@ -527,7 +527,8 @@ async def test_profile_chain_e2e(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Chain: EpisodeExtracted → trigger_profile_clustering (sqlite) →
-    ProfileClusterUpdated → extract_user_profile → SUCCESS.
+    EpisodeExtracted → extract_user_profile → SUCCESS (single path; the cluster
+    event it used to travel on is gone).
 
     Real ``cluster_by_geometry`` (cosine + time-window) with a hash-based
     deterministic embedder so the geometry stage operates on well-spread
@@ -623,6 +624,19 @@ async def test_profile_chain_e2e(
         ),
         capture_logs() as logs,
     ):
+        # The selector this strategy actually calls. It used to be
+        # `find_by_owner_entries`, and when the profile refactor moved selection to a
+        # timestamp window the stub was not moved with it -- leaving
+        # `list_by_owner_after_ts` as a bare MagicMock, which the strategy awaited and
+        # died on. The run then went FAILED -> FAILED -> DEAD_LETTER while the
+        # assertion only said "expected SUCCESS", naming the symptom and nothing else.
+        #
+        # `columns=["parent_id"]` makes the return contractually a list of raw dicts,
+        # not ORM rows, so the stub has to hand back dicts or the strategy's
+        # `row["parent_id"]` reads a Mock attribute and the id set fills with junk.
+        mock_episode_repo.list_by_owner_after_ts = AsyncMock(
+            return_value=[{"parent_id": "mc_20260517_0001"}]
+        )
         mock_episode_repo.find_by_owner_entries = AsyncMock(
             return_value=[fake_episode_row]
         )

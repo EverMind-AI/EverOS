@@ -23,7 +23,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from everos.component.embedding import get_embedding_capability
-from everos.component.llm import LLMNotConfiguredError, get_llm_client
+from everos.component.llm import (
+    LLMNotConfiguredError,
+    get_decider_llm_client,
+    get_llm_client,
+)
 from everos.component.rerank import get_rerank_capability
 from everos.component.tokenizer import build_tokenizer
 from everos.core.observability.logging import get_logger
@@ -71,6 +75,23 @@ def _get_llm_client() -> LLMClient | None:
         return None
 
 
+def _get_decider_client() -> LLMClient | None:
+    """Client for the multi-round decider; ``None`` when no LLM is configured at all.
+
+    Resolves ``[decider]`` and falls back to ``[llm]`` when that section names no model,
+    so search behaves exactly as before unless a decider is explicitly configured.
+    """
+    try:
+        return get_decider_llm_client()
+    except LLMNotConfiguredError:
+        logger.warning(
+            "decider_not_configured",
+            hint="set [decider] model (and api_key / base_url, or inherit them from "
+            "[llm]) to give multi-round retrieval its own model",
+        )
+        return None
+
+
 def _get_manager() -> SearchManager:
     global _manager
     if _manager is None:
@@ -84,6 +105,7 @@ def _get_manager() -> SearchManager:
             embedding=get_embedding_capability().provider,
             reranker=get_rerank_capability().provider,
             llm_client=_get_llm_client(),
+            decider_client=_get_decider_client(),
         )
     return _manager
 

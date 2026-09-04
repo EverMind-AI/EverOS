@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
@@ -159,15 +160,33 @@ class CascadeOrchestrator:
         ``processing`` at boot is leftover from a prior crash that
         ``claim_pending_batch`` can't re-claim on its own (the WHERE
         filter is ``status='pending'``).
+
+        ``EVEROS_DISABLE_CASCADE_WATCHER`` skips the inotify half. The scanner
+        already re-derives the same truth from the filesystem every
+        ``scan_interval`` seconds, so the only thing lost is latency: an md edit
+        is picked up within one scan instead of immediately. That trade is
+        forced on a shared host, where inotify watches are a per-user kernel
+        resource -- an IDE indexing the workspace can hold 350k of the 524k
+        ceiling by itself, and every EverOS server then dies at startup with
+        ``OSError: [Errno 28] inotify watch limit reached``. Unlike
+        ``EVEROS_DISABLE_CASCADE`` this keeps the worker, so md still reaches
+        LanceDB -- which an ingesting run cannot do without.
         """
         if self._started:
             return
         orphans = await md_change_state_repo.recover_orphan_processing()
         if orphans:
             logger.info("cascade_recovered_orphan_processing", count=orphans)
-        loop = asyncio.get_running_loop()
-        self._watcher = CascadeWatcher(self._memory_root, loop)
-        self._watcher.start()
+        if os.getenv("EVEROS_DISABLE_CASCADE_WATCHER", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            logger.info("cascade_watcher_disabled_by_env")
+        else:
+            loop = asyncio.get_running_loop()
+            self._watcher = CascadeWatcher(self._memory_root, loop)
+            self._watcher.start()
         await self._scanner.start()
         await self._worker.start()
         self._started = True
