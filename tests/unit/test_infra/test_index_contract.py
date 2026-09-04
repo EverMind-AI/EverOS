@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -15,13 +16,17 @@ from everos.infra.persistence.index import (
     IndexBackend,
     IndexRepository,
     all_of,
+    drop_business_tables,
     episode_repo,
     eq,
+    shutdown,
 )
 from everos.infra.persistence.index.lancedb import lance_index_backend, render_predicate
 from everos.infra.persistence.index.milvus import milvus_index_backend
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
 from everos.infra.persistence.lancedb import lancedb_manager
+
+_EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 
 
 def _behavioural_backends() -> list[str]:
@@ -37,6 +42,17 @@ def _behavioural_backends() -> list[str]:
     return backends
 
 
+def _milvus_collection_prefix() -> str:
+    external_prefix = os.environ.get("EVEROS_TEST_MILVUS_PREFIX")
+    if external_prefix is None:
+        return f"everos_ct_{uuid.uuid4().hex}"
+    if _EXTERNAL_PREFIX_PATTERN.fullmatch(external_prefix) is None:
+        raise ValueError(
+            "EVEROS_TEST_MILVUS_PREFIX must match everos_e2e_<32 lowercase hex>"
+        )
+    return external_prefix
+
+
 @pytest.fixture(params=_behavioural_backends(), ids=lambda b: f"index={b}")
 async def index_backend(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -48,7 +64,9 @@ async def index_backend(
     lancedb_manager._conn = None
     lancedb_manager._tables.clear()
 
+    collection_prefix: str | None = None
     if backend == "milvus":
+        collection_prefix = _milvus_collection_prefix()
         monkeypatch.setenv("EVEROS_MILVUS__URI", os.environ["EVEROS_TEST_MILVUS_URI"])
         monkeypatch.setenv(
             "EVEROS_MILVUS__TOKEN", os.environ.get("EVEROS_TEST_MILVUS_TOKEN", "")
@@ -56,26 +74,53 @@ async def index_backend(
         monkeypatch.setenv(
             "EVEROS_MILVUS__DB_NAME", os.environ.get("EVEROS_TEST_MILVUS_DB_NAME", "")
         )
-        monkeypatch.setenv(
-            "EVEROS_MILVUS__COLLECTION_PREFIX", f"everos_ct_{uuid.uuid4().hex}"
-        )
+        monkeypatch.setenv("EVEROS_MILVUS__COLLECTION_PREFIX", collection_prefix)
 
     from everos.config import load_settings
 
     load_settings.cache_clear()
-    yield backend
-
     if backend == "milvus":
-        from everos.infra.persistence.index import drop_business_tables
+        assert collection_prefix is not None
+        milvus_episode_repo = next(
+            repo
+            for repo in milvus_index_backend.repositories
+            if repo.table_name == "episode"
+        )
+        assert milvus_episode_repo.collection_name == f"{collection_prefix}_episode"
 
-        load_settings.cache_clear()
+    try:
+        yield backend
+    finally:
         try:
-            await drop_business_tables()
+            if backend == "milvus":
+                try:
+                    load_settings.cache_clear()
+                finally:
+                    try:
+                        await drop_business_tables()
+                    finally:
+                        await shutdown()
         finally:
-            from everos.infra.persistence.index import shutdown
+            try:
+                load_settings.cache_clear()
+            finally:
+                await lancedb_manager.dispose_connection()
 
-            await shutdown()
-    await lancedb_manager.dispose_connection()
+
+def test_external_milvus_prefix_is_used_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = "everos_e2e_0123456789abcdef0123456789abcdef"
+    monkeypatch.setenv("EVEROS_TEST_MILVUS_PREFIX", prefix)
+    assert _milvus_collection_prefix() == prefix
+
+
+def test_external_milvus_prefix_rejects_unbounded_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EVEROS_TEST_MILVUS_PREFIX", "everos_ct_unreviewed")
+    with pytest.raises(ValueError, match="must match everos_e2e"):
+        _milvus_collection_prefix()
 
 
 def _episode(number: int, *, owner_id: str = "owner") -> Episode:
