@@ -28,7 +28,14 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -38,6 +45,9 @@ from pydantic_settings import (
 
 _DEFAULT_TOML_PATH = Path(__file__).parent / "default.toml"
 _DEFAULT_ROOT = Path("~/.everos")
+_ATLASCLOUD_BASE_URL = "https://api.atlascloud.ai/v1"
+_ATLASCLOUD_DEFAULT_MODEL = "qwen/qwen3.5-flash"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def resolve_root(explicit: str | None = None) -> Path:
@@ -124,14 +134,37 @@ class LLMSettings(BaseModel):
     endpoint plugs in via ``base_url``.
 
     Env binding (via parent ``Settings``):
+        EVEROS_LLM__PROVIDER
         EVEROS_LLM__MODEL
         EVEROS_LLM__API_KEY
         EVEROS_LLM__BASE_URL
     """
 
+    provider: Literal["openrouter", "openai", "atlascloud", "custom"] = "openrouter"
     model: str = "gpt-4.1-mini"
     api_key: SecretStr | None = None
     base_url: str | None = None
+
+    @model_validator(mode="after")
+    def _apply_provider_defaults(self) -> LLMSettings:
+        """Apply provider-specific OpenAI-compatible defaults."""
+        if self.provider != "atlascloud":
+            return self
+
+        if not self.base_url or self.base_url == _OPENROUTER_BASE_URL:
+            self.base_url = _ATLASCLOUD_BASE_URL
+
+        if self.model in {"openai/gpt-4.1-mini", "gpt-4.1-mini"}:
+            self.model = _ATLASCLOUD_DEFAULT_MODEL
+
+        if not self.api_key or not self.api_key.get_secret_value():
+            atlas_key = os.environ.get("ATLASCLOUD_API_KEY") or os.environ.get(
+                "ATLAS_CLOUD_API_KEY"
+            )
+            if atlas_key:
+                self.api_key = SecretStr(atlas_key)
+
+        return self
 
 
 class MultimodalSettings(BaseModel):
