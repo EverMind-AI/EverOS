@@ -467,7 +467,7 @@ Ruminer 为 browser agent 带来持久记忆，让它能在不同网页任务之
 
 #### EverMem 与 EverOS 同步
 
-一条命令，把任意 AI coding CLI 连接到 EverMemOS 长期记忆。
+一条命令，把任意 AI coding CLI 连接到 EverOS（原名 EverMemOS），获得长期记忆。
 
 [代码](https://github.com/nanxingw/EverMem)
 
