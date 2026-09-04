@@ -1,9 +1,10 @@
 """Verify OME strategy registration is unconditional (capability check is body-guard).
 
 ``_get_engine()`` builds the singleton :class:`OfflineEngine` and registers
-every OME strategy exactly once. Four strategies re-embed or depend on a
+every OME strategy exactly once. Six strategies re-embed or depend on a
 cluster produced by re-embedding (``trigger_profile_clustering``,
-``trigger_skill_clustering``, ``extract_agent_skill``, ``reflect_episodes``);
+``trigger_decision_clustering``, ``trigger_skill_clustering``,
+``extract_agent_skill``, ``reflect_episodes``, ``reflect_decisions``);
 these are now registered regardless of embed availability. Each guards
 its own body via :func:`get_embedding_capability` at execution time so a
 runtime tier upgrade (Tier 1 → Tier 2) picks up on the next dispatch
@@ -24,15 +25,19 @@ _svc = importlib.import_module("everos.service.memorize")
 
 _ALWAYS = {
     "extract_atomic_facts",
+    "extract_decision",
     "extract_foresight",
     "extract_agent_case",
     "extract_user_profile",
+    "extract_principles",
 }
 _REQUIRE_EMBED = {
     "trigger_profile_clustering",
+    "trigger_decision_clustering",
     "trigger_skill_clustering",
     "extract_agent_skill",
     "reflect_episodes",
+    "reflect_decisions",
 }
 
 
@@ -70,7 +75,7 @@ def _registered_names() -> set[str]:
 def test_all_strategies_registered_when_embed_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Embed available → all 8 strategies register."""
+    """Embed available → all 12 strategies register."""
     _set_embed_available(monkeypatch, available=True)
     names = _registered_names()
     assert names >= _ALWAYS | _REQUIRE_EMBED
@@ -81,7 +86,7 @@ def test_all_strategies_registered_when_embed_unavailable(
 ) -> None:
     """Embed unavailable → registration is still unconditional.
 
-    The four embed-requiring strategies stay in the registry so that a
+    The six embed-requiring strategies stay in the registry so that a
     runtime tier upgrade (edit everos.toml + reload settings) takes
     effect on the next dispatch without a server restart. Each strategy
     body guards on :func:`get_embedding_capability` and no-ops when

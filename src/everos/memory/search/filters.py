@@ -108,8 +108,8 @@ def compile_filters(
         f"app_id = '{_escape_str(app_id)}'",
         f"project_id = '{_escape_str(project_id)}'",
     ]
-    # Only episode / atomic_fact tables carry the ``deprecated_by`` column
-    # (Reflection V1 marks superseded entries). Agent tables don't have it.
+    # episode / atomic_fact / decision tables carry ``deprecated_by``
+    # (Reflection marks superseded entries). Agent tables don't have it.
     if owner_type == "user":
         base.append("deprecated_by IS NULL")
     if node is None:
@@ -118,6 +118,52 @@ def compile_filters(
     if not compiled:
         return " AND ".join(base)
     return " AND ".join([*base, compiled])
+
+
+def compile_filters_for_decision(
+    node: FilterNode | None,
+    *,
+    owner_id: str,
+    owner_type: str,
+    app_id: str = "default",
+    project_id: str = "default",
+) -> str:
+    """Compile filters for the ``decision`` table.
+
+    Drops ``sender_id`` predicates because the decision schema has no
+    ``sender_ids`` column (tags are labels, not conversation
+    participants). Mixed user search compiles two ``where`` strings so
+    an episode ``sender_id`` filter still applies to the episode lane
+    without breaking the decision query. Other allowed fields
+    (``session_id`` / ``timestamp`` / ``parent_id`` / ``parent_type``)
+    and the user ``deprecated_by IS NULL`` pin are kept.
+    """
+    stripped: FilterNode | None = None
+    if node is not None:
+        dumped = _drop_sender_id(node.model_dump(exclude_none=True))
+        if dumped:
+            stripped = FilterNode.model_validate(dumped)
+    return compile_filters(
+        stripped,
+        owner_id=owner_id,
+        owner_type=owner_type,
+        app_id=app_id,
+        project_id=project_id,
+    )
+
+
+def _drop_sender_id(raw: Any) -> Any:
+    """Recursively strip ``sender_id`` keys from a dumped FilterNode dict."""
+    if isinstance(raw, list):
+        return [_drop_sender_id(item) for item in raw]
+    if not isinstance(raw, dict):
+        return raw
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key == "sender_id":
+            continue
+        out[key] = _drop_sender_id(value)
+    return out
 
 
 # ── Internals ────────────────────────────────────────────────────────────

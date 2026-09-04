@@ -1220,11 +1220,11 @@ async def test_search_rejects_invalid_request(
 async def test_search_returns_empty_envelope_for_unknown_owner(
     client: AsyncClient,
 ) -> None:
-    """Owner with no seeded rows → 200 with all five arrays empty.
+    """Owner with no seeded rows → 200 with all kind arrays empty.
 
-    Pins the envelope-shape invariant: ``data.{episodes, profiles,
-    agent_cases, agent_skills, unprocessed_messages}`` always exist;
-    an empty result is a successful response, not 404.
+    Pins the envelope-shape invariant: ``data.{episodes, decisions,
+    profiles, agent_cases, agent_skills, unprocessed_messages}`` always
+    exist; an empty result is a successful response, not 404.
     """
     resp = await _post(client, owner_id="ghost", query="anything", method="keyword")
     assert resp.status_code == 200
@@ -1234,6 +1234,7 @@ async def test_search_returns_empty_envelope_for_unknown_owner(
     data = body["data"]
     assert data == {
         "episodes": [],
+        "decisions": [],
         "profiles": [],
         "agent_cases": [],
         "agent_skills": [],

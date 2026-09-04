@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Domain `Decision` + `Decision.from_algo`.** Copies `Episode.from_algo`: the caller supplies `owner_id` / `session_id` / `parent_id` (source memcell), and any algo-side `owner_id` or smuggled `parent_id` is dropped so one generic extract can fan out per user sender. No domain `Principle`.
+- **`DecisionDailyFrontmatter`.** User-readable daily-log at `users/<id>/decisions/decision-<date>.md` (`ENTRY_ID_PREFIX="dc"`), with `deprecated_entries` from day one. Not a dot-prefixed internal directory.
+- **LanceDB `decision` table + `decision_repo`.** Daily-log chassis with dual BM25 (`decision_tokens` / `reason_tokens`), nullable vector, and `deprecated_by` from day one. Wired into `_BUSINESS_SCHEMAS`, `BUSINESS_SCHEMAS_WITH_VECTOR`, and cascade `_TABLE_SPECS` (embed text = `r["decision"]`).
+- **`DecisionWriter` / `DecisionReader`.** Append-only daily-log at `users/<id>/decisions/decision-<date>.md` with `dc_` entry ids. Markdown is the SoT; cascade projects into Lance.
+- **`extract_decision` OME strategy (`enabled=True`) + `DecisionExtracted` (`source=pipeline`).** One `DecisionExtractor` call per memcell (no `sender_id`); EverOS fans out one daily-log copy per user sender and emits `DecisionExtracted` after each write. An empty list is success.
+- **`DecisionHandler` + `KIND_REGISTRY` kind `decision`.** Markdown → Lance projection; embed only the Decision body (soft dependency); dual BM25 `decision_tokens` / `reason_tokens`. `deprecated_by` still from chassis `deprecated_entries`.
+- **Search `data.decisions` + Get `memory_type=decision`.** User-partition Decision recall (`DecisionRecaller`: dual BM25 + cosine) fused with `rrf` (never `arank`). `kinds` filters the episode / decision lanes (`principle` is not a kind). Get lists Decision rows with `deprecated_by IS NULL`; there is no `GetMemoryType.PRINCIPLE`.
+- **`trigger_decision_clustering` OME strategy.** On `DecisionExtracted(source=pipeline)` embeds `decision_text` and geometry-merges into sqlite clusters with `kind=decision` / `member_type=decision` (not the `user_memory` episode track). Emits `DecisionClusterUpdated` with a row snapshot. Cascade Phase 2 backfill synthesizes the same events for existing Lance decision rows (`parent_type=memcell`). Embed missing → debug no-op.
+- **`principles.md` + Lance `principle` + `PrincipleHandler`.** Single-file rewrite via existing `ProfileWriter` (`users/<id>/principles.md`, `type=principle`). Cascade explodes the frontmatter list into N KV rows (`id=<owner_id>_<pr_…>`). No vector, no BM25, not in `_TABLE_SPECS` / `BUSINESS_SCHEMAS_WITH_VECTOR`. `KIND_REGISTRY` name `principle` is the cascade projection only — not a product Kind.
+- **`extract_principles` + Search `include_principles`.** On `DecisionClusterUpdated`, unions every sqlite `kind=decision` cluster (one `PrincipleExtractor` call per cluster) into one `principles.md`. Search attaches the Lance KV rows when `include_principles=true` (`data.principles` always present). Not a kind: `kinds: ["principle"]` stays 422; agent owners ignore the flag. No Get `memory_type=principle`.
+- **`DecisionReflectionOrchestrator` + `reflect_decisions` Cron (`enabled=false`).** Select → Merge (`DecisionReflector.areflect` → Decision DTO) → markdown `parent_type=cluster` → `DecisionExtracted(source="reflection")` (no wait; clustering is pipeline-only) → deprecate md `deprecated_entries` + Lance `deprecated_by`. No atomic-fact path. Sibling of episode reflection — does not edit `ReflectionOrchestrator`.
+- **Decision closed-loop integration (FakeLLM).** `extract_decision` → `users/<id>/decisions/decision-*.md` → Cascade `decision` row → keyword Search recalls 「设备 Runtime 为什么使用 Rust？」 in `data.decisions`. No real model. `kinds: ["principle"]` / Get `memory_type=principle` stay 422.
+
+### Changed
+
+- **`everalgo-user-memory` 0.4.0 → 0.8.0** (path-pin to the sibling EverAlgo checkout until 0.8.0 is on PyPI) and **`everalgo-agent-memory` 0.4.0 → 0.5.0**. 0.8.0 is the first user-memory release that exports `Decision` / `Principle` types and extractors. `extract_decision` calls `DecisionExtractor` on each `UserPipelineStarted`. `AlgoEpisode` construction now passes the required `summary` field introduced in everalgo-core 0.5.0.
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on

@@ -149,8 +149,10 @@ def test_non_knowledge_handlers_always_registered(
         "episode",
         "atomic_fact",
         "foresight",
+        "decision",
         "agent_case",
         "agent_skill",
         "user_profile",
+        "principle",
     ):
         assert kind in handlers

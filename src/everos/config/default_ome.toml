@@ -38,14 +38,32 @@
 # [strategies.extract_foresight]
 # enabled = true
 
+# Decision extraction (runs per memcell). One LLM call for the whole
+# slice, then one md copy per user sender. Enabled by default (unlike
+# extract_foresight) so Search can consume decisions once that route
+# lands. Uncomment only to turn it off for evaluation runs:
+# [strategies.extract_decision]
+# enabled = false
+
 # Profile clustering trigger (fires on each EpisodeExtracted event).
 # [strategies.trigger_profile_clustering]
 # enabled = true
+
+# Decision clustering trigger (fires on each DecisionExtracted event).
+# Sqlite kind=decision (not user_memory). Uncomment only to turn it off:
+# [strategies.trigger_decision_clustering]
+# enabled = false
 
 # User-profile extraction (runs after clustering trigger fires). Set
 # enabled = false to skip in evaluation runs.
 # [strategies.extract_user_profile]
 # enabled = true
+
+# Principle extraction (runs after decision clustering). Unions every
+# kind=decision sqlite cluster into one principles.md per user. LLM,
+# not embed — registered in ALWAYS. Uncomment only to turn it off:
+# [strategies.extract_principles]
+# enabled = false
 
 # ── Reflection ──────────────────────────────────────────────────────────
 
@@ -53,6 +71,12 @@
 # uncomment and set enabled = true. Runs weekly Monday 02:00.
 # Run sparingly — at most once a week. Each run is a lossy LLM re-merge.
 # [strategies.reflect_episodes]
+# enabled = false
+# cron = "0 2 * * 1"
+
+# Decision reflection. Same cadence, independently default-off. Merges
+# kind=decision sqlite clusters into one Decision (not a Principle).
+# [strategies.reflect_decisions]
 # enabled = false
 # cron = "0 2 * * 1"
 

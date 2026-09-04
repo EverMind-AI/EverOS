@@ -2484,6 +2484,13 @@
             "type": "array",
             "title": "Episodes"
           },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/GetDecisionItem"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
           "profiles": {
             "items": {
               "$ref": "#/components/schemas/GetProfileItem"
@@ -2519,7 +2526,94 @@
         "additionalProperties": false,
         "type": "object",
         "title": "GetData",
-        "description": "Body of ``response.data``.\n\nAll four arrays are always present so client code can iterate\nwithout branching on ``memory_type``; the route populates exactly\none."
+        "description": "Body of ``response.data``.\n\nAll kind arrays are always present so client code can iterate\nwithout branching on ``memory_type``; the route populates exactly\none."
+      },
+      "GetDecisionItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "timestamp",
+          "title",
+          "decision",
+          "reason"
+        ],
+        "title": "GetDecisionItem",
+        "description": "Decision listing item — always user-scoped. No score (unranked)."
       },
       "GetEpisodeItem": {
         "properties": {
@@ -2601,12 +2695,13 @@
         "type": "string",
         "enum": [
           "episode",
+          "decision",
           "profile",
           "agent_case",
           "agent_skill"
         ],
         "title": "GetMemoryType",
-        "description": "The four kinds enumerated by ``/get``.\n\n``episode`` and ``profile`` are user-owned; ``agent_case`` and\n``agent_skill`` are agent-owned. Cross-pairs are rejected by\n:meth:`GetRequest._validate_owner_memory_type_pair`.\n\nNaming note: all four values use the bare kind name (no\n``_memory`` suffix) and match the LanceDB table name + everalgo\ntype name for that kind."
+        "description": "The kinds enumerated by ``/get``.\n\n``episode``, ``decision``, and ``profile`` are user-owned;\n``agent_case`` and ``agent_skill`` are agent-owned. Cross-pairs\nare rejected by :meth:`GetRequest._validate_owner_memory_type_pair`.\nThere is no ``principle`` value — Principle is Meta Memory and is\nnot listed here.\n\nNaming note: values use the bare kind name (no ``_memory`` suffix)\nand match the LanceDB table name for that kind."
       },
       "GetProfileItem": {
         "properties": {
@@ -3298,12 +3393,26 @@
             "type": "array",
             "title": "Episodes"
           },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDecisionItem"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
           "profiles": {
             "items": {
               "$ref": "#/components/schemas/SearchProfileItem"
             },
             "type": "array",
             "title": "Profiles"
+          },
+          "principles": {
+            "items": {
+              "$ref": "#/components/schemas/SearchPrincipleItem"
+            },
+            "type": "array",
+            "title": "Principles"
           },
           "agent_cases": {
             "items": {
@@ -3330,7 +3439,99 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SearchData",
-        "description": "Body of ``response.data``.\n\nAll five arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
+        "description": "Body of ``response.data``.\n\nAll arrays are always present so client code can iterate without\nbranching on ``owner_type``. Routes not applicable to the request's\nowner type stay as ``[]``. ``unprocessed_messages`` is filled only\nwhen ``filters.session_id`` is present as a top-level eq scalar —\nin-flight buffer rows are scope-tagged but unattributed (no\n``user_id``), so session is the only meaningful query dimension."
+      },
+      "SearchDecisionItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "timestamp",
+          "title",
+          "decision",
+          "reason",
+          "score"
+        ],
+        "title": "SearchDecisionItem",
+        "description": "Decision hit — always user-scoped. Instance Kind, HYBRID recall."
       },
       "SearchEpisodeItem": {
         "properties": {
@@ -3514,6 +3715,77 @@
         "title": "SearchMethod",
         "description": "Public method enum. RRF / LR / vector_anchored are hidden under HYBRID."
       },
+      "SearchPrincipleItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "source_entry_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Entry Ids"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "title",
+          "statement",
+          "timestamp"
+        ],
+        "title": "SearchPrincipleItem",
+        "description": "One engineering principle — KV fetch, not a ranked kind.\n\n``score`` is always ``None`` (no query-relevance). ``id`` is the\nLance PK ``<owner_id>_<principle_id>``. Agent owners never receive\nthis array."
+      },
       "SearchProfileItem": {
         "properties": {
           "id": {
@@ -3648,6 +3920,29 @@
             "type": "boolean",
             "title": "Include Profile",
             "default": false
+          },
+          "include_principles": {
+            "type": "boolean",
+            "title": "Include Principles",
+            "default": false
+          },
+          "kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode",
+                    "decision"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kinds"
           },
           "enable_llm_rerank": {
             "type": "boolean",

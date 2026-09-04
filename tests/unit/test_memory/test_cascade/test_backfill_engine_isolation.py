@@ -99,7 +99,7 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
         )
         # And no APS job was scheduled for the stale run_id — the
         # backfill scheduler stayed empty (only Cron/Idle jobs would
-        # exist, and neither cluster strategy uses those triggers).
+        # exist, and none of the cluster strategies use those triggers).
         assert engine._scheduler.get_job("r_server_stale") is None
     finally:
         await engine.stop()

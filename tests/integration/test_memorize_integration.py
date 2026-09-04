@@ -52,7 +52,7 @@ def _boundary_response(boundaries: list[int]) -> str:
 
 def _episode_response(title: str = "Test Subject", content: str = "Test body") -> str:
     """Build an ``EpisodeExtractor`` JSON response (algo schema)."""
-    return json.dumps({"title": title, "content": content})
+    return json.dumps({"title": title, "content": content, "summary": content})
 
 
 def _make_fake_llm(
@@ -65,7 +65,7 @@ def _make_fake_llm(
 
     Pops one ``boundaries=...`` from ``boundary_responses`` per boundary
     prompt seen; every episode prompt returns the same canned
-    ``{title, content}``.
+    ``{title, content, summary}``.
     """
     boundary_queue: list[list[int]] = list(boundary_responses or [])
 
@@ -115,6 +115,7 @@ async def memorize_env(
     svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
     client_mod = importlib.import_module("everos.component.llm.client")
 
     # Reset singletons.
@@ -129,6 +130,7 @@ async def memorize_env(
     monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
     monkeypatch.setattr(af_mod, "_writer", None, raising=False)
     monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
+    monkeypatch.setattr(dc_mod, "_writer", None, raising=False)
 
     started: dict[str, Any] = {"engine": None, "sqlite_engine": None}
 
@@ -170,6 +172,7 @@ async def memorize_env(
         # (the strategy itself still runs; it just sees no facts/foresights).
         mock_af = AsyncMock(return_value=[])
         mock_fs = AsyncMock(return_value=[])
+        mock_dc = AsyncMock(return_value=[])
         monkeypatch.setattr(
             af_mod,
             "AtomicFactExtractor",
@@ -179,6 +182,11 @@ async def memorize_env(
             fs_mod,
             "ForesightExtractor",
             lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
+        )
+        monkeypatch.setattr(
+            dc_mod,
+            "DecisionExtractor",
+            lambda *a, **k: type("M", (), {"aextract": mock_dc})(),
         )
 
         engine = svc._get_engine()

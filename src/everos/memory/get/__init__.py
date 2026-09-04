@@ -15,6 +15,7 @@ External usage::
         GetAgentCaseItem,
         GetAgentSkillItem,
         GetData,
+        GetDecisionItem,
         GetEpisodeItem,
         GetManager,
         GetMemoryType,
@@ -28,6 +29,7 @@ External usage::
 from .dto import GetAgentCaseItem as GetAgentCaseItem
 from .dto import GetAgentSkillItem as GetAgentSkillItem
 from .dto import GetData as GetData
+from .dto import GetDecisionItem as GetDecisionItem
 from .dto import GetEpisodeItem as GetEpisodeItem
 from .dto import GetMemoryType as GetMemoryType
 from .dto import GetProfileItem as GetProfileItem
@@ -40,6 +42,7 @@ __all__ = [
     "GetAgentCaseItem",
     "GetAgentSkillItem",
     "GetData",
+    "GetDecisionItem",
     "GetEpisodeItem",
     "GetManager",
     "GetMemoryType",

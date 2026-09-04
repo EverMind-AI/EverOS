@@ -91,12 +91,24 @@ async def test_missing_memory_type_returns_422(client: AsyncClient) -> None:
 
 
 async def test_invalid_memory_type_value_returns_422(client: AsyncClient) -> None:
-    """``memory_type`` outside the four-kind enum → 422."""
+    """``memory_type`` outside the enumerated kinds → 422."""
     resp = await client.post(
         "/api/v1/memory/get",
         json={
             "user_id": "u1",
             "memory_type": "atomic_fact",  # not a top-level kind
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_principle_memory_type_returns_422(client: AsyncClient) -> None:
+    """Principle is Meta Memory — not listable via ``/get``."""
+    resp = await client.post(
+        "/api/v1/memory/get",
+        json={
+            "user_id": "u1",
+            "memory_type": "principle",
         },
     )
     assert resp.status_code == 422

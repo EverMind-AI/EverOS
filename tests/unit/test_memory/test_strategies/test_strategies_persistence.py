@@ -7,13 +7,21 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
+from everalgo.types import (
+    AgentCase,
+    AtomicFact,
+    ChatMessage,
+    Decision,
+    Foresight,
+    MemCell,
+)
 
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AtomicFactReader,
+    DecisionReader,
     ForesightReader,
 )
 from everos.memory.events import (
@@ -23,6 +31,7 @@ from everos.memory.events import (
 )
 from everos.memory.strategies.extract_agent_case import extract_agent_case
 from everos.memory.strategies.extract_atomic_facts import extract_atomic_facts
+from everos.memory.strategies.extract_decision import extract_decision
 from everos.memory.strategies.extract_foresight import extract_foresight
 
 
@@ -168,6 +177,52 @@ async def test_foresights_round_trip(
     content = path.read_text(encoding="utf-8")
     assert "plans trip to tokyo" in content
     assert "said so" in content
+
+
+async def test_decisions_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
+
+    monkeypatch.setattr(
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+    )
+    monkeypatch.setattr(dc_mod, "_writer", None, raising=False)
+
+    decisions = [
+        Decision(
+            owner_id=None,
+            title="Use Rust on device",
+            decision="Device Runtime uses Rust.",
+            reason="Need deterministic latency on the edge.",
+            impact=None,
+            tags=["runtime"],
+            timestamp=1_700_000_000_000,
+        ),
+    ]
+
+    with (
+        patch(
+            "everos.memory.strategies.extract_decision.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_decision.DecisionExtractor"
+        ) as mock_ext,
+    ):
+        mock_ext.return_value.aextract = AsyncMock(return_value=decisions)
+        await extract_decision(_event_for("u_alice"), FakeStrategyContext())
+
+    reader = DecisionReader(root=MemoryRoot(root=tmp_path))
+    path = reader.path_for("u_alice")
+    assert path.is_file(), f"expected md at {path}"
+    content = path.read_text(encoding="utf-8")
+    assert "Use Rust on device" in content
+    assert "Device Runtime uses Rust." in content
+    assert "Need deterministic latency on the edge." in content
 
 
 async def test_agent_case_round_trip(

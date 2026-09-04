@@ -28,7 +28,7 @@ import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
-from everos.memory.search.dto import SearchMethod, SearchRequest
+from everos.memory.search.dto import SearchMethod, SearchPrincipleItem, SearchRequest
 from everos.memory.search.manager import SearchManager
 
 # ── Stubs ───────────────────────────────────────────────────────────────
@@ -56,6 +56,25 @@ def _episode_row(
             "episode": f"body {eid}",
             "entry_id": eid,
             "parent_id": memcell_id if memcell_id is not None else f"mc_{eid}",
+        },
+    )
+
+
+def _decision_row(did: str, score: float = 0.75) -> Candidate:
+    return Candidate(
+        id=did,
+        score=score,
+        source="keyword",
+        metadata={
+            "owner_id": "alice",
+            "owner_type": "user",
+            "session_id": "sess_a",
+            "timestamp": _ts(),
+            "title": f"title {did}",
+            "decision": f"decision {did}",
+            "reason": f"reason {did}",
+            "impact": None,
+            "tags": ["runtime"],
         },
     )
 
@@ -103,11 +122,13 @@ class _StubEpisodeRecaller:
     def __init__(self, sparse: list[Candidate], dense: list[Candidate]) -> None:
         self._sparse = sparse
         self._dense = dense
+        self.sparse_calls = 0
         self.last_where: str | None = None
 
     async def sparse_recall(
         self, query: str, where: str, *, limit: int
     ) -> list[Candidate]:
+        self.sparse_calls += 1
         self.last_where = where
         return list(self._sparse[:limit])
 
@@ -163,6 +184,33 @@ class _StubAtomicFactRecaller:
         }
 
 
+class _StubDecisionRecaller:
+    kind: ClassVar[str] = "decision"
+    everalgo_memory_type: ClassVar[str] = ""
+    text_field: ClassVar[str] = "decision"
+
+    def __init__(self, sparse: list[Candidate], dense: list[Candidate]) -> None:
+        self._sparse = sparse
+        self._dense = dense
+        self.sparse_calls = 0
+        self.dense_calls = 0
+        self.last_where: str | None = None
+
+    async def sparse_recall(
+        self, query: str, where: str, *, limit: int
+    ) -> list[Candidate]:
+        self.sparse_calls += 1
+        self.last_where = where
+        return list(self._sparse[:limit])
+
+    async def dense_recall(
+        self, vector: Sequence[float], where: str, *, limit: int
+    ) -> list[Candidate]:
+        self.dense_calls += 1
+        self.last_where = where
+        return list(self._dense[:limit])
+
+
 class _StubAgentCaseRecaller:
     kind: ClassVar[str] = "agent_case"
     everalgo_memory_type: ClassVar[str] = "case"
@@ -213,6 +261,22 @@ class _StubProfileRecaller:
         return []
 
 
+class _StubPrincipleRecaller:
+    def __init__(self, items: list | None = None) -> None:
+        self._items = items or []
+        self.fetch_calls: list[tuple[str, str, str]] = []
+
+    async def fetch(
+        self,
+        owner_id: str,
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list:
+        self.fetch_calls.append((owner_id, app_id, project_id))
+        return list(self._items)
+
+
 class _StubEmbedding:
     def __init__(self, dim: int = 4) -> None:
         self.dim = dim
@@ -231,6 +295,8 @@ def _build_manager(
     *,
     episode_sparse: list[Candidate] | None = None,
     episode_dense: list[Candidate] | None = None,
+    decision_sparse: list[Candidate] | None = None,
+    decision_dense: list[Candidate] | None = None,
     case_sparse: list[Candidate] | None = None,
     case_dense: list[Candidate] | None = None,
     skill_sparse: list[Candidate] | None = None,
@@ -241,16 +307,21 @@ def _build_manager(
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
+    principle_recaller: _StubPrincipleRecaller | None = None,
 ) -> SearchManager:
     ep_recaller = _StubEpisodeRecaller(episode_sparse or [], episode_dense or [])
     return SearchManager(
         episode_recaller=ep_recaller,
         atomic_fact_recaller=_StubAtomicFactRecaller(facts_map, atomic_fact_dense),
+        decision_recaller=_StubDecisionRecaller(
+            decision_sparse or [], decision_dense or []
+        ),
         agent_case_recaller=_StubAgentCaseRecaller(case_sparse or [], case_dense or []),
         agent_skill_recaller=_StubAgentSkillRecaller(
             skill_sparse or [], skill_dense or [], skill_by_case
         ),
         profile_recaller=_StubProfileRecaller(),
+        principle_recaller=principle_recaller or _StubPrincipleRecaller(),
         embedding=embedding,
         reranker=reranker,
         llm_client=llm_client,
@@ -300,6 +371,7 @@ async def test_user_keyword_returns_episodes_only() -> None:
     assert resp.data.episodes[0].user_id == "alice"
     assert resp.data.episodes[0].type == "Conversation"
     # Agent paths stay empty.
+    assert resp.data.decisions == []
     assert resp.data.agent_cases == []
     assert resp.data.agent_skills == []
     assert resp.data.profiles == []
@@ -384,9 +456,11 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     mgr = SearchManager(
         episode_recaller=recaller,
         atomic_fact_recaller=_StubAtomicFactRecaller(),
+        decision_recaller=_StubDecisionRecaller([], []),
         agent_case_recaller=_StubAgentCaseRecaller([], []),
         agent_skill_recaller=_StubAgentSkillRecaller([], []),
         profile_recaller=_StubProfileRecaller(),
+        principle_recaller=_StubPrincipleRecaller(),
         embedding=None,
         reranker=None,
         llm_client=None,
@@ -395,6 +469,143 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     assert recaller.last_where is not None
     assert "owner_id = 'alice'" in recaller.last_where
     assert "owner_type = 'user'" in recaller.last_where
+
+
+# ── Decision lane ──────────────────────────────────────────────────────
+
+
+async def test_user_keyword_recalls_episodes_and_decisions() -> None:
+    """Default user KEYWORD runs episode + decision sparse lanes in parallel."""
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+    )
+    resp = await mgr.search(_user_req())
+    assert [e.id for e in resp.data.episodes] == ["ep_1"]
+    assert [d.id for d in resp.data.decisions] == ["dc_1"]
+    assert mgr._ep.sparse_calls == 1
+    assert mgr._decision.sparse_calls == 1
+
+
+async def test_kinds_decision_skips_episode_lane() -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+    )
+    resp = await mgr.search(_user_req(kinds=["decision"]))
+    assert resp.data.episodes == []
+    assert [d.id for d in resp.data.decisions] == ["dc_1"]
+    assert mgr._ep.sparse_calls == 0
+    assert mgr._decision.sparse_calls == 1
+
+
+async def test_kinds_episode_skips_decision_lane() -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+    )
+    resp = await mgr.search(_user_req(kinds=["episode"]))
+    assert [e.id for e in resp.data.episodes] == ["ep_1"]
+    assert resp.data.decisions == []
+    assert mgr._ep.sparse_calls == 1
+    assert mgr._decision.sparse_calls == 0
+
+
+async def test_user_keyword_decision_where_drops_sender_id() -> None:
+    """Mixed filters: episode keeps sender_id; decision lane strips it.
+
+    Avoid a top-level ``session_id`` so ``_load_unprocessed`` stays off
+    (that path needs a real sqlite table this suite does not seed).
+    """
+    from everos.memory.search.dto import FilterNode
+
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+    )
+    await mgr.search(
+        _user_req(filters=FilterNode.model_validate({"sender_id": "alice"}))
+    )
+    assert mgr._ep.last_where is not None
+    assert "array_has(sender_ids, 'alice')" in mgr._ep.last_where
+    assert mgr._decision.last_where is not None
+    assert "sender_ids" not in mgr._decision.last_where
+    assert "deprecated_by IS NULL" in mgr._decision.last_where
+
+
+async def test_user_hybrid_decision_does_not_call_arank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision HYBRID is sparse+dense+rrf — never ``arank``."""
+    calls: list[object] = []
+
+    async def _fake_arank(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        raise AssertionError("decision HYBRID must not call arank")
+
+    monkeypatch.setattr("everos.memory.search.manager.arank", _fake_arank)
+    mgr = _build_manager(
+        decision_sparse=[_decision_row("dc_1", score=0.8)],
+        decision_dense=[_decision_row("dc_1", score=0.7)],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(
+        _user_req(method=SearchMethod.HYBRID, kinds=["decision"], top_k=5)
+    )
+    assert calls == []
+    assert [d.id for d in resp.data.decisions] == ["dc_1"]
+    assert resp.data.episodes == []
+
+
+async def test_user_agentic_still_fills_decisions_via_rrf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENTIC still only graphs episodes; decision lane remaps to rrf."""
+    from everos.memory.search.dto import SearchEpisodeItem
+
+    fake_result = [
+        SearchEpisodeItem(
+            id="ep_1",
+            score=0.9,
+            session_id="s",
+            user_id="alice",
+            timestamp=_ts(),
+            sender_ids=["alice"],
+            subject="s",
+            summary="s",
+            episode="body",
+            type="Conversation",
+            atomic_facts=[],
+        )
+    ]
+
+    async def _fake_agentic(*args: Any, **kwargs: Any) -> list:
+        return fake_result
+
+    monkeypatch.setattr(
+        "everos.memory.search.manager.search_episodes_agentic", _fake_agentic
+    )
+    mgr = _build_manager(
+        decision_sparse=[_decision_row("dc_1")],
+        decision_dense=[_decision_row("dc_1")],
+        embedding=_StubEmbedding(),
+        reranker=_StubReranker(),
+        llm_client=_StubLLM(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    assert resp.data.episodes == fake_result
+    assert [d.id for d in resp.data.decisions] == ["dc_1"]
+
+
+async def test_top_score_can_be_lifted_by_a_decision_hit() -> None:
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1", score=0.2)],
+        decision_sparse=[_decision_row("dc_1", score=0.9)],
+    )
+    resp = await mgr.search(_user_req())
+    from everos.memory.search.manager import _top_score
+
+    assert _top_score(resp.data) == pytest.approx(0.9)
 
 
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
@@ -758,6 +969,7 @@ async def test_agent_keyword_returns_cases_and_skills_only() -> None:
     )
     resp = await mgr.search(_agent_req())
     assert resp.data.episodes == []
+    assert resp.data.decisions == []
     assert resp.data.profiles == []
     assert [c.id for c in resp.data.agent_cases] == ["c_1"]
     assert [s.id for s in resp.data.agent_skills] == ["s_1"]
@@ -768,6 +980,76 @@ async def test_agent_owner_ignores_include_profile() -> None:
     mgr = _build_manager()
     resp = await mgr.search(_agent_req(include_profile=True))
     assert resp.data.profiles == []
+
+
+async def test_include_principles_false_leaves_principles_empty() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        source_entry_ids=["dc_20260101_0001"],
+        timestamp=_ts(),
+        score=None,
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_user_req())
+    assert resp.data.principles == []
+    assert recaller.fetch_calls == []
+
+
+async def test_include_principles_true_returns_kv_items() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        source_entry_ids=["dc_20260101_0001"],
+        timestamp=_ts(),
+        score=None,
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_user_req(include_principles=True))
+    assert [p.id for p in resp.data.principles] == ["u_alice_pr_aaaaaaaaaaaa"]
+    assert resp.data.principles[0].score is None
+    assert recaller.fetch_calls == [("alice", "default", "default")]
+
+
+async def test_include_principles_independent_of_kinds() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        timestamp=_ts(),
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        decision_sparse=[_decision_row("dc_1")],
+        principle_recaller=recaller,
+    )
+    resp = await mgr.search(_user_req(kinds=["episode"], include_principles=True))
+    assert [e.id for e in resp.data.episodes] == ["ep_1"]
+    assert resp.data.decisions == []
+    assert [p.title for p in resp.data.principles] == ["Prefer Rust"]
+
+
+async def test_agent_owner_ignores_include_principles() -> None:
+    item = SearchPrincipleItem(
+        id="u_alice_pr_aaaaaaaaaaaa",
+        user_id="alice",
+        title="Prefer Rust",
+        statement="Device Runtime is implemented in Rust.",
+        timestamp=_ts(),
+    )
+    recaller = _StubPrincipleRecaller([item])
+    mgr = _build_manager(principle_recaller=recaller)
+    resp = await mgr.search(_agent_req(include_principles=True))
+    assert resp.data.principles == []
+    assert recaller.fetch_calls == []
 
 
 # ── Top-k behaviour ───────────────────────────────────────────────────
@@ -1281,6 +1563,7 @@ async def test_search_captures_returned_hits_when_content_on(
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     out = json.loads(attrs["langfuse.observation.output"])
     assert out["episodes"] == ["ep_1"]
+    assert out["decisions"] == []
     assert out["agent_cases"] == [] and out["agent_skills"] == []
 
 

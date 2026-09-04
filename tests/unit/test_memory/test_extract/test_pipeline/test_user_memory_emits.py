@@ -99,7 +99,10 @@ async def test_emit_episode_extracted_after_md_write() -> None:
         ],
     )
     algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
+        owner_id="u1",
+        episode="they said hello",
+        summary="they said hello",
+        timestamp=1_700_000_000_000,
     )
     with patch.object(
         pipeline._ep_ext, "aextract", new=AsyncMock(return_value=algo_ep)
@@ -167,7 +170,10 @@ async def test_run_emits_extract_and_persist_spans() -> None:
         ],
     )
     algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
+        owner_id="u1",
+        episode="they said hello",
+        summary="they said hello",
+        timestamp=1_700_000_000_000,
     )
 
     exporter = InMemorySpanExporter()
@@ -241,7 +247,10 @@ async def test_extract_persist_capture_content_when_on() -> None:
         ],
     )
     algo_ep = AlgoEpisode(
-        owner_id="u1", episode="they said hello", timestamp=1_700_000_000_000
+        owner_id="u1",
+        episode="they said hello",
+        summary="they said hello",
+        timestamp=1_700_000_000_000,
     )
 
     exporter = InMemorySpanExporter()

@@ -40,6 +40,7 @@ def test_minimal_request_uses_hybrid_default() -> None:
     assert req.method == SearchMethod.HYBRID
     assert req.top_k == -1
     assert req.include_profile is False
+    assert req.include_principles is False
     assert req.filters is None
     assert req.radius is None
     assert req.min_score is None
@@ -137,9 +138,56 @@ def test_response_default_arrays_present() -> None:
     """Every ``data.*`` array must exist so callers can iterate unconditionally."""
     resp = SearchResponse(request_id="0" * 32, data=SearchData())
     assert resp.data.episodes == []
+    assert resp.data.decisions == []
     assert resp.data.profiles == []
+    assert resp.data.principles == []
     assert resp.data.agent_cases == []
     assert resp.data.agent_skills == []
+
+
+def test_include_principles_defaults_to_false() -> None:
+    req = SearchRequest(**_minimal_request_kwargs())
+    assert req.include_principles is False
+
+
+def test_include_principles_independent_of_include_profile() -> None:
+    req = SearchRequest(**_minimal_request_kwargs(), include_principles=True)
+    assert req.include_principles is True
+    assert req.include_profile is False
+    req2 = SearchRequest(**_minimal_request_kwargs(), include_profile=True)
+    assert req2.include_principles is False
+
+
+def test_kinds_defaults_to_none() -> None:
+    req = SearchRequest(**_minimal_request_kwargs())
+    assert req.kinds is None
+
+
+def test_kinds_accepts_episode_and_decision() -> None:
+    req = SearchRequest(**_minimal_request_kwargs(), kinds=["episode", "decision"])
+    assert req.kinds == ["episode", "decision"]
+    assert SearchRequest(**_minimal_request_kwargs(), kinds=["decision"]).kinds == [
+        "decision"
+    ]
+    assert SearchRequest(**_minimal_request_kwargs(), kinds=["episode"]).kinds == [
+        "episode"
+    ]
+
+
+def test_kinds_empty_list_rejected() -> None:
+    with pytest.raises(ValidationError, match="non-empty"):
+        SearchRequest(**_minimal_request_kwargs(), kinds=[])
+
+
+def test_kinds_principle_rejected() -> None:
+    """Principle is Meta Memory — not a searchable kind."""
+    with pytest.raises(ValidationError):
+        SearchRequest(**_minimal_request_kwargs(), kinds=["principle"])  # type: ignore[list-item]
+
+
+def test_kinds_rejected_when_agent_id_set() -> None:
+    with pytest.raises(ValidationError, match="kinds is only valid"):
+        SearchRequest(agent_id="agent_x", query="hello", kinds=["decision"])
 
 
 def test_method_enum_serialises_to_lowercase() -> None:

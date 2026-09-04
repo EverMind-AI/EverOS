@@ -147,7 +147,7 @@ async def test_ome_registers_all_strategies_in_tier1(
 
     OME's registry is frozen after ``engine.start()`` (scheduler snapshots
     the strategy set for Cron / Idle job creation), so a registration-time
-    gate cannot adapt to a runtime tier upgrade. All eight strategies are
+    gate cannot adapt to a runtime tier upgrade. All nine strategies are
     registered up-front; the four embed-requiring ones check
     :func:`get_embedding_capability` at body entry and no-op when the
     capability is unavailable — see the per-strategy unit tests for that
@@ -163,9 +163,13 @@ async def test_ome_registers_all_strategies_in_tier1(
         extract_agent_case,
         extract_agent_skill,
         extract_atomic_facts,
+        extract_decision,
         extract_foresight,
+        extract_principles,
         extract_user_profile,
+        reflect_decisions,
         reflect_episodes,
+        trigger_decision_clustering,
         trigger_profile_clustering,
         trigger_skill_clustering,
     )
@@ -174,13 +178,17 @@ async def test_ome_registers_all_strategies_in_tier1(
         strategy.meta.name
         for strategy in (
             extract_atomic_facts,
+            extract_decision,
             extract_foresight,
             extract_agent_case,
             extract_user_profile,
+            extract_principles,
             trigger_profile_clustering,
+            trigger_decision_clustering,
             trigger_skill_clustering,
             extract_agent_skill,
             reflect_episodes,
+            reflect_decisions,
         )
     }
     assert all_strategy_names <= registered_names

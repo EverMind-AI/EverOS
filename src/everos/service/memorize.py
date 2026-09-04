@@ -46,9 +46,13 @@ from everos.memory.strategies import (
     extract_agent_case,
     extract_agent_skill,
     extract_atomic_facts,
+    extract_decision,
     extract_foresight,
+    extract_principles,
     extract_user_profile,
+    reflect_decisions,
     reflect_episodes,
+    trigger_decision_clustering,
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
@@ -114,9 +118,11 @@ def _get_agent_pipeline() -> AgentMemoryPipeline:
 
 _STRATEGIES_ALWAYS = (
     extract_atomic_facts,
+    extract_decision,
     extract_foresight,
     extract_agent_case,
     extract_user_profile,
+    extract_principles,
 )
 """LLM-only strategies — no embed dependency, always registered."""
 
@@ -124,7 +130,9 @@ _STRATEGIES_REQUIRE_EMBED = (
     trigger_skill_clustering,
     extract_agent_skill,
     trigger_profile_clustering,
+    trigger_decision_clustering,
     reflect_episodes,
+    reflect_decisions,
 )
 """Strategies whose body re-embeds or consumes a re-embedded cluster.
 

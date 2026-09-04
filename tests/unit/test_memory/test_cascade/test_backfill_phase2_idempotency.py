@@ -15,8 +15,9 @@ the row already sits under a cluster, skip the emit but still count
 it toward the progress readout (matches the pre-scan estimate).
 
 The ``member_type`` values used for the lookup (``"episode"`` /
-``"case"``) must match what :func:`trigger_profile_clustering` /
-:func:`trigger_skill_clustering` insert on the write path — a
+``"case"`` / ``"decision"``) must match what
+:func:`trigger_profile_clustering` / :func:`trigger_skill_clustering` /
+:func:`trigger_decision_clustering` insert on the write path — a
 mismatch would silently disable the dedup.
 """
 
@@ -27,7 +28,7 @@ from typing import Any
 from everos.component.utils.datetime import get_utc_now
 from everos.memory.cascade import _backfill
 from everos.memory.cascade._backfill import NullBackfillPresenter
-from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
+from everos.memory.events import AgentCaseExtracted, DecisionExtracted, EpisodeExtracted
 
 
 class _RecordingEngine:
@@ -66,6 +67,23 @@ def _case_row(entry_id: str) -> dict[str, Any]:
     }
 
 
+def _decision_row(entry_id: str) -> dict[str, Any]:
+    return {
+        "entry_id": entry_id,
+        "parent_id": f"mc_{entry_id}",
+        "title": f"title {entry_id}",
+        "decision": f"body {entry_id}",
+        "reason": f"reason {entry_id}",
+        "impact": None,
+        "tags": ["runtime"],
+        "timestamp": get_utc_now(),
+        "owner_id": "u1",
+        "session_id": "s1",
+        "app_id": "default",
+        "project_id": "default",
+    }
+
+
 async def test_emit_synthetic_events_skips_already_clustered_rows(
     monkeypatch,
 ) -> None:
@@ -76,6 +94,7 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
     clustered = {
         ("episode", "ep_dup"): "cluster_abc",
         ("case", "ac_dup"): "cluster_def",
+        ("decision", "dc_dup"): "cluster_ghi",
     }
 
     class _StubClusterRepo:
@@ -96,9 +115,14 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
     engine = _RecordingEngine()
     episodes = [_episode_row("ep_fresh"), _episode_row("ep_dup")]
     cases = [_case_row("ac_fresh"), _case_row("ac_dup")]
+    decisions = [_decision_row("dc_fresh"), _decision_row("dc_dup")]
 
     processed = await _backfill._emit_synthetic_events(
-        engine, episodes, cases, presenter=NullBackfillPresenter()
+        engine,
+        episodes,
+        cases,
+        presenter=NullBackfillPresenter(),
+        decisions=decisions,
     )
 
     # Every row was looked up — dedup must not depend on ordering.
@@ -107,32 +131,38 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
         ("episode", "ep_dup"),
         ("case", "ac_fresh"),
         ("case", "ac_dup"),
+        ("decision", "dc_fresh"),
+        ("decision", "dc_dup"),
     }
 
-    # Only the fresh rows produced an engine.emit call — the two
-    # already-clustered rows were skipped.
-    assert len(engine.emitted) == 2
+    # Only the fresh rows produced an engine.emit call — the already-
+    # clustered rows were skipped.
+    assert len(engine.emitted) == 3
     episode_ids = {
         e.episode_entry_id for e in engine.emitted if isinstance(e, EpisodeExtracted)
     }
     case_ids = {
         e.case_entry_id for e in engine.emitted if isinstance(e, AgentCaseExtracted)
     }
+    decision_ids = {
+        e.decision_entry_id for e in engine.emitted if isinstance(e, DecisionExtracted)
+    }
     assert episode_ids == {"ep_fresh"}
     assert case_ids == {"ac_fresh"}
+    assert decision_ids == {"dc_fresh"}
 
     # Progress count still equals the full input size so the readout
     # matches the pre-scan estimate the user just confirmed.
-    assert processed == 4
+    assert processed == 6
 
 
 async def test_emit_synthetic_events_uses_write_path_member_type_strings(
     monkeypatch,
 ) -> None:
     """Regression guard: the ``member_type`` strings on the lookup path
-    (``"episode"`` / ``"case"``) must match what the clustering
-    strategies persist on the write path. A drift here would silently
-    disable the dedup and re-open the double-cluster window."""
+    (``"episode"`` / ``"case"`` / ``"decision"``) must match what the
+    clustering strategies persist on the write path. A drift here would
+    silently disable the dedup and re-open the double-cluster window."""
     seen_member_types: set[str] = set()
 
     class _StubClusterRepo:
@@ -156,12 +186,14 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings(
         [_episode_row("ep1")],
         [_case_row("ac1")],
         presenter=NullBackfillPresenter(),
+        decisions=[_decision_row("dc1")],
     )
 
     # These string constants are pinned by
-    # ``trigger_profile_clustering`` (member_type="episode") and
-    # ``trigger_skill_clustering`` (member_type="case").
-    assert seen_member_types == {"episode", "case"}
+    # ``trigger_profile_clustering`` (member_type="episode"),
+    # ``trigger_skill_clustering`` (member_type="case"), and
+    # ``trigger_decision_clustering`` (member_type="decision").
+    assert seen_member_types == {"episode", "case", "decision"}
 
 
 async def test_emit_synthetic_events_no_skip_when_no_prior_clusters(
@@ -190,7 +222,9 @@ async def test_emit_synthetic_events_no_skip_when_no_prior_clusters(
         [_episode_row("ep1"), _episode_row("ep2")],
         [_case_row("ac1")],
         presenter=NullBackfillPresenter(),
+        decisions=[_decision_row("dc1")],
     )
 
-    assert processed == 3
-    assert len(engine.emitted) == 3
+    assert processed == 4
+    assert len(engine.emitted) == 4
+    assert any(isinstance(e, DecisionExtracted) for e in engine.emitted)

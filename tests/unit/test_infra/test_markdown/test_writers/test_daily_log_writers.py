@@ -1,6 +1,6 @@
-"""Tests for AtomicFact / Foresight / AgentCase daily-log writers.
+"""Tests for AtomicFact / Decision / Foresight / AgentCase daily-log writers.
 
-The 4 daily-log kinds (episode + these 3) all share ``BaseDailyWriter``
+The 5 daily-log kinds (episode + these 4) all share ``BaseDailyWriter``
 plumbing — exhaustive chassis tests live in ``test_base.py`` and
 ``test_episode_writer.py`` indirectly via the e2e flows. Here we focus
 on the per-kind path resolution + frontmatter shape that each
@@ -21,6 +21,8 @@ from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactReader,
     AtomicFactWriter,
+    DecisionReader,
+    DecisionWriter,
     ForesightReader,
     ForesightWriter,
 )
@@ -110,6 +112,98 @@ async def test_atomic_fact_writer_appends_multiple(memory_root: MemoryRoot) -> N
     )
     assert eid1.format() != eid2.format()
     assert eid2.format().endswith("0002")
+
+
+# ── Decision ──────────────────────────────────────────────────────────────
+
+
+def _decision_inline(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "owner_id": "u1",
+        "session_id": "s1",
+        "timestamp": "2026-05-15T10:00:00+00:00",
+        "parent_type": "memcell",
+        "parent_id": "mc_1",
+        "tags": ["runtime", "rust"],
+    }
+    base.update(overrides)
+    return base
+
+
+def _decision_sections(**overrides: str) -> dict[str, str]:
+    base = {
+        "Title": "Use Rust on device",
+        "Decision": "Device Runtime uses Rust.",
+        "Reason": "Need deterministic latency on the edge.",
+        "Impact": "Keep Python in the agent runtime.",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_decision_writer_round_trip(memory_root: MemoryRoot) -> None:
+    writer = DecisionWriter(memory_root)
+    today = _dt.date(2026, 5, 15)
+    eid = await writer.append_entry(
+        "u1",
+        inline=_decision_inline(),
+        sections=_decision_sections(),
+        date=today,
+    )
+    path = memory_root.users_dir() / "u1" / "decisions" / "decision-2026-05-15.md"
+    parsed = await MarkdownReader.read(path)
+
+    fm = parsed.frontmatter
+    assert fm["id"] == "decision_log_u1_2026-05-15"
+    assert fm["type"] == "decision_daily"
+    assert fm["file_type"] == "decision_daily"
+    assert fm["user_id"] == "u1"
+    assert fm["track"] == "user"
+    assert fm["date"] == "2026-05-15"
+    assert fm["entry_count"] == 1
+
+    assert eid.format().startswith("dc_")
+    assert eid.format() == "dc_20260515_00000001"
+    assert len(parsed.entries) == 1
+    structured = parsed.entries[0].as_structured()
+    assert structured.inline["owner_id"] == "u1"
+    assert structured.inline["parent_type"] == "memcell"
+    assert structured.inline["parent_id"] == "mc_1"
+    assert "sender_ids" not in structured.inline
+    assert "runtime" in structured.inline["tags"]
+    assert structured.sections["Title"] == "Use Rust on device"
+    assert structured.sections["Decision"] == "Device Runtime uses Rust."
+    assert structured.sections["Reason"] == "Need deterministic latency on the edge."
+    assert structured.sections["Impact"] == "Keep Python in the agent runtime."
+
+    reader = DecisionReader(memory_root)
+    assert reader.path_for("u1", today) == path
+    found = await reader.find_structured("u1", eid)
+    assert found is not None
+    assert found.sections["Decision"] == "Device Runtime uses Rust."
+
+
+async def test_decision_writer_appends_multiple(memory_root: MemoryRoot) -> None:
+    writer = DecisionWriter(memory_root)
+    today = _dt.date(2026, 5, 15)
+    eid1 = await writer.append_entry(
+        "u1",
+        inline=_decision_inline(),
+        sections=_decision_sections(),
+        date=today,
+    )
+    eid2 = await writer.append_entry(
+        "u1",
+        inline=_decision_inline(
+            parent_id="mc_2",
+            timestamp="2026-05-15T11:00:00+00:00",
+        ),
+        sections=_decision_sections(Title="Second", Decision="Keep local-first."),
+        date=today,
+    )
+    assert eid1.format() != eid2.format()
+    assert eid1.format().startswith("dc_")
+    assert eid2.format().endswith("00000002")
 
 
 # ── Foresight ─────────────────────────────────────────────────────────────
@@ -279,9 +373,9 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     write an entry, read the .md file, assert the literal string ends
     with ``+08:00``.
 
-    Repeats the same check for ``ForesightWriter`` and
-    ``AgentCaseWriter`` — they share ``BaseDailyWriter`` plumbing so a
-    regression on one would likely affect all three, but pinning each
+    Repeats the same check for ``ForesightWriter``, ``DecisionWriter``,
+    and ``AgentCaseWriter`` — they share ``BaseDailyWriter`` plumbing so a
+    regression on one would likely affect all of them, but pinning each
     rules out per-subclass shadowing of ``_frontmatter_updates``.
     """
     from everos.component.utils import datetime as _dt_module
@@ -330,6 +424,18 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     fs_path = memory_root.users_dir() / "u1" / ".foresights" / "foresight-2026-05-15.md"
     fs_fm = (await MarkdownReader.read(fs_path)).frontmatter
     assert fs_fm["last_appended_at"].endswith("+08:00"), fs_fm["last_appended_at"]
+
+    # Decision
+    dc_writer = DecisionWriter(memory_root)
+    await dc_writer.append_entry(
+        "u1",
+        inline=_decision_inline(),
+        sections=_decision_sections(),
+        date=today,
+    )
+    dc_path = memory_root.users_dir() / "u1" / "decisions" / "decision-2026-05-15.md"
+    dc_fm = (await MarkdownReader.read(dc_path)).frontmatter
+    assert dc_fm["last_appended_at"].endswith("+08:00"), dc_fm["last_appended_at"]
 
     # AgentCase
     ac_writer = AgentCaseWriter(memory_root)

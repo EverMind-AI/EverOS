@@ -1,4 +1,4 @@
-"""Strict md <-> lancedb consistency across all 4 daily-log kinds.
+"""Strict md <-> lancedb consistency across all 5 daily-log kinds.
 
 For each registered daily-log kind, seed N entries via the kind's
 writer, wait for the cascade to drain, then assert exact equality
@@ -35,6 +35,7 @@ from everos.core.persistence import MarkdownReader, MemoryRoot
 from everos.infra.persistence.lancedb import (
     agent_case_repo,
     atomic_fact_repo,
+    decision_repo,
     dispose_connection,
     ensure_business_indexes,
     episode_repo,
@@ -43,11 +44,13 @@ from everos.infra.persistence.lancedb import (
 from everos.infra.persistence.lancedb.lancedb_manager import get_table
 from everos.infra.persistence.lancedb.tables.agent_case import AgentCase
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
+from everos.infra.persistence.lancedb.tables.decision import Decision
 from everos.infra.persistence.lancedb.tables.episode import Episode
 from everos.infra.persistence.lancedb.tables.foresight import Foresight
 from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactWriter,
+    DecisionWriter,
     EpisodeWriter,
     ForesightWriter,
 )
@@ -161,6 +164,24 @@ def _fs_item(scope_id: str, j: int):
     )
 
 
+def _dc_item(scope_id: str, j: int):
+    return (
+        {
+            "owner_id": scope_id,
+            "session_id": f"s_{j}",
+            "timestamp": "2026-05-19T07:04:26+00:00",
+            "parent_id": f"mc_{j}",
+            "tags": ["runtime", "rust"],
+        },
+        {
+            "Title": f"title {j}",
+            "Decision": f"decision body {j}",
+            "Reason": f"reason {j}",
+            "Impact": f"impact {j}",
+        },
+    )
+
+
 def _ac_item(scope_id: str, j: int):
     return (
         {
@@ -208,6 +229,16 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         repo=foresight_repo,
         table_cls=Foresight,
         build_item=_fs_item,
+    ),
+    _DailyLogKindCase(
+        name="decision",
+        scope="users",
+        dir_name="decisions",
+        file_prefix="decision",
+        writer_factory=DecisionWriter,
+        repo=decision_repo,
+        table_cls=Decision,
+        build_item=_dc_item,
     ),
     _DailyLogKindCase(
         name="agent_case",

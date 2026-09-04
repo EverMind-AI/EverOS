@@ -8,6 +8,7 @@ from everos.memory.search import (
     FilterError,
     FilterNode,
     compile_filters,
+    compile_filters_for_decision,
 )
 
 # ── Base injection ───────────────────────────────────────────────────────
@@ -266,3 +267,13 @@ def test_compile_filters_excludes_deprecated_by_for_user() -> None:
 def test_compile_filters_omits_deprecated_by_for_agent() -> None:
     result = compile_filters(None, owner_id="agent_1", owner_type="agent")
     assert "deprecated_by" not in result
+
+
+def test_compile_filters_for_decision_strips_sender_id_keeps_session() -> None:
+    node = FilterNode.model_validate({"sender_id": "u_jason", "session_id": "sess_a"})
+    where = compile_filters_for_decision(node, owner_id="alice", owner_type="user")
+    assert "sender_id" not in where
+    assert "sender_ids" not in where
+    assert "session_id = 'sess_a'" in where
+    assert "deprecated_by IS NULL" in where
+    assert "owner_id = 'alice'" in where

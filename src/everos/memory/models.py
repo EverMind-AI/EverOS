@@ -16,6 +16,7 @@ from typing import Any, Literal
 from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AtomicFact as AlgoAtomicFact
 from everalgo.types import ChatMessage as AlgoMessage
+from everalgo.types import Decision as AlgoDecision
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Foresight as AlgoForesight
 from everalgo.types import MemCell as MemCell
@@ -148,6 +149,65 @@ class Episode(BaseModel):
         data["owner_id"] = owner_id
         data["session_id"] = session_id
         data["sender_ids"] = list(sender_ids)
+        data["parent_id"] = parent_id
+        return cls.model_validate(data)
+
+
+class Decision(BaseModel):
+    """Domain Decision — algo-emitted business fields + everos context.
+
+    Composed (not inherited) from :class:`everalgo.types.Decision`. everos
+    keeps the semantic fields algo emits (``title`` / ``decision`` /
+    ``reason`` / ``impact`` / ``tags`` / ``timestamp``) and adds
+    engineering context (``session_id`` / ``parent_id``). The global id is
+    derived later by cascade from ``<scope_id>_<entry_id_in_md>``.
+
+    ``parent_id`` is the source memcell id, same as :class:`Episode`. Algo
+    Decision has no ``parent_id``; everos fills it from the memcell currently
+    being processed.
+
+    No ``sender_ids``: a decision is a committed trade-off about its
+    ``owner_id``, not a narrative about the conversation as a whole.
+    """
+
+    owner_id: str
+    title: str
+    decision: str
+    reason: str
+    impact: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    timestamp: int
+
+    # everos engineering metadata.
+    session_id: str | None = None
+    parent_id: str
+
+    model_config = ConfigDict(extra="allow")
+
+    @classmethod
+    def from_algo(
+        cls,
+        algo_decision: AlgoDecision,
+        *,
+        owner_id: str,
+        session_id: str | None,
+        parent_id: str,
+    ) -> Decision:
+        """Build a domain Decision from an algo Decision plus engineering context.
+
+        ``owner_id`` is caller-supplied so the same generic algo Decision
+        (produced once per MemCell, ``owner_id=None``) can fan out to one md
+        per user sender. Any ``owner_id`` algo's model might carry is dropped —
+        the caller's context is authoritative.
+
+        ``parent_id`` is required for the same reason: the caller always knows
+        the source memcell id. Anything algo's model carries via
+        ``extra='allow'`` is dropped in favour of the caller-supplied value.
+        ``app_id`` / ``project_id`` stay on writer / cascade scope, not here.
+        """
+        data = algo_decision.model_dump(exclude={"parent_id", "owner_id"})
+        data["owner_id"] = owner_id
+        data["session_id"] = session_id
         data["parent_id"] = parent_id
         return cls.model_validate(data)
 
@@ -328,11 +388,13 @@ __all__ = [
     "AgentCase",
     "AlgoAgentCase",
     "AlgoAtomicFact",
+    "AlgoDecision",
     "AlgoEpisode",
     "AlgoForesight",
     "AlgoMessage",
     "AtomicFact",
     "CanonicalMessage",
+    "Decision",
     "Episode",
     "Foresight",
     "IngestResult",

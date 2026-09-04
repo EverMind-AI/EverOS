@@ -49,7 +49,8 @@ def _make_fake_llm(boundary_responses: list[list[int]] | None = None) -> FakeLLM
             cuts = queue.pop(0) if queue else []
             return ChatResponse(content=_boundary_response(cuts), model="fake")
         return ChatResponse(
-            content=json.dumps({"title": "T", "content": "B"}), model="fake"
+            content=json.dumps({"title": "T", "content": "B", "summary": "B"}),
+            model="fake",
         )
 
     return FakeLLMClient(handler=handler)
@@ -111,6 +112,7 @@ async def memorize_env(
     svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
     ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
     client_mod = importlib.import_module("everos.component.llm.client")
 
@@ -125,6 +127,7 @@ async def memorize_env(
     monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
     monkeypatch.setattr(af_mod, "_writer", None, raising=False)
     monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
+    monkeypatch.setattr(dc_mod, "_writer", None, raising=False)
 
     started: dict[str, Any] = {"engine": None}
 
@@ -146,10 +149,10 @@ async def memorize_env(
             await conn.run_sync(SQLModel.metadata.create_all)
         started["dispose"] = dispose_engine
 
-        # Silence OME strategies so agent_case / atomic / foresight don't
-        # try real extraction logic during these tests.
+        # Silence OME strategies so agent_case / atomic / foresight /
+        # decision don't try real extraction logic during these tests.
         noop = AsyncMock(return_value=[])
-        for mod in (af_mod, fs_mod, ac_mod):
+        for mod in (af_mod, fs_mod, dc_mod, ac_mod):
             extractor_attr = next(
                 (n for n in dir(mod) if n.endswith("Extractor")), None
             )

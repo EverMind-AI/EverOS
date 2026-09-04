@@ -34,6 +34,7 @@ from .agent_case_reader import AgentCaseReader as AgentCaseReader
 from .agent_skill_reader import AgentSkillReader as AgentSkillReader
 from .atomic_fact_reader import AtomicFactReader as AtomicFactReader
 from .base import BaseDailyReader as BaseDailyReader
+from .decision_reader import DecisionReader as DecisionReader
 from .episode_reader import EpisodeReader as EpisodeReader
 from .foresight_reader import ForesightReader as ForesightReader
 from .profile_reader import ProfileReader as ProfileReader
@@ -45,6 +46,7 @@ __all__ = [
     "AgentSkillReader",
     "AtomicFactReader",
     "BaseDailyReader",
+    "DecisionReader",
     "EpisodeReader",
     "ForesightReader",
     "ProfileReader",

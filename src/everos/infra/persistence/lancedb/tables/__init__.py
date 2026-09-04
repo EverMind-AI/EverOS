@@ -8,10 +8,12 @@ External usage::
     from everos.infra.persistence.lancedb.tables import (
         Episode,
         AtomicFact,
+        Decision,
         Foresight,
         AgentCase,
         AgentSkill,
         UserProfile,
+        Principle,
         KnowledgeTopic,
         ParentType,
     )
@@ -21,18 +23,22 @@ from ._parent_type import ParentType as ParentType
 from .agent_case import AgentCase as AgentCase
 from .agent_skill import AgentSkill as AgentSkill
 from .atomic_fact import AtomicFact as AtomicFact
+from .decision import Decision as Decision
 from .episode import Episode as Episode
 from .foresight import Foresight as Foresight
 from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
+from .principle import Principle as Principle
 from .user_profile import UserProfile as UserProfile
 
 __all__ = [
     "AgentCase",
     "AgentSkill",
     "AtomicFact",
+    "Decision",
     "Episode",
     "Foresight",
     "KnowledgeTopic",
     "ParentType",
+    "Principle",
     "UserProfile",
 ]

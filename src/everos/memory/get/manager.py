@@ -4,15 +4,17 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 :class:`GetRequest`):
 
 * ``user`` + ``episode``       → ``data.episodes``
+* ``user`` + ``decision``      → ``data.decisions``
 * ``user`` + ``profile``       → ``data.profiles`` (one-row KV fetch
   from the ``user_profile`` table; at most one item)
 * ``agent`` + ``agent_case``   → ``data.agent_cases``
 * ``agent`` + ``agent_skill``  → ``data.agent_skills``
 
 Reads only — never writes. Filters are compiled through
-:func:`compile_filters_for_get` so the column allow-list stays
-shared with :mod:`memory.search`. Pagination + in-memory sort
-runs through :meth:`LanceRepoBase.find_where_paginated`.
+:func:`compile_filters_for_get` (or :func:`compile_filters_for_decision`
+when ``memory_type=decision``, which strips ``sender_id``) so the
+column allow-list stays shared with :mod:`memory.search`. Pagination
++ in-memory sort runs through :meth:`LanceRepoBase.find_where_paginated`.
 """
 
 from __future__ import annotations
@@ -23,11 +25,13 @@ from typing import TYPE_CHECKING, Any
 from everos.component.utils.datetime import to_display_tz
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
+from everos.memory.search import compile_filters_for_decision
 
 from .dto import (
     GetAgentCaseItem,
     GetAgentSkillItem,
     GetData,
+    GetDecisionItem,
     GetEpisodeItem,
     GetMemoryType,
     GetProfileItem,
@@ -41,6 +45,7 @@ if TYPE_CHECKING:
     from everos.infra.persistence.lancedb import (
         AgentCase,
         AgentSkill,
+        Decision,
         Episode,
         UserProfile,
     )
@@ -56,11 +61,13 @@ class GetManager:
         self,
         *,
         episode_repo: LanceRepoBase[Episode],
+        decision_repo: LanceRepoBase[Decision],
         agent_case_repo: LanceRepoBase[AgentCase],
         agent_skill_repo: LanceRepoBase[AgentSkill],
         user_profile_repo: LanceRepoBase[UserProfile],
     ) -> None:
         self._ep = episode_repo
+        self._decision = decision_repo
         self._case = agent_case_repo
         self._skill = agent_skill_repo
         self._profile = user_profile_repo
@@ -70,7 +77,12 @@ class GetManager:
     async def get(self, req: GetRequest) -> GetResponse:
         request_id = resolve_request_id()
         descending = req.sort_order == "desc"
-        where = compile_filters_for_get(
+        compile = (
+            compile_filters_for_decision
+            if req.memory_type == GetMemoryType.DECISION
+            else compile_filters_for_get
+        )
+        where = compile(
             req.filters,
             owner_id=req.owner_id,
             owner_type=req.owner_type,
@@ -90,6 +102,20 @@ class GetManager:
                 items = [self._shape_episode(r) for r in rows]
                 data = GetData(
                     episodes=items,
+                    total_count=total,
+                    count=len(items),
+                )
+            case GetMemoryType.DECISION:
+                rows, total = await self._decision.find_where_paginated(
+                    where,
+                    sort_by=req.sort_by,
+                    descending=descending,
+                    page=req.page,
+                    page_size=req.page_size,
+                )
+                items = [self._shape_decision(r) for r in rows]
+                data = GetData(
+                    decisions=items,
                     total_count=total,
                     count=len(items),
                 )
@@ -151,6 +177,22 @@ class GetManager:
             subject=row.subject or "",
             episode=row.episode,
             type="Conversation",
+        )
+
+    @staticmethod
+    def _shape_decision(row: Decision) -> GetDecisionItem:
+        return GetDecisionItem(
+            id=row.id,
+            user_id=row.owner_id,
+            app_id=row.app_id,
+            project_id=row.project_id,
+            session_id=row.session_id,
+            timestamp=to_display_tz(row.timestamp),
+            title=row.title,
+            decision=row.decision,
+            reason=row.reason,
+            impact=row.impact,
+            tags=list(row.tags),
         )
 
     @staticmethod

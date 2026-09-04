@@ -3,11 +3,15 @@
 Contract per the final design:
 
 * ``owner_type`` is a hard partition. ``user`` returns ``episodes``
-  (and optionally ``profiles``); ``agent`` returns ``agent_cases`` +
-  ``agent_skills``. The four ``data.*`` arrays always exist; routes not
-  applicable to the current ``owner_type`` stay as ``[]``.
+  (and ``decisions``; optionally ``profiles`` / ``principles``);
+  ``agent`` returns ``agent_cases`` + ``agent_skills``. The ``data.*``
+  arrays always exist; routes not applicable to the current
+  ``owner_type`` stay as ``[]``.
 * ``atomic_facts`` are **nested** inside :class:`SearchEpisodeItem`,
   never returned as a top-level array.
+* ``principle`` is Meta Memory, not a searchable kind — it is not in
+  ``kinds``. Callers opt in with ``include_principles`` (KV fetch),
+  independent of ``include_profile`` and of the episode/decision lanes.
 * Item-side ``owner_type`` / ``type`` fields are intentionally narrowed
   to the currently-emitted Literal so callers get a tight schema. Loosen
   them only when a new emission path (agent episodes, agent profiles)
@@ -70,8 +74,8 @@ class SearchRequest(BaseModel):
     user_id: str | None = Field(default=None, min_length=1)
     agent_id: str | None = Field(default=None, min_length=1)
     """Memory owner — provide ``user_id`` for user-memory (episodes /
-    profiles) or ``agent_id`` for agent-memory (cases / skills); exactly
-    one must be set."""
+    decisions / profiles / principles) or ``agent_id`` for agent-memory
+    (cases / skills); exactly one must be set."""
     app_id: str = "default"
     project_id: str = "default"
     """App / project scope (default ``"default"``). Pinned into the LanceDB
@@ -89,6 +93,19 @@ class SearchRequest(BaseModel):
     Only the episode hybrid path consumes it — other methods ignore it.
     """
     include_profile: bool = False
+    include_principles: bool = False
+    """When true and ``user_id`` is set, attach the owner's principle
+    KV rows (``data.principles``). Independent of ``include_profile``
+    and of ``kinds``. Ignored for ``agent_id``. Not a HYBRID lane —
+    principle is not a kind.
+    """
+    kinds: list[Literal["episode", "decision"]] | None = None
+    """User-partition kind filter. ``None`` searches episode + decision
+    in parallel. ``["decision"]`` / ``["episode"]`` restrict the lanes.
+    Rejected when ``agent_id`` is set, when the list is empty, or when
+    a value outside the Literal is supplied (``principle`` is not a
+    kind). Independent of ``include_profile`` and ``include_principles``.
+    """
     enable_llm_rerank: bool = Field(
         default=False,
         description=(
@@ -110,6 +127,16 @@ class SearchRequest(BaseModel):
     def _validate_top_k(self) -> SearchRequest:
         if self.top_k == 0 or self.top_k < -1 or self.top_k > 100:
             raise ValueError("top_k must be -1 or in 1..100")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_kinds(self) -> SearchRequest:
+        if self.kinds is None:
+            return self
+        if self.agent_id is not None:
+            raise ValueError("kinds is only valid when user_id is set")
+        if not self.kinds:
+            raise ValueError("kinds must be non-empty when provided")
         return self
 
     @property
@@ -168,6 +195,26 @@ class SearchEpisodeItem(BaseModel):
     atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
 
 
+class SearchDecisionItem(BaseModel):
+    """Decision hit — always user-scoped. Instance Kind, HYBRID recall."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    user_id: str | None
+    """Owning user (``None`` only on malformed cascade rows)."""
+    app_id: str = "default"
+    project_id: str = "default"
+    session_id: str | None = None
+    timestamp: _dt.datetime
+    title: str
+    decision: str
+    reason: str
+    impact: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    score: float
+
+
 class SearchProfileItem(BaseModel):
     """Owner profile — at most one per response, only for user owners.
 
@@ -183,6 +230,27 @@ class SearchProfileItem(BaseModel):
     app_id: str = "default"
     project_id: str = "default"
     profile_data: dict[str, object]
+    score: float | None = None
+
+
+class SearchPrincipleItem(BaseModel):
+    """One engineering principle — KV fetch, not a ranked kind.
+
+    ``score`` is always ``None`` (no query-relevance). ``id`` is the
+    Lance PK ``<owner_id>_<principle_id>``. Agent owners never receive
+    this array.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    user_id: str | None
+    app_id: str = "default"
+    project_id: str = "default"
+    title: str
+    statement: str
+    source_entry_ids: list[str] = Field(default_factory=list)
+    timestamp: _dt.datetime
     score: float | None = None
 
 
@@ -257,7 +325,7 @@ class UnprocessedMessageDTO(BaseModel):
 class SearchData(BaseModel):
     """Body of ``response.data``.
 
-    All five arrays are always present so client code can iterate without
+    All arrays are always present so client code can iterate without
     branching on ``owner_type``. Routes not applicable to the request's
     owner type stay as ``[]``. ``unprocessed_messages`` is filled only
     when ``filters.session_id`` is present as a top-level eq scalar —
@@ -268,7 +336,11 @@ class SearchData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     episodes: list[SearchEpisodeItem] = Field(default_factory=list)
+    decisions: list[SearchDecisionItem] = Field(default_factory=list)
     profiles: list[SearchProfileItem] = Field(default_factory=list)
+    principles: list[SearchPrincipleItem] = Field(default_factory=list)
+    """KV-fetched principles when ``include_principles=true`` (user
+    owner); otherwise stays empty. Always present on the wire."""
     agent_cases: list[SearchAgentCaseItem] = Field(default_factory=list)
     agent_skills: list[SearchAgentSkillItem] = Field(default_factory=list)
     unprocessed_messages: list[UnprocessedMessageDTO] = Field(default_factory=list)

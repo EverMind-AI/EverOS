@@ -11,6 +11,7 @@ External usage::
     from everos.infra.persistence.lancedb.repos import (
         episode_repo,
         atomic_fact_repo,
+        decision_repo,
         foresight_repo,
         agent_case_repo,
         agent_skill_repo,
@@ -24,17 +25,21 @@ External usage::
 from .agent_case import agent_case_repo as agent_case_repo
 from .agent_skill import agent_skill_repo as agent_skill_repo
 from .atomic_fact import atomic_fact_repo as atomic_fact_repo
+from .decision import decision_repo as decision_repo
 from .episode import episode_repo as episode_repo
 from .foresight import foresight_repo as foresight_repo
 from .knowledge_topic import knowledge_topic_repo as knowledge_topic_repo
+from .principle import principle_repo as principle_repo
 from .user_profile import user_profile_repo as user_profile_repo
 
 __all__ = [
     "agent_case_repo",
     "agent_skill_repo",
     "atomic_fact_repo",
+    "decision_repo",
     "episode_repo",
     "foresight_repo",
     "knowledge_topic_repo",
+    "principle_repo",
     "user_profile_repo",
 ]

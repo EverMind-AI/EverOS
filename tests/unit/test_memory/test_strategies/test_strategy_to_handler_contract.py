@@ -19,7 +19,14 @@ from unittest.mock import AsyncMock, patch
 
 import anyio
 import pytest
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
+from everalgo.types import (
+    AgentCase,
+    AtomicFact,
+    ChatMessage,
+    Decision,
+    Foresight,
+    MemCell,
+)
 
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
@@ -28,6 +35,7 @@ from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory.cascade.handlers import (
     AgentCaseHandler,
     AtomicFactHandler,
+    DecisionHandler,
     ForesightHandler,
     HandlerDeps,
 )
@@ -39,6 +47,7 @@ from everos.memory.events import (
 )
 from everos.memory.strategies.extract_agent_case import extract_agent_case
 from everos.memory.strategies.extract_atomic_facts import extract_atomic_facts
+from everos.memory.strategies.extract_decision import extract_decision
 from everos.memory.strategies.extract_foresight import extract_foresight
 
 
@@ -103,7 +112,7 @@ def _event(owner_id: str) -> UserPipelineStarted:
 
 
 async def _build_row_from_md(
-    handler: AtomicFactHandler | ForesightHandler | AgentCaseHandler,
+    handler: AtomicFactHandler | ForesightHandler | AgentCaseHandler | DecisionHandler,
     md_root: Path,
     md_glob: str,
     *,
@@ -221,6 +230,62 @@ async def test_foresight_strategy_md_feeds_handler_with_content(
     assert row.foresight_tokens == "plans trip to tokyo"
     assert row.evidence == "said so explicitly"
     assert row.evidence_tokens == "said so explicitly"
+    assert len(row.vector) == 1024
+
+
+async def test_decision_strategy_md_feeds_handler_with_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Strategy → md → DecisionHandler must carry title / decision / reason.
+
+    Guards lowercase section-key drift (``sections.get("decision")``)
+    which would upsert a Lance row with empty ``decision`` text.
+    """
+    dc_mod = importlib.import_module("everos.memory.strategies.extract_decision")
+    monkeypatch.setattr(
+        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+    )
+    monkeypatch.setattr(dc_mod, "_writer", None, raising=False)
+
+    decisions = [
+        Decision(
+            owner_id=None,
+            title="Use Rust for the device Runtime",
+            decision="Ship the device Runtime in Rust.",
+            reason="Need deterministic latency without a GC pause.",
+            impact=None,
+            tags=["runtime", "rust"],
+            timestamp=1_700_000_000_000,
+        ),
+    ]
+    with (
+        patch(
+            "everos.memory.strategies.extract_decision.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "everos.memory.strategies.extract_decision.DecisionExtractor"
+        ) as mock_ext,
+    ):
+        mock_ext.return_value.aextract = AsyncMock(return_value=decisions)
+        await extract_decision(_event("u_alice"), FakeStrategyContext())
+
+    handler = DecisionHandler(
+        HandlerDeps(
+            memory_root=MemoryRoot(root=tmp_path),
+            tokenizer=_StubTokenizer(),
+        )
+    )
+    row = await _build_row_from_md(
+        handler, tmp_path, "*/*/users/u_alice/decisions/decision-*.md"
+    )
+    assert row.title == "Use Rust for the device Runtime"
+    assert row.decision == "Ship the device Runtime in Rust."
+    assert row.decision_tokens == "Ship the device Runtime in Rust."
+    assert row.reason == "Need deterministic latency without a GC pause."
+    assert row.reason_tokens == "Need deterministic latency without a GC pause."
+    assert row.impact is None
+    assert row.tags == ["runtime", "rust"]
     assert len(row.vector) == 1024
 
 

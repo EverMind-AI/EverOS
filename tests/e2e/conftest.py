@@ -69,9 +69,12 @@ _MEMORIZE_SINGLETONS: tuple[str, ...] = (
 _STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("everos.memory.strategies.extract_atomic_facts", ("_writer",)),
     ("everos.memory.strategies.extract_foresight", ("_writer",)),
+    ("everos.memory.strategies.extract_decision", ("_writer",)),
     ("everos.memory.strategies.extract_user_profile", ("_writer", "_reader")),
+    ("everos.memory.strategies.extract_principles", ("_writer", "_decision_reader")),
     ("everos.memory.strategies.extract_agent_case", ("_writer",)),
     ("everos.memory.strategies.extract_agent_skill", ("_writer",)),
+    ("everos.memory.strategies.reflect_decisions", ("_writer",)),
 )
 
 

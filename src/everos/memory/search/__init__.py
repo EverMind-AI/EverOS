@@ -22,12 +22,15 @@ External usage::
         SearchAgentSkillItem,
         SearchAtomicFactItem,
         SearchData,
+        SearchDecisionItem,
         SearchEpisodeItem,
         SearchMethod,
+        SearchPrincipleItem,
         SearchProfileItem,
         SearchRequest,
         SearchResponse,
         compile_filters,
+        compile_filters_for_decision,
         compile_predicate,
     )
 
@@ -41,8 +44,10 @@ from .dto import SearchAgentCaseItem as SearchAgentCaseItem
 from .dto import SearchAgentSkillItem as SearchAgentSkillItem
 from .dto import SearchAtomicFactItem as SearchAtomicFactItem
 from .dto import SearchData as SearchData
+from .dto import SearchDecisionItem as SearchDecisionItem
 from .dto import SearchEpisodeItem as SearchEpisodeItem
 from .dto import SearchMethod as SearchMethod
+from .dto import SearchPrincipleItem as SearchPrincipleItem
 from .dto import SearchProfileItem as SearchProfileItem
 from .dto import SearchRequest as SearchRequest
 from .dto import SearchResponse as SearchResponse
@@ -50,6 +55,7 @@ from .filters import ALLOWED_FIELDS as ALLOWED_FIELDS
 from .filters import RESERVED_FIELDS as RESERVED_FIELDS
 from .filters import FilterError as FilterError
 from .filters import compile_filters as compile_filters
+from .filters import compile_filters_for_decision as compile_filters_for_decision
 from .filters import compile_predicate as compile_predicate
 
 __all__ = [
@@ -61,11 +67,14 @@ __all__ = [
     "SearchAgentSkillItem",
     "SearchAtomicFactItem",
     "SearchData",
+    "SearchDecisionItem",
     "SearchEpisodeItem",
     "SearchMethod",
+    "SearchPrincipleItem",
     "SearchProfileItem",
     "SearchRequest",
     "SearchResponse",
     "compile_filters",
+    "compile_filters_for_decision",
     "compile_predicate",
 ]

@@ -8,7 +8,7 @@ until backfilled. The three phase runners here upgrade them:
 - Phase 1 (:func:`_run_phase_vectors`)  — re-embed missing vectors on
   existing rows.
 - Phase 2 (:func:`_run_phase_clusters`) — build clusters on the newly-
-  embedded episodes / agent cases.
+  embedded episodes / agent cases / decisions.
 - Phase 3 (:func:`_run_phase_skills`)   — extract agent skills from
   clustered cases.
 
@@ -51,12 +51,14 @@ from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
     AtomicFact,
+    Decision,
     Episode,
     Foresight,
     KnowledgeTopic,
     agent_case_repo,
     agent_skill_repo,
     atomic_fact_repo,
+    decision_repo,
     episode_repo,
     foresight_repo,
     get_table,
@@ -69,11 +71,13 @@ from everos.memory.cascade.worker import (
 )
 from everos.memory.events import (
     AgentCaseExtracted,
+    DecisionExtracted,
     EpisodeExtracted,
     SkillClusterUpdated,
 )
 from everos.memory.strategies import (
     extract_agent_skill,
+    trigger_decision_clustering,
     trigger_profile_clustering,
     trigger_skill_clustering,
 )
@@ -147,7 +151,9 @@ class BackfillPresenter(Protocol):
     ) -> None: ...
     def server_running(self) -> None: ...
     def estimate_vectors(self, rows: int, tokens: int) -> None: ...
-    def estimate_clusters(self, episodes: int, cases: int) -> None: ...
+    def estimate_clusters(
+        self, episodes: int, cases: int, *, decisions: int = 0
+    ) -> None: ...
     def estimate_skills(self, cases: int, clusters: int) -> None: ...
     async def confirm(self, prompt: str, *, auto_yes: bool) -> bool: ...
     def emit_progress(self, done: int, total: int) -> None: ...
@@ -182,7 +188,9 @@ class NullBackfillPresenter:
     def estimate_vectors(self, rows: int, tokens: int) -> None:
         return None
 
-    def estimate_clusters(self, episodes: int, cases: int) -> None:
+    def estimate_clusters(
+        self, episodes: int, cases: int, *, decisions: int = 0
+    ) -> None:
         return None
 
     def estimate_skills(self, cases: int, clusters: int) -> None:
@@ -242,6 +250,7 @@ _TABLE_SPECS: tuple[_TableSpec, ...] = (
         subject_of=lambda r: r.get("subject") or None,
     ),
     _TableSpec(AtomicFact, atomic_fact_repo, lambda r: r["fact"]),
+    _TableSpec(Decision, decision_repo, lambda r: r["decision"]),
     _TableSpec(Foresight, foresight_repo, lambda r: r["foresight"]),
     _TableSpec(AgentCase, agent_case_repo, lambda r: r["task_intent"]),
     _TableSpec(AgentSkill, agent_skill_repo, _agent_skill_embed_text),
@@ -899,7 +908,8 @@ class _ClusterPhaseResult:
     """Phase 2 outcome.
 
     ``events_emitted`` counts every synthesized ``EpisodeExtracted`` +
-    ``AgentCaseExtracted`` event fanned into the ephemeral engine.
+    ``AgentCaseExtracted`` + ``DecisionExtracted`` event fanned into the
+    ephemeral engine.
     ``clusters_before`` / ``clusters_after`` are the total ``cluster``
     row count (:meth:`_ClusterRepo.count`, across every owner/kind)
     taken immediately before dispatch and after the engine drains, so
@@ -922,8 +932,9 @@ async def _scan_all_rows(schema: type[BaseLanceTable]) -> list[dict[str, Any]]:
 
     Phase 2 doesn't care whether a row already carries a vector — the
     cluster strategies re-embed the row's text themselves (see
-    ``trigger_profile_clustering`` / ``trigger_skill_clustering``); it
-    just needs every existing episode / agent case so it can
+    ``trigger_profile_clustering`` / ``trigger_skill_clustering`` /
+    ``trigger_decision_clustering``); it
+    just needs every existing episode / agent case / decision so it can
     synthesize the trigger event Tier 1's gated-off strategies never
     emitted (embed-requiring strategies are body-guarded off when
     ``get_embedding_capability().available`` is false — see
@@ -981,6 +992,34 @@ def _agent_case_row_to_event(raw: dict[str, Any]) -> AgentCaseExtracted:
     )
 
 
+def _decision_row_to_event(raw: dict[str, Any]) -> DecisionExtracted:
+    """Synthesize the ``DecisionExtracted(source="pipeline")`` this row's
+    original pipeline run never emitted — Tier 1 gated
+    ``trigger_decision_clustering`` off before it could fire.
+
+    ``event_id`` carries a ``backfill_`` prefix so ops can tell a
+    synthesized run apart from a real one in logs / run records.
+    """
+    tags_raw = raw.get("tags") or []
+    tags = [str(t) for t in tags_raw]
+    return DecisionExtracted(
+        event_id=f"backfill_{uuid4().hex}",
+        memcell_id=raw["parent_id"],
+        decision_entry_id=raw["entry_id"],
+        title=raw.get("title") or "",
+        decision_text=raw["decision"],
+        reason=raw.get("reason") or "",
+        impact=raw.get("impact"),
+        tags=tags,
+        decision_timestamp_ms=to_timestamp_ms(raw["timestamp"]),
+        owner_id=raw["owner_id"],
+        session_id=raw.get("session_id"),
+        app_id=raw.get("app_id", "default"),
+        project_id=raw.get("project_id", "default"),
+        source="pipeline",
+    )
+
+
 def _report_emit_progress(presenter: BackfillPresenter, done: int, total: int) -> None:
     if done % _PROGRESS_EVERY == 0 or done == total:
         presenter.emit_progress(done, total)
@@ -992,6 +1031,7 @@ async def _emit_synthetic_events(
     cases: list[dict[str, Any]],
     *,
     presenter: BackfillPresenter,
+    decisions: list[dict[str, Any]] | None = None,
 ) -> int:
     """Fan every row into ``engine`` as its own synthetic trigger event.
 
@@ -1000,20 +1040,23 @@ async def _emit_synthetic_events(
     on a partially-completed root) would re-cluster the same rows and
     grow cluster counts spuriously. ``cluster_repo.find_cluster_id_for_member``
     is O(log N) via the reverse index and is the exact primitive for
-    this dedup. ``member_type`` values (``"episode"`` / ``"case"``) match
-    what :func:`trigger_profile_clustering` and
-    :func:`trigger_skill_clustering` insert on the write path — a mismatch
-    here would silently disable the skip and re-open the double-cluster
-    window.
+    this dedup. ``member_type`` values (``"episode"`` / ``"case"`` /
+    ``"decision"``) match what :func:`trigger_profile_clustering`,
+    :func:`trigger_skill_clustering`, and
+    :func:`trigger_decision_clustering` insert on the write path — a
+    mismatch here would silently disable the skip and re-open the
+    double-cluster window.
 
-    Episodes first, then agent cases — order doesn't affect correctness
-    (each event routes to its own strategy independently); it only
-    keeps the progress readout monotonic. The progress counter advances
-    for skipped rows too so the readout matches the pre-scan estimate;
-    ``_ClusterPhaseResult.events_emitted`` reflects "rows processed"
-    (real emits + already-clustered skips), not "engine.emit calls".
+    Episodes first, then agent cases, then decisions — order doesn't
+    affect correctness (each event routes to its own strategy
+    independently); it only keeps the progress readout monotonic. The
+    progress counter advances for skipped rows too so the readout
+    matches the pre-scan estimate; ``_ClusterPhaseResult.events_emitted``
+    reflects "rows processed" (real emits + already-clustered skips),
+    not "engine.emit calls".
     """
-    total = len(episodes) + len(cases)
+    decision_rows = decisions or []
+    total = len(episodes) + len(cases) + len(decision_rows)
     emitted = 0
     for raw in episodes:
         # entry_id is only per-owner unique — scope the reverse lookup
@@ -1040,6 +1083,18 @@ async def _emit_synthetic_events(
         )
         if existing is None:
             await engine.emit(_agent_case_row_to_event(raw))
+        emitted += 1
+        _report_emit_progress(presenter, emitted, total)
+    for raw in decision_rows:
+        existing = await cluster_repo.find_cluster_id_for_member(
+            member_type="decision",
+            member_id=raw["entry_id"],
+            app_id=raw["app_id"],
+            project_id=raw["project_id"],
+            owner_id=raw["owner_id"],
+        )
+        if existing is None:
+            await engine.emit(_decision_row_to_event(raw))
         emitted += 1
         _report_emit_progress(presenter, emitted, total)
     return emitted
@@ -1100,7 +1155,7 @@ def _build_cluster_engine() -> OfflineEngine:
     ``memory`` may not import ``service`` (the layering rule forbids it —
     see ``.claude/rules/architecture.md``), so this cannot reuse
     ``service.memorize``'s process-wide engine singleton; it builds its
-    own instance and registers only the two clustering strategies whose
+    own instance and registers only the three clustering strategies whose
     body-guards short-circuit under Tier 1 (no embedding provider).
     It shares the live engine's ``ome_db``
     jobstore path, so if a server is already running against the same
@@ -1131,6 +1186,7 @@ def _build_cluster_engine() -> OfflineEngine:
     )
     engine.register(trigger_profile_clustering)
     engine.register(trigger_skill_clustering)
+    engine.register(trigger_decision_clustering)
     return engine
 
 
@@ -1155,16 +1211,17 @@ async def _ensure_cluster_schema() -> None:
 async def _run_phase_clusters(
     *, auto_yes: bool, presenter: BackfillPresenter
 ) -> _ClusterPhaseResult:
-    """Rebuild clusters for every episode / agent case via synthetic events.
+    """Rebuild clusters for every episode / agent case / decision via
+    synthetic events.
 
-    Scan every episode + agent case row → surface the estimate →
-    confirm once → synthesize the ``EpisodeExtracted`` /
-    ``AgentCaseExtracted`` event each row's original pipeline run
-    would have emitted had the clustering strategies not been gated
-    off under Tier 1 (their embed-requiring body-guards short-circuited
-    the dispatch) → replay them through a dedicated
-    engine that registers only those two (now-eligible, since embed
-    is available) strategies → wait for the engine to drain.
+    Scan every episode + agent case + decision row → surface the
+    estimate → confirm once → synthesize the ``EpisodeExtracted`` /
+    ``AgentCaseExtracted`` / ``DecisionExtracted`` event each row's
+    original pipeline run would have emitted had the clustering
+    strategies not been gated off under Tier 1 (their embed-requiring
+    body-guards short-circuited the dispatch) → replay them through a
+    dedicated engine that registers only those three (now-eligible,
+    since embed is available) strategies → wait for the engine to drain.
 
     Idempotent: :func:`_emit_synthetic_events` filters each row through
     :meth:`cluster_repo.find_cluster_id_for_member` before emitting, so
@@ -1172,14 +1229,13 @@ async def _run_phase_clusters(
     Ctrl-C interruption) skips rows already attached to a cluster.
     Cluster counts stop growing spuriously across reruns.
 
-    Episode rows carrying ``parent_type == "cluster"`` are Reflection's
-    merged episodes (``orchestrator._write_merged_episode``), not source
-    pipeline events, and are excluded — mirrors the same
-    ``parent_type == "memcell"`` filter idiom used by
-    ``extract_user_profile._select_via_cluster``. Synthesizing an event
-    for one would carry a bogus ``memcell_id`` (actually a cluster id)
-    and defeat ``trigger_profile_clustering``'s own
-    ``applies_to=lambda e: e.source == "pipeline"`` exclusion of
+    Episode (and later, decision) rows carrying ``parent_type ==
+    "cluster"`` are Reflection merged rows, not source pipeline events,
+    and are excluded — mirrors the same ``parent_type == "memcell"``
+    filter idiom used by ``extract_user_profile._select_via_cluster``.
+    Synthesizing an event for one would carry a bogus ``memcell_id``
+    (actually a cluster id) and defeat ``trigger_profile_clustering`` /
+    ``trigger_decision_clustering`` ``applies_to`` exclusion of
     Reflection output.
     """
     # Preflight capability + OME lock BEFORE any collection work. Both
@@ -1206,17 +1262,23 @@ async def _run_phase_clusters(
         if row.get("parent_type") == "memcell"
     ]
     cases = await _scan_all_rows(AgentCase)
-    total = len(episodes) + len(cases)
+    decisions = [
+        row
+        for row in await _scan_all_rows(Decision)
+        if row.get("parent_type") == "memcell"
+    ]
+    total = len(episodes) + len(cases) + len(decisions)
     if total == 0:
         presenter.nothing_to_backfill(
-            "Nothing to backfill. No episodes or agent cases found."
+            "Nothing to backfill. No episodes, agent cases, or decisions found."
         )
         return _ClusterPhaseResult()
 
-    presenter.estimate_clusters(len(episodes), len(cases))
+    presenter.estimate_clusters(len(episodes), len(cases), decisions=len(decisions))
     if not await presenter.confirm(
         f"proceed with {total:,} memories "
-        f"({len(episodes):,} episodes, {len(cases):,} agent cases)",
+        f"({len(episodes):,} episodes, {len(cases):,} agent cases, "
+        f"{len(decisions):,} decisions)",
         auto_yes=auto_yes,
     ):
         return _ClusterPhaseResult(aborted=True)
@@ -1235,7 +1297,11 @@ async def _run_phase_clusters(
         return _ClusterPhaseResult(aborted=True, blocked_by_server=True)
     try:
         emitted = await _emit_synthetic_events(
-            engine, episodes, cases, presenter=presenter
+            engine,
+            episodes,
+            cases,
+            presenter=presenter,
+            decisions=decisions,
         )
         drained = await engine.wait_idle(timeout=_CLUSTER_WAIT_TIMEOUT_SECONDS)
         if not drained:

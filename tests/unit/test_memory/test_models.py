@@ -17,13 +17,16 @@ from everalgo.types import (
     AtomicFact as AlgoAtomicFact,
 )
 from everalgo.types import (
+    Decision as AlgoDecision,
+)
+from everalgo.types import (
     Episode as AlgoEpisode,
 )
 from everalgo.types import (
     Foresight as AlgoForesight,
 )
 
-from everos.memory.models import AgentCase, AtomicFact, Episode, Foresight
+from everos.memory.models import AgentCase, AtomicFact, Decision, Episode, Foresight
 
 
 def test_atomic_fact_from_algo_carries_business_fields_and_metadata() -> None:
@@ -174,7 +177,9 @@ def test_episode_from_algo_owner_id_caller_supplied() -> None:
     EPISODE_GENERATION_PROMPT) and then fans the same algo Episode out
     to one domain Episode per user sender, each rooted at its own owner.
     """
-    algo = AlgoEpisode(owner_id=None, episode="hello", timestamp=1_700_000_000_000)
+    algo = AlgoEpisode(
+        owner_id=None, episode="hello", summary="hello", timestamp=1_700_000_000_000
+    )
     ep_alice = Episode.from_algo(
         algo,
         owner_id="u_alice",
@@ -194,3 +199,57 @@ def test_episode_from_algo_owner_id_caller_supplied() -> None:
     assert ep_alice.episode == ep_bob.episode == "hello"
     assert ep_alice.parent_id == ep_bob.parent_id == "mc_a"
     assert ep_alice.session_id == ep_bob.session_id == "s1"
+
+
+def _algo_decision(**overrides: object) -> AlgoDecision:
+    item: dict[str, object] = {
+        "owner_id": None,
+        "title": "Agent Runtime language",
+        "decision": "Python on the core, Rust on device.",
+        "reason": "Iterate the agent surface; keep the device loop stable.",
+        "impact": "Device capabilities connect through APIs.",
+        "tags": ["architecture", "runtime"],
+        "timestamp": 1_700_000_000_000,
+    }
+    item.update(overrides)
+    return AlgoDecision.model_validate(item)
+
+
+def test_decision_from_algo_owner_id_caller_supplied() -> None:
+    """Caller supplies ``owner_id``; algo's value (None or otherwise) is dropped.
+
+    DecisionExtractor runs once per MemCell with no ``sender_id``. EverOS then
+    fans the same algo Decision out to one domain Decision per user sender.
+    """
+    algo = _algo_decision(owner_id=None)
+    dc_alice = Decision.from_algo(
+        algo, owner_id="u_alice", session_id="s1", parent_id="mc_a"
+    )
+    dc_bob = Decision.from_algo(
+        algo, owner_id="u_bob", session_id="s1", parent_id="mc_a"
+    )
+    assert dc_alice.owner_id == "u_alice"
+    assert dc_bob.owner_id == "u_bob"
+    assert dc_alice.decision == dc_bob.decision == algo.decision
+    assert dc_alice.title == dc_bob.title == algo.title
+    assert dc_alice.reason == dc_bob.reason == algo.reason
+    assert dc_alice.impact == algo.impact
+    assert dc_alice.tags == algo.tags
+    assert dc_alice.parent_id == dc_bob.parent_id == "mc_a"
+    assert dc_alice.session_id == dc_bob.session_id == "s1"
+    assert not hasattr(dc_alice, "sender_ids")
+
+
+def test_decision_from_algo_overrides_stale_algo_owner_id() -> None:
+    """Fan-out still wins when the LLM smuggles a non-None owner_id."""
+    algo = _algo_decision(owner_id="PLACEHOLDER")
+    dc = Decision.from_algo(algo, owner_id="u_alice", session_id="s1", parent_id="mc_a")
+    assert dc.owner_id == "u_alice"
+
+
+def test_decision_from_algo_drops_algo_side_parent_id() -> None:
+    algo = _algo_decision(parent_id="ALGO_STALE")
+    dc = Decision.from_algo(
+        algo, owner_id="u_alice", session_id="s1", parent_id="mc_real"
+    )
+    assert dc.parent_id == "mc_real"

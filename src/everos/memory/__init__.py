@@ -20,11 +20,13 @@ cascade / search / prompt_slots / evolution).
 from .models import AgentCase as AgentCase
 from .models import AlgoAgentCase as AlgoAgentCase
 from .models import AlgoAtomicFact as AlgoAtomicFact
+from .models import AlgoDecision as AlgoDecision
 from .models import AlgoEpisode as AlgoEpisode
 from .models import AlgoForesight as AlgoForesight
 from .models import AlgoMessage as AlgoMessage
 from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
+from .models import Decision as Decision
 from .models import Episode as Episode
 from .models import Foresight as Foresight
 from .models import IngestResult as IngestResult
@@ -36,11 +38,13 @@ __all__ = [
     "AgentCase",
     "AlgoAgentCase",
     "AlgoAtomicFact",
+    "AlgoDecision",
     "AlgoEpisode",
     "AlgoForesight",
     "AlgoMessage",
     "AtomicFact",
     "CanonicalMessage",
+    "Decision",
     "Episode",
     "Foresight",
     "IngestResult",

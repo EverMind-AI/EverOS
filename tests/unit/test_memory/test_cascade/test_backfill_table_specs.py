@@ -33,6 +33,20 @@ def test_table_specs_covers_business_schemas() -> None:
     spec_names = {spec.schema.TABLE_NAME for spec in _backfill._TABLE_SPECS}
     schema_names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS_WITH_VECTOR}
     assert spec_names == schema_names
+    assert "principle" not in spec_names
+    assert "user_profile" not in spec_names
+
+
+def test_principle_is_business_schema_without_vector() -> None:
+    """Principle is created at startup (``_BUSINESS_SCHEMAS``) but is KV
+    only — no Phase-1 vector backfill, no BM25."""
+    from everos.infra.persistence.lancedb import _BUSINESS_SCHEMAS, Principle
+
+    assert Principle in _BUSINESS_SCHEMAS
+    assert Principle.BM25_FIELDS == []
+    assert "vector" not in Principle.model_fields
+    vector_names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS_WITH_VECTOR}
+    assert "principle" not in vector_names
 
 
 def test_drift_scenario_actually_raises_at_import() -> None:

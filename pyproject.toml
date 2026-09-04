@@ -76,9 +76,10 @@ dependencies = [
     "watchfiles>=0.21.0",          # native fs watcher for config hot reload
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
-    # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-user-memory==0.4.0",
-    "everalgo-agent-memory==0.4.0",
+    # Algorithm library. user-memory 0.8.0 (Decision) is not on PyPI yet;
+    # [tool.uv.sources] path-pins core + user-memory to the sibling EverAlgo checkout.
+    "everalgo-user-memory==0.8.0",
+    "everalgo-agent-memory==0.5.0",
     "everalgo-rank==0.4.1",
     "everalgo-knowledge==0.1.1",
 ]
@@ -101,6 +102,12 @@ Changelog = "https://github.com/EverMind-AI/EverOS/blob/main/CHANGELOG.md"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Workspace-local until everalgo-core 0.6.0 and everalgo-user-memory 0.8.0 are on PyPI.
+# Paths assume EverOS and EverAlgo are sibling checkouts.
+[tool.uv.sources]
+everalgo-core = { path = "../EverAlgo/packages/everalgo-core", editable = true }
+everalgo-user-memory = { path = "../EverAlgo/packages/everalgo-user-memory", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/everos"]

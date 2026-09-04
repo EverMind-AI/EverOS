@@ -3,6 +3,7 @@
 This module handles two distinct flows:
 
 * Simple kinds — :func:`shape_episode_from_candidate`,
+  :func:`shape_decision_from_candidate`,
   :func:`shape_agent_case_from_candidate`,
   :func:`shape_agent_skill_from_candidate`. Each consumes one
   :class:`Candidate` and emits the matching ``SearchXxxItem``.
@@ -32,6 +33,7 @@ from .dto import (
     SearchAgentCaseItem,
     SearchAgentSkillItem,
     SearchAtomicFactItem,
+    SearchDecisionItem,
     SearchEpisodeItem,
 )
 
@@ -83,6 +85,55 @@ def shape_episode_from_candidate(
         type="Conversation",
         score=float(candidate.score),
         atomic_facts=atomic_facts or [],
+    )
+
+
+# ── Decision shaping ────────────────────────────────────────────────────
+
+
+def shape_decision_from_candidate(candidate: Candidate) -> SearchDecisionItem | None:
+    """Build a :class:`SearchDecisionItem` from a recall ``Candidate``.
+
+    Returns ``None`` if the row is malformed (owner_type is not
+    ``"user"``, or title / decision / reason / timestamp missing).
+    """
+    md = candidate.metadata
+    if md.get("owner_type") != "user":
+        logger.warning(
+            "shape_decision_unexpected_owner_type",
+            id=candidate.id,
+            owner_type=md.get("owner_type"),
+        )
+        return None
+    timestamp = _coerce_datetime(md.get("timestamp"))
+    if timestamp is None:
+        logger.warning("shape_decision_missing_timestamp", id=candidate.id)
+        return None
+    owner_id = md.get("owner_id")
+    title = md.get("title")
+    decision = md.get("decision")
+    reason = md.get("reason")
+    if not (
+        isinstance(owner_id, str)
+        and isinstance(title, str)
+        and isinstance(decision, str)
+        and isinstance(reason, str)
+    ):
+        logger.warning("shape_decision_missing_required_field", id=candidate.id)
+        return None
+    return SearchDecisionItem(
+        id=candidate.id,
+        user_id=owner_id,
+        app_id=_as_str(md.get("app_id")) or "default",
+        project_id=_as_str(md.get("project_id")) or "default",
+        session_id=_as_optional_str(md.get("session_id")),
+        timestamp=timestamp,
+        title=title,
+        decision=decision,
+        reason=reason,
+        impact=_as_optional_str(md.get("impact")),
+        tags=_as_str_list(md.get("tags")),
+        score=float(candidate.score),
     )
 
 
