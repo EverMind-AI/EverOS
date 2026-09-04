@@ -13,31 +13,31 @@ from typing import Any
 from everos.config import load_settings
 from everos.infra.persistence import lancedb as _lancedb
 
-from .lancedb import (
+from ..backends.lancedb import (
     agent_case_repo as _lance_agent_case_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     agent_skill_repo as _lance_agent_skill_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     atomic_fact_repo as _lance_atomic_fact_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     episode_repo as _lance_episode_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     foresight_repo as _lance_foresight_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     knowledge_topic_repo as _lance_knowledge_topic_repo,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     lance_index_backend,
 )
-from .lancedb import (
+from ..backends.lancedb import (
     user_profile_repo as _lance_user_profile_repo,
 )
-from .milvus import milvus_index_backend
+from ..backends.milvus import milvus_index_backend
 from .predicate import (
     All,
     AnyOf,

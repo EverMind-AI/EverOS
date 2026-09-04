@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import ModuleType
 from typing import Any, ClassVar
 
-from .protocols import IndexRepository
+from ..index.protocols import IndexRepository
 
 
 class MilvusIndexBackend:

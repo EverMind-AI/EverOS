@@ -10,6 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from everos.infra.persistence.backends.lancedb import (
+    lance_index_backend,
+    render_predicate,
+)
+from everos.infra.persistence.backends.milvus import milvus_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
     Episode,
@@ -21,8 +26,6 @@ from everos.infra.persistence.index import (
     eq,
     shutdown,
 )
-from everos.infra.persistence.index.lancedb import lance_index_backend, render_predicate
-from everos.infra.persistence.index.milvus import milvus_index_backend
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
 from everos.infra.persistence.lancedb import lancedb_manager
 

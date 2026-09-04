@@ -141,7 +141,7 @@ class TestCompileKnowledgeWhere:
 
     def test_defaults(self) -> None:
         result = compile_knowledge_where("default", "default")
-        from everos.infra.persistence.index.lancedb import render_predicate
+        from everos.infra.persistence.backends.lancedb import render_predicate
 
         rendered = render_predicate(result)
         assert "app_id = 'default'" in rendered
@@ -165,7 +165,7 @@ class TestCompileKnowledgeWhere:
 
     def test_accepts_valid_ids_with_special_chars(self) -> None:
         result = compile_knowledge_where("my_app.v2", "project-1")
-        from everos.infra.persistence.index.lancedb import render_predicate
+        from everos.infra.persistence.backends.lancedb import render_predicate
 
         rendered = render_predicate(result)
         assert "my_app.v2" in rendered
@@ -173,7 +173,7 @@ class TestCompileKnowledgeWhere:
 
     def test_accepts_valid_ids_with_at_plus(self) -> None:
         result = compile_knowledge_where("app@org+v1", "proj_1")
-        from everos.infra.persistence.index.lancedb import render_predicate
+        from everos.infra.persistence.backends.lancedb import render_predicate
 
         rendered = render_predicate(result)
         assert "app@org+v1" in rendered

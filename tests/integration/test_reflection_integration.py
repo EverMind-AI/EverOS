@@ -34,7 +34,7 @@ from everos.core.persistence import (
 )
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
 from everos.infra.ome.testing import FakeStrategyContext
-from everos.infra.persistence.index.lancedb import LanceIndexRepository
+from everos.infra.persistence.backends.lancedb import LanceIndexRepository
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter

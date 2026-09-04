@@ -20,7 +20,7 @@ from everos.component.utils.datetime import ensure_utc, to_iso_format
 from everos.core.persistence import LanceRepoBase
 from everos.infra.persistence import lancedb as _lancedb
 
-from .predicate import (
+from ..index.predicate import (
     All,
     AnyOf,
     Comparison,

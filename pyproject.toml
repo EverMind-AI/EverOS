@@ -229,6 +229,7 @@ forbidden_modules = [
     "everos.infra.persistence.sqlite.**",
     "everos.infra.persistence.index.**",
     "everos.infra.persistence.milvus.**",
+    "everos.infra.persistence.backends.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -255,12 +256,33 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
-    "everos.infra.persistence.index -> everos.infra.persistence.index.lancedb",
-    "everos.infra.persistence.index -> everos.infra.persistence.index.milvus",
     "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
     "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
     "everos.infra.persistence.index -> everos.infra.persistence.index.router",
     "everos.infra.persistence.index -> everos.infra.persistence.index.schema",
+    "everos.infra.persistence.index -> everos.infra.persistence.backends.lancedb",
+    "everos.infra.persistence.index -> everos.infra.persistence.backends.milvus",
+]
+
+[[tool.importlinter.contracts]]
+# The facade and the router resolve a configured backend, so they import the
+# adapters by design. The port definitions must not: the moment protocols or
+# schema knows a concrete engine, "portable" stops being checkable and the
+# next adapter inherits whatever leaked in. This is the rule that keeps the
+# split from eroding -- moving files alone does not stop anyone moving them
+# back.
+name = "Derived-index ports know no concrete backend"
+type = "forbidden"
+source_modules = [
+    "everos.infra.persistence.index.protocols",
+    "everos.infra.persistence.index.schema",
+    "everos.infra.persistence.predicate",
+]
+forbidden_modules = [
+    "everos.infra.persistence.backends",
+    "everos.infra.persistence.lancedb",
+    "everos.infra.persistence.milvus",
+    "everos.core.persistence.lancedb",
 ]
 
 [[tool.importlinter.contracts]]

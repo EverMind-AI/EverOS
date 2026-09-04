@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.index.lancedb import build_or_query
+from everos.infra.persistence.backends.lancedb import build_or_query
 from everos.infra.persistence.lancedb import (
     Episode,
     ParentType,
