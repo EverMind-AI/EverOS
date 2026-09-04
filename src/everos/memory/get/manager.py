@@ -37,11 +37,11 @@ from .dto import (
 from .filters_adapter import compile_filters_for_get
 
 if TYPE_CHECKING:
-    from everos.core.persistence.lancedb import LanceRepoBase
-    from everos.infra.persistence.lancedb import (
+    from everos.infra.persistence.index import (
         AgentCase,
         AgentSkill,
         Episode,
+        IndexRepository,
         UserProfile,
     )
 
@@ -55,10 +55,10 @@ class GetManager:
     def __init__(
         self,
         *,
-        episode_repo: LanceRepoBase[Episode],
-        agent_case_repo: LanceRepoBase[AgentCase],
-        agent_skill_repo: LanceRepoBase[AgentSkill],
-        user_profile_repo: LanceRepoBase[UserProfile],
+        episode_repo: IndexRepository[Episode],
+        agent_case_repo: IndexRepository[AgentCase],
+        agent_skill_repo: IndexRepository[AgentSkill],
+        user_profile_repo: IndexRepository[UserProfile],
     ) -> None:
         self._ep = episode_repo
         self._case = agent_case_repo

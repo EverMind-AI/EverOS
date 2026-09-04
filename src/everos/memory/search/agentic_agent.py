@@ -30,6 +30,7 @@ from everalgo.types import Candidate
 
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.tracing import memory_span
+from everos.infra.persistence.index import Predicate
 from everos.memory.search.callbacks import (
     _format_case_passage_from_metadata,
     _format_skill_passage_from_metadata,
@@ -127,7 +128,7 @@ def _restore_shaper_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 async def search_agent_cases_agentic(
     query: str,
     *,
-    where: str,
+    where: Predicate,
     case_recaller: AgentCaseRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,
@@ -169,7 +170,7 @@ async def search_agent_cases_agentic(
 async def search_agent_skills_agentic(
     query: str,
     *,
-    where: str,
+    where: Predicate,
     skill_recaller: AgentSkillRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,
@@ -211,7 +212,7 @@ async def search_agent_skills_agentic(
 async def _run_agentic_retrieve(
     query: str,
     *,
-    where: str,
+    where: Predicate,
     recaller: AgentCaseRecaller | AgentSkillRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,

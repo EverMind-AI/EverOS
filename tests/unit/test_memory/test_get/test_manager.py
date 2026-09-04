@@ -254,9 +254,12 @@ async def test_episodic_memory_passes_where_and_sort_to_repo(
         filters=FilterNode.model_validate({"session_id": "sess_a"}),
     )
     await mgr.get(req)
-    assert "owner_id = 'u1'" in ep.last.where
-    assert "owner_type = 'user'" in ep.last.where
-    assert "session_id = 'sess_a'" in ep.last.where
+    from everos.infra.persistence.index.lancedb import render_predicate
+
+    rendered = render_predicate(ep.last.where)
+    assert "owner_id = 'u1'" in rendered
+    assert "owner_type = 'user'" in rendered
+    assert "session_id = 'sess_a'" in rendered
     assert ep.last.sort_by == "timestamp"
     assert ep.last.descending is False  # asc
     assert ep.last.page == 2

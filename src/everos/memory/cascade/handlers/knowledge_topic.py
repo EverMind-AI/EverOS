@@ -38,7 +38,7 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, ParsedMarkdown
-from everos.infra.persistence.lancedb import KnowledgeTopic, knowledge_topic_repo
+from everos.infra.persistence.index import KnowledgeTopic, knowledge_topic_repo
 from everos.infra.persistence.sqlite import (
     TopicUpsertPayload,
     knowledge_topic_sqlite_repo,
@@ -57,7 +57,7 @@ class KnowledgeTopicHandler(Handler):
     ``knowledge/{category}/{doc_title}/<n>_<name>.md``."""
 
     kind = "knowledge_topic"
-    lance_repo: ClassVar[Any] = knowledge_topic_repo
+    index_repo: ClassVar[Any] = knowledge_topic_repo
 
     content_change_keys: ClassVar[tuple[str, ...]] = (
         "frontmatter:summary",

@@ -393,8 +393,11 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     )
     await mgr.search(_user_req())
     assert recaller.last_where is not None
-    assert "owner_id = 'alice'" in recaller.last_where
-    assert "owner_type = 'user'" in recaller.last_where
+    from everos.infra.persistence.index.lancedb import render_predicate
+
+    rendered = render_predicate(recaller.last_where)
+    assert "owner_id = 'alice'" in rendered
+    assert "owner_type = 'user'" in rendered
 
 
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:

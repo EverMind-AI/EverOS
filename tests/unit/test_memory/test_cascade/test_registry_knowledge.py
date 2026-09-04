@@ -28,12 +28,12 @@ class TestKnowledgeKindRegistration:
         assert spec is not None
         assert spec.name == "knowledge_topic"
 
-    def test_knowledge_document_has_no_lance_schema(self) -> None:
+    def test_knowledge_document_has_no_index_schema(self) -> None:
         spec = next(k for k in KIND_REGISTRY if k.name == "knowledge_document")
-        assert spec.lance_schema is None
-        assert spec.lance_repo is None
+        assert spec.index_schema is None
+        assert spec.index_repo is None
 
-    def test_knowledge_topic_has_lance_schema(self) -> None:
+    def test_knowledge_topic_has_index_schema(self) -> None:
         spec = next(k for k in KIND_REGISTRY if k.name == "knowledge_topic")
-        assert spec.lance_schema is not None
-        assert spec.lance_repo is not None
+        assert spec.index_schema is not None
+        assert spec.index_repo is not None

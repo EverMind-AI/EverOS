@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from everos.infra.persistence.lancedb import BUSINESS_SCHEMAS_WITH_VECTOR
+from everos.infra.persistence.index import ALL_REPOS, Episode
+from everos.infra.persistence.index.schema import schema_for
 from everos.memory.cascade import _backfill
 
 
@@ -31,7 +32,11 @@ def test_table_specs_covers_business_schemas() -> None:
     tree: the two sets match at import time as well.
     """
     spec_names = {spec.schema.TABLE_NAME for spec in _backfill._TABLE_SPECS}
-    schema_names = {schema.TABLE_NAME for schema in BUSINESS_SCHEMAS_WITH_VECTOR}
+    schema_names = {
+        repo.schema.TABLE_NAME
+        for repo in ALL_REPOS
+        if schema_for(repo.schema).vector_fields
+    }
     assert spec_names == schema_names
 
 
@@ -50,19 +55,23 @@ def test_drift_scenario_actually_raises_at_import() -> None:
     """
     import importlib
     from types import SimpleNamespace
+    from typing import ClassVar
 
-    import everos.infra.persistence.lancedb as lancedb_infra
+    import everos.infra.persistence.index as index_infra
     import everos.memory.cascade._backfill as backfill_mod
 
-    real_schemas = tuple(lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR)
-    fake_schema = SimpleNamespace(TABLE_NAME="synthetic_drift_kind")
-    monkey_schemas = (*real_schemas, fake_schema)
+    class _SyntheticDriftSchema(Episode):
+        TABLE_NAME: ClassVar[str] = "synthetic_drift_kind"
 
-    original = lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR
-    lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR = monkey_schemas  # type: ignore[misc]
+    fake_schema = _SyntheticDriftSchema
+    fake_repo = SimpleNamespace(schema=fake_schema)
+    monkey_repos = (*index_infra.ALL_REPOS, fake_repo)
+
+    original = index_infra.ALL_REPOS
+    index_infra.ALL_REPOS = monkey_repos  # type: ignore[misc]
     try:
         with pytest.raises(RuntimeError, match=r"synthetic_drift_kind|drift"):
             importlib.reload(backfill_mod)
     finally:
-        lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR = original  # type: ignore[misc]
+        index_infra.ALL_REPOS = original  # type: ignore[misc]
         importlib.reload(backfill_mod)  # restore module state

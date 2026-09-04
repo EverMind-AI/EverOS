@@ -15,16 +15,9 @@ import importlib
 import pytest
 from httpx import AsyncClient
 
-from everos.infra.persistence.lancedb import Episode, get_table
-
-from .conftest import add_and_flush, seed_atomic_fact_for_episode
+from .conftest import add_and_flush, episode_rows, seed_atomic_fact_for_episode
 
 _STUB_VECTOR = [0.1] * 1024
-
-
-async def _episode_rows(owner_id: str) -> list[dict]:
-    table = await get_table(Episode.TABLE_NAME, Episode)
-    return await table.query().where(f"owner_id = '{owner_id}'").to_list()
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +28,7 @@ async def _episode_rows(owner_id: str) -> list[dict]:
 async def test_add_memory_writes_real_vector(tier2_runtime: AsyncClient) -> None:
     await add_and_flush(tier2_runtime, session_id="s_tier2_add")
 
-    rows = await _episode_rows("u_alice")
+    rows = await episode_rows("u_alice")
     assert rows, "expected cascade to index the new episode into LanceDB"
     assert rows[0]["vector"] is not None, "Tier 2 (embed available) must embed"
     assert len(rows[0]["vector"]) == 1024
@@ -48,7 +41,7 @@ async def test_user_search_methods_succeed(
     await add_and_flush(tier2_runtime, session_id=f"s_tier2_{method}")
     # VECTOR recalls via atomic_fact MaxSim, not a direct episode ANN scan
     # -- see seed_atomic_fact_for_episode's docstring.
-    episode_row = (await _episode_rows("u_alice"))[0]
+    episode_row = (await episode_rows("u_alice"))[0]
     await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
 
     resp = await tier2_runtime.post(

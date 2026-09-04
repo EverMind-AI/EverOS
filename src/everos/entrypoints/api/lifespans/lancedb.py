@@ -31,13 +31,17 @@ from fastapi import FastAPI
 
 from everos.core.lifespan import LifespanProvider
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import (
-    BUSINESS_SCHEMAS_WITH_VECTOR,
-    dispose_connection,
-    ensure_business_indexes,
-    get_connection,
-    get_table,
-    verify_business_schemas,
+from everos.infra.persistence.index import (
+    ALL_REPOS,
+    active_backend,
+    is_null,
+    schema_for,
+)
+from everos.infra.persistence.index import (
+    shutdown as shutdown_index,
+)
+from everos.infra.persistence.index import (
+    startup as startup_index,
 )
 
 logger = get_logger(__name__)
@@ -58,14 +62,16 @@ async def _log_unbackfilled_hint() -> None:
     startup.
     """
     total_null = 0
-    for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
+    for repo in ALL_REPOS:
+        logical_schema = schema_for(repo.schema)
+        if not any(field.name == "vector" for field in logical_schema.vector_fields):
+            continue
         try:
-            table = await get_table(schema.TABLE_NAME, schema)
-            count = await table.count_rows(filter="vector IS NULL")
+            count = await repo.count_where(is_null("vector"))
         except Exception as exc:
             logger.warning(
                 "unbackfilled_check_failed",
-                schema=schema.__name__,
+                schema=repo.schema.__name__,
                 error=repr(exc),
             )
             continue
@@ -100,12 +106,11 @@ class LanceDBLifespanProvider(LifespanProvider):
         super().__init__(name="lancedb", order=order)
 
     async def startup(self, app: FastAPI) -> Any:
-        conn = await get_connection()
-        await verify_business_schemas()
-        await ensure_business_indexes()
-        await _log_unbackfilled_hint()
-        logger.info("lancedb_ready", uri=conn.uri)
+        conn = await startup_index()
+        if active_backend() == "lancedb":
+            await _log_unbackfilled_hint()
+        logger.info("derived_index_ready", backend=active_backend())
         return conn
 
     async def shutdown(self, app: FastAPI) -> None:
-        await dispose_connection()
+        await shutdown_index()

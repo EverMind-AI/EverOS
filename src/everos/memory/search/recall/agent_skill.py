@@ -9,24 +9,25 @@ single-shot.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.lancedb import AgentSkill, get_table
+from everos.infra.persistence.index import (
+    AgentSkill,
+    Predicate,
+    agent_skill_repo,
+    all_of,
+    any_of,
+    contains,
+)
 
 from .base import (
     RecallerDeps,
-    build_or_query_multi_column,
     cosine_score_from_distance,
     row_to_candidate,
 )
-
-
-def _q(value: str) -> str:
-    return value.replace("'", "''")
 
 
 class AgentSkillRecaller:
@@ -40,7 +41,7 @@ class AgentSkillRecaller:
         self._deps = deps
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -48,60 +49,23 @@ class AgentSkillRecaller:
         rationale. One BooleanQuery per BM25 column; merge by id with
         max score.
         """
-        column_queries = build_or_query_multi_column(
-            self._deps.tokenizer, query, AgentSkill.BM25_FIELDS
-        )
-        if column_queries is None:
+        terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
+        if not terms:
             return []
-        table = await get_table(AgentSkill.TABLE_NAME, AgentSkill)
-
-        async def _query_one(column: str) -> list[dict]:
-            return (
-                await table.query()
-                .nearest_to_text(column_queries[column])
-                .where(where)
-                .limit(limit)
-                .to_list()
-            )
-
-        per_column = await asyncio.gather(
-            *(_query_one(col) for col in AgentSkill.BM25_FIELDS),
+        merged_rows = await agent_skill_repo.sparse_search(
+            terms, where, columns=AgentSkill.BM25_FIELDS, limit=limit
         )
-        # Merge by id, keep max BM25 score across the two columns.
-        best: dict[str, dict] = {}
-        for rows in per_column:
-            for r in rows:
-                rid = r.get("id")
-                if not isinstance(rid, str):
-                    continue
-                score = float(r.get("_score", 0.0))
-                existing = best.get(rid)
-                if existing is None or score > float(existing.get("_score", 0.0)):
-                    merged = dict(r)
-                    merged["_score"] = score
-                    best[rid] = merged
-        merged_rows = sorted(
-            best.values(), key=lambda r: float(r.get("_score", 0.0)), reverse=True
-        )[:limit]
         return [
             row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
             for r in merged_rows
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         if not vector:
             return []
-        table = await get_table(AgentSkill.TABLE_NAME, AgentSkill)
-        rows = (
-            await table.query()
-            .nearest_to(list(vector))
-            .distance_type("cosine")
-            .where(where)
-            .limit(limit)
-            .to_list()
-        )
+        rows = await agent_skill_repo.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
                 r,
@@ -112,7 +76,7 @@ class AgentSkillRecaller:
         ]
 
     async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: str, *, limit: int
+        self, case_ids: Sequence[str], where: Predicate, *, limit: int
     ) -> list[Candidate]:
         """Skills whose ``source_case_ids`` intersect ``case_ids``.
         Filter is ``array_has`` OR-ed per id (same as
@@ -124,8 +88,9 @@ class AgentSkillRecaller:
         """
         if not case_ids:
             return []
-        table = await get_table(AgentSkill.TABLE_NAME, AgentSkill)
-        clause = " OR ".join(f"array_has(source_case_ids, '{_q(c)}')" for c in case_ids)
-        full_where = f"({where}) AND ({clause})"
-        rows = await table.query().where(full_where).limit(limit).to_list()
+        full_where = all_of(
+            where,
+            any_of(*(contains("source_case_ids", case_id) for case_id in case_ids)),
+        )
+        rows = await agent_skill_repo.search(where=full_where, limit=limit)
         return [row_to_candidate(r, source="vector", score=0.0) for r in rows]

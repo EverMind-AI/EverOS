@@ -201,7 +201,7 @@ async def _check_daily_log(
             )
             for entry in parsed.entries
         }
-        lance_rows = await spec.lance_repo.find_where(
+        lance_rows = await spec.index_repo.find_where(
             f"md_path = '{_q(md_path)}'", limit=10_000
         )
         lance_sha_by_id = {r.entry_id: r.content_sha256 for r in lance_rows}
@@ -246,7 +246,7 @@ async def _check_user_profile(
                 ),
             }
         )
-        lance_row = await spec.lance_repo.get_by_id(owner_id)
+        lance_row = await spec.index_repo.get_by_id(owner_id)
         if lance_row is None:
             raise AssertionError(
                 f"user_profile row missing for owner {owner_id!r} @ {md_path}"
@@ -306,7 +306,7 @@ async def _check_agent_skill(
                 "references_content": references_content,
             }
         )
-        lance_row = await spec.lance_repo.get_by_id(skill_id)
+        lance_row = await spec.index_repo.get_by_id(skill_id)
         if lance_row is None:
             raise AssertionError(
                 f"agent_skill row missing for skill {skill_id!r} @ {md_path}"

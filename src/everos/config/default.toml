@@ -50,6 +50,18 @@ cache_size_kb = 2048
 # Uncomment to override:
 # read_consistency_seconds = 5.0
 
+[index]
+# Rebuildable vector/BM25 index. Markdown remains the source of truth.
+backend = "lancedb"
+
+[milvus]
+# Remote Milvus Server or Zilliz Cloud only; Milvus Lite paths are unsupported.
+uri = ""
+token = ""
+db_name = ""
+consistency_level = "Session"
+collection_prefix = "everos"
+
 [llm]
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL

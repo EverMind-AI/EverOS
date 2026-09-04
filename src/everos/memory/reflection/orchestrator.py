@@ -32,6 +32,7 @@ from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
+from everos.infra.persistence.index import all_of, eq, is_null
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import EpisodeExtracted
 
@@ -39,21 +40,6 @@ logger = get_logger(__name__)
 
 _MAX_CLUSTERS_PER_RUN = 10
 _WAIT_TIMEOUT_SECONDS = 120.0
-
-
-def _escape_sql(value: str) -> str:
-    """Escape single quotes for LanceDB SQL-like ``where`` predicates.
-
-    LanceDB has no parameterised query API; doubling the quote
-    (``'`` -> ``''``) is the SQL-standard escape.
-
-    Args:
-        value: Raw string to escape.
-
-    Returns:
-        Escaped string safe for interpolation into a WHERE clause.
-    """
-    return value.replace("'", "''")
 
 
 class ReflectionOrchestrator:
@@ -531,12 +517,13 @@ class ReflectionOrchestrator:
             app_id: Application scope.
             project_id: Project scope.
         """
-        where = (
-            f"parent_type = 'cluster' AND parent_id = '{_escape_sql(cluster_id)}' "
-            f"AND deprecated_by IS NULL "
-            f"AND owner_id = '{_escape_sql(owner_id)}' "
-            f"AND app_id = '{_escape_sql(app_id)}' "
-            f"AND project_id = '{_escape_sql(project_id)}'"
+        where = all_of(
+            eq("parent_type", "cluster"),
+            eq("parent_id", cluster_id),
+            is_null("deprecated_by"),
+            eq("owner_id", owner_id),
+            eq("app_id", app_id),
+            eq("project_id", project_id),
         )
         orphans = await self._episode_store.find_where(where, limit=10)
         if orphans:
@@ -865,11 +852,11 @@ class ReflectionOrchestrator:
         coros: list[Any] = [
             self._episode_store.update(
                 {"deprecated_by": merged_entry_id},
-                where=(
-                    f"entry_id = '{_escape_sql(eid)}' "
-                    f"AND owner_id = '{_escape_sql(owner_id)}' "
-                    f"AND app_id = '{_escape_sql(app_id)}' "
-                    f"AND project_id = '{_escape_sql(project_id)}'"
+                where=all_of(
+                    eq("entry_id", eid),
+                    eq("owner_id", owner_id),
+                    eq("app_id", app_id),
+                    eq("project_id", project_id),
                 ),
             )
             for eid in entry_ids
@@ -901,10 +888,10 @@ class ReflectionOrchestrator:
         coros = [
             self._atomic_fact_store.update(
                 {"deprecated_by": merged_entry_id},
-                where=(
-                    f"parent_id = '{_escape_sql(pid)}' "
-                    f"AND owner_id = '{_escape_sql(owner_id)}' "
-                    f"AND deprecated_by IS NULL"
+                where=all_of(
+                    eq("parent_id", pid),
+                    eq("owner_id", owner_id),
+                    is_null("deprecated_by"),
                 ),
             )
             for pid in parent_ids

@@ -10,7 +10,7 @@ everos/
 ├── entrypoints/    Presentation: cli + api
 ├── service/        Application: use case orchestration
 ├── memory/         Domain: extract + search + cascade + prompt_slots + models
-├── infra/          Infrastructure: persistence/{markdown, sqlite, lancedb}
+├── infra/          Infrastructure: persistence/{markdown, sqlite, lancedb, milvus, index}
 ├── component/      Cross-cutting providers: llm / embedding / config / utils
 ├── core/           Runtime base: observability / lifespan / context
 └── config/         Data: Settings + default.toml + prompt_slots templates

@@ -23,6 +23,7 @@ call. Tests that mutate environment variables must call
 from __future__ import annotations
 
 import os
+import re
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -375,6 +376,32 @@ class CascadeSettings(BaseModel):
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
 
 
+class IndexSettings(BaseModel):
+    """Rebuildable derived-index backend selection."""
+
+    backend: Literal["lancedb", "milvus"] = "lancedb"
+
+
+class MilvusSettings(BaseModel):
+    """Remote Milvus Server or Zilliz Cloud connection settings."""
+
+    uri: str = ""
+    token: SecretStr = SecretStr("")
+    db_name: str = ""
+    consistency_level: Literal["Strong", "Bounded", "Session", "Eventually"] = "Session"
+    collection_prefix: str = Field(default="everos", min_length=1)
+
+    @field_validator("collection_prefix")
+    @classmethod
+    def _validate_collection_prefix(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError(
+                "collection_prefix must start with a letter or underscore and "
+                "contain only letters, digits, and underscores"
+            )
+        return value
+
+
 class KnowledgeSearchSettings(BaseModel):
     """``[knowledge.search]`` — retrieval tuning for the knowledge module."""
 
@@ -448,6 +475,8 @@ class Settings(BaseSettings):
     api: ApiSettings = ApiSettings()
     sqlite: SqliteSettings = SqliteSettings()
     lancedb: LanceDBSettings = LanceDBSettings()
+    index: IndexSettings = IndexSettings()
+    milvus: MilvusSettings = MilvusSettings()
     llm: LLMSettings = LLMSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     rerank: RerankSettings = RerankSettings()

@@ -56,3 +56,15 @@ max_concurrent  = 5
 #
 # [lancedb]
 # read_consistency_seconds = 5.0
+#
+# [index]
+# backend = "lancedb"  # or "milvus"
+#
+# # Required only when index.backend = "milvus". Install with:
+# #   pip install "everos[milvus]"
+# [milvus]
+# uri = "http://127.0.0.1:19530"  # Milvus Server or Zilliz Cloud endpoint
+# token = ""                       # e.g. "root:Milvus" or cloud token
+# db_name = ""
+# consistency_level = "Session"
+# collection_prefix = "everos"

@@ -18,7 +18,15 @@ import pytest
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.lancedb import AgentSkill
+from everos.infra.persistence.index import (
+    AgentSkill,
+    All,
+    Comparison,
+    Predicate,
+    all_of,
+    eq,
+    ne,
+)
 from everos.infra.persistence.markdown import AgentSkillWriter
 from everos.memory.cascade.handlers import AgentSkillHandler, HandlerDeps
 
@@ -72,22 +80,31 @@ class _FakeSkillRepo:
         self.deletes.append(md_path)
         return 1
 
-    async def find_where(self, predicate: str, *, limit: int) -> list[AgentSkill]:
-        """In-memory equivalent — handles only the
-        ``md_path = '...' AND id != '...'`` shape the handler emits."""
-        if "md_path = " in predicate and "id != " in predicate:
-            md_lit = predicate.split("md_path = '")[1].split("'", 1)[0]
-            id_lit = predicate.split("id != '")[1].split("'", 1)[0]
+    async def find_where(self, predicate: Predicate, *, limit: int) -> list[AgentSkill]:
+        """In-memory equivalent for the handler's neutral predicate."""
+        if isinstance(predicate, All):
+            values = {
+                child.field: child.value
+                for child in predicate.children
+                if isinstance(child, Comparison)
+            }
+            md_lit = values.get("md_path")
+            id_lit = values.get("id")
             return [
                 r for r in self.rows.values() if r.md_path == md_lit and r.id != id_lit
             ][:limit]
         raise NotImplementedError(f"fake repo doesn't handle {predicate!r}")
 
-    async def delete(self, predicate: str) -> None:
+    async def delete(self, predicate: Predicate) -> None:
         self.predicate_deletes.append(predicate)
-        if "md_path = " in predicate and "id != " in predicate:
-            md_lit = predicate.split("md_path = '")[1].split("'", 1)[0]
-            id_lit = predicate.split("id != '")[1].split("'", 1)[0]
+        if isinstance(predicate, All):
+            values = {
+                child.field: child.value
+                for child in predicate.children
+                if isinstance(child, Comparison)
+            }
+            md_lit = values.get("md_path")
+            id_lit = values.get("id")
             self.rows = {
                 rid: row
                 for rid, row in self.rows.items()
@@ -233,7 +250,7 @@ async def test_renaming_skill_via_frontmatter_clears_old_row(
     assert list(fake_repo.rows.keys()) == ["a1_new_name"]
     # The sweep predicate references the *new* id with the same md_path.
     assert fake_repo.predicate_deletes == [
-        f"md_path = '{md_path}' AND id != 'a1_new_name'"
+        all_of(eq("md_path", md_path), ne("id", "a1_new_name"))
     ]
 
 

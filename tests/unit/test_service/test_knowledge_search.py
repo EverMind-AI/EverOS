@@ -135,12 +135,17 @@ def _patch_stack(
 class TestCompileKnowledgeWhere:
     def test_basic_clause(self) -> None:
         result = compile_knowledge_where("myapp", "myproj")
-        assert result == "app_id = 'myapp' AND project_id = 'myproj'"
+        from everos.infra.persistence.index import all_of, eq
+
+        assert result == all_of(eq("app_id", "myapp"), eq("project_id", "myproj"))
 
     def test_defaults(self) -> None:
         result = compile_knowledge_where("default", "default")
-        assert "app_id = 'default'" in result
-        assert "project_id = 'default'" in result
+        from everos.infra.persistence.index.lancedb import render_predicate
+
+        rendered = render_predicate(result)
+        assert "app_id = 'default'" in rendered
+        assert "project_id = 'default'" in rendered
 
     def test_rejects_invalid_app_id_with_sql_injection(self) -> None:
         with pytest.raises(ValueError, match="app_id"):
@@ -160,13 +165,19 @@ class TestCompileKnowledgeWhere:
 
     def test_accepts_valid_ids_with_special_chars(self) -> None:
         result = compile_knowledge_where("my_app.v2", "project-1")
-        assert "my_app.v2" in result
-        assert "project-1" in result
+        from everos.infra.persistence.index.lancedb import render_predicate
+
+        rendered = render_predicate(result)
+        assert "my_app.v2" in rendered
+        assert "project-1" in rendered
 
     def test_accepts_valid_ids_with_at_plus(self) -> None:
         result = compile_knowledge_where("app@org+v1", "proj_1")
-        assert "app@org+v1" in result
-        assert "proj_1" in result
+        from everos.infra.persistence.index.lancedb import render_predicate
+
+        rendered = render_predicate(result)
+        assert "app@org+v1" in rendered
+        assert "proj_1" in rendered
 
 
 # ── search_knowledge ─────────────────────────────────────────────────────────
