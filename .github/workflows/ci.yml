@@ -183,6 +183,14 @@ jobs:
           EVEROS_TEST_MILVUS_URI: http://127.0.0.1:19530
         run: uv run --frozen pytest tests/integration/test_tiers -v -k milvus
 
+      # The structural half of the port contract runs in the ordinary unit job
+      # for both adapters. The behavioural half needs a server, so it only has
+      # a backend to compare against here.
+      - name: Derived-index port contract (both backends)
+        env:
+          EVEROS_TEST_MILVUS_URI: http://127.0.0.1:19530
+        run: uv run --frozen pytest tests/unit/test_infra/test_index_contract.py -v
+
       - name: Stop Milvus
         if: always()
         run: docker compose -f /tmp/milvus-compose.yml down -v
