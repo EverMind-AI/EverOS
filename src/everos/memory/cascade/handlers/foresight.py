@@ -86,7 +86,7 @@ class ForesightHandler(BaseDailyLogHandler):
             " ".join(self._deps.tokenizer.tokenize(evidence)) if evidence else None
         )
         return Foresight(
-            id=f"{owner_id}_{entry.entry_id}",
+            id=f"{md_path}#{entry.entry_id}",
             entry_id=entry.entry_id,
             owner_id=owner_id,
             owner_type=owner_type,

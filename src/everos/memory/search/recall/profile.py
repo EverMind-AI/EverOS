@@ -29,16 +29,26 @@ logger = get_logger(__name__)
 class ProfileRecaller:
     """Fetch the owner's profile row from LanceDB, return at most one item."""
 
-    async def fetch(self, owner_id: str) -> list[SearchProfileItem]:
+    async def fetch(
+        self,
+        owner_id: str,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list[SearchProfileItem]:
         """Return ``[item]`` if a profile row exists, otherwise ``[]``.
 
         Empty list (rather than 404) lets the caller emit a normal
         response with ``profiles=[]`` while the user is still in their
         cold-start window (no profile synthesised yet).
+
+        The row id is the profile's md path (one profile per
+        ``<app>/<project>/users/<owner>/user.md`` since 2026-09-02 —
+        owner-only ids collapsed every project onto one row).
         """
         if not owner_id:
             return []
-        row = await user_profile_repo.get_by_id(owner_id)
+        row_id = f"{app_id}/{project_id}/users/{owner_id}/user.md"
+        row = await user_profile_repo.get_by_id(row_id)
         if row is None:
             logger.debug("profile_fetch_miss", owner_id=owner_id)
             return []

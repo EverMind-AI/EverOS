@@ -62,7 +62,7 @@ class AtomicFactHandler(BaseDailyLogHandler):
                 reason="embedding_capability_unavailable",
             )
         return AtomicFact(
-            id=f"{owner_id}_{entry.entry_id}",
+            id=f"{md_path}#{entry.entry_id}",
             entry_id=entry.entry_id,
             owner_id=owner_id,
             owner_type=owner_type,
