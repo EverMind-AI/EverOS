@@ -336,3 +336,81 @@ The `add` + `wait_ready` phase dominates wall-clock time; LLM calls
 | `Too many open files (os error 24)` | LanceDB FD exhaustion from concurrent searches | Lower `search_concurrency` in config.toml (agentic needs more FDs per query) or raise `ulimit -n` |
 | Low accuracy across all categories | Embedding/rerank not configured | Verify `everos.toml` has working embedding + rerank providers |
 | `conv<N>/error.log` exists | Unhandled exception in that conversation | Read the traceback; other conversations are unaffected |
+
+---
+
+# Belief-layer benchmark (offline)
+
+`belief_ku.py` measures one thing the LoCoMo pipeline above cannot isolate:
+**what the memory asserts when a stored fact is later contradicted.**
+
+It runs on the `knowledge-update` slice of
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) — 78 instances that
+are two-session supersessions, 70 of which carry turn-level gold evidence
+spans in both sessions. Those spans feed
+`everos.memory.belief.BeliefResolver` directly, with no extractor, no
+retriever and no LLM in between, so the resulting number is attributable to
+the update rule rather than to the pipeline around it.
+
+No server, no providers, no API key, ~2 seconds.
+
+```bash
+mkdir -p data && cd data
+wget https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json
+cd ..
+uv run python benchmarks/belief_ku.py --data data/longmemeval_oracle.json
+```
+
+```
+arm                        lww        belief
+--------------------------------------------
+clean                   100.0%         78.6%
+poison-5                  0.0%         78.6%
+novel-5                   0.0%         78.6%
+lowtrust-fix            100.0%          0.0%
+```
+
+`clean` is a pure recency test where last-write-wins is optimal by
+construction. The three overlay arms — a stale claim replayed on a low-trust
+channel, an unseen claim asserted on one, and the true update arriving on
+one — are constructed on top of the benchmark and are **not** part of
+LongMemEval. See [docs/belief-layer.md](../docs/belief-layer.md) for what
+each row means and what the 21.4% gap on `clean` is.
+
+## Belief-key derivation
+
+`belief_key.py` measures the step before arbitration: deciding *which* facts
+are competing for the same slot at all. Labels come free from KU pair
+membership. Same dataset, same offline constraints.
+
+```bash
+uv run python benchmarks/belief_key.py --data data/longmemeval_oracle.json
+```
+
+```
+ threshold    linked   false links
+----------------------------------
+      0.20     85.7%         1.60%
+      0.25     81.4%         0.45%  <- default
+      0.30     68.6%         0.12%
+
+Supersession with derived keys (nothing tells it what competes):
+  clean        78.6%
+  poison-5     78.6%
+```
+
+The two columns are not symmetric and the threshold is set from the right
+one — a missed link leaves a contradiction unarbitrated, which is today's
+behaviour, while a false link lets an unrelated fact suppress a true one.
+
+## CLI reference
+
+`belief_ku.py`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--data` | `data/longmemeval_oracle.json` | Path to the oracle split |
+| `--repetitions` | `5` | How many times the attacker repeats its claim |
+| `--poison-tier` | `web_fetch` | Channel the attacker writes on |
+
+`belief_key.py` takes `--data` only.

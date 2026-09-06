@@ -260,6 +260,7 @@ evaluation/src/adapters/*/prompts/profile/*.json
 
 # Locomo source dataset (downloadable, not source code)
 data/locomo10.json
+data/longmemeval_oracle.json
 evaluation/data/locomo/locomo10.json
 evaluation/locomo_evaluation/data/locomo10.json
 
