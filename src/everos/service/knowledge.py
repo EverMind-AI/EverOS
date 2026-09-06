@@ -1198,11 +1198,11 @@ async def _base_retrieve(
 async def _enrich_with_content(
     candidates: list[Candidate],
 ) -> list[Candidate]:
-    """Batch-fetch SQLite content and attach to candidate metadata.
+    """Batch-fetch authoritative content and build safe rerank passages.
 
-    Acts as a no-reranker path: returns candidates in their original
-    order with ``content`` added to metadata for downstream hit
-    conversion.
+    ``content`` remains the exact SQLite value for downstream API responses.
+    ``rerank_content`` falls back through topic summary/name/id so providers
+    never receive an empty document.
     """
     if not candidates:
         return candidates
@@ -1211,10 +1211,26 @@ async def _enrich_with_content(
     topics = await knowledge_topic_sqlite_repo.get_topics_by_ids(topic_ids)
     content_map = {t.node_id: t.content for t in topics}
 
+    def _first_nonblank(*values: object) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return "Knowledge topic"
+
     return [
         c.model_copy(
             update={
-                "metadata": {**c.metadata, "content": content_map.get(c.id, "")},
+                "metadata": {
+                    **c.metadata,
+                    "content": str(content_map.get(c.id, "") or ""),
+                    "rerank_content": _first_nonblank(
+                        content_map.get(c.id, ""),
+                        c.metadata.get("summary"),
+                        c.metadata.get("topic_name"),
+                        c.id,
+                    ),
+                },
             }
         )
         for c in candidates
@@ -1312,7 +1328,7 @@ async def _run_category_pipeline(
             recaller, where, method=method, query=q, vector=vector, limit=k
         )
 
-    raw_rerank = build_rerank_fn(reranker, text_field="content")
+    raw_rerank = build_rerank_fn(reranker, text_field="rerank_content")
 
     async def _rerank_with_enrich(
         q: str, candidates: Sequence[Candidate]
