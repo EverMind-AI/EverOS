@@ -11,6 +11,8 @@ Public surface:
   / ``require``).
 - :class:`OpenAIEmbeddingProvider` — concrete provider for any
   OpenAI-protocol embeddings endpoint (DeepInfra, vLLM, OpenAI, …).
+- :class:`OllamaEmbeddingProvider` — local Ollama embedding provider
+  with sensible defaults (``http://localhost:11434/v1``, dim=768).
 - :func:`build_embedding_provider` — settings-driven factory.
 - :func:`get_embedding_capability` — process-wide lazy singleton
   accessor for :class:`EmbeddingCapability`. There is no separate
@@ -31,6 +33,7 @@ from everos.core.errors import EmbeddingServiceError as EmbeddingServiceError
 from .accessor import get_embedding_capability as get_embedding_capability
 from .capability import EmbeddingCapability as EmbeddingCapability
 from .factory import build_embedding_provider as build_embedding_provider
+from .ollama_provider import OllamaEmbeddingProvider as OllamaEmbeddingProvider
 from .openai_provider import OpenAIEmbeddingProvider as OpenAIEmbeddingProvider
 from .protocol import EmbeddingError as EmbeddingError
 from .protocol import EmbeddingProvider as EmbeddingProvider
@@ -40,6 +43,7 @@ __all__ = [
     "EmbeddingError",
     "EmbeddingProvider",
     "EmbeddingServiceError",
+    "OllamaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "build_embedding_provider",
     "get_embedding_capability",
