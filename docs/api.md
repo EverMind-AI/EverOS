@@ -926,10 +926,15 @@ items match the request before paging.
 
 **`page_size`** — Items per page, in `1..100`. Default 20.
 
-**`sort_by`** — Column to sort by. Note: for `memory_type` values
-where `"timestamp"` does not apply (e.g. `"profile"` has no
-timestamp, `"agent_skill"` is a named entity), the server silently
-falls back to `"updated_at"`.
+**`sort_by`** — Column to sort by. The `agent_skill` table has no
+`timestamp` column, so a request with `sort_by="timestamp"` is
+downgraded to `"updated_at"`; the actual column used is reported
+in `response.data.effective_sort` so the caller can detect the
+override (diff `response.data.effective_sort` against the request's
+`sort_by`). The manager also emits a structured warning
+(`get.sort_by.downgraded`) on every override so the loss is visible
+in logs / metrics. `profile` is a single-row KV and does not
+consult this field.
 
 **`sort_order`** — `"desc"` (newest first, default) or `"asc"`.
 
@@ -950,6 +955,7 @@ branching on `memory_type`; exactly one is populated.
 | `agent_skills` | `array<GetAgentSkillItem>` | Populated when `memory_type="agent_skill"` |
 | `total_count` | `integer` | Total matching records **before** paging |
 | `count` | `integer` | Number of items in **this page** (`len(items)`) |
+| `effective_sort` | `string \| null` | The sort column actually applied. Normally equal to the request's `sort_by`; for `agent_skill` with `sort_by="timestamp"` it is `"updated_at"` (the override) |
 
 #### GetEpisodeItem
 

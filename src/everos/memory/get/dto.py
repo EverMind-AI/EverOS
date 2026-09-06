@@ -77,9 +77,12 @@ class GetRequest(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
     sort_by: Literal["timestamp", "updated_at"] = "timestamp"
-    """Sort column. ``profile`` and ``agent_skill`` silently override
-    to ``updated_at`` (profile has no timestamp; agent_skill is a
-    named entity with no temporal column)."""
+    """Sort column. ``agent_skill`` has no ``timestamp`` column; the
+    manager downgrades the request to ``updated_at`` and surfaces the
+    actual column used in :attr:`GetData.effective_sort` so the
+    caller can detect the override. ``profile`` is single-row KV (no
+    listing sort surface), so this field is not consulted for that
+    kind."""
 
     sort_order: Literal["asc", "desc"] = "desc"
     filters: FilterNode | None = None
@@ -108,6 +111,33 @@ class GetRequest(BaseModel):
                 f"memory_type {self.memory_type.value!r} is not valid "
                 "when agent_id is set"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_profile_has_no_paging(self) -> Self:
+        # ``profile`` is a single-row KV fetch (one user_id -> at most
+        # one user_profile row). The manager path (manager.py PROFILE
+        # arm) reads ``req.page`` / ``req.page_size`` / ``req.filters``
+        # into locals but never threads them into the profile lookup,
+        # so a caller can ship a paginated/filtered request and the
+        # server silently degrades to a single-row 200. Reject
+        # pagination + filters up front so the contract is honest.
+        # ``sort_by`` is allowed because the manager surfaces the
+        # applied column in ``GetData.effective_sort`` (callers diff
+        # against their request); see r2-4.
+        if self.memory_type == GetMemoryType.PROFILE:
+            extras: list[str] = []
+            if self.page != 1:
+                extras.append(f"page={self.page}")
+            if self.page_size != 20:
+                extras.append(f"page_size={self.page_size}")
+            if self.filters is not None:
+                extras.append("filters=<set>")
+            if extras:
+                raise ValueError(
+                    "memory_type='profile' is a single-row KV fetch and "
+                    f"ignores pagination/filter arguments; got {', '.join(extras)}"
+                )
         return self
 
     @property
@@ -210,6 +240,13 @@ class GetData(BaseModel):
 
     count: int = 0
     """Number of items in this page (``len(items)`` after slicing)."""
+
+    effective_sort: str | None = None
+    """The sort column actually applied to the query. Normally equal
+    to :attr:`GetRequest.sort_by`; for ``agent_skill`` the manager
+    downgrades ``"timestamp"`` to ``"updated_at"`` because the
+    table has no ``timestamp`` column — callers can diff against
+    ``GetRequest.sort_by`` to detect that override."""
 
 
 class GetResponse(BaseModel):
