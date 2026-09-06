@@ -119,6 +119,9 @@ built into Raven. Choose an integration to open its setup guide.
 ```bash
 uv pip install everos
 # or: pip install everos
+
+[![Listed on TakoAPI](https://img.shields.io/badge/Listed%20on-TakoAPI-7c3aed)](https://takoapi.com/agents/evermind-ai-everos)
+
 ```
 
 ### 2. Try the standalone demo — no key required
