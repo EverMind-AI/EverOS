@@ -38,6 +38,12 @@ logger = get_logger(__name__)
 
 _DUMMY_VECTOR_FIELD = "_everos_dummy_vector"
 _DUMMY_VECTOR_DIMENSION = 2
+_SEARCH_TOPK_MAX = 16_384
+"""Milvus caps ``search`` topK at its result window and rejects anything
+larger outright. LanceDB has no such ceiling, so callers pass generous
+pool sizes -- agentic search deliberately passes a large sentinel and
+expects the engine to clamp. Clamping here keeps that expectation true on
+both backends instead of making every caller learn one engine's limit."""
 _SPARSE_SUFFIX = "__sparse"
 _PRESENT_SUFFIX = "__present"
 
@@ -606,7 +612,7 @@ class MilvusRepoBase[T: BaseModel]:
                 data=[query],
                 anns_field=_sparse_field(field),
                 filter=self._expr(where),
-                limit=limit,
+                limit=min(limit, _SEARCH_TOPK_MAX),
                 output_fields=self._output_fields(include_vectors=False),
                 search_params={"metric_type": "BM25"},
             )
@@ -647,7 +653,7 @@ class MilvusRepoBase[T: BaseModel]:
             data=[list(vector)],
             anns_field=vector_field,
             filter=self._expr(all_of(where, present)),
-            limit=limit,
+            limit=min(limit, _SEARCH_TOPK_MAX),
             output_fields=self._output_fields(include_vectors=False),
             search_params={"metric_type": "COSINE"},
         )

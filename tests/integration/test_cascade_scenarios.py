@@ -34,6 +34,7 @@ from sqlmodel import SQLModel
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
 from everos.core.persistence import MarkdownReader, MarkdownWriter, MemoryRoot
+from everos.infra.persistence.index import eq
 from everos.infra.persistence.lancedb import (
     atomic_fact_repo,
     dispose_connection,
@@ -534,7 +535,7 @@ async def test_concurrent_writes_different_owners_no_bleed(
 
         for oid in owners:
             md_path = _atomic_fact_md_path(oid, bucket)
-            rows = await atomic_fact_repo.find_where(f"md_path = '{md_path}'", limit=10)
+            rows = await atomic_fact_repo.find_where(eq("md_path", md_path), limit=10)
             assert len(rows) == per_owner, (
                 f"{oid}: expected {per_owner} rows, got {len(rows)}"
             )

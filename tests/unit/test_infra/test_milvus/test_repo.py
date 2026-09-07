@@ -602,3 +602,49 @@ def test_nullable_bm25_input_is_declared_not_null() -> None:
     # "evidence" is the same optional text without the analyzer attached, so
     # it stays nullable — the NOT NULL above is caused by BM25, nothing else.
     assert physical["evidence"].nullable is True
+
+
+async def test_search_topk_is_clamped_to_the_milvus_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Milvus rejects a topK above its result window; LanceDB has no ceiling.
+
+    Agentic search passes a large sentinel on purpose and expects the engine
+    to clamp -- a habit LanceDB permits and Milvus answers with
+    ``MilvusException code=1100``. The adapter absorbs the difference so no
+    caller has to learn one engine's limit.
+    """
+    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    seen: dict[str, int] = {}
+
+    class _FakeClient:
+        def has_collection(self, name: str) -> bool:
+            return True
+
+        def describe_collection(self, name: str):  # type: ignore[no-untyped-def]
+            return _describe_response(milvus_repo)
+
+        def list_indexes(self, name: str):  # type: ignore[no-untyped-def]
+            return list(_index_descriptions(_describe_response(milvus_repo)))
+
+        def describe_index(self, name: str, index_name: str):  # type: ignore[no-untyped-def]
+            return _index_descriptions(_describe_response(milvus_repo))[index_name]
+
+        def search(self, *a, **kw):  # type: ignore[no-untyped-def]
+            seen["limit"] = kw["limit"]
+            return [[]]
+
+    async def _fake_get_client():  # type: ignore[no-untyped-def]
+        return _FakeClient()
+
+    monkeypatch.setattr(repository, "get_client", _fake_get_client)
+
+    await milvus_repo.dense_search([0.1] * 1024, None, limit=100_000)
+    assert seen["limit"] == repository._SEARCH_TOPK_MAX
+
+    await milvus_repo.sparse_search(["hiking"], None, limit=100_000)
+    assert seen["limit"] == repository._SEARCH_TOPK_MAX
+
+    # A limit inside the window is passed through untouched.
+    await milvus_repo.dense_search([0.1] * 1024, None, limit=25)
+    assert seen["limit"] == 25

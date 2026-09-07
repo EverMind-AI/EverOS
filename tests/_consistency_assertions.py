@@ -48,6 +48,7 @@ import anyio
 
 from everos.core.persistence import MarkdownReader
 from everos.core.persistence.markdown.entries import StructuredEntry
+from everos.infra.persistence.index import eq
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 from everos.memory.cascade.handlers._common import content_sha256
 from everos.memory.cascade.handlers._daily_log_base import BaseDailyLogHandler
@@ -202,7 +203,7 @@ async def _check_daily_log(
             for entry in parsed.entries
         }
         lance_rows = await spec.index_repo.find_where(
-            f"md_path = '{_q(md_path)}'", limit=10_000
+            eq("md_path", md_path), limit=10_000
         )
         lance_sha_by_id = {r.entry_id: r.content_sha256 for r in lance_rows}
         if md_sha_by_id != lance_sha_by_id:
