@@ -47,10 +47,30 @@ class IsNull(Predicate):
 class All(Predicate):
     children: tuple[Predicate, ...]
 
+    def __post_init__(self) -> None:
+        _reject_empty(self)
+
 
 @dataclass(frozen=True)
 class AnyOf(Predicate):
     children: tuple[Predicate, ...]
+
+    def __post_init__(self) -> None:
+        _reject_empty(self)
+
+
+def _reject_empty(group: All | AnyOf) -> None:
+    """Forbid an empty group at construction, not just in the factories.
+
+    Adapters render an empty group as an empty filter, and the two backends
+    then disagree: LanceDB raises a raw SQL parse error, Milvus drops the
+    filter and matches every row. Either way the meaning is wrong — an empty
+    ``AnyOf`` means "match nothing" — and on :meth:`IndexRepository.delete`
+    the Milvus reading is a silent table wipe. ``All`` and ``AnyOf`` are public,
+    so guarding only :func:`all_of` / :func:`any_of` leaves the hole open.
+    """
+    if not group.children:
+        raise ValueError(f"{type(group).__name__} requires at least one child")
 
 
 def compare(field: str, operator: ComparisonOperator, value: Scalar) -> Predicate:
