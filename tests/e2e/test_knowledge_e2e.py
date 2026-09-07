@@ -25,9 +25,13 @@ Marked ``live_llm`` + ``slow`` — requires ``EVEROS_LLM__*`` +
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 
 import httpx
 import pytest
+
+import everos.component.embedding.accessor as _embedding_accessor
+import everos.component.rerank.accessor as _rerank_accessor
 
 # ---------------------------------------------------------------------------
 # Test document — 3 clear sections for predictable topic extraction.
@@ -64,6 +68,45 @@ _PREFIX = "/api/v1/knowledge"
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _opt_in_real_embedding_and_rerank(
+    _reset_embedding_capability_singleton: None,
+    _reset_rerank_capability_singleton: None,
+) -> Iterator[None]:
+    """Opt this module's tests into real embedding + rerank capabilities.
+
+    ``tests/conftest.py``'s ``_reset_embedding_capability_singleton``
+    autouse fixture pins the capability to unavailable for every test
+    (hermeticity). The knowledge write path requires it: ``POST
+    /documents`` rejects the request with ``PROVIDER_NOT_CONFIGURED``
+    when ``get_embedding_capability()`` reports unavailable, so without
+    opting in here every test in this module fails at document creation
+    — no matter what credentials the environment carries.
+
+    Requesting ``_reset_embedding_capability_singleton`` as a parameter
+    — rather than relying on fixture declaration order — makes pytest's
+    dependency graph guarantee this fixture's setup runs after it and
+    its teardown before it.
+
+    Setting ``_capability = None`` (rather than constructing a
+    capability object) makes the accessor rebuild lazily from
+    ``load_settings()`` on next call, picking up the real credentials
+    ``tests/e2e/conftest.py`` loads at import time.
+
+    Rerank needs the same treatment, and that is where this fixture
+    differs from its sibling in
+    ``test_add_flush_agent_pipeline_e2e.py``: nothing on the agent write
+    path touches rerank, so that module leaves it hermetic. The
+    knowledge write path does require it, and ``POST /documents``
+    rejects the request the same way when it is unavailable.
+    """
+    _embedding_accessor._capability = None
+    _rerank_accessor._capability = None
+    yield
+    _embedding_accessor._capability = None
+    _rerank_accessor._capability = None
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -88,7 +131,7 @@ async def test_knowledge_full_http_lifecycle(
     assert resp.status_code == 200
     cats = resp.json()["data"]["categories"]
     assert len(cats) >= 10, f"Expected >=10 default categories, got {len(cats)}"
-    cat_ids = {c["id"] for c in cats}
+    cat_ids = {c["category_id"] for c in cats}
     assert "Sports" in cat_ids
     assert "Others" in cat_ids
 
