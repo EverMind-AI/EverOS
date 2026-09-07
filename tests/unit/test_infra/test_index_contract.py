@@ -5,7 +5,10 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import subprocess
+import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,10 +20,14 @@ from everos.infra.persistence.backends.lancedb import (
 from everos.infra.persistence.backends.milvus import milvus_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
+    All,
+    AnyOf,
     Episode,
     IndexBackend,
     IndexRepository,
+    Predicate,
     all_of,
+    any_of,
     drop_business_tables,
     episode_repo,
     eq,
@@ -190,6 +197,54 @@ def test_lance_predicate_renderer_owns_escaping() -> None:
     )
     assert "owner_id = 'o''reilly'" in rendered
     assert "session_id = 'session'" in rendered
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "everos.infra.persistence.backends.lancedb",
+        "everos.infra.persistence.backends.milvus",
+        "everos.infra.persistence.index",
+    ],
+)
+def test_adapter_and_port_modules_import_in_any_order(module: str) -> None:
+    """Each module must import as the process's first everos import.
+
+    The port facade wires the concrete backends at import time, so an adapter
+    reaching back into the ``index`` package closes a cycle: whichever side is
+    imported first fails on a partially initialised module. A subprocess is the
+    only honest check — inside this process the package is already imported, so
+    the cycle is invisible.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"importing {module} first failed:\n{proc.stderr}"
+
+
+@pytest.mark.parametrize("group", [All, AnyOf])
+def test_empty_predicate_group_is_rejected_at_construction(
+    group: type[Predicate],
+) -> None:
+    """An empty group must never reach an adapter — the two disagree on it.
+
+    Rendered empty, LanceDB raises a raw SQL parse error while Milvus drops
+    the filter and matches every row; on ``delete`` that reading is a silent
+    table wipe. ``All`` and ``AnyOf`` are exported, so the factories' own
+    guard is not enough — the classes have to refuse it too.
+    """
+    with pytest.raises(ValueError, match="at least one child"):
+        group(())
+
+
+@pytest.mark.parametrize("factory", [all_of, any_of])
+def test_predicate_factories_reject_an_all_none_argument_list(
+    factory: Callable[..., Predicate],
+) -> None:
+    with pytest.raises(ValueError, match="at least one non-None predicate"):
+        factory(None, None)
 
 
 async def test_repository_port_crud_count_and_uncapped_scan(
