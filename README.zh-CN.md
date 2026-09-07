@@ -322,6 +322,17 @@ make test
 <tr>
 <td width="50%" valign="top">
 
+[![AIUI Sports Agents for Smart Glasses](https://github.com/user-attachments/assets/7a8e6bca-6a12-4284-aa57-2f59fed7a6a2)](https://github.com/EasonZhu1997/AIUI-Sports-Agents)
+
+#### AIUI Sports Agents
+
+面向智能眼镜的运动 agents，覆盖跑步、骑行和室内划船。AISmartRun 提供用于跑后总结的可选记忆后端接口；接入 EverOS 需要单独配置后端服务。
+
+[代码](https://github.com/EasonZhu1997/AIUI-Sports-Agents)
+
+</td>
+<td width="50%" valign="top">
+
 [![banner-gif](https://github.com/user-attachments/assets/840470d7-a838-4c05-8685-dd797d4e9cdf)](https://evermind.ai/usecase_reunite)
 
 #### Reunite - 用 EverOS 找回连接
@@ -331,6 +342,9 @@ make test
 [了解更多](https://evermind.ai/usecase_reunite)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/7282b38b-56bf-4356-aa7b-06a845e7683d)](https://github.com/tt-a1i/hive)
@@ -342,9 +356,6 @@ make test
 [代码](https://github.com/tt-a1i/hive)
 
 </td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
@@ -356,6 +367,9 @@ make test
 [代码](https://github.com/tt-a1i/evermemos-mcp)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/a4f0fd86-1c81-4445-bebc-e51eb5e33b30)](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
@@ -367,9 +381,6 @@ make test
 [代码](https://github.com/yuansui123/AI-Data-Technician-EverMemOS)
 
 </td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/650b901b-c9ba-4001-bac7-626b009df830)
@@ -381,6 +392,15 @@ make test
 即将推出
 
 </td>
+</tr>
+
+<tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
+</td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 ![banner-gif](https://github.com/user-attachments/assets/85b338b2-e48e-4a65-9f30-0bc6998df872)
@@ -392,15 +412,6 @@ make test
 即将推出
 
 </td>
-</tr>
-
-<tr>
-<td colspan="2" align="right">
-<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
-</td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/f30617a1-adc0-4271-bc0e-c3a0b28cb903)](https://github.com/xunyud/Earth-Online)
@@ -412,6 +423,9 @@ Earth Online 是一款 memory-aware productivity game，把日常计划变成一
 [代码](https://github.com/xunyud/Earth-Online)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/57d8cda7-35a5-4561-b794-5520dffc917b)](https://github.com/golutra/golutra)
@@ -423,8 +437,6 @@ Golutra 为工程团队提供 multi-agent workforce，把 IDE 从单一 assistan
 [代码](https://github.com/golutra/golutra)
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/75f19db5-30f6-4eed-9b1e-c9c6a0e6b7de)](https://github.com/Yangtze-Seventh/taste-verse)
@@ -436,6 +448,9 @@ Golutra 为工程团队提供 multi-agent workforce，把 IDE 从单一 assistan
 [代码](https://github.com/Yangtze-Seventh/taste-verse)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/93ac2a68-4f18-4fcb-8d87-80aeb00a9d7c)](https://github.com/kellyvv/OpenHer)
@@ -447,9 +462,6 @@ Golutra 为工程团队提供 multi-agent workforce，把 IDE 从单一 assistan
 [代码](https://github.com/kellyvv/OpenHer)
 
 </td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/550071c1-dc39-4964-9f67-ffdfad792345)](https://chromewebstore.google.com/detail/ruminer-browser-agent/lbccjohfpdpimbhpckljimgolndfmfif)
@@ -461,6 +473,15 @@ Ruminer 为 browser agent 带来持久记忆，让它能在不同网页任务之
 [插件](https://chromewebstore.google.com/detail/ruminer-browser-agent/lbccjohfpdpimbhpckljimgolndfmfif)
 
 </td>
+</tr>
+
+<tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
+</td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/c258a6c4-fe70-497a-98d1-3dade4a932f6)](https://github.com/nanxingw/EverMem)
@@ -472,15 +493,6 @@ Ruminer 为 browser agent 带来持久记忆，让它能在不同网页任务之
 [代码](https://github.com/nanxingw/EverMem)
 
 </td>
-</tr>
-
-<tr>
-<td colspan="2" align="right">
-<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
-</td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/39274473-ceb3-48fb-a031-e22230decbe2)](https://github.com/mco-org/mco)
@@ -492,6 +504,9 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/mco-org/mco)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/314c9126-8e08-4688-bbbb-8555ad58cf67)](https://github.com/onenewborn/StudyBuddy-public)
@@ -503,9 +518,6 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/onenewborn/StudyBuddy-public)
 
 </td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/21da76aa-9a8b-48e0-9134-42429d7390e7)](https://github.com/TonyLiangDesign/MemoCare)
@@ -517,6 +529,9 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/TonyLiangDesign/MemoCare)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/e2428df3-ea11-4e88-8f9c-dad437dd8998)](https://github.com/AlexL1024/NeuralConnect)
@@ -528,9 +543,6 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/AlexL1024/NeuralConnect)
 
 </td>
-</tr>
-
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/e6eaf308-a874-483f-8874-6934bf95a78f)](https://github.com/elontusk5219-prog/Mobi)
@@ -542,6 +554,15 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/elontusk5219-prog/Mobi)
 
 </td>
+</tr>
+
+<tr>
+<td colspan="2" align="right">
+<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
+</td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/9aabcaa9-f97a-49d2-9109-0b5bb696ed41)](https://github.com/JaMesLiMers/EvermemCompetition-Spiro)
@@ -553,14 +574,6 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/JaMesLiMers/EvermemCompetition-Spiro)
 
 </td>
-</tr>
-
-<tr>
-<td colspan="2" align="right">
-<a href="#readme-top"><img src="https://img.shields.io/badge/-Back_to_top-gray?style=flat-square" alt="Back to top"></a>
-</td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/df9677ec-386f-4c56-a428-08bca25c54dc)](docs/migration-to-1.0.0.md)
@@ -572,6 +585,9 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [了解更多](docs/migration-to-1.0.0.md)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/3a2357a1-c0c3-464a-8979-0d1cdfc9b0d4)](https://github.com/TEN-framework/ten-framework/tree/04cb80601374fa9e35b4e544b2dbd23286ca7763/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
@@ -583,8 +599,6 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](https://github.com/TEN-framework/ten-framework/tree/04cb80601374fa9e35b4e544b2dbd23286ca7763/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/c36bdc04-97d3-4fe9-97d9-4b93b475595a)](https://screenshot-analysis-vercel.vercel.app/)
@@ -596,6 +610,9 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [在线演示](https://screenshot-analysis-vercel.vercel.app/)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/54a7cf8f-62c4-4fbc-9d50-b214d034e051)](use-cases/game-of-throne-demo)
@@ -607,8 +624,6 @@ MCO 为你的主 Agent 配备一个 agent team，让它们可以一起处理复�
 [代码](use-cases/game-of-throne-demo)
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/af37c1f6-7ba5-430c-b99d-2a7e7eac618f)](use-cases/claude-code-plugin)
@@ -620,6 +635,9 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 [代码](use-cases/claude-code-plugin)
 
 </td>
+</tr>
+
+<tr>
 <td width="50%" valign="top">
 
 [![banner-gif](https://github.com/user-attachments/assets/d521d28c-0ccd-44ff-aecc-828245e2f973)](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
@@ -631,6 +649,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 [在线演示](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
 
 </td>
+<td width="50%" valign="top"></td>
 </tr>
 </table>
 
