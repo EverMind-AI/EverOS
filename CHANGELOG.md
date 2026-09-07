@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-07
+
+**Milvus as an optional index backend, behind a port that hides which one you
+run.** The rebuildable BM25/vector index can now live in a remote Milvus Server
+or Zilliz Cloud instead of the embedded LanceDB, selected by one setting and
+verified at startup. Nothing about the default installation changes: LanceDB
+stays the backend, `pymilvus` stays an optional extra, and markdown stays the
+source of truth — the index is derived either way, so switching backends is a
+rebuild, not a migration. Both backends implement the same typed ports, so
+cascade, search and `/get` never branch on physical storage; a filter is a
+backend-neutral predicate tree rather than a rendered SQL string, which is what
+lets one set of contract tests hold both adapters to the same behaviour. The
+vector metric is now cosine everywhere, which corrects an inconsistency
+described under Changed.
+
+### Added
+
+- **Optional Milvus derived-index backend.** Install with
+  `pip install everos[milvus]` and select it with:
+
+  ```toml
+  [index]
+  backend = "milvus"
+
+  [milvus]
+  uri = "http://127.0.0.1:19530"   # or a Zilliz Cloud endpoint
+  token = ""                        # Zilliz Cloud API key
+  db_name = ""
+  consistency_level = "Session"     # Strong | Bounded | Session | Eventually
+  collection_prefix = "everos"
+  ```
+
+  Every field binds to an environment variable
+  (`EVEROS_INDEX__BACKEND`, `EVEROS_MILVUS__URI`, ...). The seven business
+  tables are created as `<collection_prefix>_<kind>`.
+
+  **Remote Milvus Server or Zilliz Cloud only.** A local database path is
+  rejected at startup rather than silently accepted: embedded Milvus Lite is
+  not supported, because its pure-Python rewrite degrades a single query to a
+  full scan and drops search-time parameters.
+
+  Startup verifies the physical collection field by field — datatype, primary
+  key, nullability, vector dimension, and the index metric (dense `COSINE`,
+  BM25 output fields) — so a collection that disagrees with the declared schema
+  fails immediately instead of at the first write or search.
+
+### Changed
+
+- **Vector search now uses cosine distance on LanceDB too.** The generic
+  vector path called `nearest_to()` without a distance type, so it ran on
+  LanceDB's L2 default while `agent_skill` recall and every Milvus query
+  already used cosine. All of them are cosine now. **Ranking can shift for
+  existing deployments** — the same vectors are scored by a different metric.
+  No action is required and no rebuild is involved; the index is unchanged.
+- **everalgo's transitive layer is pinned.** `everalgo-boundary`,
+  `everalgo-core` and `everalgo-clustering` are now direct `==` dependencies
+  matching the versions the test suite resolves. The consumer packages declare
+  them as `>=0.2.0,<2.0.0`, which treats a 0.x line as if only a major bump
+  could break compatibility, so a fresh resolution could pick releases the
+  suite had never run against. Raise them deliberately, together with a smoke
+  run against a PyPI-resolved install — `make package` installs the built
+  wheel with `--no-deps`, so it cannot catch a resolution break on its own.
+
+### Fixed
+
+- **`POST /api/v1/memory/add` no longer fails on a freshly resolved install.**
+  `everalgo-boundary` 0.3.0 added a third required field to the public
+  `DetectionResult` NamedTuple while `everalgo-agent-memory` 0.4.0 still built
+  it with two, so a default (`memorize.mode = "agent"`) install answered
+  `500 TypeError: DetectionResult.__new__() missing 1 required positional
+  argument: 'should_wait'`. Chat mode was unaffected. The pin above resolves
+  the compatible pair.
+- **Milvus datetime round-trips are exact below the millisecond threshold.**
+  Timestamps were written in milliseconds but read back through a
+  seconds-or-milliseconds heuristic, so any instant before 2001-09-09 either
+  landed in the year 30000 or raised `ValueError`. Physical column reads now
+  use an exact inverse.
+- **Concurrent `update()` on the Milvus backend no longer loses writes.** The
+  read half of the read-modify-write cycle sat outside the write lock, so a
+  backfill writing `vector` and a reflection writing `deprecated_by` could
+  overwrite each other on the same row. Both halves share one lock, and the
+  silent 10,000-row truncation on that path is gone.
+- **Milvus queries stay inside the engine's result window.** Row scans and
+  search `topK` are bounded by the 16,384-row ceiling instead of requesting
+  more and failing.
+
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on
@@ -946,7 +1033,7 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.3.0...HEAD
 [1.1.4]: https://github.com/EverMind-AI/everos/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/EverMind-AI/everos/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/EverMind-AI/everos/compare/v1.1.1...v1.1.2
