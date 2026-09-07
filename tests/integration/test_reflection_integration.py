@@ -35,7 +35,6 @@ from everos.core.persistence import (
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.infra.persistence.backends.lancedb import LanceIndexRepository
-from everos.infra.persistence.index import all_of, eq
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
@@ -384,7 +383,7 @@ async def test_reflection_init_merges_cluster_episodes(
         # -- Verify: source episodes deprecated in LanceDB.
         for ep in [ep1, ep2, ep3]:
             rows = await ep_repo.find_where(
-                all_of(eq("entry_id", ep.entry_id), eq("owner_id", owner_id))
+                f"entry_id = '{ep.entry_id}' AND owner_id = '{owner_id}'"
             )
             assert len(rows) == 1, f"expected 1 row for {ep.entry_id}"
             assert rows[0].deprecated_by == merged_entry_id, (

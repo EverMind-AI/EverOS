@@ -42,7 +42,6 @@ from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.component.utils.datetime import get_utc_now
 from everos.config import load_settings
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.persistence.index import eq
 from everos.infra.persistence.lancedb import (
     AgentCase,
     agent_case_repo,
@@ -252,7 +251,7 @@ async def test_skills_phase_grows_agent_skill_count(
     assert skills_after == skills_before + 1
     assert "phase 3 complete" in out
 
-    rows = await agent_skill_repo.find_where(eq("owner_id", "agent1"), limit=10)
+    rows = await agent_skill_repo.find_where("owner_id = 'agent1'", limit=10)
     assert len(rows) == 1
     assert rows[0].name == "summarise_doc"
     assert rows[0].cluster_id is not None
