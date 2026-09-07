@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from ..index.protocols import IndexRepository
+if TYPE_CHECKING:  # importing the port package here would close an import cycle
+    from ..index.protocols import IndexRepository
 
 
 class MilvusIndexBackend:
