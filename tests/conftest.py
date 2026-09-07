@@ -49,6 +49,7 @@ def _reset_settings_cache() -> Iterator[None]:
 
     from everos.component.utils import datetime as dt_module
     from everos.config import load_settings
+    from everos.memory import _partition_locks
 
     # ``configure_logging`` (called by some e2e fixtures / the CLI entry)
     # sets ``cache_logger_on_first_use=True``; once a logger is cached,
@@ -56,13 +57,25 @@ def _reset_settings_cache() -> Iterator[None]:
     # which silently breaks log-assertion tests that run *after* it in the
     # same process. Reset structlog to defaults around every test so that
     # global config never leaks across the suite.
+    # ``_partition_locks`` caches one ``asyncio.Lock`` per (strategy,
+    # partition key) and never evicts it — correct for a single-loop
+    # production process, wrong across tests: pytest-asyncio gives each
+    # test its own event loop, so the second test to touch a partition
+    # gets a lock bound to a dead loop and the strategy dies with
+    # ``RuntimeError: ... is bound to a different event loop``. It hits
+    # the parametrised suites hardest, where both backends replay the
+    # same agent ids, and it surfaces as a dead-lettered OME run rather
+    # than a test error — reported as a flake on whichever parameter
+    # happens to run second.
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
+    _partition_locks._reset_for_tests()
     yield
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
+    _partition_locks._reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
