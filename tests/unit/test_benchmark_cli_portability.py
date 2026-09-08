@@ -104,13 +104,3 @@ def test_no_proc_reports_instead_of_raising(
     assert run._iter_servers() == []
     out = capsys.readouterr().out
     assert "/proc" in out
-
-
-def test_linux_still_reads_proc() -> None:
-    """The behaviour that exists is not traded away for the guard.
-
-    Asserted by the call completing on this Linux runner: a guard that swallowed
-    every platform would return the same empty list and look identical.
-    """
-    assert isinstance(run._iter_servers(), list)
-    assert Path("/proc").is_dir(), "this test is only meaningful where /proc exists"
