@@ -1,6 +1,9 @@
-"""Shared error construction for HTTP-based rerank providers."""
+"""Shared error construction and retry pacing for HTTP rerank providers."""
 
 from __future__ import annotations
+
+import asyncio
+import random
 
 import httpx
 
@@ -9,6 +12,26 @@ from everos.core.observability.logging import get_logger
 from .protocol import RerankServiceError
 
 logger = get_logger(__name__)
+
+_BACKOFF_BASE_SECONDS = 0.5
+_BACKOFF_CAP_SECONDS = 8.0
+
+
+async def backoff_sleep(attempt: int) -> None:
+    """Wait before the next retry of a 429 / 5xx rerank request.
+
+    Retrying with no delay is useless against a *per-minute* quota — the
+    whole budget burns in milliseconds and the caller still fails. Hosted
+    rerank routers enforce exactly that kind of quota, so the retry loop
+    has to actually wait. Exponential with full jitter, capped, to avoid a
+    thundering herd when a batch of concurrent searches trips the limit
+    together.
+
+    Args:
+        attempt: Zero-based index of the attempt that just failed.
+    """
+    delay = min(_BACKOFF_BASE_SECONDS * (2**attempt), _BACKOFF_CAP_SECONDS)
+    await asyncio.sleep(random.uniform(0, delay))
 
 
 def upstream_http_error(provider: str, response: httpx.Response) -> RerankServiceError:

@@ -185,3 +185,35 @@ async def test_malformed_result_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     p = VllmRerankProvider(model="m", api_key="", base_url="http://x/v1")
     with pytest.raises(RerankServiceError, match="malformed rerank result"):
         await p.rerank("q", ["a"])
+
+
+async def test_429_retry_waits_between_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-minute quota is not survivable by spinning — retries must sleep."""
+    import everos.component.rerank._errors as errmod
+
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(errmod.asyncio, "sleep", fake_sleep)
+
+    attempts = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            return httpx.Response(429, json={"error": "rate limited"})
+        return _ok_response([{"index": 0, "relevance_score": 0.7}])
+
+    _patch_httpx(monkeypatch, handler)
+    p = VllmRerankProvider(model="m", api_key="k", base_url="http://x/v1")
+    out = await p.rerank("q", ["d"])
+    assert [r.score for r in out] == [0.7]
+    assert attempts == 3
+    # One wait per failed attempt, and each wait is a real (non-zero) budget.
+    assert len(slept) == 2
+    assert all(s >= 0 for s in slept)

@@ -47,6 +47,7 @@ from typing import Any
 
 import httpx
 
+from ._errors import backoff_sleep
 from .protocol import RerankError, RerankResult
 
 
@@ -160,6 +161,7 @@ class DashScopeRerankProvider:
                             f"DashScope rerank HTTP {response.status_code}: "
                             f"{response.text[:200]}"
                         )
+                    await backoff_sleep(attempt)
                     continue
                 raise RerankError(
                     f"DashScope rerank HTTP {response.status_code}: "

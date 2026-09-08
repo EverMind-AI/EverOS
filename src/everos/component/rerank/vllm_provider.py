@@ -41,7 +41,12 @@ from typing import Any
 
 import httpx
 
-from ._errors import retries_exhausted_error, transport_error, upstream_http_error
+from ._errors import (
+    backoff_sleep,
+    retries_exhausted_error,
+    transport_error,
+    upstream_http_error,
+)
 from .protocol import RerankResult, RerankServiceError
 
 
@@ -143,6 +148,7 @@ class VllmRerankProvider:
                 if response.status_code >= 500 or response.status_code == 429:
                     if attempt == self._max_retries:
                         raise upstream_http_error("vLLM", response)
+                    await backoff_sleep(attempt)
                     continue
                 raise upstream_http_error("vLLM", response)
 
