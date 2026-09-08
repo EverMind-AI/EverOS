@@ -333,7 +333,7 @@ class MultimodalSettings(BaseModel):
         EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES
     """
 
-    model: str = "google/gemini-3-flash-preview"
+    model: str = "google/gemini-3.8-flash"
     api_key: SecretStr | None = None
     base_url: str | None = None
     max_concurrency: int = 4

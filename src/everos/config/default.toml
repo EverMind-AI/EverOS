@@ -112,7 +112,7 @@ fallback_core = 3              # core size when every decider attempt fails
 # Independent LLM for multimodal parsing (everalgo-parser); must accept
 # image / pdf / audio image_url parts. Override via env:
 #   EVEROS_MULTIMODAL__MODEL, EVEROS_MULTIMODAL__API_KEY, EVEROS_MULTIMODAL__BASE_URL
-model = "google/gemini-3-flash-preview"
+model = "google/gemini-3.8-flash"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
 max_concurrency = 4

@@ -134,7 +134,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `model` | string | `"google/gemini-3-flash-preview"` | No | Multimodal parsing model. |
+| `model` | string | `"google/gemini-3.8-flash"` | No | Multimodal parsing model. |
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | No | Custom endpoint URL. |
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
