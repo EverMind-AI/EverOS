@@ -603,18 +603,6 @@ class _ServerFleet:
                 srv_env["EVEROS_LLMMR_TRACE_DUMP"] = str(
                     self.trace_dir / f"trace_port{port}.jsonl"
                 )
-            # Profile extraction runs in OME, concurrently across owners, so it gets
-            # its own file: interleaved into the retrieval trace it would be
-            # unreadable. Same reason the retrieval file is per-server -- one writer.
-            # Same two guards as above: no trace_dir means the caller wants no dump,
-            # and an operator-set env keeps their own value.
-            if self.trace_dir is not None and not os.environ.get(
-                "EVEROS_PROFILE_TRACE_DUMP"
-            ):
-                self.trace_dir.mkdir(parents=True, exist_ok=True)
-                srv_env["EVEROS_PROFILE_TRACE_DUMP"] = str(
-                    self.trace_dir / f"profile_port{port}.jsonl"
-                )
             if self.backbone_model:
                 srv_env["EVEROS_LLM__MODEL"] = self.backbone_model
             if self.backbone_base_url:
@@ -4309,7 +4297,8 @@ def main() -> None:
             decider_base_url=config.decider_base_url,
             decider_api_key=config.decider_api_key,
             extra_env=server_env_for(args.stages, config.retrieval_env),
-            # None disables both dumps inside the fleet; see BenchmarkConfig.trace.
+            # None disables retrieval tracing inside the fleet; see
+            # BenchmarkConfig.trace.
             trace_dir=(
                 Path(_results_root(args, config)) / args.run_name / "traces"
                 if config.trace

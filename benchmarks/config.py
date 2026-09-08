@@ -170,13 +170,11 @@ class BenchmarkConfig(BaseModel):
     overrides that, which is what a profile ablation needs. The server defaults the
     field to ``False``, so a run that wants profiles has to ask."""
     trace: bool = True
-    """Export the per-round retrieval trace and the profile-extraction trace.
+    """Export the per-round retrieval trace.
 
-    ``EVEROS_LLMMR_TRACE_DUMP`` and ``EVEROS_PROFILE_TRACE_DUMP`` are derived per
-    server under ``results/<run>/traces/``. On by default: a run without them cannot be
-    attributed afterwards, and the two files are the only record of what the decider saw
-    and which memcells each profile was built from. Turn it off only for a throughput
-    measurement where the writes themselves are being measured."""
+    ``EVEROS_LLMMR_TRACE_DUMP`` is derived per server under
+    ``results/<run>/traces/``. On by default because a run without it cannot establish
+    whether the decider completed normally or fell back after an error."""
 
     retrieval_env: dict[str, str] = Field(default_factory=dict)
     """Retrieval knobs pushed into the servers this harness starts, as EVEROS_*

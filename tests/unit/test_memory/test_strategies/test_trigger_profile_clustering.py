@@ -2,8 +2,7 @@
 
 Mirrors the skill-side test layout: mock embedder + cluster_repo +
 cluster_by_geometry, drive the strategy via :class:`FakeStrategyContext`,
-verify it emits nothing: the profile no longer keys off clustering, and the
-clusters it writes are read by ``agentic`` retrieval and Reflection instead.
+verify a single :class:`ProfileClusterUpdated` event is emitted.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
 from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory._partition_locks import _reset_for_tests
-from everos.memory.events import EpisodeExtracted
+from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.strategies.trigger_profile_clustering import (
     trigger_profile_clustering,
 )
@@ -70,9 +69,7 @@ async def test_strategy_meta_is_attached() -> None:
     meta = trigger_profile_clustering.meta
     assert meta.name == "trigger_profile_clustering"
     assert EpisodeExtracted in meta.trigger.on
-    # Emits nothing: `extract_user_profile` was the only consumer and it now
-    # triggers directly off `EpisodeExtracted`.
-    assert meta.emits == frozenset()
+    assert meta.emits == frozenset({ProfileClusterUpdated})
     assert meta.max_retries == 2
     assert meta.applies_to is not None
 
@@ -128,7 +125,11 @@ async def test_creates_new_cluster_when_no_existing(
         "project_id": "default",
     }
 
-    assert ctx.emitted == []
+    emitted = [e for e in ctx.emitted if isinstance(e, ProfileClusterUpdated)]
+    assert len(emitted) == 1
+    assert emitted[0].memcell_id == "mc_aaaaaaaaaaa1"
+    assert emitted[0].cluster_id == "cl_newuser00001"
+    assert emitted[0].owner_id == "u_alice"
 
     matching = [r for r in captured if r.get("event") == "profile_cluster_updated"]
     assert matching, "expected profile_cluster_updated log line"
@@ -179,7 +180,9 @@ async def test_merges_into_existing_cluster_when_algo_matches(
     assert persisted.id == "cl_existing0001"
     assert persisted.count == 2
 
-    assert ctx.emitted == []
+    emitted = [e for e in ctx.emitted if isinstance(e, ProfileClusterUpdated)]
+    assert len(emitted) == 1
+    assert emitted[0].cluster_id == "cl_existing0001"
 
 
 # ── partition lock (owner_id-level serialisation) ────────────────────────

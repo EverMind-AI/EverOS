@@ -1,10 +1,9 @@
-"""``include_profile`` / ``trace`` as config, not as code.
+"""``include_profile`` and retrieval ``trace`` as explicit run configuration.
 
-Both used to be implicit: ``INCLUDE_PROFILE`` lived on the adapter module and the
-traces switched on whenever the fleet happened to get a ``trace_dir``. Neither was
-visible in the run's recorded config, so a run could not say afterwards whether it
-had injected profiles or written a trace. These tests pin the two knobs and the
-precedence between the config value and the adapter's declaration.
+Both used to be implicit: ``INCLUDE_PROFILE`` lived on the adapter module and tracing
+switched on whenever the fleet happened to get a ``trace_dir``. Neither was visible in
+the recorded config. These tests pin the two knobs and the precedence between the
+config value and the adapter's declaration.
 """
 
 from __future__ import annotations
@@ -93,7 +92,7 @@ def test_config_overrides_the_adapter_only_when_it_says_something(
 
 
 def test_trace_off_gives_the_fleet_no_directory(tmp_path: Path) -> None:
-    """The fleet skips both dumps when ``trace_dir`` is None; that is the switch."""
+    """The fleet skips retrieval tracing when ``trace_dir`` is ``None``."""
     run = importlib.import_module("run")
     fleet = run._ServerFleet(1, tmp_path / "store", first_port=19999, trace_dir=None)
     assert fleet.trace_dir is None

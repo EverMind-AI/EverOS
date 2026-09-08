@@ -75,7 +75,7 @@ search_concurrency = 4                  # questions retrieved in parallel within
                                         # was an over-correction -- it measured 2.8 rows/min and
                                         # put search 5.9 hours out for no robustness gained.
 include_profile = false                 # OFF for this arm -- see the header
-trace = true                            # export retrieval + profile-extraction traces
+trace = true                            # export the retrieval trace
 
 [providers]                # OpenRouter provider pin per model vendor
 openai = "openai"
@@ -92,8 +92,6 @@ EVEROS_DECIDER__TIMEOUT_SECONDS = "600"   # 33.8s/call measured; 180s default le
 EVEROS_LLM__SEARCH_TIMEOUT_SECONDS = "600"
 EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
                                         # the 30s scanner covers the same ground
-EVEROS_PROFILE_EXTRACTION_INTERVAL = "1"   # real-time: every memcell updates the profile
-
 # --- ANSWER ----------------------------------------------------------------
 [answer]
 model = "google/gemini-3-flash-preview"

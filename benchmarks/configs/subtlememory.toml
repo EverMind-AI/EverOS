@@ -35,7 +35,7 @@ include_profile = false                 # OFF. The reference harness for this
                                         # ablation, and expect to beat the measured
                                         # run-to-run noise floor first: 0.91 pp on
                                         # LoCoMo, 1.20 pp on LongMemEval.
-trace = true                            # export retrieval + profile-extraction traces
+trace = true                            # export the retrieval trace
 
 [providers]                                # OpenRouter provider pin per model vendor
 openai = "openai"
@@ -46,8 +46,6 @@ google = "google-vertex,google-ai-studio"  # two providers => fallbacks permitte
 EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instead of summaries
 EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
                                         # the 30s scanner covers the same ground
-EVEROS_PROFILE_EXTRACTION_INTERVAL = "50"  # rewrite the profile every 50th episode, not every one
-
 # --- ANSWER ----------------------------------------------------------------
 # clash -> v5 routing, the reference's best-scoring arm: 71.75% against 66.56% for
 # the plain official prompt, and the only one of its sixteen configurations that
