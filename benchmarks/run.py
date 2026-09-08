@@ -418,18 +418,33 @@ def server_env_for(
 ) -> dict[str, str]:
     """The environment the servers this run starts should get.
 
-    A run with no ADD stage never writes markdown, so both background subsystems are
-    pure overhead on it -- and both actively hurt. Cascade's periodic scan re-enqueues
-    the whole store, which starved search on a dense one; OME holds an exclusive
-    per-store lock, which stops a second server from sharing one pre-built store root,
-    the shape a parallel-lane evaluation needs. Only set when ADD is absent, so an
-    ingesting run still extracts.
+    A run with no ADD stage never writes markdown, so the cascade projector is disabled.
+    OME keeps its normal lifecycle: the benchmark does not define a supported topology
+    where several server processes share one prebuilt root.
     """
     env = {str(k): str(v) for k, v in retrieval_env.items()}
     if "add" not in stages:
         env["EVEROS_DISABLE_CASCADE"] = "1"
-        env["EVEROS_DISABLE_OME"] = "1"
     return env
+
+
+def _server_roots_for(
+    base_urls: Sequence[str] | str, roots: Sequence[str] | str
+) -> list[str]:
+    """Return roots aligned one-to-one with server URLs.
+
+    Sharing a root across server processes is not a benchmark topology. Requiring one
+    explicit root per URL also keeps owner checks and completion polling on the same
+    shard that serves the conversation.
+    """
+    urls = [base_urls] if isinstance(base_urls, str) else list(base_urls)
+    resolved = [roots] if isinstance(roots, str) else list(roots)
+    if len(resolved) != len(urls):
+        raise SystemExit(
+            "--everos-root takes exactly one path per --base-url "
+            f"(got {len(resolved)} roots for {len(urls)} servers)"
+        )
+    return resolved
 
 
 _BIND_FAILURE_MARKERS = (
@@ -1492,7 +1507,6 @@ def _search_one(
     project_id: str,
     qa_meta_keys: Sequence[str] = (),
     include_profile: bool = False,
-    profile_subject: str | None = None,
 ) -> SearchResult:
     """Search a single QA question with retry on server errors."""
     question = qa["question"]
@@ -1515,13 +1529,6 @@ def _search_one(
     # that grades persona questions has to ask. Only the adapter declaring it does.
     if include_profile:
         payload["include_profile"] = True
-        # A group owner holds one profile per participant, so the question has to say
-        # which one. Left unset the server returns every profile under the owner --
-        # 38 of them on this benchmark's topic 01, which is the composite-profile
-        # failure again, only longer. An owner who is its own subject has a single
-        # profile and ignores this.
-        if profile_subject:
-            payload["profile_subject"] = profile_subject
     resp: dict = {}
     search_time = 0.0
     for attempt in range(_SEARCH_RETRIES):
@@ -1609,10 +1616,6 @@ def run_search_phase(
         if config.include_profile is not None
         else getattr(_ad, "INCLUDE_PROFILE", False)
     )
-    # A group owner holds one profile per participant; an adapter that knows how to read
-    # the asker out of a question says so with this hook. Absent, the owner is its own
-    # subject and the server's single profile needs no naming.
-    _subject_of = getattr(_ad, "profile_subject_of", None)
 
     def _worker(_pos: int, item: tuple[int, dict]) -> SearchResult:
         i, qa = item
@@ -1627,7 +1630,6 @@ def run_search_phase(
             project_id=project_id,
             qa_meta_keys=qa_meta_keys,
             include_profile=_include_profile,
-            profile_subject=_subject_of(qa) if _subject_of else None,
         )
 
     out_path = conv_dir / f"search_{method_label}.jsonl"
@@ -2972,9 +2974,65 @@ class DeciderUnreachableError(RuntimeError):
     """
 
 
+class DeciderTraceValidationError(RuntimeError):
+    """The completed run cannot prove that every decider round was healthy."""
+
+
 _MULTIROUND_METHOD = "llm_multiround"
 """The one search method that runs a decider. Mirrors ``SearchMethod.LLM_MULTIROUND``;
 every other method reaches no decider, so a run without it has nothing to probe."""
+
+
+def _assert_clean_decider_trace(output_dir: Path, methods: Sequence[str]) -> None:
+    """Refuse a multi-round report when its trace is missing, malformed, or degraded.
+
+    The public search response deliberately carries no benchmark-only health field.
+    Instead, each multi-round server writes structured JSONL under the run's ``traces``
+    directory. A round with exhausted decider retries carries
+    ``decider_failed=true``; scoring that fallback would measure a different method.
+    """
+    if _MULTIROUND_METHOD not in methods:
+        return
+
+    trace_dir = output_dir / "traces"
+    trace_paths = sorted(trace_dir.glob("trace*.jsonl"))
+    if not trace_paths:
+        raise DeciderTraceValidationError(
+            "llm_multiround report blocked: no retrieval trace found under "
+            f"{trace_dir}. Enable benchmark trace output and rerun search."
+        )
+
+    failed_rounds: list[str] = []
+    round_count = 0
+    for path in trace_paths:
+        with path.open(encoding="utf-8") as fh:
+            for line_number, line in enumerate(fh, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise DeciderTraceValidationError(
+                        "llm_multiround report blocked: malformed retrieval trace at "
+                        f"{path}:{line_number}: {error.msg}"
+                    ) from error
+                if record.get("round_idx") is None:
+                    continue
+                round_count += 1
+                if record.get("decider_failed") is True:
+                    failed_rounds.append(f"{path.name}:{line_number}")
+
+    if round_count == 0:
+        raise DeciderTraceValidationError(
+            "llm_multiround report blocked: retrieval traces contain no round records"
+        )
+    if failed_rounds:
+        sample = ", ".join(failed_rounds[:5])
+        suffix = "" if len(failed_rounds) <= 5 else ", ..."
+        raise DeciderTraceValidationError(
+            "llm_multiround report blocked: "
+            f"{len(failed_rounds)} decider fallback round(s) found at {sample}{suffix}"
+        )
 
 
 def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
@@ -3448,22 +3506,12 @@ def run_conversation(
     # c % N, the same mapping the historical fleet used, so a lane that dies can be
     # resumed with the identical assignment by re-running just its conversations.
     _urls = args.base_url if isinstance(args.base_url, list) else [args.base_url]
-    _roots = (
-        args.everos_root if isinstance(args.everos_root, list) else [args.everos_root]
-    )
-    if len(_roots) != 1 and len(_roots) != len(_urls):
-        raise SystemExit(
-            f"--everos-root takes either 1 path or exactly one per --base-url "
-            f"(got {len(_roots)} roots for {len(_urls)} servers)"
-        )
-    if len(_roots) == 1:
-        _roots = _roots * len(_urls)
+    _roots = _server_roots_for(_urls, args.everos_root)
     if len(_urls) > 1 and "add" in stages and conv_index == 0:
         # ADD writes, and a server takes an exclusive lock on its store's index queue
         # (.index/sqlite/ome.db.lock), so two servers cannot ingest into one root -- the
         # second refuses to start with BlockingIOError. Sharded ingestion therefore
-        # means The read-only stages have no such constraint and may share a single
-        # root.
+        # needs one root per server.
         print(
             "  NOTE: sharded ADD needs one --everos-root per --base-url (the index "
             "queue lock is exclusive). Conversation c is both written and read through "
@@ -3675,18 +3723,9 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
         default="http://localhost:8000",
         nargs="+",
         help="EverOS server address(es). Several may be given: conversation c is "
-        "served "
-        ""
-        "by address c %% len(addresses). Retrieval is read-only, so N servers can "
-        "share "
-        ""
-        ""
-        "one store -- only ADD needs a root per server, because it holds an exclusive "
-        "lock on the index queue (.index/sqlite/ome.db.lock). Splitting the read "
-        "stages "
-        ""
-        ""
-        "across servers is the cheapest speedup available: the client already runs "
+        "served by address c %% len(addresses). Each address must have a matching "
+        "--everos-root; sharing one root across server processes is unsupported. "
+        "The client already runs "
         "conversations_concurrency x search_concurrency requests at once, and a single "
         "server serialises them behind its own LLM calls.",
     )
@@ -3694,11 +3733,9 @@ def parse_args() -> tuple[argparse.Namespace, BenchmarkConfig]:
         "--everos-root",
         default=[],
         nargs="+",
-        help="EverOS --root path(s). Give one per --base-url when sharding ADD across "
-        "servers: ADD holds an exclusive lock on <root>/.index/sqlite/ome.db, so two "
-        "servers cannot ingest into the same root. Conversation c is served by "
-        "base_url[c %% n] and polled at everos_root[c %% n], keeping the two aligned. "
-        "SEARCH is read-only and happily shares one root.",
+        help="EverOS --root path(s), exactly one per --base-url. Conversation c is "
+        "served by base_url[c %% n] and polled at everos_root[c %% n], keeping the "
+        "two aligned. Multiple server processes sharing one root are unsupported.",
     )
     p.add_argument(
         "--data-path",
@@ -4536,6 +4573,7 @@ def _main_inner(args, config) -> None:
 
     # Aggregate
     if "judge" in args.stages:
+        _assert_clean_decider_trace(output_dir, config.parsed_methods)
         aggregate_report(output_dir, args.conv, config, unscorable=failed)
 
     if failed:

@@ -40,12 +40,7 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
-from everos.core.context import (
-    get_degradations,
-    reset_degradations,
-    resolve_request_id,
-    restore_degradations,
-)
+from everos.core.context import resolve_request_id
 from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import (
@@ -193,11 +188,6 @@ class SearchManager:
 
     async def search(self, req: SearchRequest) -> SearchResponse:
         request_id = resolve_request_id()
-        # Cleared per search, and restored on the way out. A worker task's context is
-        # reused across requests, so without this one degraded search would mark every
-        # later healthy one -- which is worse than not reporting at all, because it
-        # trains the reader to ignore the field.
-        _deg_token = reset_degradations()
         with memory_span(
             "everos.memory.search",
             observation_type="retriever",
@@ -239,10 +229,6 @@ class SearchManager:
                     episodes=episodes,
                     profiles=profiles,
                     unprocessed_messages=unprocessed,
-                    # Read after the routes have run: a fallback deep in the
-                    # multi-round loop records itself here, and this is the last
-                    # point before the result leaves the domain.
-                    degraded=list(get_degradations()),
                 )
             else:  # "agent"
                 (cases, skills), unprocessed = await asyncio.gather(
@@ -253,7 +239,6 @@ class SearchManager:
                     agent_cases=cases,
                     agent_skills=skills,
                     unprocessed_messages=unprocessed,
-                    degraded=list(get_degradations()),
                 )
 
             # Returned hits (ids only) — content, so only when capture_content
@@ -292,7 +277,6 @@ class SearchManager:
                     method=req.method.value,
                 )
 
-            restore_degradations(_deg_token)
             return SearchResponse(request_id=request_id, data=data)
 
     # ── Unprocessed buffer ──────────────────────────────────────────
@@ -639,7 +623,7 @@ class SearchManager:
     async def _fetch_profile(self, req: SearchRequest) -> list[SearchProfileItem]:
         if not req.include_profile or req.owner_type != "user":
             return []
-        return await self._profile.fetch(req.owner_id, subject=req.profile_subject)
+        return await self._profile.fetch(req.owner_id)
 
     # ── Recall helpers ──────────────────────────────────────────────
 

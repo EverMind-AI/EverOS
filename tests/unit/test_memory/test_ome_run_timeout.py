@@ -31,16 +31,6 @@ def test_a_ceiling_is_on_by_default() -> None:
     assert _cfg().run_timeout_seconds == 1800.0
 
 
-def test_the_ceiling_leaves_room_for_slow_but_healthy_work() -> None:
-    """Measured worst case is a ~7-minute 38-subject profile pass.
-
-    Pinned as an inequality rather than a constant: the point is the margin, so
-    tuning the default stays free while shrinking it below the known-good
-    workload does not.
-    """
-    assert (_cfg().run_timeout_seconds or 0) >= 4 * 7 * 60
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

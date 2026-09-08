@@ -5,12 +5,10 @@ owner returns an empty episode list with HTTP 200; every question is then answer
 nothing, graded wrong, and the run finishes with `exit 0` and a report. The number is
 built entirely from absent evidence and nothing in the output says so.
 
-Reaching that state takes one plausible mistake. `--everos-root` accepts a single path
-and replicates it across every server (`_roots * len(_urls)`), so a benchmark whose
-conversations live in separate shards will read all of them from the first shard.
-Measured on EverMemBench, whose five topics live in five stores: pointed at one of them,
-conv0 retrieved 10/10 and conv1 retrieved 0/10, and the run reported 40.0% rather than
-failing.
+Reaching that state takes one plausible mistake: aligning a conversation with the wrong
+server/root pair. Measured on EverMemBench, whose five topics lived in five stores,
+conv0 retrieved 10/10 and conv1 retrieved 0/10 when both were pointed at the first
+shard, and the run reported 40.0% rather than failing.
 
 The check reads markdown rather than issuing a search: markdown is the store's source of
 truth, and an empty search result is the symptom under diagnosis, not a usable test.

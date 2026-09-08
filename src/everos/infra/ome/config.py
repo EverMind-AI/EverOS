@@ -157,10 +157,9 @@ class OMEConfig(BaseModel):
             "one lock, starving every other strategy for 6.7 hours until it was "
             "killed by hand. crash_recovery_timeout_seconds does not cover this "
             "-- it reclaims orphans from a PREVIOUS process, not live coroutines "
-            "in this one. The default is deliberately generous (30 min against a "
-            "measured worst case near 7 min for a 38-subject profile pass): a "
-            "deadlock backstop, not a latency target, since killing slow-but-"
-            "healthy work would trade a stall for lost extractions.",
+            "in this one. The 30-minute default is a deadlock backstop, not a "
+            "latency target; killing slow-but-healthy work would trade a stall "
+            "for lost extractions.",
         ),
     ]
     max_retries: Annotated[

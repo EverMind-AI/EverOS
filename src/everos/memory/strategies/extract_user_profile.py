@@ -33,28 +33,19 @@ Input shape: raw chat messages -- algo's ``_render_conversation`` unwraps the it
 list. The sqlite ``memcell.payload_json`` column is the long-term archive that lets
 this replay beyond ``unprocessed_buffer``'s lifetime.
 
-Who the profile is about is :data:`PROFILE_SUBJECT`. The default (``owner``) treats
-``event.owner_id`` as the subject, which holds whenever an owner is one person: the
-ingest fans each Episode out to every ``sender_id`` in the memcell, so a two-person
-dialogue already produces one owner -- and one profile -- per participant.
-
-It stops holding when many people deliberately share one owner, which is how a group
-chat keeps retrieval in a single partition. There ``owner`` hands the extractor every
-speaker's turns under one name and gets a composite of nobody; ``sender`` writes one
-profile per real speaker instead.
+The event owner is the profile subject. Ingest already fans a generic extracted Episode
+out to every distinct ``sender_id`` in its memcell, so each real participant receives an
+independent event and therefore an independent profile update.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
 import time
 from typing import Any
 
-import anyio
-from everalgo.types import ChatMessage as AlgoChatMessage
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.types import Profile as AlgoProfile
 from everalgo.user_memory import ProfileExtractor
@@ -99,26 +90,6 @@ opensource parity."""
 PROFILE_MIN_MEMCELLS = 1
 """Opensource parity: skip when the candidate cluster set holds fewer
 than ``N`` memcells across all selected clusters."""
-
-SUBJECT_OWNER = "owner"
-SUBJECT_SENDER = "sender"
-PROFILE_SUBJECT = os.getenv("EVEROS_PROFILE_SUBJECT", SUBJECT_OWNER)
-"""Who a profile describes: the owner (default) or each real speaker.
-
-``owner`` treats ``event.owner_id`` as the profile subject. That is correct
-whenever the owner is one person -- the ingest fans an Episode out to every
-``sender_id`` in a memcell, so a two-person dialogue already yields one owner
-(and one profile) per participant.
-
-``sender`` treats the owner as a **group**: episodes stay in the owner's
-partition, and one profile is written per distinct speaker found in the
-memcells. This is the only correct shape when many people share an owner --
-otherwise the extractor is handed N people's turns and told they are one
-person, and it dutifully synthesises a composite of somebody who does not
-exist. Costs one LLM call per speaker per extraction, so raise
-``EVEROS_PROFILE_EXTRACTION_INTERVAL`` alongside it."""
-
-_SUBJECT_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 PROFILE_TRACE_ENV = "EVEROS_PROFILE_TRACE_DUMP"
 """Env var naming a JSONL path; unset disables the dump.
@@ -216,35 +187,15 @@ async def extract_user_profile(event: EpisodeExtracted, ctx: StrategyContext) ->
     # body is a read → LLM merge → overwrite sequence. Different users
     # run fully in parallel.
     #
-    # Per-sender mode takes the lock per subject inside the loop instead. Each
-    # subject owns its own file, so an owner-wide lock buys no extra safety and
-    # costs the whole group: it serialises every task for the owner across all N
-    # subjects, so one slow subject blocks the other N-1 AND every queued task.
-    # Measured on a 38-speaker owner: 60 of the 64 OME slots ended up parked on
-    # this one lock waiting for a single subject, which starved every other
-    # strategy on the process and stalled the run for 6.7 hours.
     partition = f"{event.app_id}:{event.project_id}:{event.owner_id}"
-    guard: contextlib.AbstractAsyncContextManager[Any] = (
-        contextlib.nullcontext()
-        if PROFILE_SUBJECT == SUBJECT_SENDER
-        else get_partition_lock("extract_user_profile", partition)
-    )
-    async with guard:
-        if PROFILE_SUBJECT == SUBJECT_SENDER:
-            # A group owner has no single profile to watermark against; the
-            # per-subject files carry the timestamps instead.
-            existing = None
-            last_profile_ts = await _subject_baseline_ts(
-                event.owner_id, event.app_id, event.project_id
-            )
-        else:
-            existing = await _get_reader().read(
-                event.owner_id,
-                schema=UserProfileFrontmatter,
-                app_id=event.app_id,
-                project_id=event.project_id,
-            )
-            last_profile_ts = existing[0].profile_timestamp_ms if existing else 0
+    async with get_partition_lock("extract_user_profile", partition):
+        existing = await _get_reader().read(
+            event.owner_id,
+            schema=UserProfileFrontmatter,
+            app_id=event.app_id,
+            project_id=event.project_id,
+        )
+        last_profile_ts = existing[0].profile_timestamp_ms if existing else 0
 
         # Throttle on "cumulative units of source-memory for this owner", scoped to
         # parent_type='memcell' so it matches `_select_via_timestamp`'s selector --
@@ -292,77 +243,50 @@ async def extract_user_profile(event: EpisodeExtracted, ctx: StrategyContext) ->
             return
 
         extractor = ProfileExtractor(llm=get_llm_client())
-        if PROFILE_SUBJECT == SUBJECT_SENDER:
-            subjects = _subjects_of(algo_memcells)
-            if not subjects:
-                logger.info(
-                    "profile_extraction_no_subjects",
-                    owner_id=event.owner_id,
-                    memcell_count=len(algo_memcells),
-                )
-                return
-            # Sequential on purpose: the whole block already holds the owner's
-            # partition lock, and one LLM call per speaker fanned out at once
-            # would spike a group of 20+ into the provider's rate limit.
-            written = 0
-            for subject in subjects:
-                written += await _extract_one_subject(
-                    algo_memcells,
-                    subject=subject,
-                    owner_id=event.owner_id,
-                    app_id=event.app_id,
-                    project_id=event.project_id,
-                    extractor=extractor,
-                )
-            summary_mode = f"{written}/{len(subjects)} subjects"
-        else:
-            # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
-            old_profile = _to_algo_profile(existing[0]) if existing else None
-            t0 = time.perf_counter()
-            new_profile, retried = await _aextract_language_checked(
-                extractor,
-                algo_memcells,
-                sender_id=event.owner_id,
-                old_profile=old_profile,
-            )
-            elapsed = time.perf_counter() - t0
+        # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
+        old_profile = _to_algo_profile(existing[0]) if existing else None
+        t0 = time.perf_counter()
+        new_profile, retried = await _aextract_language_checked(
+            extractor,
+            algo_memcells,
+            sender_id=event.owner_id,
+            old_profile=old_profile,
+        )
+        elapsed = time.perf_counter() - t0
 
-            # Write the fresh profile back to users/<user_id>/user.md.
-            await _persist_profile(
-                new_profile,
-                owner_id=event.owner_id,
-                app_id=event.app_id,
-                project_id=event.project_id,
-            )
-            summary_mode = "UPDATE" if old_profile is not None else "INIT"
-            _append_trace(
-                {
-                    "kind": "profile_extract",
-                    "owner_id": event.owner_id,
-                    # Owner-is-subject: no name, the owner IS who this describes.
-                    "subject": "",
-                    "mode": summary_mode,
-                    "candidates": len(algo_memcells),
-                    "memcells_used": len(algo_memcells),
-                    "memcell_chars": sum(
-                        len(str(getattr(i, "content", "")))
-                        for mc in algo_memcells
-                        for i in mc.items
-                    ),
-                    "own_profile_ts_ms": last_profile_ts,
-                    "before": _profile_shape(old_profile),
-                    "after": _profile_shape(new_profile),
-                    "summary": str(new_profile.summary or "")[:400],
-                    "cjk_in_summary": len(_CJK.findall(str(new_profile.summary or ""))),
-                    "language_retried": retried,
-                    "elapsed_s": round(elapsed, 3),
-                }
-            )
+        # Write the fresh profile back to users/<user_id>/user.md.
+        await _persist_profile(
+            new_profile,
+            owner_id=event.owner_id,
+            app_id=event.app_id,
+            project_id=event.project_id,
+        )
+        summary_mode = "UPDATE" if old_profile is not None else "INIT"
+        _append_trace(
+            {
+                "kind": "profile_extract",
+                "owner_id": event.owner_id,
+                "mode": summary_mode,
+                "candidates": len(algo_memcells),
+                "memcells_used": len(algo_memcells),
+                "memcell_chars": sum(
+                    len(str(getattr(i, "content", "")))
+                    for mc in algo_memcells
+                    for i in mc.items
+                ),
+                "own_profile_ts_ms": last_profile_ts,
+                "before": _profile_shape(old_profile),
+                "after": _profile_shape(new_profile),
+                "summary": str(new_profile.summary or "")[:400],
+                "cjk_in_summary": len(_CJK.findall(str(new_profile.summary or ""))),
+                "language_retried": retried,
+                "elapsed_s": round(elapsed, 3),
+            }
+        )
     logger.info(
         "user_profile_extracted",
         owner_id=event.owner_id,
         memcell_count=len(algo_memcells),
-        subject=PROFILE_SUBJECT,
         mode=summary_mode,
     )
 
@@ -507,232 +431,6 @@ def _profile_shape(profile: AlgoProfile | None) -> dict[str, Any]:
     }
 
 
-def _subject_slug(subject: str) -> str:
-    """Filename-safe form of a subject name (``"Lan Ye"`` -> ``"Lan_Ye"``).
-
-    The slug only has to locate the file; :attr:`UserProfileFrontmatter.subject`
-    carries the real name, and the LanceDB row id is keyed on that, so two
-    names that slugify alike collide on disk but not in the index. The write
-    path detects that collision rather than silently overwriting.
-    """
-    return _SUBJECT_UNSAFE.sub("_", subject).strip("._-") or "unnamed"
-
-
-def _subject_filename(subject: str) -> str:
-    """``users/<owner>/`` filename holding ``subject``'s profile."""
-    return f"user.{_subject_slug(subject)}.md"
-
-
-def _subjects_of(memcells: list[AlgoMemCell]) -> list[str]:
-    """Distinct real speakers across ``memcells``, first-seen order.
-
-    Prefers ``sender_name`` over ``sender_id``: a group ingest pins every
-    message's ``sender_id`` to the batch owner (that is what keeps retrieval
-    in one partition) and carries the person's name alongside. Only
-    ``role == "user"`` turns count -- an assistant is never a profile subject,
-    and :meth:`ProfileExtractor.aextract` rejects one outright.
-    """
-    seen: list[str] = []
-    for cell in memcells:
-        for item in cell.items:
-            if not isinstance(item, AlgoChatMessage) or item.role != "user":
-                continue
-            subject = (item.sender_name or item.sender_id or "").strip()
-            if subject and subject not in seen:
-                seen.append(subject)
-    return seen
-
-
-def _speaks_in(memcell: AlgoMemCell, subject: str) -> bool:
-    """Whether ``subject`` has a user turn in ``memcell``.
-
-    A memcell is a whole slice of conversation, so keeping only the ones a subject
-    spoke in still hands the extractor everyone else's surrounding turns -- what it
-    drops is the meetings that person never attended, which is not evidence about
-    them in the first place.
-    """
-    return any(
-        isinstance(item, AlgoChatMessage)
-        and item.role == "user"
-        and (item.sender_name or item.sender_id or "").strip() == subject
-        for item in memcell.items
-    )
-
-
-def _retarget(memcells: list[AlgoMemCell], subject: str) -> list[AlgoMemCell]:
-    """Copy ``memcells`` with user turns re-keyed from name to ``sender_id``.
-
-    :meth:`ProfileExtractor.aextract` validates ``sender_id`` against the
-    memcells' own user senders and will not accept a name that only appears in
-    ``sender_name``. Rewriting the copy is what lets a real person be the
-    target while the persisted memcell keeps the owner as its sender. It also
-    stops the rendered transcript from claiming ``Lan Ye(user_id:01)``.
-    """
-    out: list[AlgoMemCell] = []
-    for cell in memcells:
-        clone = cell.model_copy(deep=True)
-        for item in clone.items:
-            if isinstance(item, AlgoChatMessage) and item.role == "user":
-                item.sender_id = (item.sender_name or item.sender_id or "").strip()
-        out.append(clone)
-    return out
-
-
-async def _subject_baseline_ts(owner_id: str, app_id: str, project_id: str) -> int:
-    """Oldest participant-profile timestamp under ``owner_id`` (0 when none).
-
-    The **minimum**, not the maximum: memcell selection runs once and feeds
-    every subject from the same set, so watermarking on the freshest subject
-    would starve the ones that lag behind.
-    """
-    own = _get_reader().path_for(
-        owner_id,
-        schema=UserProfileFrontmatter,
-        app_id=app_id,
-        project_id=project_id,
-    )
-    oldest: int | None = None
-    async for path in anyio.Path(own.parent).glob("user.*.md"):
-        parsed = await _get_reader().read(
-            owner_id,
-            schema=UserProfileFrontmatter,
-            app_id=app_id,
-            project_id=project_id,
-            filename=path.name,
-        )
-        if parsed is None:
-            continue
-        ts = parsed[0].profile_timestamp_ms
-        oldest = ts if oldest is None else min(oldest, ts)
-    return oldest or 0
-
-
-async def _extract_one_subject(
-    memcells: list[AlgoMemCell],
-    *,
-    subject: str,
-    owner_id: str,
-    app_id: str,
-    project_id: str,
-    extractor: ProfileExtractor,
-) -> bool:
-    """Synthesise and persist one subject's profile. False = skipped.
-
-    Serialised per ``(owner, subject)`` -- the granularity of the file actually
-    being rewritten. Two tasks for the same owner now block each other only when
-    they reach the *same* speaker; previously they contended on the owner for the
-    entire N-subject pass, which is how one stuck subject took a whole process
-    down (see the caller).
-    """
-    async with get_partition_lock(
-        "extract_user_profile", f"{app_id}:{project_id}:{owner_id}::{subject}"
-    ):
-        return await _extract_one_subject_locked(
-            memcells,
-            subject=subject,
-            owner_id=owner_id,
-            app_id=app_id,
-            project_id=project_id,
-            extractor=extractor,
-        )
-
-
-async def _extract_one_subject_locked(
-    memcells: list[AlgoMemCell],
-    *,
-    subject: str,
-    owner_id: str,
-    app_id: str,
-    project_id: str,
-    extractor: ProfileExtractor,
-) -> bool:
-    """Body of :func:`_extract_one_subject`; caller holds the subject's lock."""
-    filename = _subject_filename(subject)
-    prior = await _get_reader().read(
-        owner_id,
-        schema=UserProfileFrontmatter,
-        app_id=app_id,
-        project_id=project_id,
-        filename=filename,
-    )
-    if prior is not None and prior[0].subject and prior[0].subject != subject:
-        # Two names slugified onto one file. Writing would destroy the other
-        # person's profile, so refuse and say whose.
-        logger.error(
-            "user_profile_subject_slug_collision",
-            owner_id=owner_id,
-            subject=subject,
-            occupied_by=prior[0].subject,
-            filename=filename,
-        )
-        return False
-    # Per-subject watermark, not the owner-wide one. Participants advance at wildly
-    # different rates -- a rarely-speaking member's profile stays old, and the
-    # owner-wide baseline is the MINIMUM across all of them, so it lags behind by
-    # however long the quietest member has been silent. Filtering on that baseline
-    # alone would hand a regular speaker every memcell since the quietest member last
-    # spoke instead of the one that just arrived.
-    own_ts = prior[0].profile_timestamp_ms if prior is not None else 0
-    mine = [mc for mc in memcells if mc.timestamp > own_ts and _speaks_in(mc, subject)]
-    if not mine:
-        # Present in the candidate set only because somebody else spoke, or already
-        # merged. Nothing to re-read: the profile already encodes it.
-        _append_trace(
-            {
-                "kind": "profile_extract",
-                "owner_id": owner_id,
-                "subject": subject,
-                "skipped": "no_new_memcells",
-                "candidates": len(memcells),
-                "own_profile_ts_ms": own_ts,
-            }
-        )
-        return False
-
-    old_profile = _to_algo_profile(prior[0]) if prior is not None else None
-    t0 = time.perf_counter()
-    new_profile, retried = await _aextract_language_checked(
-        extractor,
-        _retarget(mine, subject),
-        sender_id=subject,
-        old_profile=old_profile,
-    )
-    elapsed = time.perf_counter() - t0
-    await _persist_profile(
-        new_profile,
-        owner_id=owner_id,
-        app_id=app_id,
-        project_id=project_id,
-        subject=subject,
-    )
-    _append_trace(
-        {
-            "kind": "profile_extract",
-            "owner_id": owner_id,
-            "subject": subject,
-            # INIT fixes the profile's language and writes it whole; UPDATE emits
-            # index-addressed ops onto it. Which one ran explains both the cost of the
-            # call and whether a language choice was made here.
-            "mode": "UPDATE" if old_profile is not None else "INIT",
-            # Candidates the owner-level selector produced vs what this subject
-            # actually read: the gap is the per-subject filter doing its job.
-            "candidates": len(memcells),
-            "memcells_used": len(mine),
-            "memcell_chars": sum(
-                len(str(getattr(i, "content", ""))) for mc in mine for i in mc.items
-            ),
-            "own_profile_ts_ms": own_ts,
-            "before": _profile_shape(old_profile),
-            "after": _profile_shape(new_profile),
-            "summary": str(new_profile.summary or "")[:400],
-            "cjk_in_summary": len(_CJK.findall(str(new_profile.summary or ""))),
-            "language_retried": retried,
-            "elapsed_s": round(elapsed, 3),
-        }
-    )
-    return True
-
-
 def _to_algo_profile(fm: UserProfileFrontmatter) -> AlgoProfile:
     """Rehydrate an algo :class:`Profile` from the markdown frontmatter."""
     return AlgoProfile.model_validate(
@@ -752,21 +450,14 @@ async def _persist_profile(
     owner_id: str,
     app_id: str,
     project_id: str,
-    subject: str = "",
 ) -> None:
-    """Write the freshly extracted profile under ``users/<user_id>/``.
-
-    ``subject`` empty writes the owner's own ``user.md``; a subject writes
-    ``user.<slug>.md`` and records the real name in the frontmatter, which is
-    what the cascade keys the LanceDB row id on.
-    """
+    """Write the freshly extracted profile to ``users/<user_id>/user.md``."""
     extras = profile.model_dump(exclude={"owner_id", "summary", "timestamp"})
     explicit_info = extras.get("explicit_info") or []
     implicit_traits = extras.get("implicit_traits") or []
     frontmatter = UserProfileFrontmatter(
-        id=f"profile_{owner_id}::{subject}" if subject else f"profile_{owner_id}",
+        id=f"profile_{owner_id}",
         user_id=owner_id,
-        subject=subject,
         summary=profile.summary,
         explicit_info=list(explicit_info),
         implicit_traits=list(implicit_traits),
@@ -778,5 +469,4 @@ async def _persist_profile(
         body=profile.summary,
         app_id=app_id,
         project_id=project_id,
-        filename=_subject_filename(subject) if subject else None,
     )

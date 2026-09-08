@@ -114,6 +114,17 @@ def test_one_server_is_never_touched(tmp_path: Path) -> None:
     assert args.servers == 1
 
 
+def test_external_servers_require_one_root_each() -> None:
+    """A single prebuilt root cannot be replicated across several server processes."""
+    with pytest.raises(SystemExit, match="exactly one path per --base-url"):
+        run._server_roots_for(["http://server-a", "http://server-b"], ["/store/a"])
+
+
+def test_external_server_roots_keep_url_order() -> None:
+    roots = ["/store/a", "/store/b"]
+    assert run._server_roots_for(["http://server-a", "http://server-b"], roots) == roots
+
+
 class _Args:
     def __init__(self, servers: int, everos_root: list[str]) -> None:
         self.servers = servers

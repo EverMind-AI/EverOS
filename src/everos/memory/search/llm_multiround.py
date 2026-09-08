@@ -56,7 +56,6 @@ from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
 from everos.config.settings import DeciderSettings, load_settings
-from everos.core.context import mark_degraded
 from everos.core.observability.logging import get_logger
 
 from .dto import SearchEpisodeItem
@@ -380,9 +379,6 @@ class LLMRoundDecider:
                 fallback_core=len(fallback),
                 last_error=last_error[:200],
             )
-            # And say so in the response. A caller cannot tell a degraded result from a
-            # healthy one by looking at it: both are HTTP 200 with a full episode list.
-            mark_degraded("decider_fallback")
             return RoundDecision(
                 stop=True,
                 queries=[],

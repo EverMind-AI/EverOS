@@ -3403,13 +3403,6 @@
             },
             "type": "array",
             "title": "Unprocessed Messages"
-          },
-          "degraded": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Degraded"
           }
         },
         "additionalProperties": false,
@@ -3734,18 +3727,6 @@
             "type": "boolean",
             "title": "Include Profile",
             "default": false
-          },
-          "profile_subject": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Subject"
           },
           "enable_llm_rerank": {
             "type": "boolean",

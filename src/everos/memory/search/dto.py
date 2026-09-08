@@ -102,12 +102,6 @@ class SearchRequest(BaseModel):
     Only the episode hybrid path consumes it — other methods ignore it.
     """
     include_profile: bool = False
-    profile_subject: str | None = Field(default=None, min_length=1)
-    """Which participant's profile to return, for a **group** owner that
-    holds one profile per person. ``None`` returns every profile under the
-    owner (capped). Ignored unless ``include_profile`` is set, and irrelevant
-    for the common case of an owner who is one person -- that owner has a
-    single profile keyed on ``owner_id`` itself."""
     enable_llm_rerank: bool = Field(
         default=False,
         description=(
@@ -294,16 +288,6 @@ class SearchData(BaseModel):
     """In-flight messages still in the boundary-detection buffer for
     the ``filters.session_id`` (if supplied as a top-level eq scalar);
     otherwise stays empty."""
-    degraded: list[str] = Field(default_factory=list)
-    """Non-empty when this result came from a fallback rather than the normal path.
-
-    Empty on a healthy search, so a client that ignores it sees no change. It exists
-    because the alternative is indistinguishable: when every multi-round decider attempt
-    fails the loop returns a fixed top-N core with HTTP 200 and a full episode list,
-    and an evaluation harness reading only the episodes cannot tell that the component
-    it was measuring never ran. Twelve arms of one sweep reported 87-93% that way.
-
-    Values are stable identifiers, not messages: ``decider_fallback`` today."""
 
 
 class SearchResponse(BaseModel):

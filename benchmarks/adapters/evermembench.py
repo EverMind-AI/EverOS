@@ -360,34 +360,6 @@ SEARCH_ERROR_CONTEXT = "(Search failed)"
 INCLUDE_PROFILE = True
 
 
-# The persona questions name their asker in the opening clause -- "I'm Lan Ye from the
-# operations team", "I (Xinhao Yao) have completed ...". Measured on the full set: 434 of
-# the 2400 carry one, and 431 of those are P_Skill / P_Style / P_Title, i.e. exactly the
-# 541 persona questions minus the ones that leave the asker implicit. The other families
-# (F_*, MA_C, MA_U) name nobody because they do not grade persona at all.
-_ASKER_PATTERNS = (
-    re.compile(r"^I'?m ([A-Z][a-z]+(?: [A-Z][a-z]+)+)"),
-    re.compile(r"^I \(([A-Z][a-z]+(?: [A-Z][a-z]+)+)\)"),
-    re.compile(r"^As ([A-Z][a-z]+(?: [A-Z][a-z]+)+),"),
-)
-
-
-def profile_subject_of(qa: dict[str, Any]) -> str | None:
-    """Whose profile this question needs, or ``None`` when it names nobody.
-
-    The owner here is a whole project group (38 speakers on topic 01), so it holds one
-    profile per participant rather than one profile. Without a subject the search returns
-    all of them, and injecting 38 people's profiles is strictly worse than injecting none
-    -- it is the composite-profile failure spelled out at length. So a question that
-    names no asker gets no profile block; it is not a persona question anyway.
-    """
-    for pattern in _ASKER_PATTERNS:
-        m = pattern.search(str(qa.get("question") or "").strip())
-        if m:
-            return m.group(1)
-    return None
-
-
 def build_context(episodes: list[dict], profiles: list[dict]) -> str:
     """Render retrieved episodes the way this benchmark's own adapter does.
 

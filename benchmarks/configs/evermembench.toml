@@ -93,7 +93,6 @@ EVEROS_LLM__SEARCH_TIMEOUT_SECONDS = "600"
 EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
                                         # the 30s scanner covers the same ground
 EVEROS_PROFILE_EXTRACTION_INTERVAL = "1"   # real-time: every memcell updates the profile
-EVEROS_PROFILE_SUBJECT = "sender"       # one profile per speaker: the owner is a 38-person group
 
 # --- ANSWER ----------------------------------------------------------------
 [answer]

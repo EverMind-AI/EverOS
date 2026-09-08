@@ -1,10 +1,8 @@
-"""The two switches that let a server run read-only.
+"""The switch that lets a server start without the cascade projector.
 
-Both subsystems are write-side, and on a retrieval-only server both actively hurt rather
-than merely idle: cascade's periodic scan re-enqueues a whole store's markdown, which
-starved search on a dense store badly enough to hold it at zero; the OME engine holds an
-exclusive per-store lock, which stops a second server from sharing one pre-built store
-root -- the shape a parallel-lane evaluation needs.
+On a retrieval-only server cascade's periodic scan can re-enqueue a whole store's
+markdown, which starves search on a dense store. The switch is deliberately scoped to
+cascade; OME keeps its normal process lifecycle.
 
 Off by default, so an ingesting daemon is unaffected. That default is the part worth
 pinning hardest: a switch that defaults to "on" would silently stop extraction.
@@ -18,7 +16,6 @@ import pytest
 from fastapi import FastAPI
 
 from everos.entrypoints.api.lifespans.cascade import CascadeLifespanProvider
-from everos.entrypoints.api.lifespans.ome import OmeLifespanProvider
 
 TRUTHY = ["1", "true", "TRUE", "yes", "Yes"]
 FALSY = ["", "   ", "0", "false", "no", "off", "maybe"]
@@ -32,15 +29,6 @@ async def test_cascade_startup_is_skipped_when_disabled(
     provider = CascadeLifespanProvider()
     assert await provider.startup(FastAPI()) is None
     assert provider._orchestrator is None
-
-
-@pytest.mark.parametrize("value", TRUTHY)
-async def test_ome_startup_is_skipped_when_disabled(
-    value: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("EVEROS_DISABLE_OME", value)
-    provider = OmeLifespanProvider()
-    assert await provider.startup(FastAPI()) is None
 
 
 @pytest.mark.parametrize("value", FALSY)
@@ -68,28 +56,9 @@ async def test_an_unrecognised_value_does_not_disable_cascade(
     assert reached.get("past_the_gate") is True
 
 
-@pytest.mark.parametrize("value", FALSY)
-async def test_an_unrecognised_value_does_not_disable_ome(
-    value: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("EVEROS_DISABLE_OME", value)
-    provider = OmeLifespanProvider()
-    reached: dict[str, Any] = {}
-
-    def _boom(*_a: Any, **_k: Any) -> Any:
-        reached["past_the_gate"] = True
-        raise RuntimeError("stop here")
-
-    monkeypatch.setattr("importlib.import_module", _boom)
-    with pytest.raises(RuntimeError, match="stop here"):
-        await provider.startup(FastAPI())
-    assert reached.get("past_the_gate") is True
-
-
-async def test_unset_leaves_both_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unset_leaves_cascade_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default. A run that ingests must not have to know these exist."""
     monkeypatch.delenv("EVEROS_DISABLE_CASCADE", raising=False)
-    monkeypatch.delenv("EVEROS_DISABLE_OME", raising=False)
 
     cascade = CascadeLifespanProvider()
     monkeypatch.setattr(
@@ -98,12 +67,3 @@ async def test_unset_leaves_both_enabled(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     with pytest.raises(RuntimeError, match="cascade gate open"):
         await cascade.startup(FastAPI())
-
-    # And OME, which the first version of this test named but never constructed.
-    ome = OmeLifespanProvider()
-    monkeypatch.setattr(
-        "importlib.import_module",
-        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ome gate open")),
-    )
-    with pytest.raises(RuntimeError, match="ome gate open"):
-        await ome.startup(FastAPI())
