@@ -273,7 +273,7 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 
 This pulls in `everalgo-parser` (with the `[svg]` bundle for SVG support via
 cairosvg). Configure the `[multimodal]` section in `everos.toml`; its default
-model is `google/gemini-3-flash-preview` via OpenRouter.
+model is `google/gemini-3.8-flash` via OpenRouter.
 
 **Office document support requires LibreOffice as a system dependency.**
 The parser shells out to `soffice` (LibreOffice's headless renderer) to

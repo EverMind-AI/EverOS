@@ -97,7 +97,7 @@ parts. Fill in three fields in `everos.toml`:
 
 ```toml
 [multimodal]
-model    = "google/gemini-3-flash-preview"   # must support image_url parts
+model    = "google/gemini-3.8-flash"   # must support image_url parts
 base_url = "https://openrouter.ai/api/v1"
 api_key  = "<your key>"
 ```
@@ -270,7 +270,7 @@ containers and CI).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `model` | `google/gemini-3-flash-preview` | Parsing model; must accept `image_url` parts |
+| `model` | `google/gemini-3.8-flash` | Parsing model; must accept `image_url` parts |
 | `base_url` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL |
 | `api_key` | — (required) | API key for the endpoint above |
 | `max_concurrency` | `4` | Cap on parallel multimodal calls within one extraction |

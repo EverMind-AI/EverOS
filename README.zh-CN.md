@@ -275,7 +275,7 @@ uv pip install 'everos[multimodal]'   # or: pip install 'everos[multimodal]'
 
 这会引入 `everalgo-parser`（包含用于 SVG 支持的 `[svg]` bundle，通过
 cairosvg）。在 `everos.toml` 的 `[multimodal]` 中完成配置；默认模型是通过
-OpenRouter 使用的 `google/gemini-3-flash-preview`。
+OpenRouter 使用的 `google/gemini-3.8-flash`。
 
 **Office 文档支持需要 LibreOffice 作为系统依赖。** parser 会调用
 `soffice`（LibreOffice 的 headless renderer），先把 `.doc` / `.docx` /
