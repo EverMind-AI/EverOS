@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-08
+
+**One reproducible runner for four long-term-memory benchmarks, plus an
+LLM-guided multi-round retrieval method.** LoCoMo, LongMemEval, EverMemBench,
+and SubtleMemory now share the same staged ADD → SEARCH → ANSWER → JUDGE
+workflow, resume model, metrics, and run manifest. The new
+`llm_multiround` search method iteratively recalls episode blocks, asks a
+separately configurable decider to retain core evidence and issue follow-up
+queries, and returns a bounded final context without a cross-encoder.
+
+### Added
+
+- **LLM-guided multi-round episode retrieval.**
+  `POST /api/v2/memory/search` accepts `method = "llm_multiround"` for user
+  memory. Each round independently fuses BM25 and vector candidates for the
+  current sub-queries with RRF, then uses the decider to select core evidence
+  and identify remaining gaps. Existing search response fields are unchanged;
+  decider failures are recorded in structured logs and optional trace dumps.
+- **Independent decider configuration.** The new `[decider]` section selects
+  the model, endpoint, timeout, request extras, retry policy, and loop tuning.
+  Empty connection fields inherit `[llm]`, preserving single-model setups.
+- **Unified benchmark harness.** One runner and four adapters cover LoCoMo,
+  LongMemEval, EverMemBench, and SubtleMemory with explicit dataset configs,
+  resumable stage artifacts, deterministic run identities, shared IR metrics,
+  decider preflight checks, and trace validation that rejects degraded
+  multi-round runs before reporting scores.
+- **Cascade snapshot control.** `POST /api/v1/cascade/quiesce` and
+  `POST /api/v2/cascade/quiesce` drain the Markdown-to-index queue and stop the
+  cascade subsystem until restart. Startup switches can disable all cascade
+  work or only the filesystem watcher for managed read-only workloads.
+
+### Changed
+
+- **OME attempts are bounded.** One strategy attempt now has a 1,800-second
+  default wall-clock timeout and follows the existing retry/dead-letter path on
+  timeout. Environment settings can tune concurrency or disable the timeout.
+- **SQLite pool saturation fails visibly.** Pool size, overflow, checkout
+  timeout, recycle, and pre-ping are explicit settings; exhausted pools now
+  raise after a bounded wait and emit saturation diagnostics instead of waiting
+  indefinitely.
+- **Extraction LLM transport is configurable.** `[llm]` now exposes request
+  timeout and provider-specific SDK arguments while retaining the previous
+  60-second default.
+
+### Fixed
+
+- **Permanent embedding request errors no longer retry.** HTTP 400, 401, 403,
+  404, 413, 414, and 422 responses are classified as rejected input or
+  configuration and leave the retry loop; timeouts, 429 responses, and server
+  errors remain retryable.
+- **EverMemBench owner mapping no longer changes profile extraction.** The
+  adapter uses one stable synthetic owner per topic for both ingestion and
+  search while preserving each real participant's name in message metadata.
+  The production Profile cluster/direct extraction paths are unchanged.
+
+### Upgrade
+
+- No storage migration or index rebuild is required. Existing search methods
+  keep their prior behavior unless callers explicitly select
+  `llm_multiround`.
+- Deployments with a healthy OME strategy that legitimately runs for more than
+  1,800 seconds must raise `EVEROS_OME_RUN_TIMEOUT_SECONDS` or set it to `0` /
+  `off` before upgrading.
+
 ## [1.3.0] - 2026-09-07
 
 **Milvus as an optional index backend, behind a port that hides which one you
@@ -1033,7 +1097,9 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/everos/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/EverMind-AI/everos/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/EverMind-AI/everos/compare/v1.2.3...v1.3.0
 [1.1.4]: https://github.com/EverMind-AI/everos/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/EverMind-AI/everos/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/EverMind-AI/everos/compare/v1.1.1...v1.1.2

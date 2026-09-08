@@ -21,6 +21,7 @@ across the two positions, so eight subprocess runs total.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -35,6 +36,17 @@ def isolated_root(tmp_path: Path) -> Iterator[Path]:
     yield tmp_path
 
 
+def _hermetic_env() -> dict[str, str]:
+    """Return a subprocess environment without ambient EverOS settings."""
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("EVEROS_")
+    }
+    env["EVEROS_LLM__API_KEY"] = ""
+    env["EVEROS_EMBEDDING__API_KEY"] = ""
+    env["EVEROS_RERANK__API_KEY"] = ""
+    return env
+
+
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """Invoke ``python -m everos.entrypoints.cli.main <argv>``.
 
@@ -47,6 +59,7 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=_hermetic_env(),
     )
 
 
