@@ -44,6 +44,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.core.persistence.markdown import dump_frontmatter, parse_frontmatter
+from everos.infra.persistence.index import Predicate, all_of, eq
 from everos.infra.persistence.markdown import (
     KnowledgeWriter,
     ensure_taxonomy,
@@ -1148,26 +1149,22 @@ def _validate_scope_id(value: str, name: str) -> None:
         raise ValueError(f"{name} contains invalid characters: {value!r}")
 
 
-def compile_knowledge_where(app_id: str, project_id: str) -> str:
-    """Build a LanceDB ``where`` clause scoped to the given tenant.
+def compile_knowledge_where(app_id: str, project_id: str) -> Predicate:
+    """Build a backend-neutral predicate scoped to the given tenant.
 
     Args:
         app_id: Tenant application identifier.
         project_id: Tenant project identifier.
 
     Returns:
-        SQL-style predicate string safe for use in LanceDB ``where`` parameter.
+        Predicate safe for the active derived-index backend.
 
     Raises:
         ValueError: If either id contains invalid characters.
     """
     _validate_scope_id(app_id, "app_id")
     _validate_scope_id(project_id, "project_id")
-
-    def _esc(v: str) -> str:
-        return v.replace("'", "''")
-
-    return f"app_id = '{_esc(app_id)}' AND project_id = '{_esc(project_id)}'"
+    return all_of(eq("app_id", app_id), eq("project_id", project_id))
 
 
 # ── Recall helpers ───────────────────────────────────────────────────────────
@@ -1175,7 +1172,7 @@ def compile_knowledge_where(app_id: str, project_id: str) -> str:
 
 async def _base_retrieve(
     recaller: KnowledgeTopicRecaller,
-    where: str,
+    where: Predicate,
     *,
     method: str,
     query: str,
@@ -1290,7 +1287,7 @@ def _require_search_providers() -> tuple[EmbeddingProvider, RerankProvider]:
 
 async def _run_category_pipeline(
     query: str,
-    where: str,
+    where: Predicate,
     *,
     method: str,
     vector: list[float],

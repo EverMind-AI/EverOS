@@ -41,7 +41,7 @@ POST /api/v2/memory/add
   boundary detector → extraction LLM → memory cell (MemCell)
         │
         ▼
-  markdown (truth)  +  SQLite (state)  +  LanceDB (vector + BM25)
+  markdown (truth)  +  SQLite (state)  +  derived vector/BM25 index
         │
         ▼
   retrievable via /search and /get like any text memory

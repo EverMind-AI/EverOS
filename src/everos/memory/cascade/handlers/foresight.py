@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import Foresight, ParentType, foresight_repo
+from everos.infra.persistence.index import Foresight, ParentType, foresight_repo
 
 from ._common import (
     optional_int,
@@ -47,7 +47,7 @@ class ForesightHandler(BaseDailyLogHandler):
     """Cascade handler for ``users/<u>/.foresights/foresight-*.md``."""
 
     kind = "foresight"
-    lance_repo = foresight_repo
+    index_repo = foresight_repo
     content_change_keys = (
         "section:Foresight",
         "section:Evidence",

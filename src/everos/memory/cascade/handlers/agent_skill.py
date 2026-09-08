@@ -42,7 +42,13 @@ import anyio
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader
-from everos.infra.persistence.lancedb import AgentSkill, agent_skill_repo
+from everos.infra.persistence.index import (
+    AgentSkill,
+    agent_skill_repo,
+    all_of,
+    eq,
+    ne,
+)
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 
 from ..types import HandlerOutcome
@@ -58,7 +64,7 @@ class AgentSkillHandler(Handler):
     ``agents/<a>/skills/skill_<n>/SKILL.md`` + ``references/*.md``."""
 
     kind = "agent_skill"
-    lance_repo: ClassVar[Any] = agent_skill_repo
+    index_repo: ClassVar[Any] = agent_skill_repo
     """Exposed for ``CascadeWorker._optimize_touched_kinds`` — see the
     matching note on :class:`UserProfileHandler`."""
 
@@ -136,7 +142,7 @@ class AgentSkillHandler(Handler):
         # cascade's contract — skip the lookup.
         deleted = 0
         if prior is None:
-            orphan_clause = f"md_path = '{_q(md_path)}' AND id != '{_q(skill_id)}'"
+            orphan_clause = all_of(eq("md_path", md_path), ne("id", skill_id))
             orphans = await agent_skill_repo.find_where(orphan_clause, limit=1000)
             deleted = len(orphans)
             if deleted:
@@ -224,8 +230,3 @@ def _join_body_and_references(body: str, references: str) -> str:
     if not body:
         return references
     return f"{body}\n\n{references}"
-
-
-def _q(value: str) -> str:
-    """Defensive SQL-quote escape (mirrors lancedb chassis convention)."""
-    return value.replace("'", "''")

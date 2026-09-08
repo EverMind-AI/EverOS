@@ -11,7 +11,7 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 - Local deployment for personal agents or small teams
 - Conversation, workflow, agent-trace, file-knowledge → structured memory
 - Hybrid retrieval (BM25 + vector + scalar filter)
-- Cascade index sync (md edit → LanceDB sub-second)
+- Cascade index sync (md edit → derived index)
 - Dual-track memory (user-track / agent-track)
 - Offline memory evolution (Foresight / AtomicFact / Profile / Skill),
   including Reflection — a consolidation strategy within the OME that
@@ -30,7 +30,7 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 ### 1. Markdown as Source of Truth
 
 ```
-delete all LanceDB / SQLite files → can rebuild from md
+delete all derived index / SQLite files → can rebuild from md
 delete any md file               → memory is gone
 ```
 
@@ -42,7 +42,7 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 |---|---|---|
 | Markdown files | Truth source — entries, frontmatter | Search (grep is degraded fallback only) |
 | SQLite | Queue, cascade audit log, sensitive data isolation | Vector / full-text |
-| LanceDB | Vector ANN + BM25 + scalar filter, single-query hybrid | Be the source of truth (loss = rebuild from md) |
+| Derived index | Vector ANN + BM25 + scalar filter | Be the source of truth (loss = rebuild from md) |
 
 ### 3. Algorithm-orchestration separation
 

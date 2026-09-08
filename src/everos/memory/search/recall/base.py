@@ -24,14 +24,9 @@ from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from everalgo.types import Candidate
-from lancedb.query import BooleanQuery, FullTextQuery, MatchQuery
-
-try:
-    from lancedb.query import Occur
-except ImportError:  # pragma: no cover — fallback for older LanceDB layouts
-    from lancedb._lancedb import Occur  # type: ignore[attr-defined,no-redef]
 
 from everos.component.tokenizer import Tokenizer
+from everos.infra.persistence.index import Predicate
 
 # Columns that should never travel through the ranker / shaper. ``vector``
 # is huge (1024 floats); ``_distance`` belongs to LanceDB's query engine
@@ -66,11 +61,11 @@ class KindRecaller(Protocol):
     """Source column for cross-encoder rerank passages (display text)."""
 
     async def sparse_recall(
-        self, query: str, where: str, *, limit: int
+        self, query: str, where: Predicate, *, limit: int
     ) -> list[Candidate]: ...
 
     async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
+        self, vector: Sequence[float], where: Predicate, *, limit: int
     ) -> list[Candidate]: ...
 
 
@@ -112,90 +107,3 @@ def cosine_score_from_distance(distance: float | None) -> float:
     if sim > 1.0:
         return 1.0
     return sim
-
-
-def tokenize_query(tokenizer: Tokenizer, query: str) -> str:
-    """Run the configured tokenizer over the query and join with spaces.
-
-    Cascade joins tokens with a single space when writing the
-    ``*_tokens`` columns; LanceDB FTS expects a whitespace-tokenised
-    query string. Same function on both sides keeps BM25 scoring
-    symmetric.
-
-    Note: prefer :func:`build_or_query` for new code — it sidesteps
-    the tantivy implicit-AND query-parser pitfall where a single
-    IDF≈0 token (e.g. an owner's own name on the owner's partition)
-    poisons the whole query into zero hits.
-    """
-    tokens = tokenizer.tokenize(query)
-    return " ".join(t for t in tokens if t)
-
-
-def build_or_query(
-    tokenizer: Tokenizer,
-    query: str,
-    column: str,
-) -> FullTextQuery | None:
-    """Tokenise ``query`` and wrap in an OR-mode FTS query.
-
-    Mirrors the enterprise ES design
-    (``bool.should + minimum_should_match=1``):
-
-    - jieba tokenises the user query.
-    - Each token becomes its own :class:`MatchQuery` clause.
-    - Clauses combine under :class:`BooleanQuery` with
-      :attr:`Occur.SHOULD` so any single matching token surfaces
-      the document.
-    - LanceDB still computes a proper joint BM25 score from all
-      clauses; tokens with IDF ≈ 0 contribute ~0 but no longer
-      poison the rest of the query.
-
-    Returns ``None`` when the query tokenises to nothing (the
-    caller must guard against this — there's no useful BM25 query
-    over an empty token set).
-
-    Single-token queries collapse to a bare :class:`MatchQuery`
-    (skipping the boolean wrapper) so the FTS engine doesn't pay
-    for an unnecessary boolean layer.
-    """
-    tokens = [t for t in tokenizer.tokenize(query) if t]
-    if not tokens:
-        return None
-    if len(tokens) == 1:
-        return MatchQuery(tokens[0], column=column)
-    clauses: list[tuple[Occur, FullTextQuery]] = [
-        (Occur.SHOULD, MatchQuery(t, column=column)) for t in tokens
-    ]
-    return BooleanQuery(clauses)
-
-
-def build_or_query_multi_column(
-    tokenizer: Tokenizer,
-    query: str,
-    columns: Sequence[str],
-) -> dict[str, FullTextQuery] | None:
-    """Same as :func:`build_or_query` but emit one FTS query per column.
-
-    ``MatchQuery`` is bound to a single column, and LanceDB FTS only
-    searches one column per ``nearest_to_text`` call. Dual-column
-    kinds (``agent_case`` over ``task_intent_tokens`` /
-    ``approach_tokens``, ``agent_skill`` over
-    ``description_tokens`` / ``content_tokens``, etc.) need one
-    OR-bundle per column and merge the results in the caller.
-
-    Returns ``None`` on empty tokenisation; otherwise a dict
-    ``{column: FullTextQuery}`` ready to feed into separate
-    ``nearest_to_text`` calls.
-    """
-    tokens = [t for t in tokenizer.tokenize(query) if t]
-    if not tokens:
-        return None
-    out: dict[str, FullTextQuery] = {}
-    for col in columns:
-        if len(tokens) == 1:
-            out[col] = MatchQuery(tokens[0], column=col)
-        else:
-            out[col] = BooleanQuery(
-                [(Occur.SHOULD, MatchQuery(t, column=col)) for t in tokens]
-            )
-    return out

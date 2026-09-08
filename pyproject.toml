@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.2.3"
+version = "1.3.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -81,6 +81,21 @@ dependencies = [
     "everalgo-agent-memory==0.4.0",
     "everalgo-rank==0.4.1",
     "everalgo-knowledge==0.1.1",
+
+    # everalgo's own transitive layer, pinned to what this repo's uv.lock —
+    # and therefore the whole test suite — actually resolves. The packages
+    # above declare it as `>=0.2.0,<2.0.0`, treating a 0.x line as if a major
+    # bump were the only breaking one, so a fresh `pip install everos` picks
+    # up releases the suite has never run against. That is not theoretical:
+    # everalgo-boundary 0.3.0 added a third required field to the public
+    # `DetectionResult` NamedTuple while everalgo-agent-memory 0.4.0 still
+    # builds it with two, so `POST /add` answered 500 on a default
+    # (`memorize.mode = "agent"`) install of 1.2.3 while every local suite
+    # stayed green on the locked 0.2.1. Raise these deliberately, together
+    # with a run of the release smoke against a PyPI-resolved install.
+    "everalgo-boundary==0.2.1",
+    "everalgo-core==0.3.0",
+    "everalgo-clustering==0.2.1",
 ]
 
 [project.optional-dependencies]
@@ -91,6 +106,7 @@ otel = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
 ]
+milvus = ["pymilvus>=3.0.0"]
 
 [project.urls]
 Homepage = "https://evermind.ai"
@@ -238,6 +254,9 @@ forbidden_modules = [
     "everos.infra.persistence.markdown.**",
     "everos.infra.persistence.lancedb.**",
     "everos.infra.persistence.sqlite.**",
+    "everos.infra.persistence.index.**",
+    "everos.infra.persistence.milvus.**",
+    "everos.infra.persistence.backends.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -264,6 +283,33 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.router",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.schema",
+    "everos.infra.persistence.index -> everos.infra.persistence.backends.lancedb",
+    "everos.infra.persistence.index -> everos.infra.persistence.backends.milvus",
+]
+
+[[tool.importlinter.contracts]]
+# The facade and the router resolve a configured backend, so they import the
+# adapters by design. The port definitions must not: the moment protocols or
+# schema knows a concrete engine, "portable" stops being checkable and the
+# next adapter inherits whatever leaked in. This is the rule that keeps the
+# split from eroding -- moving files alone does not stop anyone moving them
+# back.
+name = "Derived-index ports know no concrete backend"
+type = "forbidden"
+source_modules = [
+    "everos.infra.persistence.index.protocols",
+    "everos.infra.persistence.index.schema",
+    "everos.infra.persistence.predicate",
+]
+forbidden_modules = [
+    "everos.infra.persistence.backends",
+    "everos.infra.persistence.lancedb",
+    "everos.infra.persistence.milvus",
+    "everos.core.persistence.lancedb",
 ]
 
 [[tool.importlinter.contracts]]
@@ -292,4 +338,5 @@ dev = [
     # [otel] stack is always present in the dev / CI environment.
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    "pymilvus>=3.0.0",
 ]

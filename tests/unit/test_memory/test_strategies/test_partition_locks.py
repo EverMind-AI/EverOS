@@ -10,18 +10,15 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from everos.memory._partition_locks import (
+    _pools,
     _reset_for_tests,
     get_partition_lock,
 )
 
-
-@pytest.fixture(autouse=True)
-def _isolate_locks() -> None:
-    """Each test gets a clean registry — no inherited holders / waiters."""
-    _reset_for_tests()
+# No local reset fixture: ``tests/conftest.py`` clears the pool around
+# every test in the suite. A second, file-local reset would mask the
+# very contract the two isolation tests at the bottom pin.
 
 
 def test_same_strategy_same_key_returns_identical_lock() -> None:
@@ -124,3 +121,29 @@ async def test_concurrent_acquirers_fifo_fairness() -> None:
     await asyncio.gather(task_holder, task_a, task_b)
 
     assert log == ["leave:holder", "enter:a", "enter:b"]
+
+
+# ── Cross-test isolation ────────────────────────────────────────────────
+#
+# The pool is a module global that never evicts, which is right for a
+# single-loop production process and wrong across tests: pytest-asyncio
+# hands each test its own event loop, so a lock carried over from an
+# earlier test is bound to a loop that is already closed. Reusing it
+# raises ``RuntimeError: ... is bound to a different event loop`` deep
+# inside a strategy body, where it surfaces as a dead-lettered OME run
+# rather than a test error. ``tests/conftest.py`` clears the pool around
+# every test; these two pin that, in order — the first dirties the pool,
+# the second asserts it did not survive.
+
+
+def test_dirty_the_partition_lock_pool() -> None:
+    get_partition_lock("isolation_probe", "k")
+    assert "isolation_probe" in _pools
+
+
+def test_partition_lock_pool_starts_empty_in_every_test() -> None:
+    assert _pools == {}, (
+        "a previous test's locks survived into this one — the pool is not "
+        "being reset between tests, so a strategy can acquire a lock bound "
+        "to a closed event loop"
+    )

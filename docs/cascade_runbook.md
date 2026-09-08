@@ -1,9 +1,13 @@
 # Cascade Runbook
 
-The cascade daemon keeps LanceDB in sync with the markdown files under
-the memory root. Service / entry points only ever write markdown; the
-daemon is the **sole** writer of the LanceDB index. This runbook covers
-the recurring operational questions.
+The cascade daemon keeps the configured derived index in sync with the
+markdown files under the memory root. Service / entry points only ever write
+markdown; the daemon is the **sole** writer of the derived index. This runbook
+covers the recurring operational questions.
+
+Sections that mention LanceDB-specific schemas, index cache, file descriptors,
+or `lance error` messages apply to the default LanceDB backend. Milvus uses the
+same cascade queue with backend-specific collection management.
 
 ## What runs where
 
@@ -13,7 +17,7 @@ providers in order:
 1. **Metrics** — Prometheus collector.
 2. **LLM** — LLM client initialisation.
 3. **SQLite** — system DB + schema (`SQLModel.metadata.create_all`).
-4. **LanceDB** — async connection + schema verification + FTS indexes.
+4. **Derived index** — async connection + schema verification + search indexes.
 5. **Cascade** — watcher + scanner + worker, all in-process tasks.
 6. **OME** — offline memory engine.
 
@@ -23,7 +27,7 @@ The cascade subsystem itself is three independent loops:
 |---|---|---|
 | Watcher | `watchdog` filesystem events (sync thread) | `md_change_state.upsert` per registered kind |
 | Scanner | Periodic walk (`scan_interval_seconds`, default 30 s) | Same — catches changes the watcher missed |
-| Worker | `claim_pending_batch` polling (default 1 s when idle) | Handler dispatch → LanceDB upsert / delete |
+| Worker | `claim_pending_batch` polling (default 1 s when idle) | Handler dispatch → index upsert / delete |
 
 Every loop talks to the same `md_change_state` sqlite table. The
 worker's claim mode (`pending → processing → done/failed`) keeps
@@ -123,7 +127,7 @@ parallel with a live `everos server`.
 
 ## Rebuild the index: `everos cascade rebuild`
 
-The safe recovery from a drifted or corrupt LanceDB index. It rebuilds
+The safe recovery from a drifted or corrupt derived index. It rebuilds
 the whole index from markdown (the source of truth) in one shot:
 
 ```bash
@@ -132,15 +136,16 @@ everos cascade rebuild --yes    # non-interactive
 ```
 
 > **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the LanceDB tables. A running daemon holds
+> **drops and recreates** the active backend's tables or collections. A running
+> daemon holds
 > cached table handles that would keep pointing at (and writing to) the
 > dropped dataset, corrupting the rebuild. This is the one cascade
 > command that is **not** safe to run alongside a live server.
 
 What it does, in order:
 
-1. **Drops** every business LanceDB table (`drop_business_tables`) and
-   evicts them from the connection cache.
+1. **Drops** every business table or collection (`drop_business_tables`) and
+   evicts it from the process cache.
 2. **Recreates** them empty from the current schema + FTS indexes
    (`ensure_business_indexes`).
 3. **Clears** the cascade queue (`md_change_state.reset_all`) so every
@@ -159,6 +164,10 @@ Why not a bare `rm`:
 | `rm -rf .index/lancedb` | ❌ scanner skips `done` rows → empty index | ✅ |
 | `rm -rf .index` | ✅ | ❌ deletes un-extracted messages |
 | `everos cascade rebuild` | ✅ | ✅ |
+
+For a remote Milvus backend, rebuild acts only on collections whose names use
+the configured `collection_prefix`. Use a unique prefix or dedicated database
+before running it on a shared Milvus Server or Zilliz Cloud deployment.
 
 ## Recovery paths
 

@@ -19,7 +19,7 @@ import json
 from typing import Any
 
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import user_profile_repo
+from everos.infra.persistence.index import user_profile_repo
 
 from ..dto import SearchProfileItem
 

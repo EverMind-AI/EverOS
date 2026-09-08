@@ -11,7 +11,7 @@ it never blocks on optional components the way ``/search`` does.
 from __future__ import annotations
 
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.index import (
     agent_case_repo,
     agent_skill_repo,
     episode_repo,

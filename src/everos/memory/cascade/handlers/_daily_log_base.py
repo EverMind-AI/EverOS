@@ -15,7 +15,7 @@ session_id / timestamp / parent_id / sender_ids) are NOT in the hash
 — editing them does NOT propagate to LanceDB and does NOT waste an
 embed call.
 
-Subclasses bind their ``kind`` / ``lance_repo`` / ``content_change_keys``
+Subclasses bind their ``kind`` / ``index_repo`` / ``content_change_keys``
 as ClassVars and override :meth:`_build_row` to do the per-kind field
 mapping. Everything else — read, diff, embed call, upsert, delete —
 lives here.
@@ -30,6 +30,7 @@ from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, StructuredEntry
+from everos.infra.persistence.index import all_of, eq, one_of
 
 from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -57,7 +58,7 @@ class BaseDailyLogHandler(Handler):
     Subclass requirements:
 
     - :attr:`kind` (ClassVar[str]) — registry name, surfaces in logs.
-    - :attr:`lance_repo` (ClassVar) — the LanceDB repo singleton for
+    - :attr:`index_repo` (ClassVar) — the LanceDB repo singleton for
       this kind (must expose ``find_where`` / ``upsert`` / ``delete``
       / ``delete_by_md_path``).
     - :attr:`content_change_keys` (ClassVar[tuple[str, ...]]) — the
@@ -70,7 +71,7 @@ class BaseDailyLogHandler(Handler):
     """
 
     kind: ClassVar[str] = ""
-    lance_repo: ClassVar[Any] = None
+    index_repo: ClassVar[Any] = None
     content_change_keys: ClassVar[tuple[str, ...]] = ()
 
     def _content_sha256(self, structured: StructuredEntry) -> str:
@@ -107,8 +108,8 @@ class BaseDailyLogHandler(Handler):
             for entry in parsed.entries
         ]
 
-        existing = await self.lance_repo.find_where(
-            f"md_path = '{_q(md_path)}'",
+        existing = await self.index_repo.find_where(
+            eq("md_path", md_path),
             limit=10_000,
         )
         owner_id, owner_type = resolve_owner(parsed.frontmatter, md_path)
@@ -196,15 +197,14 @@ class BaseDailyLogHandler(Handler):
     ) -> None:
         """Flush upserts and deletes to LanceDB."""
         if to_upsert:
-            await self.lance_repo.upsert(to_upsert)
+            await self.index_repo.upsert(to_upsert)
         if to_delete_ids:
-            in_list = ", ".join(f"'{eid}'" for eid in to_delete_ids)
-            await self.lance_repo.delete(
-                f"md_path = '{_q(md_path)}' AND entry_id IN ({in_list})"
+            await self.index_repo.delete(
+                all_of(eq("md_path", md_path), one_of("entry_id", to_delete_ids))
             )
 
     async def handle_deleted(self, md_path: str) -> HandlerOutcome:
-        deleted = await self.lance_repo.delete_by_md_path(md_path)
+        deleted = await self.index_repo.delete_by_md_path(md_path)
         return HandlerOutcome(
             md_path=md_path,
             kind=self.kind,
@@ -252,14 +252,14 @@ class BaseDailyLogHandler(Handler):
         entry may have been deleted or not yet indexed.
         """
         app_id, project_id = scope
-        predicate = (
-            f"owner_id = '{_q(owner_id)}' "
-            f"AND entry_id = '{_q(entry_id)}' "
-            f"AND app_id = '{_q(app_id)}' "
-            f"AND project_id = '{_q(project_id)}'"
+        predicate = all_of(
+            eq("owner_id", owner_id),
+            eq("entry_id", entry_id),
+            eq("app_id", app_id),
+            eq("project_id", project_id),
         )
         try:
-            await self.lance_repo.update(
+            await self.index_repo.update(
                 {"deprecated_by": deprecated_by},
                 where=predicate,
             )
@@ -290,8 +290,3 @@ class BaseDailyLogHandler(Handler):
         ``"default"`` so white-box callers exercising only the field mapping
         can omit them.
         """
-
-
-def _q(text: str) -> str:
-    """Defensive SQL-quote escape (mirrors lancedb chassis convention)."""
-    return text.replace("'", "''")

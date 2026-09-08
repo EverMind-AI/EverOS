@@ -17,7 +17,7 @@
 │    + reflection + strategies + get + events            │
 ├──────────────────────────────────────────────────────┤
 │  infra/persistence  (Storage adapters; infra/ may host other adapter types)    │
-│    markdown + sqlite + lancedb                        │
+│    markdown + sqlite + derived index                  │
 └──────────────────────────────────────────────────────┘
 
 Cross-cutting (used by all layers, depends on none):
@@ -68,8 +68,8 @@ layers = [
 └────────────────────────────────────────────────────────────────┘
 
    ┌──────────────┐   ┌──────────────┐   ┌─────────────────┐
-   │   Markdown   │   │   SQLite     │   │    LanceDB      │
-   │  (truth)     │   │  (state)     │   │  (index)        │
+   │   Markdown   │   │   SQLite     │   │ Derived index   │
+   │  (truth)     │   │  (state)     │   │ LanceDB/Milvus  │
    ├──────────────┤   ├──────────────┤   ├─────────────────┤
    │ entries +    │   │ change queue │   │ vector ANN      │
    │ frontmatter  │   │ + state/LSN  │   │ BM25 (Tantivy)  │
@@ -78,7 +78,7 @@ layers = [
    └──────────────┘   └──────────────┘   └─────────────────┘
           │                  │                    │
           ▼                  ▼                    ▼
-    memory-root/         .index/sqlite/      .index/lancedb/
+    memory-root/         .index/sqlite/      .index/<backend>/
    (truth source)       (system data)       (rebuildable)
 ```
 
@@ -101,10 +101,13 @@ External message
    │        │
    ▼        ▼
 4a. SQLite   4b. memory.cascade  (async daemon)
-    audit        watches md → diff entries → LanceDB sync
+    audit        watches md → diff entries → index sync
 ```
 
-**Key guarantee**: md write is strongly consistent (fsync). LanceDB is eventually consistent. LanceDB unavailability does not block response — changes buffer in the SQLite `md_change_state` queue, replayed on recovery.
+**Key guarantee**: md write is strongly consistent (fsync). The derived
+index is eventually consistent. Index backend unavailability does not block
+response — changes buffer in the SQLite `md_change_state` queue, replayed on
+recovery.
 
 ## Read path
 
@@ -115,8 +118,8 @@ User query
 1. service.search
    │
    ▼
-2. memory.search (hybrid)     single LanceDB query =
-                                BM25 + vector ANN + scalar filter
+2. memory.search (hybrid)     BM25 + vector ANN + scalar filter
+                              through the configured index backend
    │
    ▼
 3. (optional) read md         original markdown for context
@@ -139,12 +142,13 @@ extract/
 
 ### `memory/cascade/`
 
-Daemon that watches markdown changes and syncs to LanceDB:
+Daemon that watches markdown changes and syncs to the configured derived
+index backend:
 
 - inotify / FSEvents file watcher (cross-platform via `watchdog`)
 - 500ms debounce
 - Entry-level diff (added / changed / removed)
-- LanceDB single-transaction update (text + vector columns atomic)
+- Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
 - Handlers for all eight business kinds: episode, atomic_fact, foresight,
   user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
@@ -225,7 +229,7 @@ holding **only memory extraction algorithms**:
 everalgo is:
 
 - **Stateless** — pure functions, no class hierarchy
-- **No I/O** — does not touch md files / LanceDB / SQLite
+- **No I/O** — does not touch md files, derived indexes, or SQLite
 - **No prompts inline** — extractors that accept a prompt-override parameter use the project-supplied value; others use their algo-bundled defaults
 
 This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).

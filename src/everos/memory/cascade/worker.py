@@ -879,7 +879,7 @@ class CascadeWorker:
           LanceDB's per-table manifest version expects.
 
         No-op when the handler for ``kind`` doesn't expose a
-        ``lance_repo`` (test stubs, handlers that intentionally skip
+        ``index_repo`` (test stubs, handlers that intentionally skip
         LanceDB).
 
         Idempotent and cheap (a single dict lookup + flag write in
@@ -887,7 +887,7 @@ class CascadeWorker:
         heartbeat sweep.
         """
         handler = self._handlers.get(kind)
-        repo = getattr(handler, "lance_repo", None) if handler else None
+        repo = getattr(handler, "index_repo", None) if handler else None
         if repo is None:
             return
         state = self._optimizer_states.setdefault(kind, _KindOptimizerState())
@@ -987,7 +987,7 @@ class CascadeWorker:
         manifest, and prune is a write.
         """
         handler = self._handlers.get(kind)
-        repo = getattr(handler, "lance_repo", None) if handler else None
+        repo = getattr(handler, "index_repo", None) if handler else None
         if repo is None:
             return
         state = self._optimizer_states.get(kind)
@@ -1201,7 +1201,7 @@ class CascadeWorker:
         during the rebuild coalesce instead of racing on the manifest.
         """
         handler = self._handlers.get(kind)
-        repo = getattr(handler, "lance_repo", None) if handler else None
+        repo = getattr(handler, "index_repo", None) if handler else None
         if repo is None:
             return
         state = self._optimizer_states.setdefault(kind, _KindOptimizerState())

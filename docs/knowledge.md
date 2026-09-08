@@ -48,8 +48,8 @@ Each level corresponds to a different granularity of API:
 ## Storage layout
 
 Every document is a self-contained directory. Markdown files are the
-single source of truth; SQLite and LanceDB are derived indexes built
-automatically by the cascade daemon.
+single source of truth; SQLite and the configured vector/BM25 index are
+derived indexes built automatically by the cascade daemon.
 
 ```
 ~/.everos/<app>/<project>/knowledge/
@@ -73,16 +73,16 @@ automatically by the cascade daemon.
 ### Storage roles
 
 ```
-Markdown (source of truth)  +  SQLite (structured state)  +  LanceDB (vector + BM25 index)
+Markdown (source of truth)  +  SQLite (structured state)  +  derived vector/BM25 index
 ```
 
 | Store | What it holds | Role |
 |-------|---------------|------|
 | Markdown | Document metadata, summaries, topic content, original files | Single source of truth; human-readable and editable |
 | SQLite | Document rows, topic rows (with content), change queue | Structured queries, paginated lists, count aggregation |
-| LanceDB | Topic vectors, BM25 tokens, scalar fields | Search index (fully rebuildable from Markdown) |
+| Derived index | Topic vectors, BM25 tokens, scalar fields | Search index (fully rebuildable from Markdown) |
 
-Even if SQLite and LanceDB data is corrupted, as long as the Markdown
+Even if SQLite and derived index data is corrupted, as long as the Markdown
 files are intact, the indexes can be fully rebuilt via the cascade daemon.
 
 ### Markdown format
@@ -500,7 +500,7 @@ query ─→ embed ─→ keyword (BM25) ─┐
 ```
 
 1. **Embed** — the query is embedded using the configured embedding provider
-2. **Recall** — dual-channel retrieval from LanceDB:
+2. **Recall** — dual-channel retrieval from the configured derived index:
    - BM25 channel: keyword matching on `summary_tokens` + `content_tokens`
    - ANN channel: nearest-neighbor search on the `vector` column
    - In `hybrid` mode, both channels run in parallel
@@ -531,7 +531,7 @@ export EVEROS_KNOWLEDGE__SEARCH__RERANK_N=100
 ## Cascade sync
 
 The cascade daemon watches the knowledge Markdown directory for file
-changes and keeps SQLite + LanceDB in sync.
+changes and keeps SQLite + the configured derived index in sync.
 
 ```
 md file written
@@ -539,7 +539,7 @@ md file written
   → worker picks up from queue (≤1s poll interval)
   → handler dispatched by file type:
       index.md    → KnowledgeDocumentHandler → SQLite upsert (metadata)
-      N_topic.md  → KnowledgeTopicHandler    → tokenize + embed + SQLite + LanceDB upsert
+      N_topic.md  → KnowledgeTopicHandler    → tokenize + embed + SQLite + index upsert
 ```
 
 The topic handler uses a SHA-256 content digest to skip unchanged files —
@@ -597,7 +597,7 @@ curl .../documents?app_id=tenant_b&project_id=proj_1
 # → { "documents": [], "total": 0 }
 ```
 
-Storage paths, SQLite rows, and LanceDB indexes are all scoped by
+Storage paths, SQLite rows, and derived index rows are all scoped by
 `app_id` + `project_id`.
 
 ## End-to-end walkthrough

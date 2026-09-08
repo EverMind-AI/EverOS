@@ -93,8 +93,9 @@ bare FastAPI `detail`); see [Errors](#errors).
 
 `/add` and `/flush` write the markdown file (the source of truth)
 **synchronously** — when the call returns with `status: "extracted"`,
-the new entry exists on disk. The LanceDB vector / BM25 / scalar index
-is rebuilt by the in-process **cascade coroutine asynchronously**.
+the new entry exists on disk. The configured vector / BM25 / scalar
+index backend is rebuilt by the in-process **cascade coroutine
+asynchronously**.
 
 That means `/search` and `/get` may not see a record immediately after
 the `/flush` that produced it. Typical sync latency is sub-second, but
@@ -371,7 +372,7 @@ A recursive boolean tree of predicates. Used by `/search.filters` and
 `/get.filters`. The Pydantic envelope only checks the recursive
 combinator shape; field-level validity (which scalar fields are
 filterable, which operators apply, value coercion) runs when the
-node is compiled to a LanceDB `where` clause server-side. Compile
+node is compiled to a backend-specific filter clause server-side. Compile
 errors surface as `422` with the offending field / operator in
 `error.message`.
 
@@ -464,12 +465,12 @@ Examples:
 |---|---|
 | `"keyword"` | BM25 only — pure lexical match, no embedding cost |
 | `"vector"` | Dense vector ANN only — semantic recall, no lexical |
-| `"hybrid"` *(default)* | Reciprocal-rank fuse of BM25 + vector + optional scalar filter in a single LanceDB query |
+| `"hybrid"` *(default)* | Reciprocal-rank fuse of BM25 + vector + optional scalar filter against the configured derived index backend |
 | `"agentic"` | Iterative cluster-path retrieval driven by a cross-encoder rerank loop; higher quality at higher latency / cost |
 
 `"hybrid"` is the default because it balances recall and precision
-with one LanceDB roundtrip. `"agentic"` calls the LLM in a loop and
-should be reserved for offline or background workflows.
+without requiring the agentic loop. `"agentic"` calls the LLM in a loop
+and should be reserved for offline or background workflows.
 
 ### GetMemoryType
 
@@ -613,7 +614,7 @@ scope.
   this `(session_id, app_id, project_id)`, or it was already flushed).
 
 `/flush` is synchronous with respect to markdown persistence: by the
-time the response returns, the new entry is on disk. LanceDB index
+time the response returns, the new entry is on disk. Derived index
 sync is still asynchronous — see
 [Eventual consistency](#eventual-consistency).
 

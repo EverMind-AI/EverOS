@@ -47,7 +47,7 @@ import pytest
 
 import everos.component.embedding.accessor as _embedding_accessor
 from everos.infra.ome.records import RunStatus
-from everos.infra.persistence.lancedb import agent_case_repo, agent_skill_repo
+from everos.infra.persistence.index import agent_case_repo, agent_skill_repo, eq
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
 from everos.service.memorize import _get_engine
 
@@ -188,9 +188,9 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         assert md_files, f"no agent_case md under {case_dir!s}"
 
     # 4.3 LanceDB agent_case rows per owner
-    pytest_cases = await agent_case_repo.find_where(f"owner_id = '{_AGENT_PYTEST}'")
-    sympy_cases = await agent_case_repo.find_where(f"owner_id = '{_AGENT_SYMPY}'")
-    django_cases = await agent_case_repo.find_where(f"owner_id = '{_AGENT_DJANGO}'")
+    pytest_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_PYTEST))
+    sympy_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_SYMPY))
+    django_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_DJANGO))
 
     assert len(pytest_cases) >= 1, (
         f"no agent_pytest rows in LanceDB (got {len(pytest_cases)})"
@@ -230,9 +230,9 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     # SKILL.md (extract_agent_skill status "success", no retries); driving
     # 5 trajectories across 3 agents should clear an aggregate floor of 1
     # even if any single agent's cluster is quality-gated to 0.
-    pytest_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_PYTEST}'")
-    sympy_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_SYMPY}'")
-    django_skills = await agent_skill_repo.find_where(f"owner_id = '{_AGENT_DJANGO}'")
+    pytest_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_PYTEST))
+    sympy_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_SYMPY))
+    django_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_DJANGO))
     total_skills = len(pytest_skills) + len(sympy_skills) + len(django_skills)
     assert total_skills >= 1, (
         "agent-skill chain produced nothing — the strategy chain "

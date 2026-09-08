@@ -40,6 +40,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -175,6 +177,54 @@ def _reset_search_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _index_backends() -> list[str]:
+    """Backends the tier suites run against.
+
+    LanceDB is always exercised. Milvus joins only when a real server is
+    configured — it is a remote service, so there is no embedded fallback to
+    silently degrade to. A run without ``EVEROS_TEST_MILVUS_URI`` therefore
+    proves nothing about Milvus, and says so by not collecting those cases.
+    """
+    backends = ["lancedb"]
+    if os.environ.get("EVEROS_TEST_MILVUS_URI"):
+        backends.append("milvus")
+    return backends
+
+
+@pytest_asyncio.fixture(params=_index_backends(), ids=lambda b: f"index={b}")
+async def index_backend(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[str]:
+    """Point the derived index at one backend for the duration of a test."""
+    backend = request.param
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", backend)
+    if backend == "milvus":
+        monkeypatch.setenv("EVEROS_MILVUS__URI", os.environ["EVEROS_TEST_MILVUS_URI"])
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__TOKEN", os.environ.get("EVEROS_TEST_MILVUS_TOKEN", "")
+        )
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__DB_NAME", os.environ.get("EVEROS_TEST_MILVUS_DB_NAME", "")
+        )
+        # A fresh prefix per test: collections are remote and outlive the
+        # process, so two tests sharing one would leak state into each other.
+        monkeypatch.setenv(
+            "EVEROS_MILVUS__COLLECTION_PREFIX", f"everos_tier_{uuid.uuid4().hex}"
+        )
+
+    yield backend
+
+    if backend == "milvus":
+        from everos.config import load_settings
+        from everos.infra.persistence.index import drop_business_tables, shutdown
+
+        load_settings.cache_clear()
+        try:
+            await drop_business_tables()
+        finally:
+            await shutdown()
+
+
 @asynccontextmanager
 async def _tier_client(
     tmp_path: Path,
@@ -234,7 +284,7 @@ async def _tier_client(
 
 @pytest_asyncio.fixture
 async def tier1_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Tier 1: LLM only. embed/rerank/multimodal all unavailable."""
     async with _tier_client(
@@ -245,7 +295,7 @@ async def tier1_runtime(
 
 @pytest_asyncio.fixture
 async def tier2_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Tier 2: LLM + embed. rerank unavailable."""
     async with _tier_client(
@@ -256,7 +306,7 @@ async def tier2_runtime(
 
 @pytest_asyncio.fixture
 async def tier3_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_backend: str
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Tier 3: LLM + embed + rerank, all available."""
     async with _tier_client(
@@ -384,7 +434,7 @@ async def seed_atomic_fact_for_episode(
     import hashlib
 
     from everos.component.utils.datetime import get_utc_now
-    from everos.infra.persistence.lancedb import AtomicFact, atomic_fact_repo
+    from everos.infra.persistence.index import AtomicFact, atomic_fact_repo
 
     entry_id = f"af_seed_{episode_row['entry_id']}"
     owner_id = episode_row["owner_id"]
@@ -434,3 +484,16 @@ def add_payload(
             }
         ],
     }
+
+
+async def episode_rows(owner_id: str) -> list[dict[str, Any]]:
+    """Every episode row for one owner, as plain dicts.
+
+    Backend-neutral on purpose: the tier suites assert on indexed content, not
+    on how a particular engine stores it, so they read through the same port
+    the application uses.
+    """
+    from everos.infra.persistence.index import episode_repo, eq
+
+    rows = await episode_repo.scan(eq("owner_id", owner_id))
+    return [row.model_dump(mode="python") for row in rows]

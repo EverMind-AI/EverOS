@@ -183,6 +183,17 @@ def from_timestamp(ts: int | float) -> _dt.datetime:
     return _dt.datetime.fromtimestamp(seconds, tz=_display_tz())
 
 
+def from_timestamp_ms(ts: int) -> _dt.datetime:
+    """Parse an epoch-milliseconds value into a timezone-aware datetime.
+
+    Exact inverse of :func:`to_timestamp_ms`. Unlike :func:`from_timestamp`
+    this does **not** guess whether the value is seconds or milliseconds, so
+    pre-2001 instants (whose ms value falls under the 1e12 heuristic
+    threshold) round-trip instead of being read as seconds.
+    """
+    return _dt.datetime.fromtimestamp(ts / 1000.0, tz=_display_tz())
+
+
 def from_iso_format(value: _dt.datetime | int | float | str) -> _dt.datetime:
     """Parse a value into a timezone-aware datetime (strict).
 

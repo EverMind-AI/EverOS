@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -46,11 +47,11 @@ from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.persistence.lancedb import (
-    dispose_connection,
+from everos.infra.persistence.index import (
+    connect,
     drop_business_tables,
     ensure_business_indexes,
-    get_connection,
+    shutdown,
     verify_business_schemas,
 )
 from everos.infra.persistence.sqlite import (
@@ -135,9 +136,7 @@ _VERBOSE_OPTION_HELP = (
 
 
 @asynccontextmanager
-async def _runtime(  # type: ignore[no-untyped-def]
-    *, verify: bool = True, ensure: bool = True
-):
+async def _runtime(*, verify: bool = True, ensure: bool = True) -> AsyncIterator[None]:
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
     The CLI uses the same lazy, process-wide singletons the API lifespan
@@ -163,7 +162,7 @@ async def _runtime(  # type: ignore[no-untyped-def]
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    await get_connection()
+    await connect()
     if verify:
         await verify_business_schemas()
     if ensure:
@@ -171,7 +170,7 @@ async def _runtime(  # type: ignore[no-untyped-def]
     try:
         yield
     finally:
-        await dispose_connection()
+        await shutdown()
         await dispose_engine()
 
 

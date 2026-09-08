@@ -29,18 +29,20 @@ import pytest
 import structlog.testing
 
 from everos.entrypoints.api.lifespans import lancedb as lancedb_lifespan
-from everos.infra.persistence.lancedb import BUSINESS_SCHEMAS_WITH_VECTOR
+from everos.infra.persistence.index import ALL_REPOS
+from everos.infra.persistence.index.schema import schema_for
 
 
-class _FakeTable:
-    """Minimal stand-in for :class:`BaseLanceTable` used by the hint."""
+class _FakeRepo:
+    """Minimal backend-neutral repository used by the hint."""
 
-    def __init__(self, null_count: int) -> None:
+    def __init__(self, schema: Any, null_count: int) -> None:
+        self.schema = schema
         self._null_count = null_count
-        self.count_rows_calls = 0
+        self.count_where_calls = 0
 
-    async def count_rows(self, filter: str) -> int:
-        self.count_rows_calls += 1
+    async def count_where(self, predicate: Any) -> int:
+        self.count_where_calls += 1
         return self._null_count
 
 
@@ -53,18 +55,15 @@ def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _wire_tables(
     monkeypatch: pytest.MonkeyPatch, *, null_count: int
-) -> dict[str, _FakeTable]:
-    """Replace ``get_table`` in the lifespan module with a per-table stub."""
-    tables: dict[str, _FakeTable] = {
-        schema.TABLE_NAME: _FakeTable(null_count)
-        for schema in BUSINESS_SCHEMAS_WITH_VECTOR
+) -> dict[str, _FakeRepo]:
+    """Replace the facade registry with per-schema repository stubs."""
+    repos: dict[str, _FakeRepo] = {
+        repo.schema.TABLE_NAME: _FakeRepo(repo.schema, null_count)
+        for repo in ALL_REPOS
+        if schema_for(repo.schema).vector_fields
     }
-
-    async def _fake_get_table(name: str, _schema: Any) -> _FakeTable:
-        return tables[name]
-
-    monkeypatch.setattr(lancedb_lifespan, "get_table", _fake_get_table)
-    return tables
+    monkeypatch.setattr(lancedb_lifespan, "ALL_REPOS", tuple(repos.values()))
+    return repos
 
 
 async def test_hint_fires_when_null_vectors_exist(
@@ -77,10 +76,10 @@ async def test_hint_fires_when_null_vectors_exist(
 
     emissions = [e for e in captured if e.get("event") == "unbackfilled_memory_rows"]
     assert len(emissions) == 1
-    expected_total = 3 * len(BUSINESS_SCHEMAS_WITH_VECTOR)
+    expected_total = 3 * len(tables)
     assert emissions[0]["count"] == expected_total
     # Every business table contributes exactly one ``count_rows`` call.
-    assert all(t.count_rows_calls == 1 for t in tables.values())
+    assert all(t.count_where_calls == 1 for t in tables.values())
 
 
 async def test_hint_silent_when_no_null_vectors(
@@ -95,24 +94,24 @@ async def test_hint_silent_when_no_null_vectors(
     assert emissions == []
     # Every table was scanned (unconditional count) — none had rows to
     # report, so no banner. No marker involved.
-    assert all(t.count_rows_calls == 1 for t in tables.values())
+    assert all(t.count_where_calls == 1 for t in tables.values())
 
 
 async def test_per_table_failure_is_swallowed_and_logged(
     _isolated_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    tables: dict[str, _FakeTable] = {
-        schema.TABLE_NAME: _FakeTable(null_count=1)
-        for schema in BUSINESS_SCHEMAS_WITH_VECTOR
+    tables: dict[str, _FakeRepo] = {
+        repo.schema.TABLE_NAME: _FakeRepo(repo.schema, null_count=1)
+        for repo in ALL_REPOS
+        if schema_for(repo.schema).vector_fields
     }
-    poisoned = BUSINESS_SCHEMAS_WITH_VECTOR[0].TABLE_NAME
+    poisoned = next(iter(tables))
 
-    async def _fake_get_table(name: str, _schema: Any) -> _FakeTable:
-        if name == poisoned:
-            raise RuntimeError("simulated LanceDB hiccup")
-        return tables[name]
+    async def _poisoned_count(_predicate: Any) -> int:
+        raise RuntimeError("simulated index hiccup")
 
-    monkeypatch.setattr(lancedb_lifespan, "get_table", _fake_get_table)
+    tables[poisoned].count_where = _poisoned_count  # type: ignore[method-assign]
+    monkeypatch.setattr(lancedb_lifespan, "ALL_REPOS", tuple(tables.values()))
 
     with structlog.testing.capture_logs() as captured:
         await lancedb_lifespan._log_unbackfilled_hint()
@@ -125,4 +124,4 @@ async def test_per_table_failure_is_swallowed_and_logged(
     # out silently.
     emissions = [e for e in captured if e.get("event") == "unbackfilled_memory_rows"]
     assert len(emissions) == 1
-    assert emissions[0]["count"] == len(BUSINESS_SCHEMAS_WITH_VECTOR) - 1
+    assert emissions[0]["count"] == len(tables) - 1

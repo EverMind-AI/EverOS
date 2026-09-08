@@ -12,15 +12,7 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-from everos.infra.persistence.lancedb import Episode, get_table
-
-from .conftest import add_and_flush
-
-
-async def _episode_rows(owner_id: str) -> list[dict]:
-    table = await get_table(Episode.TABLE_NAME, Episode)
-    return await table.query().where(f"owner_id = '{owner_id}'").to_list()
-
+from .conftest import add_and_flush, episode_rows
 
 # ---------------------------------------------------------------------------
 # 1. POST /memory/add -> md write + LanceDB vector=NULL
@@ -31,7 +23,7 @@ async def test_add_memory_writes_null_vector(tier1_runtime: AsyncClient) -> None
     body = await add_and_flush(tier1_runtime, session_id="s_tier1_add")
     assert body["data"]["status"] == "extracted"
 
-    rows = await _episode_rows("u_alice")
+    rows = await episode_rows("u_alice")
     assert rows, "expected cascade to index the new episode into LanceDB"
     assert rows[0]["vector"] is None, "Tier 1 (no embed) must write vector=NULL"
 

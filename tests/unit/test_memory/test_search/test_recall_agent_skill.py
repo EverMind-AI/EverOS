@@ -26,6 +26,7 @@ from everos.infra.persistence.lancedb import (
     agent_skill_repo,
     lancedb_manager,
 )
+from everos.infra.persistence.predicate import all_of, eq
 from everos.memory.search.recall.agent_skill import AgentSkillRecaller
 from everos.memory.search.recall.base import RecallerDeps
 
@@ -76,7 +77,7 @@ def _recaller() -> AgentSkillRecaller:
     return AgentSkillRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
 
 
-_OWNER_WHERE = "owner_id = 'agt' AND owner_type = 'agent'"
+_OWNER_WHERE = all_of(eq("owner_id", "agt"), eq("owner_type", "agent"))
 
 
 async def test_fetch_by_case_ids_matches_any_lineage_case() -> None:

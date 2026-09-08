@@ -99,6 +99,29 @@ everos init --root /data/everos
 | `read_consistency_seconds` | float \| null | `null` | Read consistency interval. `null` = no check, `0` = strict, `>0` = eventual. |
 | `index_cache_size_bytes` | int | `16777216` | Upper bound on LanceDB index cache (16 MB default). |
 
+### `[index]`
+
+The derived vector/BM25 index is rebuildable; Markdown remains the source of
+truth regardless of backend.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `backend` | string | `"lancedb"` | Index implementation: `lancedb` or `milvus`. |
+
+### `[milvus]`
+
+Used only when `index.backend = "milvus"`. Install the optional client with
+`pip install "everos[milvus]"`. EverOS supports a remote Milvus Server or
+Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `uri` | string | `""` | Milvus Server or Zilliz Cloud URI. |
+| `token` | string | `""` | Authentication token, when required. |
+| `db_name` | string | `""` | Optional Milvus database name. |
+| `consistency_level` | string | `"Session"` | Milvus consistency level used by collections. |
+| `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. |
+
 ### `[llm]`
 
 | Field | Type | Default | Required | Description |

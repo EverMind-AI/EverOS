@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.lancedb import AtomicFact, ParentType, atomic_fact_repo
+from everos.infra.persistence.index import AtomicFact, ParentType, atomic_fact_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
@@ -35,7 +35,7 @@ class AtomicFactHandler(BaseDailyLogHandler):
     """Cascade handler for ``users/<u>/.atomic_facts/atomic_fact-*.md``."""
 
     kind = "atomic_fact"
-    lance_repo = atomic_fact_repo
+    index_repo = atomic_fact_repo
     content_change_keys = ("section:Fact",)
     """Only ``Fact`` matters — it's both the embedded text AND the
     BM25 source. Audit inline is excluded."""

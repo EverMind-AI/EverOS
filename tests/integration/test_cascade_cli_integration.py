@@ -124,7 +124,7 @@ def test_sync_with_path_outside_root_errors(
     # between the two tokens.
     output = result.stdout + (result.stderr or "")
     plain_output = _strip_ansi(output)
-    assert re.search(r"not under[^\w]+memory root", plain_output), output
+    assert re.search(r"not[^\w]+under[^\w]+memory[^\w]+root", plain_output), output
 
 
 def test_sync_with_unmatched_path(

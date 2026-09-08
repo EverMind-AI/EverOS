@@ -50,6 +50,7 @@ from everos.core.observability.tracing import (
     emit_recall_scores,
     memory_span,
 )
+from everos.infra.persistence.index import Predicate
 from everos.infra.persistence.sqlite import (
     UnprocessedBuffer,
     unprocessed_buffer_repo,
@@ -305,7 +306,7 @@ class SearchManager:
     # ── Agent partition ─────────────────────────────────────────────
 
     async def _search_cases_and_skills(
-        self, req: SearchRequest, where: str
+        self, req: SearchRequest, where: Predicate
     ) -> tuple[list[SearchAgentCaseItem], list[SearchAgentSkillItem]]:
         """Cases + skills, serial when bridging.
 
@@ -359,7 +360,11 @@ class SearchManager:
         return await self._search_episodes(req, where, decider=decider)
 
     async def _search_episodes(
-        self, req: SearchRequest, where: str, *, decider: RoundDecider | None = None
+        self,
+        req: SearchRequest,
+        where: Predicate,
+        *,
+        decider: RoundDecider | None = None,
     ) -> list[SearchEpisodeItem]:
         if req.method == SearchMethod.AGENTIC:
             return await search_episodes_agentic(
@@ -483,7 +488,7 @@ class SearchManager:
     # ── Agent cases ─────────────────────────────────────────────────
 
     async def _search_agent_cases(
-        self, req: SearchRequest, where: str
+        self, req: SearchRequest, where: Predicate
     ) -> list[SearchAgentCaseItem]:
         if req.method == SearchMethod.AGENTIC:
             return await search_agent_cases_agentic(
@@ -539,7 +544,7 @@ class SearchManager:
     async def _search_agent_skills(
         self,
         req: SearchRequest,
-        where: str,
+        where: Predicate,
         *,
         bridge_cases: list[Candidate] | None = None,
     ) -> list[SearchAgentSkillItem]:
@@ -631,7 +636,7 @@ class SearchManager:
         self,
         recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
         req: SearchRequest,
-        where: str,
+        where: Predicate,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
@@ -655,7 +660,7 @@ class SearchManager:
         self,
         recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
         req: SearchRequest,
-        where: str,
+        where: Predicate,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
@@ -685,7 +690,7 @@ class SearchManager:
             return sparse, dense, vector
 
     async def _maxsim_atomic_recall(
-        self, req: SearchRequest, where: str, top_k: int
+        self, req: SearchRequest, where: Predicate, top_k: int
     ) -> list[Candidate]:
         """MaxSim-style: ANN atomic_facts → max-pool by memcell → batch fetch episodes.
 
@@ -727,7 +732,7 @@ class SearchManager:
     async def _case_bridged_skills(
         self,
         bridge_cases: list[Candidate] | None,
-        where: str,
+        where: Predicate,
         top_k: int,
     ) -> list[Candidate]:
         """Reverse-resolve lineage skills and max-pool their source-case
