@@ -10,7 +10,6 @@ See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 
 from __future__ import annotations
 
-import asyncio
 import datetime as _dt
 import json
 import uuid
@@ -32,13 +31,25 @@ from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.persistence import MemoryRoot
 from everos.infra.ome.context import StrategyContext
-from everos.infra.persistence.index import all_of, eq, is_null
+from everos.infra.persistence.index import all_of, eq, is_null, one_of
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.events import EpisodeExtracted
 
 logger = get_logger(__name__)
 
 _MAX_CLUSTERS_PER_RUN = 10
+
+# Upper bound on the episodes one merge consumes. A cluster with more members
+# is merged incrementally: its existing merged episode plus the oldest sources
+# go into this run, the remaining members stay in the cluster and are folded
+# in by later runs in update mode. Keeps the merged narrative, and the
+# cascade upsert it triggers, inside the LanceDB write-lock budget.
+_MAX_SOURCES_PER_MERGE = 50
+
+# Entry ids per LanceDB ``update`` when deprecating sources. One update per
+# batch instead of one per row keeps the number of write-lock acquisitions
+# small for large clusters.
+_DEPRECATE_BATCH_SIZE = 100
 _WAIT_TIMEOUT_SECONDS = 120.0
 
 
@@ -354,7 +365,52 @@ class ReflectionOrchestrator:
             app_id=app_id,
             project_id=project_id,
         )
-        return members, episodes
+        return self._cap_cluster_sources(
+            cluster_id=cluster_id, members=members, episodes=episodes
+        )
+
+    @staticmethod
+    def _cap_cluster_sources(
+        *,
+        cluster_id: str,
+        members: list[tuple[str, str]],
+        episodes: list[Any],
+    ) -> tuple[list[tuple[str, str]], list[Any]]:
+        """Limit one merge to ``_MAX_SOURCES_PER_MERGE`` episodes.
+
+        The cluster's existing merged episodes (``parent_type == "cluster"``)
+        are always kept so update mode still sees the previous narrative;
+        the remaining budget goes to the oldest source episodes. Members
+        whose episode is deferred are dropped from this run's snapshot so
+        they are neither merged nor deprecated now.
+
+        Args:
+            cluster_id: Target cluster identifier (for logging).
+            members: Cluster members ``(member_id, member_type)``.
+            episodes: Episode rows sorted by timestamp ascending.
+
+        Returns:
+            ``(members, episodes)`` restricted to this run.
+        """
+        if len(episodes) <= _MAX_SOURCES_PER_MERGE:
+            return members, episodes
+
+        merged = [e for e in episodes if e.parent_type == "cluster"]
+        sources = [e for e in episodes if e.parent_type != "cluster"]
+        budget = max(_MAX_SOURCES_PER_MERGE - len(merged), 1)
+        kept = merged + sources[:budget]
+        kept.sort(key=lambda e: e.timestamp)
+        deferred = sources[budget:]
+        deferred_keys = {e.entry_id for e in deferred} | {e.parent_id for e in deferred}
+        kept_members = [(mid, mt) for mid, mt in members if mid not in deferred_keys]
+        logger.info(
+            "reflection_cluster_capped",
+            cluster_id=cluster_id,
+            member_count=len(members),
+            merged_count=len(kept_members),
+            deferred_count=len(members) - len(kept_members),
+        )
+        return kept_members, kept
 
     async def _write_and_reextract(
         self,
@@ -732,7 +788,7 @@ class ReflectionOrchestrator:
         Returns:
             A ReflectionReport on success, ``None`` when no members to deprecate.
         """
-        to_deprecate = await self._resolve_deprecation_targets(
+        to_deprecate, remaining = await self._resolve_deprecation_targets(
             cluster_id=cluster_id,
             original_members=original_members,
         )
@@ -753,6 +809,7 @@ class ReflectionOrchestrator:
             merged_entry_id=merged_entry_id,
             algo_result=algo_result,
             episodes=episodes,
+            member_count=remaining + 1,
         )
         report = await self._create_reflection_report(
             cluster_id=cluster_id,
@@ -783,7 +840,14 @@ class ReflectionOrchestrator:
         project_id: str,
         merged_entry_id: str,
     ) -> tuple[int, int]:
-        """Patch md frontmatter and mark episodes/facts deprecated in LanceDB.
+        """Mark episodes/facts deprecated in LanceDB, then patch md frontmatter.
+
+        The LanceDB writes go first and the markdown record last, so the
+        durable record only lists deprecations that were actually applied.
+        If any write fails, the ``deprecated_by`` values this run already
+        wrote are reverted before the error propagates, so a failed run
+        leaves no sources half-deprecated toward a merge that was never
+        committed to the cluster.
 
         Args:
             episodes: Source episode rows (for md patching).
@@ -796,31 +860,90 @@ class ReflectionOrchestrator:
         Returns:
             ``(deprecated_episode_count, deprecated_fact_count)``.
         """
-        await self._patch_md_frontmatter(
-            episodes=episodes,
-            to_deprecate=to_deprecate,
-            merged_entry_id=merged_entry_id,
-        )
-        deprecated_ep_count = await self._deprecate_lance_episodes(
-            entry_ids=to_deprecate,
-            owner_id=owner_id,
-            app_id=app_id,
-            project_id=project_id,
-            merged_entry_id=merged_entry_id,
-        )
-        deprecated_fact_count = await self._deprecate_lance_facts(
-            parent_ids=to_deprecate,
-            owner_id=owner_id,
-            merged_entry_id=merged_entry_id,
-        )
+        try:
+            deprecated_ep_count = await self._deprecate_lance_episodes(
+                entry_ids=to_deprecate,
+                owner_id=owner_id,
+                app_id=app_id,
+                project_id=project_id,
+                merged_entry_id=merged_entry_id,
+            )
+            deprecated_fact_count = await self._deprecate_lance_facts(
+                parent_ids=to_deprecate,
+                owner_id=owner_id,
+                merged_entry_id=merged_entry_id,
+            )
+            await self._patch_md_frontmatter(
+                episodes=episodes,
+                to_deprecate=to_deprecate,
+                merged_entry_id=merged_entry_id,
+            )
+        except BaseException:
+            await self._revert_lance_deprecation(
+                entry_ids=to_deprecate,
+                owner_id=owner_id,
+                app_id=app_id,
+                project_id=project_id,
+                merged_entry_id=merged_entry_id,
+            )
+            raise
         return deprecated_ep_count, deprecated_fact_count
+
+    async def _revert_lance_deprecation(
+        self,
+        *,
+        entry_ids: set[str],
+        owner_id: str,
+        app_id: str,
+        project_id: str,
+        merged_entry_id: str,
+    ) -> None:
+        """Best-effort compensation: clear ``deprecated_by`` written by this run.
+
+        Only rows that point at ``merged_entry_id`` are touched, so
+        deprecations from earlier, committed merges are left alone.
+        Failures are logged, never raised: the original error is the one
+        the caller needs to see.
+        """
+        reverted = True
+        for store, field_name, label in (
+            (self._episode_store, "entry_id", "episode"),
+            (self._atomic_fact_store, "parent_id", "atomic_fact"),
+        ):
+            for batch in _batched(sorted(entry_ids), _DEPRECATE_BATCH_SIZE):
+                where = all_of(
+                    one_of(field_name, batch),
+                    eq("owner_id", owner_id),
+                    eq("deprecated_by", merged_entry_id),
+                )
+                if label == "episode":
+                    where = all_of(
+                        where, eq("app_id", app_id), eq("project_id", project_id)
+                    )
+                try:
+                    await store.update({"deprecated_by": None}, where=where)
+                except Exception:
+                    reverted = False
+                    logger.error(
+                        "reflection_deprecate_revert_failed",
+                        table=label,
+                        merged_entry_id=merged_entry_id,
+                        batch_size=len(batch),
+                        exc_info=True,
+                    )
+        logger.warning(
+            "reflection_deprecate_reverted",
+            merged_entry_id=merged_entry_id,
+            source_count=len(entry_ids),
+            complete=reverted,
+        )
 
     async def _resolve_deprecation_targets(
         self,
         *,
         cluster_id: str,
         original_members: list[tuple[str, str]],
-    ) -> set[str]:
+    ) -> tuple[set[str], int]:
         """Re-read cluster members and intersect with the original snapshot.
 
         Args:
@@ -828,12 +951,16 @@ class ReflectionOrchestrator:
             original_members: Snapshot ``(member_id, member_type)`` from selection.
 
         Returns:
-            Set of member IDs safe to deprecate (present in both snapshots).
+            ``(to_deprecate, remaining)``: the member IDs safe to deprecate
+            (present in both snapshots) and the number of current members
+            that stay in the cluster (deferred by the per-merge cap, or
+            added after the snapshot).
         """
         current_members = await self._cluster_repo.get_members_with_type(cluster_id)
         current_ids = {mid for mid, _ in current_members}
         original_ids = {mid for mid, _ in original_members}
-        return original_ids & current_ids
+        to_deprecate = original_ids & current_ids
+        return to_deprecate, len(current_ids - to_deprecate)
 
     async def _deprecate_lance_episodes(
         self,
@@ -846,24 +973,25 @@ class ReflectionOrchestrator:
     ) -> int:
         """Mark deprecated episodes in LanceDB by entry_id.
 
+        One ``update`` per batch of ``_DEPRECATE_BATCH_SIZE`` ids, issued
+        sequentially: every call takes the table's write lock, so N
+        concurrent single-row updates queue behind each other and, on a
+        large cluster, blow the lock deadline.
+
         Returns:
-            Number of LanceDB update calls issued.
+            Number of episodes targeted.
         """
-        coros: list[Any] = [
-            self._episode_store.update(
+        for batch in _batched(sorted(entry_ids), _DEPRECATE_BATCH_SIZE):
+            await self._episode_store.update(
                 {"deprecated_by": merged_entry_id},
                 where=all_of(
-                    eq("entry_id", eid),
+                    one_of("entry_id", batch),
                     eq("owner_id", owner_id),
                     eq("app_id", app_id),
                     eq("project_id", project_id),
                 ),
             )
-            for eid in entry_ids
-        ]
-        if coros:
-            await asyncio.gather(*coros)
-        return len(coros)
+        return len(entry_ids)
 
     async def _deprecate_lance_facts(
         self,
@@ -880,24 +1008,21 @@ class ReflectionOrchestrator:
             merged_entry_id: Entry ID of the replacement merged episode.
 
         Returns:
-            Total number of LanceDB update calls issued.
+            Number of parents whose facts were targeted.
         """
         if not parent_ids:
             return 0
 
-        coros = [
-            self._atomic_fact_store.update(
+        for batch in _batched(sorted(parent_ids), _DEPRECATE_BATCH_SIZE):
+            await self._atomic_fact_store.update(
                 {"deprecated_by": merged_entry_id},
                 where=all_of(
-                    eq("parent_id", pid),
+                    one_of("parent_id", batch),
                     eq("owner_id", owner_id),
                     is_null("deprecated_by"),
                 ),
             )
-            for pid in parent_ids
-        ]
-        await asyncio.gather(*coros)
-        return len(coros)
+        return len(parent_ids)
 
     async def _update_cluster_after_merge(
         self,
@@ -907,6 +1032,7 @@ class ReflectionOrchestrator:
         merged_entry_id: str,
         algo_result: AlgoEpisode,
         episodes: list[Any],
+        member_count: int = 1,
     ) -> None:
         """Remove old members, add merged, and recompute centroid.
 
@@ -916,6 +1042,8 @@ class ReflectionOrchestrator:
             merged_entry_id: Entry ID of the newly merged episode.
             algo_result: Algo reflector output (episode text for centroid).
             episodes: Source episode rows (for last timestamp).
+            member_count: Members left in the cluster after the merge
+                (the merged episode plus any deferred or newly added ones).
         """
         await self._cluster_repo.remove_members(cluster_id, to_deprecate)
         await self._cluster_repo.add_member(cluster_id, merged_entry_id, "episode")
@@ -926,7 +1054,7 @@ class ReflectionOrchestrator:
         await self._cluster_repo.update_metadata(
             cluster_id,
             centroid_blob=centroid_blob,
-            count=1,
+            count=member_count,
             last_ts_ms=last_ts_ms,
             preview_json=json.dumps([algo_result.episode[:200]], ensure_ascii=False),
         )
@@ -1015,6 +1143,11 @@ class ReflectionOrchestrator:
                 root / md_path,
                 {"deprecated_entries": deprecated_map},
             )
+
+
+def _batched(items: list[str], size: int) -> list[list[str]]:
+    """Split ``items`` into consecutive lists of at most ``size`` elements."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def _to_algo_episodes(episodes: list[Any]) -> list[AlgoEpisode]:

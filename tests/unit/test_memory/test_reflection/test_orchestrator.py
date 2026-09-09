@@ -16,8 +16,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from everos.core.errors import VectorStoreBusyError
 from everos.infra.ome.testing import FakeStrategyContext
+from everos.infra.persistence.predicate import All, Comparison, In, Predicate
 from everos.memory._partition_locks import _reset_for_tests
+from everos.memory.reflection import orchestrator as orchestrator_module
 from everos.memory.reflection.orchestrator import (
     _MAX_CLUSTERS_PER_RUN,
     ReflectionOrchestrator,
@@ -483,3 +486,180 @@ async def test_call_reflector_emits_consolidate_generation_span() -> None:
         spans["everos.reflect.consolidate"].attributes["langfuse.observation.type"]
         == "generation"
     )
+
+
+# ── Batched deprecation, compensation and per-merge cap ───────────────────
+
+
+def _in_values(predicate: Predicate, field_name: str) -> list[str]:
+    """Collect the values of every ``IN`` clause on ``field_name``."""
+    if isinstance(predicate, In):
+        return list(predicate.values) if predicate.field == field_name else []
+    if isinstance(predicate, All):
+        return [
+            v for child in predicate.children for v in _in_values(child, field_name)
+        ]
+    return []
+
+
+def _eq_value(predicate: Predicate, field_name: str) -> object | None:
+    if isinstance(predicate, Comparison):
+        return predicate.value if predicate.field == field_name else None
+    if isinstance(predicate, All):
+        for child in predicate.children:
+            found = _eq_value(child, field_name)
+            if found is not None:
+                return found
+    return None
+
+
+async def test_deprecate_lance_episodes_batches_updates(monkeypatch) -> None:
+    """One update per batch of ids instead of one update per row."""
+    monkeypatch.setattr(orchestrator_module, "_DEPRECATE_BATCH_SIZE", 100)
+    episode_store = MagicMock()
+    episode_store.update = AsyncMock()
+    orch = _build_orchestrator(episode_store=episode_store)
+    entry_ids = {f"ep_{i:04d}" for i in range(250)}
+
+    count = await orch._deprecate_lance_episodes(
+        entry_ids=entry_ids,
+        owner_id="u_alice",
+        app_id="default",
+        project_id="default",
+        merged_entry_id="ep_merged",
+    )
+
+    assert count == 250
+    assert episode_store.update.await_count == 3
+    seen: list[str] = []
+    for call in episode_store.update.await_args_list:
+        updates, where = call.args[0], call.kwargs["where"]
+        assert updates == {"deprecated_by": "ep_merged"}
+        batch = _in_values(where, "entry_id")
+        assert 0 < len(batch) <= 100
+        assert _eq_value(where, "owner_id") == "u_alice"
+        seen.extend(batch)
+    assert sorted(seen) == sorted(entry_ids)
+
+
+async def test_deprecate_failure_reverts_applied_writes(monkeypatch) -> None:
+    """A failed LanceDB write reverts what this run already wrote and leaves
+    the markdown record untouched, then propagates the error."""
+    monkeypatch.setattr(orchestrator_module, "_DEPRECATE_BATCH_SIZE", 100)
+    episode_store = MagicMock()
+    episode_store.update = AsyncMock(
+        side_effect=[None, VectorStoreBusyError("write lock deadline"), None, None]
+    )
+    atomic_fact_store = MagicMock()
+    atomic_fact_store.update = AsyncMock()
+    episode_writer = MagicMock()
+    episode_writer.patch_frontmatter = AsyncMock()
+    orch = _build_orchestrator(
+        episode_store=episode_store,
+        atomic_fact_store=atomic_fact_store,
+        episode_writer=episode_writer,
+    )
+    entry_ids = {f"ep_{i:04d}" for i in range(150)}
+    episodes = [_make_episode_row(entry_id=eid) for eid in sorted(entry_ids)]
+
+    with pytest.raises(VectorStoreBusyError):
+        await orch._apply_deprecation_writes(
+            episodes=episodes,
+            to_deprecate=entry_ids,
+            owner_id="u_alice",
+            app_id="default",
+            project_id="default",
+            merged_entry_id="ep_merged",
+        )
+
+    # The markdown record was never patched.
+    episode_writer.patch_frontmatter.assert_not_awaited()
+    # Two forward batches (second failed) + two revert batches on episodes.
+    assert episode_store.update.await_count == 4
+    reverts = episode_store.update.await_args_list[2:]
+    reverted: list[str] = []
+    for call in reverts:
+        updates, where = call.args[0], call.kwargs["where"]
+        assert updates == {"deprecated_by": None}
+        assert _eq_value(where, "deprecated_by") == "ep_merged"
+        reverted.extend(_in_values(where, "entry_id"))
+    assert sorted(reverted) == sorted(entry_ids)
+    # Facts were never deprecated, only (harmlessly) reverted.
+    for call in atomic_fact_store.update.await_args_list:
+        assert call.args[0] == {"deprecated_by": None}
+
+
+async def test_run_caps_sources_per_merge_and_keeps_the_rest(monkeypatch) -> None:
+    """A cluster above the cap merges only its oldest sources; the deferred
+    members stay in the cluster and the count reflects them."""
+    monkeypatch.setattr(orchestrator_module, "_MAX_SOURCES_PER_MERGE", 2)
+    cluster_repo = MagicMock()
+    episode_store = MagicMock()
+    atomic_fact_store = MagicMock()
+    episode_writer = MagicMock()
+    report_repo = MagicMock()
+    reflector = MagicMock()
+    embedder = MagicMock()
+
+    report_repo.list_reflected_cluster_ids = AsyncMock(return_value=set())
+    cluster_repo.list_ids_and_member_counts = AsyncMock(return_value=[("cl_abc", 3)])
+    episode_store.find_where = AsyncMock(return_value=[])
+    members = [
+        ("ep_20260601_0001", "episode"),
+        ("ep_20260601_0002", "episode"),
+        ("ep_20260601_0003", "episode"),
+    ]
+    cluster_repo.get_members_with_type = AsyncMock(return_value=members)
+    rows = [
+        _make_episode_row(
+            entry_id=f"ep_20260601_000{i}",
+            parent_id=f"mc_00{i}",
+            timestamp=_dt.datetime(2026, 6, i, tzinfo=_dt.UTC),
+        )
+        for i in (3, 1, 2)
+    ]
+    episode_store.find_by_owner_entries = AsyncMock(return_value=rows)
+    reflector.areflect = AsyncMock(
+        return_value=_FakeAlgoResult(
+            owner_id=None, episode="merged", subject="s", timestamp=1717200000000
+        )
+    )
+    episode_writer.append_entries = AsyncMock(
+        return_value=[_make_entry_id("ep_20260614_0001")]
+    )
+    episode_writer.patch_frontmatter = AsyncMock()
+    cluster_repo.remove_members = AsyncMock()
+    cluster_repo.add_member = AsyncMock()
+    cluster_repo.update_metadata = AsyncMock()
+    embedder.embed = AsyncMock(return_value=[0.1] * 1024)
+    episode_store.update = AsyncMock()
+    atomic_fact_store.update = AsyncMock()
+    report_repo.create = AsyncMock()
+
+    orch = _build_orchestrator(
+        cluster_repo=cluster_repo,
+        episode_store=episode_store,
+        atomic_fact_store=atomic_fact_store,
+        episode_writer=episode_writer,
+        report_repo=report_repo,
+        reflector=reflector,
+        embedder=embedder,
+    )
+    reports = await orch.run(ctx=FakeStrategyContext(), owner_id="u_alice")
+
+    # Only the two oldest sources were reflected.
+    reflected = reflector.areflect.await_args.args[0]
+    assert [ep.timestamp for ep in reflected] == [
+        _ts_to_ms(_dt.datetime(2026, 6, 1, tzinfo=_dt.UTC)),
+        _ts_to_ms(_dt.datetime(2026, 6, 2, tzinfo=_dt.UTC)),
+    ]
+    # ... and only those were deprecated and removed from the cluster.
+    cluster_repo.remove_members.assert_awaited_once_with(
+        "cl_abc", {"ep_20260601_0001", "ep_20260601_0002"}
+    )
+    deprecated = _in_values(episode_store.update.await_args.kwargs["where"], "entry_id")
+    assert sorted(deprecated) == ["ep_20260601_0001", "ep_20260601_0002"]
+    # The deferred member plus the merged episode remain.
+    assert cluster_repo.update_metadata.await_args.kwargs["count"] == 2
+    assert len(reports) == 1
+    assert reports[0].source_count == 2
