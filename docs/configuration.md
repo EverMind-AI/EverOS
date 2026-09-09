@@ -126,6 +126,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
+| `provider` | string | `"openrouter"` | No | Provider preset. Use `"atlascloud"` to apply Atlas Cloud's OpenAI-compatible defaults. |
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
@@ -225,8 +226,9 @@ variables directly:
 
 ```dockerfile
 ENV EVEROS_ROOT=/data/everos
+ENV EVEROS_LLM__PROVIDER=atlascloud
 ENV EVEROS_LLM__API_KEY=sk-...
-ENV EVEROS_LLM__MODEL=gpt-4o
+ENV EVEROS_LLM__MODEL=qwen/qwen3.5-flash
 ENV EVEROS_EMBEDDING__MODEL=text-embedding-3-large
 ENV EVEROS_EMBEDDING__API_KEY=sk-...
 ENV EVEROS_EMBEDDING__BASE_URL=https://api.openai.com/v1
@@ -248,6 +250,7 @@ Examples:
 
 | TOML | Environment Variable |
 |---|---|
+| `[llm] provider = "atlascloud"` | `EVEROS_LLM__PROVIDER=atlascloud` |
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
