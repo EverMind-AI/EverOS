@@ -66,6 +66,10 @@ collection_prefix = "everos"
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL
 # Or set the field directly in this file (<root>/everos.toml).
+# The model slug below is spelled the same way by both aggregators, so
+# only base_url + api_key change:
+#   aimlapi.com -> https://api.aimlapi.com/v1
+#   OpenRouter  -> https://openrouter.ai/api/v1
 model = "openai/gpt-4.1-mini"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
