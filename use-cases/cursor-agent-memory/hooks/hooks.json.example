@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python3 .cursor/hooks/everos-memory/recall_on_session_start.py",
+        "timeout": 15
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 .cursor/hooks/everos-memory/save_on_stop.py",
+        "timeout": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "python3 .cursor/hooks/everos-memory/flush_on_session_end.py",
+        "timeout": 15
+      }
+    ]
+  }
+}
