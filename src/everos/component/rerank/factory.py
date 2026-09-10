@@ -35,8 +35,8 @@ def build_rerank_provider(settings: RerankSettings) -> RerankProvider:
     Raises:
         ValueError: If ``model`` or ``base_url`` is unset, or if
             ``provider`` does not match a known implementation.
-            ``api_key`` is required for ``deepinfra``; optional (empty
-            string) for ``vllm`` self-hosted endpoints.
+            ``api_key`` is required for ``deepinfra`` and ``dashscope``;
+            optional (empty string) for ``vllm`` self-hosted endpoints.
     """
     if not settings.model:
         raise ValueError(missing_config_error("Rerank model", "rerank"))

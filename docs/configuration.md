@@ -157,7 +157,7 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra` or `vllm`. |
+| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra`, `vllm`, or `dashscope`. |
 | `model` | string | — | **Yes** | Reranker model identifier. |
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | **Yes** | Rerank endpoint URL. |
