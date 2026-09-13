@@ -124,6 +124,10 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 
 ### `[llm]`
 
+Any OpenAI-compatible endpoint is supported: set `base_url` to the
+provider's endpoint (for example `https://api.deepseek.com` with
+`model = "deepseek-flash"`) and `api_key` to that provider's key.
+
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
