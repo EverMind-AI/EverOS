@@ -23,14 +23,14 @@ This is the narrative companion to the reference docs: see
 
 ## The storage stack
 
-Three embedded pieces, each owning what it is best at. Markdown is the
+Three storage layers, each owning what it is best at. Markdown is the
 **source of truth**; the other two are **derived and rebuildable**.
 
 | Layer | Backed by | Holds | Rebuildable? |
 |---|---|---|---|
 | **Markdown + YAML frontmatter** | plain `.md` files | the memory content itself — the only portable, human-editable asset | — (it *is* the truth) |
 | **SQLite** (`aiosqlite`) | `.index/sqlite/*.db` | system state, audit log, the cascade queue, the boundary buffer, OME engine state | ✅ from markdown |
-| **LanceDB** (Arrow) | `.index/lancedb/*.lance` | vector + BM25 + scalar columns for retrieval | ✅ from markdown |
+| **Derived index** (LanceDB by default; Milvus or SeekDB optional) | `.index/lancedb/*.lance`, a remote service, or `.index/seekdb/` | vector + BM25 + scalar columns for retrieval | ✅ from markdown |
 
 !!! note "The one rule that follows from this"
     Delete the entire `.index/` directory and **no memory is lost** — it
@@ -77,8 +77,10 @@ visually distinct from a user-named one).
 │   │   ├── ome.db                          Offline Memory Engine state
 │   │   ├── ome.aps.db                      APScheduler jobstore (split to avoid lock contention)
 │   │   └── ome.db.lock                     OME single-engine guard (portalocker)
-│   └── lancedb/
-│       └── <kind>.lance/                   one Arrow table per kind
+│   ├── lancedb/
+│   │   └── <kind>.lance/                   default: one Arrow table per kind
+│   └── seekdb/
+│       └── ...                             optional embedded SeekDB files
 │
 ├── ome.toml                                ← user-editable OME strategy overrides (hot-reloaded)
 └── .tmp/                                   atomic-write staging
@@ -97,8 +99,9 @@ visually distinct from a user-named one).
 The path manager is
 [`MemoryRoot`](../src/everos/core/persistence/memory_root.py); every path
 above is a property on it. `MemoryRoot.ensure()` creates the runtime dirs
-(`.index/{sqlite,lancedb}/`, `.tmp/`); user-visible dirs appear on first
-write. Config files (`everos.toml`, `ome.toml`) are created by `everos init`.
+(`.index/{sqlite,lancedb}/`, `.tmp/`); the optional SeekDB directory is
+created lazily. User-visible dirs appear on first write. Config files
+(`everos.toml`, `ome.toml`) are created by `everos init`.
 
 ## How a memory is born
 
@@ -130,7 +133,7 @@ index catches up asynchronously.
                                                            ▼
                                        md_change_state queue (SQLite, durable)
                                                            ▼
-                                            rebuild LanceDB rows  ──▶  searchable
+                                            rebuild index rows    ──▶  searchable
 ```
 
 - **`/add`** appends messages to a per-`(session_id, app_id, project_id)`
@@ -143,7 +146,7 @@ index catches up asynchronously.
 - Everything else (atomic facts, foresight, profile, agent cases/skills)
   is produced **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
-- The **cascade daemon** turns every `.md` write into LanceDB rows so the
+- The **cascade daemon** turns every `.md` write into derived-index rows so the
   content becomes searchable.
 
 ## Memory types & storage strategies
@@ -178,7 +181,8 @@ The three strategies:
 
 ## The cascade daemon
 
-The cascade subsystem keeps LanceDB in sync with the markdown tree. It runs
+The cascade subsystem keeps the configured derived index in sync with the
+markdown tree. It runs
 **in-process** with the server (a coroutine started by the app lifespan),
 not as a separate OS daemon.
 
@@ -188,7 +192,7 @@ not as a separate OS daemon.
    durable, so a crash mid-sync replays on restart.
 3. A worker drains the queue at **entry-level** granularity: it diffs the
    file, re-embeds only changed entries (keyed by `content_sha256`), and
-   upserts the LanceDB rows.
+   upserts the configured backend's rows.
 
 Because markdown is the source of truth, **editing a file directly is
 fully supported** — open an episode in VSCode / Obsidian / Vim, change an
@@ -258,8 +262,8 @@ Two paths, two guarantees:
 
 | Path | Guarantee | Detail |
 |---|---|---|
-| **Write** (`/add`, `/flush`) | **strong** | the episode `.md` is on disk before the call returns `extracted`; never blocks on LanceDB |
-| **Read** (`/search`, `/get`) | **eventual** | reads LanceDB, which lags md by the cascade processing time — sub-second typically, up to ~10–15 s under load |
+| **Write** (`/add`, `/flush`) | **strong** | the episode `.md` is on disk before the call returns `extracted`; never blocks on derived-index work |
+| **Read** (`/search`, `/get`) | **eventual** | reads the configured derived index, which lags md by the cascade processing time — sub-second typically, up to ~10–15 s under load |
 
 So a `/search` immediately after the `/flush` that produced a record may
 miss it. The markdown is durable regardless; index lag never loses data. If
@@ -275,15 +279,15 @@ trail.
 
 ## Zero external services
 
-No database server, message broker, or vector service to run. Vector ANN,
-full-text BM25, and scalar filtering all execute inside the **embedded
-LanceDB** engine in one query; SQLite is a local file. The whole stack is a
-single directory you can copy, back up, or check the user-visible parts of
-into git.
+With the default LanceDB backend there is no database server, message broker,
+or vector service to run. Vector ANN, full-text BM25, and scalar filtering all
+execute inside the embedded engine; SQLite is a local file. Embedded SeekDB
+also needs no service on supported platforms. Milvus and remote SeekDB are
+explicit opt-in service-backed modes.
 
 !!! note
     There is no automatic "grep over markdown" search fallback today — if
-    the LanceDB index is unavailable, rebuild it from markdown (it is
+    the derived index is unavailable, rebuild it from markdown (it is
     derived and disposable) rather than relying on a degraded search path.
 
 ## Operating it
@@ -295,17 +299,17 @@ The CLI ([cli.md](cli.md)) is intentionally small:
 | `everos init` | generate starter config files (`everos.toml` + `ome.toml`) |
 | `everos server start` | run the HTTP API (cascade + OME start with it) |
 | `everos cascade status` | queue / LSN summary |
-| `everos cascade sync` | drain the cascade queue now (force md → LanceDB) |
+| `everos cascade sync` | drain the cascade queue now (force md → derived index) |
 | `everos cascade fix` | list failed rows / re-enqueue retryable ones |
 | `everos cascade rebuild` | rebuild the whole index from markdown (drift / corruption recovery) |
 
 !!! warning "There is no `everos reindex` or `everos flush`"
     - **Reindex** = the index is rebuildable from markdown. To rebuild
       the whole index, run `everos cascade rebuild` — it drops the
-      LanceDB tables and re-indexes from md, re-populating even entries
+      derived-index tables and re-indexes from md, re-populating even entries
       the queue already marked `done` and preserving un-extracted
-      buffered messages. (A bare `rm -rf <memory-root>/.index/lancedb`
-      is **not** enough: the cascade queue still shows those files
+      buffered messages. (Deleting only the backend's physical data is
+      **not** enough: the cascade queue still shows those files
       `done`, so the scanner skips them and the index comes back empty.)
       For an incremental catch-up, use `everos cascade sync`.
     - **Flush** is an HTTP endpoint (`POST /api/v2/memory/flush`), not a

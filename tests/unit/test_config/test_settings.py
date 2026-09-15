@@ -144,6 +144,44 @@ def test_index_milvus_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.milvus.consistency_level == "Strong"
 
 
+def test_index_seekdb_defaults_and_env_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = Settings()
+    assert defaults.seekdb.mode == "embedded"
+    assert defaults.seekdb.database == "everos"
+    assert defaults.seekdb.port == 2881
+    assert defaults.seekdb.tenant == ""
+    assert defaults.seekdb.vector_sync_mode == "immediate"
+
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "seekdb")
+    monkeypatch.setenv("EVEROS_SEEKDB__MODE", "remote")
+    monkeypatch.setenv("EVEROS_SEEKDB__HOST", "seekdb.example")
+    monkeypatch.setenv("EVEROS_SEEKDB__PASSWORD", "secret")
+    monkeypatch.setenv("EVEROS_SEEKDB__VECTOR_SYNC_MODE", "async")
+    configured = Settings()
+    assert configured.index.backend == "seekdb"
+    assert configured.seekdb.mode == "remote"
+    assert configured.seekdb.host == "seekdb.example"
+    assert configured.seekdb.password.get_secret_value() == "secret"
+    assert configured.seekdb.vector_sync_mode == "async"
+
+
+def test_seekdb_identifier_settings_are_validated() -> None:
+    from pydantic import ValidationError
+
+    from everos.config import SeekdbSettings
+
+    with pytest.raises(ValidationError, match="table_prefix"):
+        SeekdbSettings(table_prefix="bad-prefix")
+    with pytest.raises(ValidationError, match="database"):
+        SeekdbSettings(database="bad-database")
+    with pytest.raises(ValidationError, match="database"):
+        SeekdbSettings(database="d" * 65)
+    with pytest.raises(ValidationError, match="table_prefix"):
+        SeekdbSettings(table_prefix="p" * 49)
+
+
 def test_resolve_root_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """No --root, no EVEROS_ROOT → ~/.everos."""
     monkeypatch.delenv("EVEROS_ROOT", raising=False)

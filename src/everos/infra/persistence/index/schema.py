@@ -50,7 +50,9 @@ class IndexSchema:
         for field in self.fields:
             if field.name == name:
                 return field
-        raise KeyError(name)
+        raise ValueError(
+            f"derived-index schema {self.table_name!r} has no field {name!r}"
+        )
 
     @property
     def vector_fields(self) -> tuple[IndexField, ...]:

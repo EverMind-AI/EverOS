@@ -697,6 +697,9 @@ async def test_get_truncates_above_max_fetch(
     # wired up and ``caplog`` can observe the chassis warning.
     from everos.core.observability.logging import configure_logging
 
+    if index_backend == "seekdb":
+        pytest.skip("SeekDB paginates natively without a max_fetch window")
+
     if index_backend == "milvus":
         requested_prefix = os.environ.get("EVEROS_TEST_MILVUS_PREFIX")
         if requested_prefix:

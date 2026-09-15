@@ -127,6 +127,10 @@ def _index_backends() -> list[str]:
     backends = ["lancedb"]
     if os.environ.get("EVEROS_TEST_MILVUS_URI"):
         backends.append("milvus")
+    if os.environ.get("EVEROS_TEST_SEEKDB_PATH") or os.environ.get(
+        "EVEROS_TEST_SEEKDB_HOST"
+    ):
+        backends.append("seekdb")
     return backends
 
 
@@ -150,10 +154,33 @@ async def index_backend(
         monkeypatch.setenv(
             "EVEROS_MILVUS__COLLECTION_PREFIX", f"everos_e2e_{uuid.uuid4().hex}"
         )
+    elif backend == "seekdb":
+        monkeypatch.setenv(
+            "EVEROS_SEEKDB__TABLE_PREFIX", f"everos_e2e_{uuid.uuid4().hex}"
+        )
+        if path := os.environ.get("EVEROS_TEST_SEEKDB_PATH"):
+            monkeypatch.setenv("EVEROS_SEEKDB__MODE", "embedded")
+            monkeypatch.setenv("EVEROS_SEEKDB__PATH", path)
+        else:
+            monkeypatch.setenv("EVEROS_SEEKDB__MODE", "remote")
+            monkeypatch.setenv(
+                "EVEROS_SEEKDB__HOST", os.environ["EVEROS_TEST_SEEKDB_HOST"]
+            )
+            for name, default in (
+                ("PORT", "2881"),
+                ("TENANT", ""),
+                ("USER", "root"),
+                ("PASSWORD", ""),
+                ("DATABASE", "everos_test"),
+            ):
+                monkeypatch.setenv(
+                    f"EVEROS_SEEKDB__{name}",
+                    os.environ.get(f"EVEROS_TEST_SEEKDB_{name}", default),
+                )
 
     yield backend
 
-    if backend == "milvus":
+    if backend in {"milvus", "seekdb"}:
         from everos.config import load_settings
         from everos.infra.persistence.index import drop_business_tables, shutdown
 

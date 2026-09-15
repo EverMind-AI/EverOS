@@ -58,7 +58,7 @@ max_concurrent  = 5
 # read_consistency_seconds = 5.0
 #
 # [index]
-# backend = "lancedb"  # or "milvus"
+# backend = "lancedb"  # or "milvus" / "seekdb"
 #
 # # Required only when index.backend = "milvus". Install with:
 # #   pip install "everos[milvus]"
@@ -68,3 +68,22 @@ max_concurrent  = 5
 # db_name = ""
 # consistency_level = "Session"
 # collection_prefix = "everos"
+#
+# # SeekDB supports an in-process engine on Linux/macOS and a remote seekdb
+# # Server or OceanBase endpoint on every platform. Install with:
+# #   pip install "everos[seekdb]"
+# # Add the embedded extra for local in-process storage:
+# #   pip install "everos[seekdb-embedded]"
+# [seekdb]
+# mode = "embedded"              # "embedded" or "remote"
+# path = ""                      # empty -> <EVEROS_ROOT>/.index/seekdb
+# host = ""                      # required in remote mode
+# port = 2881
+# tenant = ""                      # set for OceanBase, e.g. "test"
+# user = "root"
+# password = ""                  # or export SEEKDB_PASSWORD
+# database = "everos"
+# table_prefix = "everos"
+# vector_sync_mode = "immediate" # "immediate" or "async"
+# connect_timeout_seconds = 10.0
+# read_timeout_seconds = 60.0

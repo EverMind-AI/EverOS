@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from pydantic import BaseModel
 
@@ -17,6 +18,11 @@ from .protocols import (
     IndexRepository,
 )
 
+_BACKEND_MODULES: Final[dict[str, str]] = {
+    "milvus": "everos.infra.persistence.milvus",
+    "seekdb": "everos.infra.persistence.seekdb",
+}
+
 
 class RoutedIndexRepository[T: BaseModel]:
     """Stable repository identity with a backend selected at call time."""
@@ -24,10 +30,10 @@ class RoutedIndexRepository[T: BaseModel]:
     def __init__(
         self,
         lance_repo: IndexRepository[T],
-        milvus_repo_name: str,
+        repo_name: str,
     ) -> None:
         self._lance_repo = lance_repo
-        self._milvus_repo_name = milvus_repo_name
+        self._repo_name = repo_name
         self.schema = lance_repo.schema
 
     @property
@@ -35,11 +41,11 @@ class RoutedIndexRepository[T: BaseModel]:
         return self._lance_repo.table_name
 
     def _repo(self) -> IndexRepository[T]:
-        if load_settings().index.backend == "milvus":
-            from everos.infra.persistence import milvus
-
-            return getattr(milvus, self._milvus_repo_name)
-        return self._lance_repo
+        backend = load_settings().index.backend
+        if backend == "lancedb":
+            return self._lance_repo
+        module = importlib.import_module(_BACKEND_MODULES[backend])
+        return getattr(module, self._repo_name)
 
     async def add(self, records: Sequence[T]) -> None:
         await self._repo().add(records)

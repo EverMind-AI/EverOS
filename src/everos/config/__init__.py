@@ -22,6 +22,7 @@ from .settings import MemorySettings as MemorySettings
 from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
 from .settings import RerankSettings as RerankSettings
+from .settings import SeekdbSettings as SeekdbSettings
 from .settings import Settings as Settings
 from .settings import SqliteSettings as SqliteSettings
 from .settings import load_settings as load_settings
@@ -37,6 +38,7 @@ __all__ = [
     "MilvusSettings",
     "MultimodalSettings",
     "RerankSettings",
+    "SeekdbSettings",
     "Settings",
     "SqliteSettings",
     "load_settings",

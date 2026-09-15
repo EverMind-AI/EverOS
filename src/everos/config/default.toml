@@ -62,6 +62,22 @@ db_name = ""
 consistency_level = "Session"
 collection_prefix = "everos"
 
+[seekdb]
+# Used only when index.backend = "seekdb". Install everos[seekdb] for remote
+# mode, or everos[seekdb-embedded] on Linux/macOS for the in-process engine.
+mode = "embedded"
+path = ""
+host = ""
+port = 2881
+tenant = ""
+user = "root"
+password = ""
+database = "everos"
+table_prefix = "everos"
+vector_sync_mode = "immediate"
+connect_timeout_seconds = 10.0
+read_timeout_seconds = 60.0
+
 [llm]
 # Provider-agnostic OpenAI-protocol client config. Override via env:
 #   EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL

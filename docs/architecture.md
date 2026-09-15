@@ -69,7 +69,8 @@ layers = [
 
    ┌──────────────┐   ┌──────────────┐   ┌─────────────────┐
    │   Markdown   │   │   SQLite     │   │ Derived index   │
-   │  (truth)     │   │  (state)     │   │ LanceDB/Milvus  │
+   │  (truth)     │   │  (state)     │   │ Lance/Milvus/   │
+   │              │   │              │   │     SeekDB      │
    ├──────────────┤   ├──────────────┤   ├─────────────────┤
    │ entries +    │   │ change queue │   │ vector ANN      │
    │ frontmatter  │   │ + state/LSN  │   │ BM25 (Tantivy)  │

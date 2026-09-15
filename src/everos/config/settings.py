@@ -560,7 +560,7 @@ class CascadeSettings(BaseModel):
 class IndexSettings(BaseModel):
     """Rebuildable derived-index backend selection."""
 
-    backend: Literal["lancedb", "milvus"] = "lancedb"
+    backend: Literal["lancedb", "milvus", "seekdb"] = "lancedb"
 
 
 class MilvusSettings(BaseModel):
@@ -578,6 +578,54 @@ class MilvusSettings(BaseModel):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
             raise ValueError(
                 "collection_prefix must start with a letter or underscore and "
+                "contain only letters, digits, and underscores"
+            )
+        return value
+
+
+class SeekdbSettings(BaseModel):
+    """Embedded or remote SeekDB connection settings.
+
+    Env binding (via parent ``Settings``):
+        EVEROS_SEEKDB__MODE
+        EVEROS_SEEKDB__PATH
+        EVEROS_SEEKDB__HOST
+        EVEROS_SEEKDB__PORT
+        EVEROS_SEEKDB__TENANT
+        EVEROS_SEEKDB__USER
+        EVEROS_SEEKDB__PASSWORD
+        EVEROS_SEEKDB__DATABASE
+        EVEROS_SEEKDB__TABLE_PREFIX
+        EVEROS_SEEKDB__VECTOR_SYNC_MODE
+        EVEROS_SEEKDB__CONNECT_TIMEOUT_SECONDS
+        EVEROS_SEEKDB__READ_TIMEOUT_SECONDS
+    """
+
+    mode: Literal["embedded", "remote"] = "embedded"
+    path: str = ""
+    host: str = ""
+    port: int = Field(default=2881, ge=1, le=65535)
+    tenant: str = ""
+    user: str = "root"
+    password: SecretStr = SecretStr("")
+    database: str = Field(
+        default="everos",
+        max_length=64,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+    )
+    # SeekDB follows MySQL's 64-character table-name limit. The longest
+    # logical suffix is ``_knowledge_topic`` (16 characters).
+    table_prefix: str = Field(default="everos", min_length=1, max_length=48)
+    vector_sync_mode: Literal["immediate", "async"] = "immediate"
+    connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    read_timeout_seconds: float = Field(default=60.0, gt=0)
+
+    @field_validator("table_prefix")
+    @classmethod
+    def _validate_table_prefix(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError(
+                "table_prefix must start with a letter or underscore and "
                 "contain only letters, digits, and underscores"
             )
         return value
@@ -658,6 +706,7 @@ class Settings(BaseSettings):
     lancedb: LanceDBSettings = LanceDBSettings()
     index: IndexSettings = IndexSettings()
     milvus: MilvusSettings = MilvusSettings()
+    seekdb: SeekdbSettings = SeekdbSettings()
     llm: LLMSettings = LLMSettings()
     decider: DeciderSettings = DeciderSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()

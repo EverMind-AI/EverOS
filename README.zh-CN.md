@@ -39,8 +39,8 @@
 EverOS 是面向 agents 和 makers 的 Python library 与 local-first memory
 runtime。它从 day one 开始就提供一层可携带的记忆层，让记忆穿过 coding
 assistants、apps、devices 和 workflows。它会把 conversations、files 和
-agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
-索引，用于快速检索和自进化复用。
+agent trajectories 保存为可读 Markdown，并同步 SQLite 与可重建派生索引
+（默认 LanceDB，也可选 Milvus 或 SeekDB），用于快速检索和自进化复用。
 
 <table>
 <tr>
@@ -60,7 +60,7 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 </tr>
 <tr>
 <td><strong>本地三件套</strong></td>
-<td>✅ Markdown + SQLite + LanceDB；不需要 MongoDB、Elasticsearch 或 Redis</td>
+<td>✅ 默认 Markdown + SQLite + LanceDB；可选 Milvus 或 SeekDB backend</td>
 <td>❌ 常依赖 managed service、vector DB、graph DB 或 server stack</td>
 </tr>
 <tr>
@@ -663,7 +663,7 @@ Claude Code 的持久记忆插件。自动保存并回忆过去 coding sessions 
 ## 文档
 
 - [docs/everos-demo.md](docs/everos-demo.md) - Demo 范围与 TUI 源码布局
-- [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、LanceDB 与 recall flow
+- [docs/how-memory-works.md](docs/how-memory-works.md) - Markdown、SQLite、派生索引与 recall flow
 - [docs/use-cases.md](docs/use-cases.md) - 完整使用场景 gallery 和集成示例
 - [docs/engineering.md](docs/engineering.md) - 贡献者工程参考:构建、测试、CI 与规范
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) - Legacy API 迁移说明

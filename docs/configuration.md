@@ -106,7 +106,7 @@ truth regardless of backend.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `backend` | string | `"lancedb"` | Index implementation: `lancedb` or `milvus`. |
+| `backend` | string | `"lancedb"` | Index implementation: `lancedb`, `milvus`, or `seekdb`. |
 
 ### `[milvus]`
 
@@ -121,6 +121,41 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `db_name` | string | `""` | Optional Milvus database name. |
 | `consistency_level` | string | `"Session"` | Milvus consistency level used by collections. |
 | `collection_prefix` | string | `"everos"` | Prefix for the seven derived-index collections. |
+
+### `[seekdb]`
+
+Used only when `index.backend = "seekdb"`. Install `everos[seekdb]` for a
+remote seekdb Server or OceanBase endpoint. Install `everos[seekdb-embedded]`
+for in-process storage on Linux or macOS; pylibseekdb does not currently ship a
+Windows wheel. Embedded mode owns its database directory exclusively, so do
+not run a server and a cascade CLI process against the same path concurrently.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"embedded"` | `embedded` for an in-process directory, or `remote` for a server endpoint. |
+| `path` | string | `""` | Embedded directory; empty resolves to `<EVEROS_ROOT>/.index/seekdb`. |
+| `host` | string | `""` | Required hostname in remote mode. |
+| `port` | int | `2881` | MySQL-compatible server port. |
+| `tenant` | string | `""` | Leave empty for seekdb Server; set the OceanBase tenant name (for example, `test`) when connecting to OceanBase. |
+| `user` | string | `"root"` | User name without the tenant suffix. |
+| `password` | string | `""` | Password; an empty value falls back to `SEEKDB_PASSWORD`. |
+| `database` | string | `"everos"` | Database created on first use when permitted; SQL identifier, at most 64 characters. |
+| `table_prefix` | string | `"everos"` | Prefix for the seven derived-index tables; SQL identifier, at most 48 characters. |
+| `vector_sync_mode` | string | `"immediate"` | Vector-index synchronization: `immediate` for write-then-search consistency, or `async` for higher ingest throughput and eventual index visibility. |
+| `connect_timeout_seconds` | float | `10.0` | Remote connection timeout. |
+| `read_timeout_seconds` | float | `60.0` | Remote read and write timeout. |
+
+SeekDB tables use `utf8mb4_bin`, typed scalar/JSON columns,
+whitespace-tokenized full-text indexes, and cosine HNSW indexes. The default
+`immediate` vector synchronization makes a successful upsert visible to the
+following search, at a significant write-throughput cost. Choose `async` when
+bulk-ingest throughput matters more than immediate visibility, or when a
+compatible OceanBase deployment does not support seekdb's `immediate` option;
+new vectors may then be absent from search results until background index
+synchronization catches up.
+
+Markdown remains the source of truth; changing the backend requires
+`everos cascade rebuild`, not a data migration.
 
 ### `[llm]`
 

@@ -39,8 +39,9 @@
 EverOS is a Python library and local-first memory runtime for agents and
 makers. It gives one portable memory layer across coding assistants, apps,
 devices, and workflows from day one. It stores conversations, files, and agent
-trajectories as readable Markdown, then syncs local SQLite and LanceDB indexes
-for fast retrieval and self-evolving reuse.
+trajectories as readable Markdown, then syncs SQLite and a rebuildable derived
+index (LanceDB by default, with optional Milvus or SeekDB) for fast retrieval
+and self-evolving reuse.
 
 <table>
 <tr>
@@ -60,7 +61,7 @@ for fast retrieval and self-evolving reuse.
 </tr>
 <tr>
 <td><strong>Local three-part stack</strong></td>
-<td>✅ Markdown + SQLite + LanceDB; no MongoDB, Elasticsearch, or Redis required</td>
+<td>✅ Markdown + SQLite + LanceDB by default; optional Milvus or SeekDB backends</td>
 <td>❌ Often depends on managed services, vector DBs, graph DBs, or server stacks</td>
 </tr>
 <tr>
@@ -664,7 +665,7 @@ Explore stored entities and relationships in a graph interface. Frontend demo; b
 ## Documentation
 
 - [docs/everos-demo.md](docs/everos-demo.md) — Demo scope and TUI source layout
-- [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, LanceDB, and recall flow
+- [docs/how-memory-works.md](docs/how-memory-works.md) — Markdown, SQLite, derived indexes, and recall flow
 - [docs/use-cases.md](docs/use-cases.md) — Full use-case gallery and integration examples
 - [docs/engineering.md](docs/engineering.md) — Contributor engineering reference: build, test, CI, conventions
 - [docs/migration-to-1.0.0.md](docs/migration-to-1.0.0.md) — Legacy API migration notes

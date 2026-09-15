@@ -18,6 +18,7 @@ from everos.infra.persistence.backends.lancedb import (
     render_predicate,
 )
 from everos.infra.persistence.backends.milvus import milvus_index_backend
+from everos.infra.persistence.backends.seekdb import seekdb_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
     All,
@@ -49,6 +50,10 @@ def _behavioural_backends() -> list[str]:
     backends = ["lancedb"]
     if os.environ.get("EVEROS_TEST_MILVUS_URI"):
         backends.append("milvus")
+    if os.environ.get("EVEROS_TEST_SEEKDB_PATH") or os.environ.get(
+        "EVEROS_TEST_SEEKDB_HOST"
+    ):
+        backends.append("seekdb")
     return backends
 
 
@@ -59,6 +64,17 @@ def _milvus_collection_prefix() -> str:
     if _EXTERNAL_PREFIX_PATTERN.fullmatch(external_prefix) is None:
         raise ValueError(
             "EVEROS_TEST_MILVUS_PREFIX must match everos_e2e_<32 lowercase hex>"
+        )
+    return external_prefix
+
+
+def _seekdb_table_prefix() -> str:
+    external_prefix = os.environ.get("EVEROS_TEST_SEEKDB_PREFIX")
+    if external_prefix is None:
+        return f"everos_ct_{uuid.uuid4().hex}"
+    if _EXTERNAL_PREFIX_PATTERN.fullmatch(external_prefix) is None:
+        raise ValueError(
+            "EVEROS_TEST_SEEKDB_PREFIX must match everos_e2e_<32 lowercase hex>"
         )
     return external_prefix
 
@@ -85,6 +101,28 @@ async def index_backend(
             "EVEROS_MILVUS__DB_NAME", os.environ.get("EVEROS_TEST_MILVUS_DB_NAME", "")
         )
         monkeypatch.setenv("EVEROS_MILVUS__COLLECTION_PREFIX", collection_prefix)
+    elif backend == "seekdb":
+        collection_prefix = _seekdb_table_prefix()
+        monkeypatch.setenv("EVEROS_SEEKDB__TABLE_PREFIX", collection_prefix)
+        if path := os.environ.get("EVEROS_TEST_SEEKDB_PATH"):
+            monkeypatch.setenv("EVEROS_SEEKDB__MODE", "embedded")
+            monkeypatch.setenv("EVEROS_SEEKDB__PATH", path)
+        else:
+            monkeypatch.setenv("EVEROS_SEEKDB__MODE", "remote")
+            monkeypatch.setenv(
+                "EVEROS_SEEKDB__HOST", os.environ["EVEROS_TEST_SEEKDB_HOST"]
+            )
+            for name, default in (
+                ("PORT", "2881"),
+                ("TENANT", ""),
+                ("USER", "root"),
+                ("PASSWORD", ""),
+                ("DATABASE", "everos_test"),
+            ):
+                monkeypatch.setenv(
+                    f"EVEROS_SEEKDB__{name}",
+                    os.environ.get(f"EVEROS_TEST_SEEKDB_{name}", default),
+                )
 
     from everos.config import load_settings
 
@@ -97,12 +135,22 @@ async def index_backend(
             if repo.table_name == "episode"
         )
         assert milvus_episode_repo.collection_name == f"{collection_prefix}_episode"
+    elif backend == "seekdb":
+        assert collection_prefix is not None
+        seekdb_episode_repo = next(
+            repo
+            for repo in seekdb_index_backend.repositories
+            if repo.table_name == "episode"
+        )
+        assert seekdb_episode_repo.physical_table_name == (
+            f"{collection_prefix}_episode"
+        )
 
     try:
         yield backend
     finally:
         try:
-            if backend == "milvus":
+            if backend in {"milvus", "seekdb"}:
                 try:
                     load_settings.cache_clear()
                 finally:
@@ -157,6 +205,7 @@ def _episode(number: int, *, owner_id: str = "owner") -> Episode:
     [
         pytest.param(lance_index_backend, id="lancedb"),
         pytest.param(milvus_index_backend, id="milvus"),
+        pytest.param(seekdb_index_backend, id="seekdb"),
     ],
 )
 def test_every_backend_satisfies_the_ports(backend: IndexBackend) -> None:
@@ -204,6 +253,7 @@ def test_lance_predicate_renderer_owns_escaping() -> None:
     [
         "everos.infra.persistence.backends.lancedb",
         "everos.infra.persistence.backends.milvus",
+        "everos.infra.persistence.backends.seekdb",
         "everos.infra.persistence.index",
     ],
 )
@@ -222,6 +272,25 @@ def test_adapter_and_port_modules_import_in_any_order(module: str) -> None:
         text=True,
     )
     assert proc.returncode == 0, f"importing {module} first failed:\n{proc.stderr}"
+
+
+def test_seekdb_adapter_does_not_eagerly_import_optional_client() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "from everos.infra.persistence.backends.seekdb import "
+                "seekdb_index_backend; "
+                "assert len(seekdb_index_backend.repositories) == 7; "
+                "assert 'pyseekdb' not in sys.modules"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 @pytest.mark.parametrize("group", [All, AnyOf])

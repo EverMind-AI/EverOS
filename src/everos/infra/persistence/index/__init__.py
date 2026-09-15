@@ -2,13 +2,13 @@
 
 Markdown remains the source of truth and SQLite remains the system-state
 store. This boundary owns only the derived business indexes used by cascade,
-search, and get. LanceDB and Milvus implement the same typed ports, so callers
-do not branch on physical storage.
+search, and get. LanceDB, Milvus, and SeekDB implement the same typed ports, so
+callers do not branch on physical storage.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from everos.config import load_settings
 from everos.infra.persistence import lancedb as _lancedb
@@ -38,6 +38,7 @@ from ..backends.lancedb import (
     user_profile_repo as _lance_user_profile_repo,
 )
 from ..backends.milvus import milvus_index_backend
+from ..backends.seekdb import seekdb_index_backend
 from .predicate import (
     All,
     AnyOf,
@@ -104,6 +105,12 @@ ALL_REPOS = (
     knowledge_topic_repo,
 )
 
+_BACKENDS: Final[dict[str, IndexBackend]] = {
+    "lancedb": lance_index_backend,
+    "milvus": milvus_index_backend,
+    "seekdb": seekdb_index_backend,
+}
+
 
 def active_backend() -> str:
     """Name of the configured derived-index backend."""
@@ -111,9 +118,7 @@ def active_backend() -> str:
 
 
 def _backend() -> IndexBackend:
-    if active_backend() == "milvus":
-        return milvus_index_backend
-    return lance_index_backend
+    return _BACKENDS[active_backend()]
 
 
 async def connect() -> Any:

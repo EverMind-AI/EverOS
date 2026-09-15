@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional SeekDB derived-index backend.** Set `[index] backend = "seekdb"`
+  to store the seven rebuildable business indexes in embedded SeekDB or a
+  remote seekdb Server/OceanBase database. The adapter implements the same
+  repository and lifecycle ports as LanceDB and Milvus, including typed scalar
+  filters, JSON array membership, native pagination, BM25 token columns, and
+  cosine search across multiple vector columns. Install `everos[seekdb]` for
+  remote mode or `everos[seekdb-embedded]` on Linux/macOS. Markdown remains the
+  source of truth and the default LanceDB installation is unchanged.
+
+### Changed
+
+- **Derived-index routing now supports registered backends uniformly.** Stable
+  repository objects resolve LanceDB, Milvus, or SeekDB at call time without
+  leaking a concrete adapter into the port definitions.
+
 ## [1.3.1] - 2026-09-08
 
 **One reproducible runner for four long-term-memory benchmarks, plus an
