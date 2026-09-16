@@ -436,3 +436,72 @@ async def test_agentic_emits_recall_and_rank_spans(
     names = {s.name for s in exporter.get_finished_spans()}
     assert "everos.search.recall" in names
     assert "everos.search.rank" in names
+
+
+@pytest.mark.parametrize("radius", [None, 0.0, 0.5, 1.0])
+async def test_radius_filters_fact_and_subject_children_before_maxsim(
+    radius: float | None,
+) -> None:
+    children = [
+        Candidate(id=name, score=score, metadata={"parent_id": name})
+        for name, score in [
+            ("fact_high", 0.9),
+            ("fact_low", 0.2),
+            ("subject_edge", 0.5),
+            ("subject_low", 0.1),
+        ]
+    ]
+    keyword = Candidate(id="keyword", score=0.1, metadata={"parent_id": "keyword"})
+    parents = {
+        c.id: _mc_candidate(c.id, c.id).model_copy(
+            update={
+                "metadata": {**_mc_candidate(c.id, c.id).metadata, "entry_id": c.id}
+            }
+        )
+        for c in [*children, keyword]
+    }
+    ep = _StubEpisodeRecaller([], parents)
+    ep.dense_recall_subject_as_child = AsyncMock(return_value=children[2:])
+    fact = _StubFactRecaller(children[:2])
+    fact.sparse_recall = AsyncMock(return_value=[keyword])
+    expected = {c.id for c in children if radius is None or c.score >= radius} | {
+        "keyword"
+    }
+
+    async def cluster_passthrough(query: str, **kwargs: Any) -> list[Candidate]:
+        return await kwargs["base_retrieve"](query, 20)
+
+    async def drive_rounds(
+        query: str, **kwargs: Any
+    ) -> tuple[list[Candidate], AgenticDecision]:
+        for retrieve, q in [
+            (kwargs["base_retrieve"], query),
+            (kwargs["round2_retrieve"], "refined query"),
+        ]:
+            hits = await retrieve(q, 20)
+            assert {c.id for c in hits} == expected
+            if radius == 0.5:
+                assert all(c.score < radius for c in hits)
+        return [], AgenticDecision(is_multi_round=True)
+
+    with (
+        patch(
+            "everos.memory.search.agentic.cluster_repo.list_for_owner",
+            AsyncMock(return_value=[]),
+        ),
+        patch("everos.memory.search.agentic.acluster_retrieve", cluster_passthrough),
+        patch("everos.memory.search.agentic.aagentic_retrieve", drive_rounds),
+    ):
+        await search_episodes_agentic(
+            "query",
+            owner_id="alice",
+            where=None,
+            episode_recaller=ep,
+            atomic_fact_recaller=fact,
+            embed_query_fn=AsyncMock(return_value=[0.1, 0.2]),
+            reranker=_StubReranker(),
+            llm=FakeLLMClient(responses=[]),
+            top_k=10,
+            radius=radius,
+        )
+    assert ep.dense_recall_subject_as_child.await_count == 2

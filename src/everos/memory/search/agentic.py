@@ -37,6 +37,7 @@ from everos.core.observability.tracing import memory_span
 from everos.infra.persistence.index import Predicate
 from everos.infra.persistence.sqlite import cluster_repo
 from everos.memory.search.callbacks import build_rerank_fn
+from everos.memory.search.radius import apply_radius
 from everos.memory.search.shaper import shape_episode_from_candidate
 
 from .dto import SearchEpisodeItem
@@ -90,6 +91,7 @@ async def search_episodes_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchEpisodeItem]:
     """Episode AGENTIC search via cluster-scoped MaxSim — 1:1 with benchmark.
 
@@ -102,6 +104,7 @@ async def search_episodes_agentic(
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
+        radius: Resolved cosine floor for dense recall, before fusion.
         top_k: Maximum episodes to return (maps to ``top_n`` in aagentic_retrieve).
 
     Returns:
@@ -118,7 +121,7 @@ async def search_episodes_agentic(
             atomic_fact_recaller.dense_recall(vec, where, limit=k),
             episode_recaller.dense_recall_subject_as_child(vec, where, limit=k),
         )
-        return fact_results + ep_results
+        return apply_radius(fact_results + ep_results, radius)
 
     async def _fact_sparse(q: str, k: int) -> list[Candidate]:
         fact_results, ep_results = await asyncio.gather(

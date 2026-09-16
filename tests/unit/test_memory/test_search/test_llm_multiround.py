@@ -598,3 +598,32 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
     (kw,) = llm.kwargs
     assert kw["max_tokens"] == 256
     assert kw["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+@pytest.mark.parametrize("radius", [None, 0.0, 0.5, 1.0])
+async def test_radius_filters_each_round_before_rrf(radius: float | None) -> None:
+    from unittest.mock import AsyncMock
+
+    dense = [_ep("high", 0.9), _ep("edge", 0.5), _ep("low", 0.1)]
+    recaller = _Recaller(seed=dense)
+    recaller.sparse_recall = AsyncMock(return_value=[_ep("keyword", 0.1)])
+    llm = _ScriptLLM([_reply([], ["facet one", "facet two"]), _reply([], [])])
+    result = await search_episodes_llm_multiround(
+        "q",
+        owner_id="alice",
+        where=_WHERE,
+        episode_recaller=recaller,
+        atomic_fact_recaller=_FactRecaller(),
+        embed_query_fn=_embed,
+        llm=llm,
+        top_k=10,
+        radius=radius,
+    )
+    expected = {c.id for c in dense if radius is None or c.score >= radius} | {
+        "alice__keyword"
+    }
+    assert {c.id for c in result} == expected
+    assert len(recaller.dense_vectors) == 3
+    assert len(llm.calls) == 2
+    if radius == 0.5:
+        assert all(c.score < radius for c in result)

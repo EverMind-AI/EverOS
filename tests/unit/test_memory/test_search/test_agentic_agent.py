@@ -23,6 +23,7 @@ import json
 from typing import Any, ClassVar
 from unittest.mock import patch
 
+import pytest
 from everalgo.rank.protocols import AgenticDecision
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
@@ -493,3 +494,60 @@ async def test_agentic_uses_case_rerank_passage() -> None:
         "Agent Case: restart the pod - kubectl rollout restart"
     ]
     assert captured_instruction == _CASE_RERANK_INSTRUCTION
+
+
+@pytest.mark.parametrize("kind", ["case", "skill"])
+@pytest.mark.parametrize("with_sparse", [False, True])
+@pytest.mark.parametrize(
+    "radius, expected",
+    [
+        (None, {"high", "edge", "low", "keyword"}),
+        (0.0, {"high", "edge", "low", "keyword"}),
+        (0.5, {"high", "edge", "keyword"}),
+        (1.0, {"keyword"}),
+    ],
+)
+async def test_radius_filters_dense_before_real_rrf_on_every_query(
+    kind: str, radius: float | None, expected: set[str], with_sparse: bool
+) -> None:
+    from unittest.mock import AsyncMock
+
+    candidate = _case_candidate if kind == "case" else _skill_candidate
+    recaller = _StubCaseRecaller([]) if kind == "case" else _StubSkillRecaller([])
+    recaller.dense_recall = AsyncMock(
+        return_value=[
+            candidate("high", 0.9),
+            candidate("edge", 0.5),
+            candidate("low", 0.2),
+        ]
+    )
+    recaller.sparse_recall = AsyncMock(
+        return_value=[candidate("keyword", 0.1)] if with_sparse else []
+    )
+    if not with_sparse:
+        expected = expected - {"keyword"}
+
+    async def drive_queries(
+        query: str, **kwargs: Any
+    ) -> tuple[list[Candidate], AgenticDecision]:
+        for q in (query, "refined query", "second facet"):
+            hits = await kwargs["base_retrieve"](q, 20)
+            assert {c.id for c in hits} == expected
+            if radius == 0.5 and with_sparse:
+                # Survives even though the fused score is far below the cosine floor.
+                assert all(c.score < radius for c in hits)
+        return [], AgenticDecision(is_multi_round=True)
+
+    fn = search_agent_cases_agentic if kind == "case" else search_agent_skills_agentic
+    with patch("everos.memory.search.agentic_agent.aagentic_retrieve", drive_queries):
+        await fn(
+            "query",
+            where=None,
+            embed_query_fn=_fake_embed,
+            reranker=_StubReranker(),
+            llm=FakeLLMClient(responses=[]),
+            top_k=10,
+            radius=radius,
+            **{f"{kind}_recaller": recaller},
+        )
+    assert recaller.dense_recall.await_count == 3

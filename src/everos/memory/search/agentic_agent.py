@@ -37,6 +37,7 @@ from everos.memory.search.callbacks import (
     build_case_rerank_fn,
     build_skill_rerank_fn,
 )
+from everos.memory.search.radius import apply_radius
 from everos.memory.search.shaper import (
     shape_agent_case_from_candidate,
     shape_agent_skill_from_candidate,
@@ -134,6 +135,7 @@ async def search_agent_cases_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentCaseItem]:
     """Agent-case AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -144,6 +146,7 @@ async def search_agent_cases_agentic(
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
+        radius: Resolved cosine floor for dense recall, before fusion.
         top_k: Maximum cases to return.
 
     Returns:
@@ -157,6 +160,7 @@ async def search_agent_cases_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
         kind="case",
     )
     return [
@@ -176,6 +180,7 @@ async def search_agent_skills_agentic(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
 ) -> list[SearchAgentSkillItem]:
     """Agent-skill AGENTIC search via flat hybrid retrieve + aagentic_retrieve.
 
@@ -186,6 +191,7 @@ async def search_agent_skills_agentic(
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
+        radius: Resolved cosine floor for dense recall, before fusion.
         top_k: Maximum skills to return.
 
     Returns:
@@ -199,6 +205,7 @@ async def search_agent_skills_agentic(
         reranker=reranker,
         llm=llm,
         top_k=top_k,
+        radius=radius,
         kind="skill",
     )
     return [
@@ -218,6 +225,7 @@ async def _run_agentic_retrieve(
     reranker: RerankProvider,
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
     kind: Literal["case", "skill"],
 ) -> list[Candidate]:
     """Shared flat agentic retrieve pipeline for agent memory kinds.
@@ -243,7 +251,8 @@ async def _run_agentic_retrieve(
         vec = await embed_query_fn(q)
         if not vec:
             return []
-        return await recaller.dense_recall(vec, where, limit=k)
+        candidates = await recaller.dense_recall(vec, where, limit=k)
+        return apply_radius(candidates, radius)
 
     async def _sparse(q: str, k: int) -> list[Candidate]:
         return await recaller.sparse_recall(q, where, limit=k)
