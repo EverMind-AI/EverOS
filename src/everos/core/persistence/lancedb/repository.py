@@ -475,22 +475,42 @@ class LanceRepoBase[T: BaseLanceTable]:
         parameter on purpose: the key is the table's declaration, not the
         caller's choice.
 
+        When the primary key is a single string column, a cheap PK
+        existence probe lets an all-new batch take LanceDB's append-only
+        ``add`` path; only batches that actually contain an existing key
+        pay for ``merge_insert``. This matters for daily logs: a merge
+        against a large fragment can rewrite hundreds of MiB and retain
+        GiB-scale Arrow/Lance native allocations even when the batch
+        merely appends a handful of new entries.
+
         Cascade uses this when reconciling md → LanceDB: an entry seen
         for the first time inserts; an entry that was edited in md
         updates its existing row.
         """
-        key = getattr(self.schema, "PRIMARY_KEY", None)
+        key = tuple(getattr(self.schema, "PRIMARY_KEY", None) or ())
         if not key:
             raise ValueError(
                 f"derived-index model {self.schema.__name__} has no PRIMARY_KEY"
             )
+        rows = list(records)
+        if not rows:
+            return
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
             table = await self._table()
+            if len(key) == 1:
+                by = key[0]
+                key_values = [getattr(row, by) for row in rows]
+                if all(isinstance(value, str) for value in key_values):
+                    values = ", ".join(f"'{_q(value)}'" for value in key_values)
+                    existing = await table.count_rows(filter=f"{by} IN ({values})")
+                    if existing == 0:
+                        await table.add(rows)
+                        return
             await (
                 table.merge_insert(list(key))
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(list(records))
+                .execute(rows)
             )
 
     # ── Maintenance ────────────────────────────────────────────────────────

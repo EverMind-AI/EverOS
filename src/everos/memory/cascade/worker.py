@@ -457,6 +457,7 @@ class CascadeWorker:
         optimize_rebuild_interval_seconds: float = (
             DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS
         ),
+        maintenance_enabled: bool = True,
     ) -> None:
         self._handlers = handlers
         self._batch_size = batch_size
@@ -468,6 +469,7 @@ class CascadeWorker:
         self._optimize_prune_interval = optimize_prune_interval_seconds
         self._optimize_prune_retention = optimize_prune_retention_seconds
         self._optimize_rebuild_interval = optimize_rebuild_interval_seconds
+        self._maintenance_enabled = maintenance_enabled
         self._task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._rebuild_task: asyncio.Task[None] | None = None
@@ -484,12 +486,20 @@ class CascadeWorker:
         self._stop.clear()
         self._started_at = time.monotonic()
         self._task = self._spawn_loop("drain", self._run_loop, "cascade-worker")
-        self._heartbeat_task = self._spawn_loop(
-            "heartbeat", self._heartbeat_loop, "cascade-worker-heartbeat"
-        )
-        self._rebuild_task = self._spawn_loop(
-            "rebuild", self._rebuild_loop, "cascade-worker-rebuild"
-        )
+        if self._maintenance_enabled:
+            self._heartbeat_task = self._spawn_loop(
+                "heartbeat", self._heartbeat_loop, "cascade-worker-heartbeat"
+            )
+        else:
+            self._heartbeat_task = None
+            logger.info("cascade_lancedb_online_maintenance_disabled")
+        if self._maintenance_enabled and self._optimize_rebuild_interval > 0:
+            self._rebuild_task = self._spawn_loop(
+                "rebuild", self._rebuild_loop, "cascade-worker-rebuild"
+            )
+        else:
+            self._rebuild_task = None
+            logger.info("cascade_lancedb_auto_rebuild_disabled")
         logger.info("cascade_worker_started", batch_size=self._batch_size)
 
     def _spawn_loop(
@@ -890,6 +900,8 @@ class CascadeWorker:
         repo = getattr(handler, "index_repo", None) if handler else None
         if repo is None:
             return
+        if not self._maintenance_enabled:
+            return
         state = self._optimizer_states.setdefault(kind, _KindOptimizerState())
         state.dirty = True
         if state.task is not None and not state.task.done():
@@ -1103,7 +1115,10 @@ class CascadeWorker:
                 consecutive_failures=failures,
                 error=f"{type(exc).__name__}: {exc}",
             )
-            if since_fallback >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD:
+            if (
+                since_fallback >= _OPTIMIZE_FAILURE_ALERT_THRESHOLD
+                and self._optimize_rebuild_interval > 0
+            ):
                 logger.info(
                     "cascade_lancedb_optimize_fallback_rebuild",
                     kind=kind,
@@ -1150,10 +1165,13 @@ class CascadeWorker:
         current stack (lancedb 0.30.2 / lance 4.0) to bound active
         index UUID / FTS ``part_N`` accumulation.
 
-        First sweep fires immediately on worker start to bound any
-        accumulation from a previous session. Subsequent sweeps honour
-        the interval. Both sweep and each per-kind step respect
-        ``self._stop`` so shutdown is prompt.
+        The first sweep waits for the configured interval, just like every
+        subsequent sweep. Rebuilding at process start made restart frequency
+        control maintenance frequency and, on production-sized Lance tables,
+        retained several GiB of native Arrow/Lance allocations before the
+        server handled its first request. Regular optimize/prune heartbeats
+        already keep the unindexed tail and dead files bounded between full
+        rebuilds, so a restart must not force an extra O(N) rebuild.
 
         Rebuild is serialised through the per-kind
         :class:`_KindOptimizerState.task` slot so it does not race with
@@ -1162,14 +1180,6 @@ class CascadeWorker:
         is harmless for correctness (queries / writes keep working
         against the existing indices).
         """
-        # First sweep: catch up from any prior session before honouring the
-        # interval. Rebuild is cheap (~0.3s per 50k rows × indexed columns
-        # in local benchmarks); deferring it 12h after startup risks long
-        # accumulation if the daemon restarts often.
-        for kind in self._handlers:
-            if self._stop.is_set():
-                return
-            await self._run_rebuild_once(kind)
         last_sweep = time.monotonic()
         # Never coarser than the configured cadence: the tick exists to give
         # conflict retries a 60s granularity against a 12h sweep, and must not

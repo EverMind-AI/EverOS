@@ -213,6 +213,10 @@ class CascadeOrchestrator:
             optimize_rebuild_interval_seconds=(
                 self._config.optimize_rebuild_interval_seconds
             ),
+            maintenance_enabled=os.getenv(
+                "EVEROS_DISABLE_CASCADE_MAINTENANCE", ""
+            ).strip().lower()
+            not in ("1", "true", "yes"),
         )
         self._watcher: CascadeWatcher | None = None
         self._started = False

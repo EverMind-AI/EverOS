@@ -493,15 +493,10 @@ async def test_stop_waits_for_in_flight_optimize(
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.02,
         optimize_heartbeat_seconds=10.0,
-        # Park rebuild interval — startup sweep still fires but we wait
-        # for it before testing optimize semantics.
+        # Park rebuild interval while testing optimize semantics.
         optimize_rebuild_interval_seconds=10.0,
     )
     await w.start()
-    # Let the startup rebuild sweep complete (instant for the fake repo)
-    # before scheduling optimize — otherwise optimize would queue behind it.
-    await asyncio.sleep(0.02)
-    assert fake.rebuild_calls, "startup rebuild should have fired by now"
     w._schedule_optimize("episode")
     await asyncio.sleep(0.01)  # let optimize start
     await w.stop()
@@ -738,14 +733,35 @@ async def test_prune_recurs_once_per_cadence_across_light_beats(
 # ── Rebuild scheduler tests ────────────────────────────────────────────────
 
 
-async def test_rebuild_runs_on_startup_for_every_kind(
+async def test_zero_rebuild_interval_disables_loop_and_fallback(
     patched_repo: _FakeRepo,
 ) -> None:
-    """The first rebuild sweep fires on worker start, before any interval.
+    """Disabled full rebuilds never allocate in the daemon, even on failure."""
+    from everos.memory.cascade import worker as wmod
 
-    Otherwise a daemon that restarts more often than the rebuild
-    interval would never bound accumulated UUIDs.
-    """
+    repo = _OptimizeFailingRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(repo)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_heartbeat_seconds=10.0,
+        optimize_rebuild_interval_seconds=0.0,
+    )
+    await w.start()
+    assert w._rebuild_task is None
+
+    w._optimizer_states["episode"] = wmod._KindOptimizerState()
+    for _ in range(wmod._OPTIMIZE_FAILURE_ALERT_THRESHOLD * 2):
+        await w._run_optimize_once("episode")
+
+    await w.stop()
+    assert repo.rebuild_calls == []
+
+
+async def test_rebuild_does_not_run_on_startup(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A restart must not force an O(N) full-index rebuild."""
     fake_a = _FakeLanceRepo()
     fake_b = _FakeLanceRepo()
     w = CascadeWorker(
@@ -756,21 +772,20 @@ async def test_rebuild_runs_on_startup_for_every_kind(
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
         optimize_heartbeat_seconds=10.0,  # park heartbeat
-        optimize_rebuild_interval_seconds=10.0,  # only the startup sweep should fire
+        optimize_rebuild_interval_seconds=10.0,
     )
     await w.start()
-    # Allow the startup sweep to complete; the next tick is 10s away.
+    # The first interval is 10s away, so startup must remain side-effect free.
     await asyncio.sleep(0.1)
     await w.stop()
-    # Exactly one rebuild per kind: the startup sweep. Next interval is 10s.
-    assert len(fake_a.rebuild_calls) == 1
-    assert len(fake_b.rebuild_calls) == 1
+    assert fake_a.rebuild_calls == []
+    assert fake_b.rebuild_calls == []
 
 
 async def test_rebuild_runs_periodically(
     patched_repo: _FakeRepo,
 ) -> None:
-    """After the startup sweep, rebuild repeats every interval."""
+    """The first and subsequent rebuilds run only after full intervals."""
     fake = _FakeLanceRepo()
     w = CascadeWorker(
         {"episode": _OkHandlerWithRepo(fake)},
@@ -784,9 +799,8 @@ async def test_rebuild_runs_periodically(
     # so size the window off the observed tick, not the requested one.
     await asyncio.sleep(0.6)
     await w.stop()
-    # Startup sweep + at least 2 interval-driven sweeps.
-    assert len(fake.rebuild_calls) >= 3, (
-        f"expected ≥3 rebuilds (1 startup + ≥2 periodic), got {len(fake.rebuild_calls)}"
+    assert len(fake.rebuild_calls) >= 2, (
+        f"expected ≥2 interval-driven rebuilds, got {len(fake.rebuild_calls)}"
     )
 
 
@@ -803,7 +817,7 @@ async def test_rebuild_failure_does_not_crash_daemon(
         optimize_rebuild_interval_seconds=10.0,
     )
     await w.start()
-    # Give startup rebuild a chance to throw, then heartbeat to keep optimizing.
+    # Heartbeat optimize progresses while rebuild is parked until its interval.
     await asyncio.sleep(0.12)
     # Optimize should still progress despite rebuild errors.
     assert fake.beats, "heartbeat optimize should run even when rebuild fails"
