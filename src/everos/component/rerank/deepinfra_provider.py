@@ -54,6 +54,8 @@ _QWEN3_PREFIX = (
     "<|im_end|>\n<|im_start|>user\n"
 )
 _QWEN3_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+_KEEPALIVE_EXPIRY_SECONDS = 120.0
+
 _DEFAULT_RERANK_INSTRUCTION = (
     "Given a question and a passage, determine if the passage contains "
     "information relevant to answering the question."
@@ -104,6 +106,27 @@ class DeepInfraRerankProvider:
         self._max_retries = max_retries
         self._batch_size = batch_size
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    def _http_client(self) -> httpx.AsyncClient:
+        """Pooled client, reused across requests (local patch 2026-09-19).
+
+        A client per request paid a fresh TLS handshake every call (~0.4 s of a
+        ~0.64 s rerank from ap-southeast-1). Idle connections are kept for
+        120 s instead of httpx's 5 s default, because searches arrive seconds to
+        minutes apart (measured after 30 s idle: 1.11 s at 5 s vs 0.45 s at
+        120 s). Rebuilt if the event loop changes, since an httpx client cannot
+        be shared across loops.
+        """
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client_loop is not loop:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(keepalive_expiry=_KEEPALIVE_EXPIRY_SECONDS),
+            )
+            self._client_loop = loop
+        return self._client
 
     async def rerank(
         self,
@@ -149,10 +172,9 @@ class DeepInfraRerankProvider:
         async with self._semaphore:
             for attempt in range(self._max_retries + 1):
                 try:
-                    async with httpx.AsyncClient(timeout=self._timeout) as client:
-                        response = await client.post(
-                            self._url, json=payload, headers=headers
-                        )
+                    response = await self._http_client().post(
+                        self._url, json=payload, headers=headers
+                    )
                 except httpx.HTTPError as exc:
                     if attempt == self._max_retries:
                         raise transport_error("DeepInfra", exc) from exc
