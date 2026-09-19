@@ -16,7 +16,9 @@ Cross-suite fixtures:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -41,6 +43,20 @@ def _isolate_everos_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     ``setenv`` / ``delenv`` runs inside the test body, after this fixture.
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _reset_seekdb_loop_locks() -> None:
+    """Each test has a new event loop; contended asyncio locks retain the old one.
+
+    Only reset an already imported adapter, preserving optional/lazy imports.
+    Backend fixtures own session shutdown before the next test starts.
+    """
+    if manager := sys.modules.get("everos.infra.persistence.seekdb.seekdb_manager"):
+        manager._connection_lock = asyncio.Lock()
+        manager._operation_lock = asyncio.Lock()
+    if repository := sys.modules.get("everos.infra.persistence.seekdb.repository"):
+        repository.SeekdbRepoBase._reset_locks_for_tests()
 
 
 @pytest.fixture(autouse=True)
