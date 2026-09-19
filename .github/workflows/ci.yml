@@ -237,13 +237,12 @@ jobs:
       seekdb:
         image: oceanbase/seekdb:latest
         env:
-          ROOT_PASSWORD: everos-test
           CPU_COUNT: "2"
           MEMORY_LIMIT: 2G
           LOG_DISK_SIZE: 2G
           DATAFILE_SIZE: 2G
         ports:
-          - 2881:2881
+          - 127.0.0.1:2881:2881
     steps:
       - uses: actions/checkout@v6
 
@@ -259,7 +258,9 @@ jobs:
       - name: Install dependencies (frozen)
         run: uv sync --frozen --extra seekdb
 
-      - name: Wait for the MySQL endpoint
+      # Initialize the disposable container through SQL: recent image entrypoints
+      # can serve MySQL before (or without) applying ROOT_PASSWORD.
+      - name: Wait for MySQL and initialize the test password
         run: |
           uv run python - <<'PY'
           import time
@@ -272,9 +273,15 @@ jobs:
                       host="127.0.0.1",
                       port=2881,
                       user="root",
-                      password="everos-test",
+                      password="",
                       connect_timeout=3,
+                      read_timeout=3,
+                      write_timeout=3,
                   )
+                  with connection.cursor() as cursor:
+                      cursor.execute(
+                          "ALTER USER 'root' IDENTIFIED BY %s", ("everos-test",)
+                      )
                   connection.close()
                   break
               except pymysql.MySQLError:
