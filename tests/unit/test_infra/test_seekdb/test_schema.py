@@ -168,6 +168,50 @@ def test_index_drift_checks_stats_ddl_parameters_and_stale_indexes() -> None:
     assert stale == ["ix_obsolete"]
 
 
+def test_search_catalog_internal_columns_are_not_logical_schema_drift() -> None:
+    logical = schema_for(Episode)
+    expected = physical_indexes(logical)
+    ddl = build_create_table("unit_episode", logical)
+    reported = _catalog_indexes(expected)
+    for row in reported:
+        name = str(row["INDEX_NAME"])
+        if name.startswith(("ft_", "vec_")):
+            row["COLUMN_NAME"] = "__pk_increment"
+            row["INDEX_TYPE"] = "BTREE"
+    for index in expected:
+        if index.kind == "vector":
+            for suffix in ("_index_id_table", "_index_snapshot_data_table"):
+                reported.append(
+                    {
+                        "INDEX_NAME": index.name + suffix,
+                        "COLUMN_NAME": "__vid",
+                        "INDEX_TYPE": "BTREE",
+                        "SEQ_IN_INDEX": 1,
+                        "SUB_PART": None,
+                    }
+                )
+    assert index_drift(expected, reported, create_sql=ddl) == ([], [], [])
+    # Still reject real logical option drift and undeclared search indexes.
+    wrong = ddl.replace("WITH PARSER space", "WITH PARSER ngram")
+    assert any(
+        "parser" in item
+        for item in index_drift(expected, reported, create_sql=wrong)[2]
+    )
+    missing_ddl = ddl.replace("VECTOR INDEX `vec_vector`", "INDEX `vec_vector`")
+    _, stale, incompatible = index_drift(expected, reported, create_sql=missing_ddl)
+    assert "vec_vector_index_id_table" in stale
+    assert any("vec_vector: DDL type" in item for item in incompatible)
+    # A user-created index with an auxiliary-looking name is not hidden.
+    extra = ddl.replace(
+        "PRIMARY KEY (`id`)",
+        "INDEX `vec_vector_index_id_table` (`id`), PRIMARY KEY (`id`)",
+    )
+    assert (
+        "vec_vector_index_id_table"
+        in index_drift(expected, reported, create_sql=extra)[1]
+    )
+
+
 def _catalog_column(
     column: PhysicalColumn, *, integer_width: bool = False
 ) -> dict[str, object]:

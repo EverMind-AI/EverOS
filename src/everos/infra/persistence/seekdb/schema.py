@@ -234,7 +234,16 @@ def index_drift(
             by_name.setdefault(name, []).append(row)
     parsed = _parse_indexes(create_sql)
     wanted = {index.name: index for index in expected}
-    actual_names = set(by_name) | set(parsed)
+    # SeekDB 1.4 exposes vector backing indexes in STATISTICS, while SHOW
+    # CREATE TABLE contains the logical declaration. Ignore only recognized
+    # auxiliary names tied to an actual vector declaration, never user DDL.
+    auxiliary = {
+        f"{name}{suffix}"
+        for name, declaration in parsed.items()
+        if declaration.kind == "vector"
+        for suffix in ("_index_id_table", "_index_snapshot_data_table")
+    } - set(parsed)
+    actual_names = (set(by_name) - auxiliary) | set(parsed)
     missing: list[str] = []
     incompatible: list[str] = []
     for name, index in wanted.items():
@@ -243,7 +252,10 @@ def index_drift(
         if not rows and declaration is None:
             missing.append(name)
             continue
-        if rows:
+        # Full-text/vector catalog rows describe internal implementation
+        # columns (e.g. __word_segment_* / __pk_increment) and may say BTREE.
+        # Their logical columns and options must be verified against DDL.
+        if rows and (index.kind == "btree" or declaration is None):
             incompatible.extend(_statistics_mismatches(index, rows))
         if declaration is not None:
             incompatible.extend(_ddl_index_mismatches(index, declaration))
