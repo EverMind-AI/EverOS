@@ -154,6 +154,13 @@ compatible OceanBase deployment does not support seekdb's `immediate` option;
 new vectors may then be absent from search results until background index
 synchronization catches up.
 
+SeekDB serializes operations on its process-wide connection. Cancelling an
+operation waits for the in-flight driver call to finish before another query
+or shutdown can use that connection; remote read/write timeouts bound this
+wait. A disconnected operation raises an error without replaying its SQL,
+and the next operation opens a fresh session. Physical connection replacements
+restore the required charset and SQL mode before executing business SQL.
+
 Markdown remains the source of truth; changing the backend requires
 `everos cascade rebuild`, not a data migration.
 

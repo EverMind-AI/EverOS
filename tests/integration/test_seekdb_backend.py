@@ -221,6 +221,34 @@ async def test_ids_differing_only_in_case_are_distinct() -> None:
     assert (await episode_repo.get_by_id(upper.id)).id == upper.id  # type: ignore[union-attr]
 
 
+@pytest.mark.skipif(not _HOST or bool(_PATH), reason="requires remote SeekDB")
+async def test_remote_replacement_restores_session_and_round_trips_text() -> None:
+    from everos.infra.persistence.index import episode_repo
+    from everos.infra.persistence.seekdb.seekdb_manager import get_session, run
+
+    text = "quote ' backslash \\ newline\n中文"
+    before = _episode(300, subject=text, vector=False)
+    await episode_repo.upsert([before])
+    assert (await episode_repo.get_by_id(before.id)).subject == text  # type: ignore[union-attr]
+    session = await get_session()
+
+    def replace_connection() -> None:
+        # Reproduce pyseekdb's transparent replacement of a closed connection,
+        # with a server sql_mode that would break our literal renderer.
+        server = session._server
+        server.get_raw_connection().close()
+        raw = server.get_raw_connection()
+        with raw.cursor() as cursor:
+            cursor.execute("SET SESSION sql_mode = 'NO_BACKSLASH_ESCAPES'")
+
+    await run(replace_connection)
+    after = _episode(301, subject=text, vector=False)
+    await episode_repo.upsert([after])
+    assert (await episode_repo.get_by_id(after.id)).subject == text  # type: ignore[union-attr]
+    mode = await run(session.fetch_scalar, "SELECT @@SESSION.sql_mode")
+    assert "NO_BACKSLASH_ESCAPES" not in mode
+
+
 async def test_seekdb_runs_specialized_repositories_and_real_filters() -> None:
     from everos.infra.persistence.index import (
         Episode,

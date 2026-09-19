@@ -97,7 +97,7 @@ def test_session_normalizes_rows_and_pings_remote_connection() -> None:
     remote = SeekdbSession(remote_server, mode="remote")
     assert embedded.fetch_all("SELECT", ["id", "count"]) == [{"id": "one", "count": 2}]
     assert remote.fetch_all("SELECT", ["id", "count"]) == [{"id": "one", "count": 2}]
-    assert remote_server.raw.pings == [True]
+    assert remote_server.raw.pings == [False]
 
 
 def test_session_maps_integrity_and_preserves_operational_context() -> None:

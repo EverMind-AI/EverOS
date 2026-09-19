@@ -71,11 +71,14 @@ class SeekdbSession:
         *,
         mode: Literal["embedded", "remote"],
         directory_lock: _HeldFileLock | None = None,
+        database: str = "SeekDB",
     ):
         self._server = server
         self._directory_lock = directory_lock
         self._invalidated = False
         self.mode = mode
+        self._database = database
+        self._raw_connection = server.get_raw_connection() if mode == "remote" else None
 
     def execute(self, sql: str, *, table: str | None = None) -> None:
         self._call(sql, table=table)
@@ -102,25 +105,35 @@ class SeekdbSession:
         return row
 
     def close(self) -> None:
+        self._invalidated = True
         try:
-            self._server._cleanup()
+            _close_server(self._server)
         finally:
             if self._directory_lock is not None:
                 self._directory_lock.release()
                 self._directory_lock = None
 
     def _call(self, sql: str, *, table: str | None) -> Any:
+        checking_connection = self.mode == "remote"
         try:
             if self.mode == "remote":
                 raw = self._server.get_raw_connection()
+                # pyseekdb itself can replace a closed physical connection.
+                if raw is not self._raw_connection:
+                    _configure_session(self._server, self._database)
+                    self._raw_connection = raw
                 ping = getattr(raw, "ping", None)
                 if callable(ping):
-                    ping(reconnect=True)
+                    # Never let PyMySQL silently discard our session settings.
+                    ping(reconnect=False)
+            checking_connection = False
             return self._server._execute(sql)
         except Exception as exc:
             kind = _sql_kind(sql)
             code = _error_code(exc)
-            disconnected = self.mode == "remote" and code in {2006, 2013}
+            disconnected = self.mode == "remote" and (
+                checking_connection or code in {2006, 2013}
+            )
             if disconnected:
                 self._invalidate()
             logger.warning(
@@ -136,11 +149,11 @@ class SeekdbSession:
                 raise SeekdbIntegrityError(
                     f"SeekDB rejected a {kind} operation on {table or 'SeekDB'} "
                     f"due to an integrity constraint [{detail}]"
-                ) from exc
+                ) from None
             raise SeekdbOperationalError(
                 f"SeekDB failed to execute a {kind} operation on "
                 f"{table or 'SeekDB'} [{detail}]"
-            ) from exc
+            ) from None
 
     def _invalidate(self) -> None:
         global _session
@@ -221,7 +234,7 @@ async def get_session() -> SeekdbSession:
     async with _connection_lock:
         if _session is None:
             target = resolve_target()
-            _session = await asyncio.to_thread(_open_session, target)
+            await _run_blocking(_open_cached_session, target)
             logger.info(
                 "seekdb_connection_opened",
                 mode=target.mode,
@@ -231,6 +244,33 @@ async def get_session() -> SeekdbSession:
         return _session
 
 
+def _open_cached_session(target: SeekdbTarget) -> None:
+    # Publish before cancellation can propagate, so an opened engine/lock is
+    # always owned by the cache and can be disposed by shutdown.
+    global _session
+    _session = _open_session(target)
+
+
+async def _run_blocking[**P, R](
+    fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Delay cancellation until the worker finishes, including repeated cancels."""
+    task = asyncio.create_task(asyncio.to_thread(fn, *args, **kwargs))
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+        except Exception:
+            break  # Retrieve the worker exception below, even after cancellation.
+    if cancelled is not None:
+        if not task.cancelled():
+            task.exception()
+        raise cancelled
+    return task.result()
+
+
 async def run[**P, R](fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs) -> R:
     """Run one blocking client operation under the connection lock."""
     async with _operation_lock:
@@ -238,31 +278,34 @@ async def run[**P, R](fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs) 
         if isinstance(owner, SeekdbSession) and owner._invalidated:
             current = await get_session()
             rebound = cast(Callable[P, R], getattr(current, fn.__name__))
-            return await asyncio.to_thread(rebound, *args, **kwargs)
-        return await asyncio.to_thread(fn, *args, **kwargs)
+            return await _run_blocking(rebound, *args, **kwargs)
+        return await _run_blocking(fn, *args, **kwargs)
 
 
 async def dispose_connection() -> None:
     """Close the process session and permit a fresh target on next use."""
     global _session
-    async with _connection_lock:
+    # Same lock order as run() when it replaces an invalidated session.
+    async with _operation_lock, _connection_lock:
         session = _session
-        _session = None
-    if session is not None:
-        async with _operation_lock:
-            await asyncio.to_thread(session.close)
-        logger.info("seekdb_connection_closed")
+        if session is not None:
+            try:
+                await _run_blocking(session.close)
+            finally:
+                _session = None
+            logger.info("seekdb_connection_closed")
 
 
 def _open_session(target: SeekdbTarget) -> SeekdbSession:
     directory_lock = _acquire_embedded_lock(target)
     try:
         server = _connect_target_database(target)
-        _configure_session(server, target)
+        _configure_session(server, target.database)
         return SeekdbSession(
             server,
             mode=target.mode,
             directory_lock=directory_lock,
+            database=target.database,
         )
     except BaseException:
         if directory_lock is not None:
@@ -280,7 +323,7 @@ def _connect_target_database(target: SeekdbTarget) -> _SqlServer:
             raise SeekdbOperationalError(
                 f"Could not connect to SeekDB database {target.database!r} "
                 f"[{_error_detail(exc, _error_code(exc))}]"
-            ) from exc
+            ) from None
     _ensure_database(target)
     try:
         return _new_connected_server(target, database=target.database)
@@ -288,7 +331,7 @@ def _connect_target_database(target: SeekdbTarget) -> _SqlServer:
         raise SeekdbOperationalError(
             f"Could not connect to newly created SeekDB database "
             f"{target.database!r} [{_error_detail(exc, _error_code(exc))}]"
-        ) from exc
+        ) from None
 
 
 def _new_connected_server(target: SeekdbTarget, *, database: str) -> _SqlServer:
@@ -299,7 +342,7 @@ def _new_connected_server(target: SeekdbTarget, *, database: str) -> _SqlServer:
             raise SeekdbConfigurationError(
                 "SeekDB embedded support is unavailable. Install "
                 "everos[seekdb-embedded]."
-            ) from exc
+            ) from None
         raise
     try:
         server.get_raw_connection()
@@ -315,8 +358,9 @@ def _ensure_database(target: SeekdbTarget) -> None:
     # pylibseekdb's public contract. Remote MySQL endpoints can select
     # information_schema directly without requiring access to another user DB.
     admin_database = "test" if target.mode == "embedded" else "information_schema"
-    server = _new_connected_server(target, database=admin_database)
+    server: _SqlServer | None = None
     try:
+        server = _new_connected_server(target, database=admin_database)
         rows = server._execute(
             "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "
             f"WHERE SCHEMA_NAME = {literal(target.database)}"
@@ -333,28 +377,38 @@ def _ensure_database(target: SeekdbTarget) -> None:
                 f"SeekDB database {target.database!r} does not exist and "
                 "the configured account cannot create it; pre-create the "
                 "database with utf8mb4_bin collation or grant CREATE permission"
-            ) from exc
+            ) from None
         raise SeekdbOperationalError(
             f"Could not ensure SeekDB database {target.database!r} "
             f"[{_error_detail(exc, _error_code(exc))}]"
-        ) from exc
+        ) from None
     finally:
+        if server is not None:
+            _close_server(server)
+
+
+def _close_server(server: _SqlServer) -> None:
+    try:
         server._cleanup()
+    except Exception as exc:
+        raise SeekdbOperationalError(
+            f"Could not close SeekDB [{_error_detail(exc, _error_code(exc))}]"
+        ) from None
 
 
-def _configure_session(server: _SqlServer, target: SeekdbTarget) -> None:
+def _configure_session(server: _SqlServer, database: str) -> None:
     try:
         server._execute("SET NAMES utf8mb4 COLLATE utf8mb4_bin")
         server._execute(
             "SET SESSION sql_mode = TRIM(BOTH ',' FROM REPLACE(CONCAT(',', "
             "@@SESSION.sql_mode, ','), ',NO_BACKSLASH_ESCAPES,', ','))"
         )
-    except Exception as exc:
-        server._cleanup()
+    except Exception:
+        _close_server(server)
         raise SeekdbConfigurationError(
-            f"Could not configure the SeekDB session for {target.database!r}; "
+            f"Could not configure the SeekDB session for {database!r}; "
             "the account must be allowed to set its session charset and sql_mode"
-        ) from exc
+        ) from None
 
 
 def _acquire_embedded_lock(target: SeekdbTarget) -> _EmbeddedDirectoryLock | None:
@@ -367,12 +421,12 @@ def _acquire_embedded_lock(target: SeekdbTarget) -> _EmbeddedDirectoryLock | Non
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as exc:
+    except BlockingIOError:
         os.close(fd)
         raise SeekdbConfigurationError(
             f"embedded SeekDB at {target.path} is already opened by another "
             "process; use remote mode or stop the other process"
-        ) from exc
+        ) from None
     except BaseException:
         os.close(fd)
         raise
@@ -401,11 +455,11 @@ def _new_server(target: SeekdbTarget, *, database: str) -> _SqlServer:
         if target.tenant:
             options["tenant"] = target.tenant
         return cls(**options)
-    except (ImportError, AttributeError) as exc:
+    except (ImportError, AttributeError):
         extra = "seekdb-embedded" if target.mode == "embedded" else "seekdb"
         raise SeekdbConfigurationError(
             f"SeekDB {target.mode} support is unavailable. Install everos[{extra}]."
-        ) from exc
+        ) from None
 
 
 def _default_path() -> Path:
