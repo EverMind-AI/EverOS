@@ -1296,7 +1296,14 @@ async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
 
 @pytest.mark.parametrize(
     ("top_k", "radius", "expected"),
-    [(-1, None, 0.5), (10, None, None), (-1, 0.0, 0.0), (10, 0.8, 0.8)],
+    [
+        (-1, None, 0.5),
+        (10, None, None),
+        (-1, 0.0, 0.0),
+        (10, 0.0, 0.0),
+        (-1, 0.8, 0.8),
+        (10, 0.8, 0.8),
+    ],
 )
 @pytest.mark.parametrize("lane", ["episode", "case", "skill", "multiround"])
 async def test_iterative_dispatch_resolves_radius_before_top_k_cap(

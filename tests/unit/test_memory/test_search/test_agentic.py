@@ -449,6 +449,7 @@ async def test_radius_filters_fact_and_subject_children_before_maxsim(
             ("fact_low", 0.2),
             ("subject_edge", 0.5),
             ("subject_low", 0.1),
+            ("subject_zero", 0.0),
         ]
     ]
     keyword = Candidate(id="keyword", score=0.1, metadata={"parent_id": "keyword"})
@@ -505,3 +506,108 @@ async def test_radius_filters_fact_and_subject_children_before_maxsim(
             radius=radius,
         )
     assert ep.dense_recall_subject_as_child.await_count == 2
+
+
+async def test_radius_checks_query_specific_children_at_maxsim_entry() -> None:
+    from everalgo.rank import amaxsim_retrieve
+
+    queries = ["original", "refined", "facet"]
+    vectors = {q: [float(i), 1.0] for i, q in enumerate(queries)}
+    query_for_vector = {tuple(v): q for q, v in vectors.items()}
+
+    def child(cid: str, score: float, parent: str) -> Candidate:
+        return Candidate(
+            id=cid, score=score, source="vector", metadata={"parent_id": parent}
+        )
+
+    facts = {
+        q: [child("crossing", score, "shared"), child(f"{q}_fact", 0.7, q)]
+        for q, score in zip(queries, [0.9, 0.2, 0.8], strict=True)
+    }
+    subjects = {
+        q: [
+            child(f"{q}_subject", 0.5, q),
+            # Shares a parent with a stronger fact: checking only the pooled
+            # parent cannot prove this child was removed before MaxSim.
+            child("weak_subject", 0.1, "shared"),
+        ]
+        for q in queries
+    }
+    keyword = Candidate(
+        id="keyword", score=0.1, source="keyword", metadata={"parent_id": "keyword"}
+    )
+    parents = {
+        pid: _mc_candidate(pid, pid).model_copy(
+            update={"metadata": {**_mc_candidate(pid, pid).metadata, "entry_id": pid}}
+        )
+        for pid in [*queries, "shared", "keyword"]
+    }
+    ep = _StubEpisodeRecaller([], parents)
+    fact = _StubFactRecaller([])
+
+    async def recall_facts(vector: Sequence[float], *_: Any, **__: Any):
+        return facts[query_for_vector[tuple(vector)]]
+
+    async def recall_subjects(vector: Sequence[float], *_: Any, **__: Any):
+        return subjects[query_for_vector[tuple(vector)]]
+
+    fact.dense_recall = AsyncMock(side_effect=recall_facts)
+    fact.sparse_recall = AsyncMock(return_value=[keyword])
+    ep.dense_recall_subject_as_child = AsyncMock(side_effect=recall_subjects)
+    embed = AsyncMock(side_effect=lambda q: vectors[q])
+    observed: dict[str, list[dict[str, float]]] = {q: [] for q in queries}
+
+    async def inspect_maxsim(q: str, *, child_retrieve: Any, **kwargs: Any):
+        async def inspect_children(query: str, k: int) -> list[Candidate]:
+            children = await child_retrieve(query, k)
+            observed[query].append({c.id: c.score for c in children})
+            return children
+
+        return await amaxsim_retrieve(q, child_retrieve=inspect_children, **kwargs)
+
+    async def cluster_passthrough(query: str, **kwargs: Any):
+        return await kwargs["base_retrieve"](query, 20)
+
+    async def drive_rounds(query: str, **kwargs: Any):
+        for i, q in enumerate(queries):
+            retrieve = kwargs["base_retrieve" if i == 0 else "round2_retrieve"]
+            hits = await retrieve(q, 20)
+            expected = {q, "keyword"} | ({"shared"} if i != 1 else set())
+            assert {c.id for c in hits} == expected
+            assert all(c.score < 0.5 for c in hits)  # real RRF scores survive
+        return [], AgenticDecision(is_multi_round=True)
+
+    with (
+        patch("everos.memory.search.agentic.amaxsim_retrieve", inspect_maxsim),
+        patch("everos.memory.search.agentic.acluster_retrieve", cluster_passthrough),
+        patch("everos.memory.search.agentic.aagentic_retrieve", drive_rounds),
+        patch(
+            "everos.memory.search.agentic.cluster_repo.list_for_owner",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        await search_episodes_agentic(
+            queries[0],
+            owner_id="alice",
+            where=None,
+            episode_recaller=ep,
+            atomic_fact_recaller=fact,
+            embed_query_fn=embed,
+            reranker=_StubReranker(),
+            llm=FakeLLMClient(responses=[]),
+            top_k=10,
+            radius=0.5,
+        )
+
+    for i, q in enumerate(queries):
+        dense = {f"{q}_fact": 0.7, f"{q}_subject": 0.5}
+        if i != 1:
+            dense["crossing"] = [0.9, 0.2, 0.8][i]
+        assert len(observed[q]) == 2
+        assert dense in observed[q]
+        assert {"keyword": 0.1} in observed[q]
+    assert [call.args[0] for call in embed.await_args_list] == queries
+    for recaller in (fact.dense_recall, ep.dense_recall_subject_as_child):
+        assert [call.args[0] for call in recaller.await_args_list] == list(
+            vectors.values()
+        )

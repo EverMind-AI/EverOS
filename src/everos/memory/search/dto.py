@@ -92,13 +92,22 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     method: SearchMethod = SearchMethod.HYBRID
     top_k: int = -1
-    radius: float | None = Field(default=None, ge=0.0, le=1.0)
-    """Dense-recall cosine floor, applied before fusion in every vector-backed
-    method (including each iterative sub-query). Does not filter keyword or
-    linkage candidates, or final fused scores. Unlimited searches default
-    to 0.5; positive top_k disables the default. Explicit zero keeps all
-    dense hits (recallers clamp cosine scores to [0, 1]).
-    """
+    radius: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Inclusive dense cosine-similarity floor, applied before fusion in "
+            "vector, hybrid, agentic, and llm_multiround, independently for each "
+            "sub-query and before user agentic MaxSim pooling. Omitted or null "
+            "uses 0.5 when top_k=-1, and no floor when top_k>0. Explicit 0 "
+            "keeps every recalled dense hit, including zero scores (recallers "
+            "clamp cosine scores to [0, 1]); recall-pool and top_k limits still "
+            "apply. Does not filter keyword matches, profiles, cluster "
+            "expansions, linkage candidates, or final fused scores. "
+            "Ignored by keyword search."
+        ),
+    )
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     """Post-fusion relevance floor for the episode HYBRID path.
 
