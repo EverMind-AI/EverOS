@@ -46,6 +46,7 @@ from everos.infra.persistence.sqlite import (
 )
 from everos.memory.cascade import watcher as watcher_mod
 from everos.memory.cascade.registry import match_kind
+from everos.memory.cascade.scanner import CascadeScanner
 from everos.memory.cascade.watcher import CascadeWatcher, _enqueue_async, _Handler
 
 _EPISODE_DIR = ("default_app", "default_project", "users", "u1", "episodes")
@@ -373,6 +374,19 @@ async def test_unlink_enqueues_deleted(
 async def test_rename_within_root_moves_the_row(
     runtime: MemoryRoot, watcher: CascadeWatcher
 ) -> None:
+    """The destination is the watcher's job; the source is the sweep's.
+
+    ReadDirectoryChangesW reports a rename as RENAMED_OLD then RENAMED_NEW,
+    and watchdog pairs them only when both land in the same read -- the
+    pairing variable is local to one ``queue_events`` call. Split across two
+    reads, the OLD leg is dropped and the watcher never learns the source
+    path (CI saw the source row sit at ``added`` for 15 s). That is not a
+    defect the watcher can fix; it is why the scanner exists: a state row
+    whose path is gone from disk is re-emitted as ``deleted`` on the next
+    sweep. So assert the immediate leg on the watcher and the source leg
+    after one sweep, which is the contract the system actually offers on
+    every backend.
+    """
     a = _episode(runtime.root, "episode-2026-01-01.md")
     b = _episode(runtime.root, "episode-2026-01-02.md")
     a.write_text("renamed later", encoding="utf-8")
@@ -380,4 +394,5 @@ async def test_rename_within_root_moves_the_row(
     await _wait_row(rel_a)
     os.rename(a, b)
     assert (await _wait_row(rel_b)).change_type in {"added", "modified"}
-    await _wait_row(rel_a, lambda r: r.change_type == "deleted")
+    await CascadeScanner(runtime).scan_once(kinds={"episode"})
+    await _wait_row(rel_a, lambda r: r.change_type == "deleted", deadline=5)
