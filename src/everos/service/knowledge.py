@@ -508,7 +508,9 @@ async def delete_document(
 ) -> DeleteResult:
     """Remove a document directory; cascade handles SQLite/LanceDB cleanup.
 
-    Idempotent: returns ``deleted_topics=0`` when the document does not exist.
+    Idempotent: returns ``deleted_topics=0`` when neither the index nor the
+    disk has the document, and also when the directory was removed before the
+    cascade had indexed its topics.
 
     Args:
         doc_id: Document primary key.
@@ -519,14 +521,21 @@ async def delete_document(
         DeleteResult with the topic count that was present before deletion.
     """
     row = await knowledge_document_repo.get_by_doc_id(doc_id)
-    if row is None:
-        return DeleteResult(doc_id=doc_id, deleted_topics=0)
-
-    topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
-
     memory_root = MemoryRoot.resolve()
-    doc_dir = memory_root.root / Path(row.md_path).parent
-    if await anyio.Path(doc_dir).is_dir():
+    if row is not None:
+        topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
+        doc_dir: Path | None = memory_root.root / Path(row.md_path).parent
+    else:
+        # The index trails the markdown by seconds, so a document created a
+        # moment ago has a directory but no row yet. Deleting by the index
+        # alone leaves that directory behind for the cascade to index right
+        # back in, and the "deleted" document reappears. The directory name
+        # ends in the doc_id (knowledge_writer), so it is found without the row.
+        topic_count = 0
+        doc_dir = await anyio.to_thread.run_sync(
+            _find_doc_dir, memory_root.knowledge_dir(app_id, project_id), doc_id
+        )
+    if doc_dir is not None and await anyio.Path(doc_dir).is_dir():
         await anyio.to_thread.run_sync(shutil.rmtree, doc_dir)
 
     logger.info(
@@ -535,6 +544,13 @@ async def delete_document(
         topic_count=topic_count,
     )
     return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
+
+
+def _find_doc_dir(knowledge_dir: Path, doc_id: str) -> Path | None:
+    """Locate ``knowledge/<category>/<title>_<doc_id>/`` without the SQLite row."""
+    if not knowledge_dir.is_dir():
+        return None
+    return next(knowledge_dir.glob(f"*/*_{doc_id}"), None)
 
 
 async def replace_document(

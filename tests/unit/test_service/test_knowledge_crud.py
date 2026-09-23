@@ -220,8 +220,11 @@ async def test_delete_document_success(tmp_path: Path) -> None:
     mock_anyio.to_thread.run_sync.assert_awaited_once()
 
 
-async def test_delete_document_idempotent() -> None:
+async def test_delete_document_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Returns deleted_topics=0 without error when document does not exist."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
         mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
 
@@ -230,6 +233,33 @@ async def test_delete_document_idempotent() -> None:
     assert isinstance(result, DeleteResult)
     assert result.doc_id == "d_missing"
     assert result.deleted_topics == 0
+
+
+async def test_delete_document_removes_dir_before_the_index_has_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document created a moment ago has a directory but no SQLite row yet
+    (the cascade trails the markdown by seconds). Delete must still remove the
+    directory, or the cascade indexes the "deleted" document right back in.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    doc_dir = (
+        tmp_path
+        / "app1"
+        / "proj1"
+        / "knowledge"
+        / "Technology"
+        / "Release_checklist_d_lagging00001"
+    )
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "index.md").write_text("---\ndoc_id: d_lagging00001\n---\n")
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
+        result = await delete_document("d_lagging00001", "app1", "proj1")
+
+    assert result.deleted_topics == 0
+    assert not doc_dir.exists()
 
 
 # ── list_documents ────────────────────────────────────────────────────────────
