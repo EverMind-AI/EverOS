@@ -216,4 +216,7 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 
 ## 直接在 Windows 上装行不行
 
-目前不支持。这个组合没有 CI 覆盖，也没有端到端验证过。
+还不算支持，但比之前近了。单测套件在 CI 的 `windows-latest` 上是绿的（`unit tests
+(Windows)` 这个 job），覆盖了锁、md 层、检索和 cascade 流水线。还缺两样：集成套件没在
+Windows 上跑，也没人在真的 Windows 机器上完整跑过一次 `everos serve`。这两件事没做完之前，
+这篇指南只为 WSL2 这条路背书。

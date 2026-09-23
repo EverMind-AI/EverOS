@@ -218,6 +218,10 @@ wsl --shutdown        # next `wsl` command restarts it and rebuilds the relay
 
 ## Native Windows
 
-Running EverOS directly on Windows, without WSL2, is not currently a
-supported configuration. There is no CI coverage for it and the
-combination has not been validated end to end.
+Running EverOS directly on Windows, without WSL2, is not yet a supported
+configuration — but it is closer than it was. The unit suite runs green on
+`windows-latest` in CI (the `unit tests (Windows)` job), which covers the
+lock, the markdown layer, search and the cascade pipeline. What is still
+missing: the integration suite does not run on Windows, and nobody has yet
+exercised a full `everos serve` on a Windows machine end to end. Until
+both happen, WSL2 is the path this guide stands behind.
