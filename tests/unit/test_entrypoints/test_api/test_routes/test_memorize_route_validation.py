@@ -10,13 +10,34 @@ containment backstop is covered in
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from pathlib import Path
+
 import pytest
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
+from everos.config import load_settings
+from everos.entrypoints.api.app import create_app
 from everos.entrypoints.api.routes.memorize import (
     MemorizeAddRequest,
     MessageItemDTO,
 )
+
+
+@pytest.fixture
+async def client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[AsyncClient]:
+    """FastAPI app with no lifespan; nothing past DTO validation is reached."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    load_settings.cache_clear()
+    app = create_app(lifespan_providers=[])
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+    load_settings.cache_clear()
 
 
 def _message(sender_id: str) -> MessageItemDTO:
@@ -60,6 +81,48 @@ def test_message_item_rejects_unsafe_sender_id(bad_sender_id: str) -> None:
 )
 def test_message_item_accepts_path_safe_sender_id(good_sender_id: str) -> None:
     assert _message(good_sender_id).sender_id == good_sender_id
+
+
+def test_message_item_rejects_tool_role_without_call_id() -> None:
+    # An orphan tool row used to travel to ``_boundary`` and 500 from
+    # inside extraction; it is refused at the DTO now.
+    with pytest.raises(ValidationError, match="tool_call_id"):
+        MessageItemDTO(
+            sender_id="agent",
+            role="tool",
+            timestamp=1_700_000_000_000,
+            content="x",
+        )
+
+
+def test_message_item_accepts_tool_role_with_call_id() -> None:
+    m = MessageItemDTO(
+        sender_id="agent",
+        role="tool",
+        timestamp=1_700_000_000_000,
+        content="x",
+        tool_call_id="call_1",
+    )
+    assert m.tool_call_id == "call_1"
+
+
+async def test_add_orphan_tool_row_is_422_not_500(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/v1/memory/add",
+        json={
+            "session_id": "s1",
+            "messages": [
+                {
+                    "sender_id": "agent",
+                    "role": "tool",
+                    "timestamp": 1_700_000_000_000,
+                    "content": "x",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 422
+    assert "tool_call_id" in resp.text
 
 
 def test_add_request_rejects_traversal_sender_id_in_messages() -> None:

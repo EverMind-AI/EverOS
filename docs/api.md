@@ -275,7 +275,8 @@ file (`episode-<YYYY-MM-DD>.md` etc.).
 assistant emitted in this turn (OpenAI Chat Completions shape).
 
 **`tool_call_id`** — When `role: "tool"`, the `id` of the call this
-message is the response to.
+message is the response to. Required for `role: "tool"`; a tool row
+without it is rejected with `422`.
 
 ### ContentItem
 
