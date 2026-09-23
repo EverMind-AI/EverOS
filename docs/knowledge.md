@@ -307,8 +307,11 @@ Changing `category_id` moves the document directory to the new category folder.
 DELETE /documents/{doc_id}
 ```
 
-Returns 204 when no topics were removed (document absent or present with zero
-topics); 200 with `doc_id` + `deleted_topics` otherwise.
+Returns 204 when no topics were removed (document absent, present with zero
+topics, or deleted before the cascade had indexed its topics — see
+[Cascade sync](#cascade-sync)); 200 with `doc_id` + `deleted_topics`
+otherwise. The 204 says nothing about whether a directory was removed: read
+back with `GET /documents/{doc_id}` (allowing for the index lag) to confirm.
 
 ### List documents
 
