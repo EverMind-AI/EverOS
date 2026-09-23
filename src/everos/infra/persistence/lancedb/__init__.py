@@ -118,7 +118,11 @@ async def migrate_fts_indexes() -> None:
     async with memory_root_lock(memory_root):
         marker = memory_root.lancedb_dir / ".fts_index_version"
         try:
-            current = int(marker.read_text().strip()) if marker.exists() else 0
+            current = (
+                int(marker.read_text(encoding="utf-8").strip())
+                if marker.exists()
+                else 0
+            )
         except (ValueError, OSError):
             current = 0
         if current >= _FTS_INDEX_SCHEMA_VERSION:
@@ -140,7 +144,7 @@ async def migrate_fts_indexes() -> None:
             # so compaction no longer decodes a position List.
             with contextlib.suppress(Exception):
                 await table.optimize(cleanup_older_than=dt.timedelta(seconds=0))
-        marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION))
+        marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION), encoding="utf-8")
         logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
 
 
@@ -219,7 +223,11 @@ async def migrate_table_schemas() -> None:
     async with memory_root_lock(memory_root):
         marker = memory_root.lancedb_dir / ".table_schema_version"
         try:
-            current = int(marker.read_text().strip()) if marker.exists() else 0
+            current = (
+                int(marker.read_text(encoding="utf-8").strip())
+                if marker.exists()
+                else 0
+            )
         except (ValueError, OSError):
             current = 0
         if current >= _TABLE_SCHEMA_VERSION:
@@ -266,7 +274,7 @@ async def migrate_table_schemas() -> None:
 
         marker.parent.mkdir(parents=True, exist_ok=True)
         try:
-            marker.write_text(str(_TABLE_SCHEMA_VERSION))
+            marker.write_text(str(_TABLE_SCHEMA_VERSION), encoding="utf-8")
         except OSError:
             logger.error("table_schema_migration_marker_write_failed", path=str(marker))
             raise

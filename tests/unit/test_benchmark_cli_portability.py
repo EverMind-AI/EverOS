@@ -14,6 +14,7 @@ written on, applied unconditionally.
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ def test_a_built_in_name_still_resolves_under_configs(name: str) -> None:
 def test_the_error_names_the_path_it_actually_opened(tmp_path: Path) -> None:
     """Otherwise a mis-resolved name is indistinguishable from a missing file."""
     missing = tmp_path / "absent.toml"
-    with pytest.raises(FileNotFoundError, match=str(missing)):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(missing))):
         BenchmarkConfig.from_toml(str(missing))
 
     with pytest.raises(FileNotFoundError, match=r"nosuchbenchmark\.toml"):
