@@ -31,7 +31,7 @@ singletons leak Lock objects across boundaries.
 Process-level coordination (multi-process writers against the same
 memory-root) remains the job of
 :func:`everos.core.persistence.locking.memory_root_lock`, which uses
-``fcntl.flock``. The two locks compose: per-path async lock serialises
+``portalocker``. The two locks compose: per-path async lock serialises
 tasks within one process, ``memory_root_lock`` serialises processes
 against each other.
 """
