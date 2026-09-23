@@ -850,6 +850,11 @@ class ReflectionOrchestrator:
             cluster_id=cluster_id,
             deprecated_episode_count=dep_ep,
             deprecated_fact_count=dep_fact,
+            # Members this merge left in the cluster (deferred by the source
+            # cap, or added after the snapshot): a later run merges them, so a
+            # large cluster converges over several runs rather than in one.
+            cluster_remaining_count=len(kept),
+            retired_orphan_count=len(orphans),
         )
         return report
 
