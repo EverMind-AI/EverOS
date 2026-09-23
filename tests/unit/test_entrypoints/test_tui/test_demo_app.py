@@ -394,12 +394,17 @@ async def test_conversation_panel_scrolls_when_log_overflows() -> None:
         for i in range(8):
             app._record_line("you", f"memory {i}")
             app._record_line("everos", f"a long recalled answer for round {i}")
+        # Each _record_line defers its scroll_end past the layout refresh that
+        # Static.update() triggers; one pause is not always enough to drain 16
+        # of them, and a late one landing after scroll_home re-pins the bottom.
+        await pilot.pause()
         await pilot.pause()
 
         panel = app.query_one("#conversation", VerticalScroll)
         assert panel.max_scroll_y > 0  # content overflows and is scrollable
         assert panel.scroll_y == panel.max_scroll_y  # newest line auto-pinned
         panel.scroll_home(animate=False)
+        await pilot.pause()
         await pilot.pause()
         assert panel.scroll_y == 0  # user can scroll back to the start
 
