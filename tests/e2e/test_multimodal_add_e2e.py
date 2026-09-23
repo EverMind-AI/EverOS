@@ -129,7 +129,7 @@ async def test_add_html_file_uri_parsed_into_buffer(
                     "sender_id": "alice",
                     "role": "user",
                     "timestamp": 1780304400000,
-                    "content": [{"type": "html", "uri": f"file://{doc}"}],
+                    "content": [{"type": "html", "uri": doc.as_uri()}],
                 }
             ],
         },

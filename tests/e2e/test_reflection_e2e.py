@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging
 import sys
@@ -17,22 +18,30 @@ import time
 from pathlib import Path
 from typing import Any
 
-# benchmarks/run.py is the benchmark runner; add repo root to sys.path so
-# the benchmarks package is importable from any working directory.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from benchmarks.run import (
-    ANSWER_PROMPT,
-    JUDGE_SYSTEM_PROMPT,
-    JUDGE_USER_PROMPT,
-    EverosClient,
-    LLMClientPool,
-    _build_context,
-    _extract_final_answer,
-    _extract_json,
-    _parse_session_timestamp,
-    print_section,
-)
+# benchmarks/run.py is a script, not a package module: it imports its
+# siblings bare (``import adapters``), which only resolves with
+# ``benchmarks/`` itself on sys.path. Importing it as ``benchmarks.run``
+# therefore fails at collection and, by pytest's default, aborts the whole
+# run before a single test executes. The unit tests that use the runner do
+# this same dance (``test_benchmark_cli_portability.py``); mirror it.
+_BENCH = Path(__file__).resolve().parents[2] / "benchmarks"
+if str(_BENCH) not in sys.path:
+    sys.path.insert(0, str(_BENCH))
+_run = importlib.import_module("run")
+# The prompts moved from run.py into the per-benchmark adapters when the
+# runner was generalised (#425); this suite is LoCoMo conv_0, so LoCoMo's.
+_locomo = importlib.import_module("adapters.locomo")
+_LOCOMO_CONFIG = importlib.import_module("config").BenchmarkConfig.from_toml("locomo")
+ANSWER_PROMPT = _locomo.ANSWER_PROMPT
+JUDGE_SYSTEM_PROMPT = _locomo.JUDGE_SYSTEM_PROMPT
+JUDGE_USER_PROMPT = _locomo.JUDGE_USER_PROMPT
+EverosClient = _run.EverosClient
+LLMClientPool = _run.LLMClientPool
+_build_context = _run._build_context
+_extract_final_answer = _run._extract_final_answer
+_extract_json = _run._extract_json
+_parse_session_timestamp = _run._parse_session_timestamp
+print_section = _run.print_section
 
 logger = logging.getLogger(__name__)
 
@@ -292,8 +301,10 @@ def answer_and_judge(
         search_data.get("profiles", []),
         speaker_a,
         speaker_b,
+        _LOCOMO_CONFIG,
     )
-    prompt = ANSWER_PROMPT.format(context=context, question=query)
+    # No session date is known here; the runner passes "" in that case too.
+    prompt = ANSWER_PROMPT.format(context=context, current_date_line="", question=query)
     try:
         resp = llm_client.chat.completions.create(
             model=llm_model,
