@@ -547,6 +547,16 @@ re-embedding only happens when the content actually changes.
 
 Typical latency from file write to search availability: **1–3 seconds**.
 
+The read endpoints (`GET /documents`, `GET /documents/{doc_id}`,
+`/search`) are served from that index, so they trail the write endpoints:
+right after `POST /documents` returns `201`, `GET /documents/{doc_id}` can
+still answer `404` for about a second, and after `DELETE` returns `200` the
+document can stay readable for several seconds (≈11 s observed on a laptop)
+until the cascade has processed the removal. `PATCH` writes the markdown
+directly and is not subject to this lag. Clients that need read-your-write
+semantics should poll with a budget rather than assume the response is
+immediately visible.
+
 ## Supported file formats
 
 EverOS accepts text-based files natively. Binary formats require the

@@ -47,9 +47,13 @@ business semantics the raw spec does not carry.
 Business endpoints live under `/api/v2/memory/`, `/api/v2/ome/`, and
 `/api/v2/knowledge/`. Knowledge endpoints have their own dedicated
 reference at [docs/knowledge.md](knowledge.md) and are cross-referenced
-below. The operational endpoints `GET /health` and `GET /metrics` exist
-but are intentionally outside this reference — they are runtime probes
-for deployment, not part of the application contract.
+below. The operational endpoints `GET /health`, `GET /metrics` and
+`POST /api/v2/cascade/quiesce` exist but are intentionally outside this
+reference — they are runtime probes and shutdown hooks for deployment, not
+part of the application contract. `quiesce` drains the md → index queue and
+stops the watcher; it is idempotent and returns a bare status body
+(`quiesced`, `drained`, `pending_before`, `pending_after`,
+`failed_permanent`), see `docs/openapi.json`.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy
@@ -74,7 +78,10 @@ before exposing the API on any other interface. See
 
 ### Response envelope
 
-Successful (`200 OK`) responses always wrap the payload in:
+Successful responses from the business endpoints (`/memory/*`,
+`/knowledge/*`) wrap the payload in the envelope below (`200 OK`, or
+`201 Created` for a knowledge document upload). `POST /api/v2/ome/trigger`
+and the operational endpoints return their body bare — see each section.
 
 ```json
 {
@@ -102,6 +109,21 @@ the `/flush` that produced it. Typical sync latency is sub-second, but
 under load it can reach ~10–15 seconds. If you need read-your-write
 semantics, retry with backoff. The markdown file is durable
 regardless; index lag never loses data.
+
+The same applies one level up for everything an OME strategy produces
+**after** the extraction call returns: agent cases and skills (agent track),
+profiles, atomic facts. `/flush` returns once the episode is on disk; the
+`extract_agent_case` strategy then runs its own LLM call, and skill
+clustering runs after that, so `/get` with `memory_type: "agent_case"` can
+legitimately report `total_count: 0` for tens of seconds after a flush that
+returned `"extracted"` (14 s for the case and 32 s for the skill on a
+laptop with a hosted LLM). `GET /health`'s `cascade.pending` does **not**
+cover this window — it only tracks the md → index queue, which is empty
+while the strategy is still thinking. Poll `/get` with a budget instead.
+The agent track also has extraction gates of its own: a session with a
+single user message and no tool use, an assistant turn under ~200 tokens
+with no tool use, or a trajectory that ends on a user message yields no
+case (logged as `agent_case_skipped_by_algo` with the reason).
 
 ### Conventions
 
@@ -199,7 +221,7 @@ parsing the human-readable `message` field.
 | `NOT_FOUND` | `404` | No | Requested resource does not exist |
 | `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document) |
 | `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
-| `EXTRACTION_EMPTY` | `422` | No | Document extraction produced no topics (empty or whitespace-only content) |
+| `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
@@ -1075,7 +1097,10 @@ Manually trigger a registered OME strategy.
 
 #### Response body
 
-`200 OK` returns:
+`200 OK` returns the body below **bare** — no `request_id` / `data`
+envelope. This is the one business-prefixed endpoint that behaves like
+the operational probes; clients that share a response parser with
+`/memory/*` must special-case it.
 
 | Field | Type | Notes |
 |---|---|---|
