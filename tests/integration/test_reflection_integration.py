@@ -18,7 +18,9 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -27,8 +29,12 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory.reflect import EpisodeReflector
 from sqlmodel import SQLModel
 
+from everos.component.utils.datetime import from_iso_format
 from everos.config import LanceDBSettings, load_settings
+from everos.core.errors import VectorStoreBusyError
 from everos.core.persistence import (
+    EntryId,
+    MarkdownReader,
     MemoryRoot,
     open_lancedb_connection,
 )
@@ -38,6 +44,7 @@ from everos.infra.persistence.backends.lancedb import LanceIndexRepository
 from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
+from everos.infra.persistence.predicate import Predicate
 from everos.infra.persistence.sqlite import cluster_repo, reflection_report_repo
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.reflection.orchestrator import ReflectionOrchestrator
@@ -842,6 +849,265 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
             f"AND session_id = 's_test'"
         )
         assert len(session_rows) == 0
+
+    finally:
+        conn.close()
+        await _teardown_sqlite()
+
+
+# ---------------------------------------------------------------------------
+# Retry after a failed deprecation step
+# ---------------------------------------------------------------------------
+
+
+class _IndexingEpisodeWriter(EpisodeWriter):
+    """EpisodeWriter that also plays the cascade and atomic fact extraction.
+
+    ``FakeStrategyContext`` runs neither, so every entry appended here is
+    indexed into LanceDB right away together with one atomic fact derived
+    from it: the state the real pipeline reaches before Reflection gets to
+    its deprecation step. The first ``failing_patches`` frontmatter patches
+    raise.
+    """
+
+    def __init__(
+        self,
+        memory_root: MemoryRoot,
+        ep_repo: _EpisodeRepo,
+        af_repo: _AtomicFactRepo,
+        *,
+        failing_patches: int = 0,
+    ) -> None:
+        super().__init__(memory_root)
+        self._ep_repo = ep_repo
+        self._af_repo = af_repo
+        self._failing_patches = failing_patches
+
+    async def append_entries(
+        self,
+        scope_id: str,
+        items: Sequence[tuple[Mapping[str, object], Mapping[str, str]]],
+        *,
+        date: _dt.date | None = None,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> list[EntryId]:
+        eids = await super().append_entries(
+            scope_id, items, date=date, app_id=app_id, project_id=project_id
+        )
+        for eid, (inline, sections) in zip(eids, items, strict=True):
+            entry_id = eid.format()
+            md_path = self._resolve_path(scope_id, eid.date, app_id, project_id)
+            timestamp = from_iso_format(str(inline["timestamp"]))
+            session_id = inline.get("session_id")
+            await self._ep_repo.add(
+                [
+                    _make_lance_episode(
+                        entry_id=entry_id,
+                        owner_id=scope_id,
+                        episode=sections["Content"],
+                        timestamp=timestamp,
+                        parent_type=str(inline["parent_type"]),
+                        parent_id=str(inline["parent_id"]),
+                        session_id=None if session_id is None else str(session_id),
+                        md_path=md_path.relative_to(self._root.root).as_posix(),
+                    )
+                ]
+            )
+            await self._af_repo.add(
+                [
+                    _make_lance_fact(
+                        entry_id=entry_id.replace("ep_", "af_", 1),
+                        owner_id=scope_id,
+                        fact=sections["Content"],
+                        parent_id=entry_id,
+                        parent_type="episode",
+                        timestamp=timestamp,
+                    )
+                ]
+            )
+        return eids
+
+    async def patch_frontmatter(self, path: Path, updates: Mapping[str, Any]) -> None:
+        if self._failing_patches:
+            self._failing_patches -= 1
+            raise OSError("No space left on device")
+        await super().patch_frontmatter(path, updates)
+
+
+class _LockedFactStore(LanceIndexRepository):
+    """Atomic fact index whose first deprecation write misses the lock deadline."""
+
+    def __init__(self, repo: _AtomicFactRepo) -> None:
+        super().__init__(repo, AtomicFact)
+        self._armed = True
+
+    async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
+        if self._armed and updates.get("deprecated_by") is not None:
+            self._armed = False
+            raise VectorStoreBusyError("write lock deadline")
+        await super().update(updates, where=where)
+
+
+async def _deprecated_entries(memory_root: MemoryRoot, owner_id: str) -> dict[str, str]:
+    """Merge ``deprecated_entries`` across the owner's episode daily logs."""
+    merged: dict[str, str] = {}
+    episodes_dir = memory_root.users_dir("default", "default") / owner_id / "episodes"
+    for path in sorted(episodes_dir.rglob("episode-*.md")):
+        parsed = await MarkdownReader.read(path)
+        merged.update(parsed.frontmatter.get("deprecated_entries") or {})
+    return merged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_step", ["lance", "markdown"])
+async def test_retry_after_failed_deprecation_leaves_one_merged_episode(
+    tmp_path: Path,
+    memory_root: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    failing_step: str,
+) -> None:
+    """A run that fails after writing its merge is retried idempotently.
+
+    Run 1 writes and indexes merged episode v1, then its deprecation step
+    fails after the LanceDB episode write (``lance``: the atomic fact update
+    misses the write-lock deadline; ``markdown``: the frontmatter patch
+    raises) and is compensated. v1 is left behind as an orphan: indexed,
+    live, and not a cluster member.
+
+    Verifies that the retry:
+        - merges the three sources again in INIT mode, so v1 was neither
+          a source nor treated as the previous narrative
+        - deprecates the sources toward its own merged episode v2 only
+        - retires v1 and v1's atomic fact toward v2, in LanceDB and in
+          the md frontmatter, leaving exactly one live merged episode
+    """
+    monkeypatch.setattr(
+        MemoryRoot,
+        "resolve",
+        classmethod(lambda cls: MemoryRoot(root=tmp_path)),
+    )
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
+    monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
+
+    load_settings.cache_clear()
+
+    await _setup_sqlite(monkeypatch)
+
+    try:
+        conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
+        ep_table = await conn.create_table("episode", schema=LanceEpisode)
+        af_table = await conn.create_table("atomic_fact", schema=AtomicFact)
+        ep_repo = _EpisodeRepo(table=ep_table)
+        af_repo = _AtomicFactRepo(table=af_table)
+
+        owner_id = "u_test"
+        cluster_id = "cl_test_retry"
+        episode_writer = _IndexingEpisodeWriter(
+            memory_root,
+            ep_repo,
+            af_repo,
+            failing_patches=1 if failing_step == "markdown" else 0,
+        )
+
+        # -- Three source episodes in md + LanceDB, one cluster holding them.
+        texts = ["Andrew has no pets", "Andrew adopted Toby", "Andrew adopted Buddy"]
+        source_eids = await episode_writer.append_entries(
+            owner_id,
+            [
+                (
+                    {
+                        "owner_id": owner_id,
+                        "timestamp": f"2026-06-10T1{i}:00:00+00:00",
+                        "parent_type": "memcell",
+                        "parent_id": f"mc_00{i}",
+                        "session_id": "s_test",
+                    },
+                    {"Subject": "test", "Content": text},
+                )
+                for i, text in enumerate(texts, start=1)
+            ],
+        )
+        source_ids = [eid.format() for eid in source_eids]
+        await cluster_repo.upsert_with_members(
+            AlgoCluster(
+                id=cluster_id,
+                centroid=np.zeros(1024, dtype=np.float32),
+                count=3,
+                last_ts=int(
+                    _dt.datetime(2026, 6, 10, 13, 0, 0, tzinfo=_dt.UTC).timestamp()
+                    * 1000
+                ),
+                preview=texts[:2],
+                members=source_ids,
+            ),
+            owner_id=owner_id,
+            owner_type="user",
+            kind="user_memory",
+            member_type="episode",
+        )
+
+        fake_llm = FakeLLMClient(
+            responses=[
+                json.dumps({"content": "Andrew pets narrative v1.", "title": "v1"}),
+                json.dumps({"content": "Andrew pets narrative v2.", "title": "v2"}),
+            ]
+        )
+        orchestrator = ReflectionOrchestrator(
+            cluster_repo=cluster_repo,
+            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
+            atomic_fact_store=(
+                _LockedFactStore(af_repo)
+                if failing_step == "lance"
+                else LanceIndexRepository(af_repo, AtomicFact)
+            ),
+            episode_writer=episode_writer,
+            report_repo=reflection_report_repo,
+            reflector=EpisodeReflector(llm=fake_llm),
+            embedder=_StubEmbedder(),
+        )
+        live_episodes = f"owner_id = '{owner_id}' AND deprecated_by IS NULL"
+
+        # -- Run 1: v1 is written and indexed, the deprecation step fails.
+        reports = await orchestrator.run(ctx=FakeStrategyContext(), owner_id=owner_id)
+        assert reports == []
+
+        merged_rows = await ep_repo.find_where(
+            f"parent_type = 'cluster' AND parent_id = '{cluster_id}'"
+        )
+        assert len(merged_rows) == 1
+        orphan_id = merged_rows[0].entry_id
+        live = await ep_repo.find_where(live_episodes)
+        assert sorted(r.entry_id for r in live) == sorted([*source_ids, orphan_id])
+        members = await cluster_repo.get_members_with_type(cluster_id)
+        assert sorted(mid for mid, _ in members) == sorted(source_ids)
+        assert await _deprecated_entries(memory_root, owner_id) == {}
+
+        # -- Run 2: the retry.
+        reports = await orchestrator.run(ctx=FakeStrategyContext(), owner_id=owner_id)
+
+        assert len(reports) == 1
+        report = reports[0]
+        assert report.mode == "init"
+        assert report.source_count == 3
+        retry_prompt = " ".join(m.content for m in fake_llm.calls[1].messages)
+        assert "narrative v1" not in retry_prompt
+        merged_id = report.merged_entry_id
+
+        live = await ep_repo.find_where(live_episodes)
+        assert [r.entry_id for r in live] == [merged_id]
+        superseded = await ep_repo.find_where(
+            f"owner_id = '{owner_id}' AND deprecated_by IS NOT NULL"
+        )
+        expected = {eid: merged_id for eid in [*source_ids, orphan_id]}
+        assert {r.entry_id: r.deprecated_by for r in superseded} == expected
+        live_facts = await af_repo.find_where(
+            f"owner_id = '{owner_id}' AND deprecated_by IS NULL"
+        )
+        assert [f.parent_id for f in live_facts] == [merged_id]
+        members = await cluster_repo.get_members_with_type(cluster_id)
+        assert members == [(merged_id, "episode")]
+        assert await _deprecated_entries(memory_root, owner_id) == expected
 
     finally:
         conn.close()

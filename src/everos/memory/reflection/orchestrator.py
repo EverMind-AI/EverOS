@@ -268,8 +268,6 @@ class ReflectionOrchestrator:
         Returns:
             A ReflectionReport on success, ``None`` on skip.
         """
-        await self._detect_orphans(cluster_id, owner_id, app_id, project_id)
-
         scope = dict(owner_id=owner_id, app_id=app_id, project_id=project_id)
         members, episodes = await self._load_cluster_episodes(
             cluster_id=cluster_id, **scope
@@ -564,14 +562,27 @@ class ReflectionOrchestrator:
         owner_id: str,
         app_id: str,
         project_id: str,
-    ) -> None:
-        """Log warning if orphan merged episodes exist for this cluster.
+        *,
+        exclude: set[str],
+    ) -> list[Any]:
+        """Find live merged episodes of this cluster that no run committed.
+
+        A run that fails after writing its merged episode (deprecation
+        failed and was reverted, or extraction timed out) leaves that
+        episode indexed and live but outside the cluster. It is never
+        loaded as a source, because sources come from cluster membership,
+        but it stays searchable next to the merge that replaces it.
 
         Args:
             cluster_id: Target cluster identifier.
             owner_id: Target owner identifier.
             app_id: Application scope.
             project_id: Project scope.
+            exclude: Entry IDs that are not orphans: the current cluster
+                members and the merged episode this run wrote.
+
+        Returns:
+            The orphaned merged episode rows (possibly empty).
         """
         where = all_of(
             eq("parent_type", "cluster"),
@@ -581,13 +592,15 @@ class ReflectionOrchestrator:
             eq("app_id", app_id),
             eq("project_id", project_id),
         )
-        orphans = await self._episode_store.find_where(where, limit=10)
+        rows = await self._episode_store.find_where(where)
+        orphans = [row for row in rows if row.entry_id not in exclude]
         if orphans:
             logger.warning(
                 "reflection_orphan_detected",
                 cluster_id=cluster_id,
                 orphan_entry_ids=[o.entry_id for o in orphans],
             )
+        return orphans
 
     async def _fetch_episodes(
         self,
@@ -788,16 +801,26 @@ class ReflectionOrchestrator:
         Returns:
             A ReflectionReport on success, ``None`` when no members to deprecate.
         """
-        to_deprecate, remaining = await self._resolve_deprecation_targets(
+        to_deprecate, kept = await self._resolve_deprecation_targets(
             cluster_id=cluster_id,
             original_members=original_members,
         )
         if not to_deprecate:
             return None
 
+        # Merged episodes left behind by earlier failed runs are retired
+        # toward this merge in the same writes (and reverted with them), so
+        # a retry ends with one live merged episode instead of two.
+        orphans = await self._detect_orphans(
+            cluster_id,
+            owner_id,
+            app_id,
+            project_id,
+            exclude=to_deprecate | kept | {merged_entry_id},
+        )
         dep_ep, dep_fact = await self._apply_deprecation_writes(
-            episodes=episodes,
-            to_deprecate=to_deprecate,
+            episodes=[*episodes, *orphans],
+            to_deprecate=to_deprecate | {o.entry_id for o in orphans},
             owner_id=owner_id,
             app_id=app_id,
             project_id=project_id,
@@ -809,7 +832,7 @@ class ReflectionOrchestrator:
             merged_entry_id=merged_entry_id,
             algo_result=algo_result,
             episodes=episodes,
-            member_count=remaining + 1,
+            member_count=len(kept) + 1,
         )
         report = await self._create_reflection_report(
             cluster_id=cluster_id,
@@ -850,8 +873,9 @@ class ReflectionOrchestrator:
         committed to the cluster.
 
         Args:
-            episodes: Source episode rows (for md patching).
-            to_deprecate: Set of member IDs being deprecated.
+            episodes: Rows of the episodes being deprecated (for md patching).
+            to_deprecate: Entry IDs being deprecated: cluster members and
+                orphaned merged episodes.
             owner_id: Target owner identifier.
             app_id: Application scope.
             project_id: Project scope.
@@ -943,7 +967,7 @@ class ReflectionOrchestrator:
         *,
         cluster_id: str,
         original_members: list[tuple[str, str]],
-    ) -> tuple[set[str], int]:
+    ) -> tuple[set[str], set[str]]:
         """Re-read cluster members and intersect with the original snapshot.
 
         Args:
@@ -951,16 +975,16 @@ class ReflectionOrchestrator:
             original_members: Snapshot ``(member_id, member_type)`` from selection.
 
         Returns:
-            ``(to_deprecate, remaining)``: the member IDs safe to deprecate
-            (present in both snapshots) and the number of current members
-            that stay in the cluster (deferred by the per-merge cap, or
-            added after the snapshot).
+            ``(to_deprecate, kept)``: the member IDs safe to deprecate
+            (present in both snapshots) and the current members that stay
+            in the cluster (deferred by the per-merge cap, or added after
+            the snapshot).
         """
         current_members = await self._cluster_repo.get_members_with_type(cluster_id)
         current_ids = {mid for mid, _ in current_members}
         original_ids = {mid for mid, _ in original_members}
         to_deprecate = original_ids & current_ids
-        return to_deprecate, len(current_ids - to_deprecate)
+        return to_deprecate, current_ids - to_deprecate
 
     async def _deprecate_lance_episodes(
         self,
