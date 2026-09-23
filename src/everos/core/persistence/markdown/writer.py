@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -155,7 +156,7 @@ class MarkdownWriter:
         tmp = target.parent / f".{target.name}.tmp.{uuid.uuid4().hex}"
         try:
             await anyio.to_thread.run_sync(_write_and_fsync, tmp, content)
-            await anyio.to_thread.run_sync(os.replace, tmp, target)
+            await anyio.to_thread.run_sync(_replace_with_retry, tmp, target)
         except Exception:
             # Best-effort cleanup of the staging file on failure.
             await _unlink_quiet(tmp)
@@ -336,6 +337,39 @@ class MarkdownWriter:
 
         # 4. Atomic write.
         return await self.write_markdown(target, frontmatter=meta, body=body)
+
+
+_REPLACE_ATTEMPTS = 8
+_REPLACE_FIRST_BACKOFF_S = 0.02  # doubles each time: ~5 s of patience in total
+
+
+def _replace_with_retry(tmp: Path, target: Path) -> None:
+    """``os.replace`` that outlasts a Windows sharing violation.
+
+    On Windows a file some other process holds open cannot be replaced: the
+    cascade worker reading it, an antivirus scan right after the last write,
+    an editor with it open -- ``os.replace`` raises ``PermissionError``
+    (WinError 5 / 32). POSIX never does; there the first attempt succeeds and
+    this is a plain ``os.replace``. Those holds last milliseconds, so a short
+    exponential backoff is the standard idiom (git, pip and uv all do it).
+    Only ``PermissionError`` is retried, each attempt is still one atomic
+    ``os.replace``, and after the budget the error propagates unchanged --
+    nothing is swallowed. Sync on purpose: it runs in the same worker thread
+    as the fsync'ed staging write.
+
+    Surfaced by the Windows soak, where the load feeder hit exactly this 62 s
+    in; the server's own writer here is the same primitive.
+    """
+    delay = _REPLACE_FIRST_BACKOFF_S
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def _write_and_fsync(tmp: Path, content: str) -> None:
