@@ -11,7 +11,7 @@ from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.events import BaseEvent, CronTick
+from everos.infra.ome.events import BaseEvent, CronTick, ManualTick
 from everos.infra.ome.gates import Counter
 from everos.infra.ome.triggers import Cron, Immediate
 
@@ -167,6 +167,19 @@ async def test_dispatch_strategy_filter_scopes_to_single_strategy(
     dispatcher._registry.register(_make_strategy("s_b"))
     routes = await dispatcher.dispatch(_E(user_id="u1"), strategy_filter="s_a")
     assert [m.name for m, _ in routes] == ["s_a"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_strategy_filter_refuses_undeclared_event_class(
+    dispatcher: EventDispatcher,
+) -> None:
+    # A bare ManualTick aimed at an ``Immediate(on=[_E])`` strategy must not
+    # reach the handler: it reads ``_E`` fields the tick does not carry.
+    dispatcher._registry.register(_make_strategy("s_a"))
+    routes = await dispatcher.dispatch(
+        ManualTick(strategy_name="s_a"), strategy_filter="s_a"
+    )
+    assert routes == []
 
 
 @pytest.mark.asyncio

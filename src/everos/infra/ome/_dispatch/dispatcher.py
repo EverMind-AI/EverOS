@@ -61,10 +61,14 @@ class EventDispatcher:
             force_enabled: Bypass the ``meta.enabled`` gate. ``applies_to``
                 and the counter still apply. Used by manual triggers
                 with ``force=True``.
-            strategy_filter: Restrict to one strategy name regardless of
-                whether it subscribes to ``type(event)``. Manual triggers
-                use this when targeting a strategy with a caller-supplied
-                event. Raises ``KeyError`` if the name is not registered.
+            strategy_filter: Restrict to one strategy name. The strategy
+                must still subscribe to ``type(event)`` — a handler is never
+                handed an event class it did not declare (a bare
+                ``ManualTick`` aimed at ``Immediate(on=[AgentCaseExtracted])``
+                would crash reading fields the tick does not carry). Manual
+                triggers use this when targeting a strategy with a
+                caller-supplied event. Raises ``KeyError`` if the name is
+                not registered.
 
         ``applies_to`` callables raised by a single strategy are caught,
         logged, and treated as ``False`` for that strategy alone — sibling
@@ -72,7 +76,9 @@ class EventDispatcher:
         I/O) propagate.
         """
         if strategy_filter is not None:
-            metas: list[StrategyMeta] = [self._registry.get(strategy_filter)]
+            target = self._registry.get(strategy_filter)
+            subscribed = {m.name for m in self._registry.lookup_by_event(type(event))}
+            metas: list[StrategyMeta] = [target] if target.name in subscribed else []
         else:
             metas = list(self._registry.lookup_by_event(type(event)))
         out: list[tuple[StrategyMeta, str]] = []

@@ -293,6 +293,30 @@ async def test_trigger_manual_with_default_event_uses_manual_tick(
 
 
 @pytest.mark.asyncio
+async def test_trigger_manual_default_tick_skips_strategy_not_listening_to_it(
+    cfg: OMEConfig,
+) -> None:
+    # ``POST /ome/trigger`` on a business-event strategy: no ManualTick in
+    # ``on`` → empty routes (``not_dispatched``), handler never sees the tick.
+    seen: list = []
+
+    @offline_strategy(name="on_e_only", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, ctx: StrategyContext) -> None:
+        seen.append(event)
+
+    engine = OfflineEngine(config=cfg)
+    engine.register(s)
+    await engine.start()
+    try:
+        _, routes = await engine.trigger_manual("on_e_only")
+        await asyncio.sleep(0.2)
+    finally:
+        await engine.stop()
+    assert routes == []
+    assert seen == []
+
+
+@pytest.mark.asyncio
 async def test_trigger_manual_force_bypasses_enabled(
     cfg: OMEConfig,
 ) -> None:
