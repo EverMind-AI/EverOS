@@ -183,6 +183,24 @@ async def test_dispatch_strategy_filter_refuses_undeclared_event_class(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_manual_tick_reaches_a_cron_strategy(
+    dispatcher: EventDispatcher,
+) -> None:
+    # ``POST /ome/trigger {"name": "reflect_episodes", "force": true}`` is the
+    # documented way to run a scheduled job now; CronTick and ManualTick carry
+    # the same single field, so the handler is safe.
+    @offline_strategy(name="weekly", trigger=Cron(expr="0 2 * * 1"), emits=[])
+    async def _weekly(event: Any, ctx: StrategyContext) -> None:
+        return None
+
+    dispatcher._registry.register(_weekly)
+    routes = await dispatcher.dispatch(
+        ManualTick(strategy_name="weekly"), strategy_filter="weekly"
+    )
+    assert [m.name for m, _ in routes] == ["weekly"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_strategy_filter_unknown_raises(
     dispatcher: EventDispatcher,
 ) -> None:
