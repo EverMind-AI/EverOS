@@ -7,7 +7,7 @@ The watcher catches realtime events but misses:
 - WSL2 / network mounts where fsevents don't propagate.
 
 The scanner closes those gaps by walking the memory root every
-``scan_interval`` seconds (default 30s, configurable later), matching
+``scan_interval`` seconds (default 30s, ``[cascade] scan_interval_seconds``), matching
 paths against the kind registry, reading prior state, and running the
 pure :func:`reconcile` function to emit the upsert plan.
 
