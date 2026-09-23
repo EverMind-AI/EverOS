@@ -225,3 +225,16 @@ lock, the markdown layer, search and the cascade pipeline. What is still
 missing: the integration suite does not run on Windows, and nobody has yet
 exercised a full `everos serve` on a Windows machine end to end. Until
 both happen, WSL2 is the path this guide stands behind.
+
+One prerequisite is already known from a stock Windows 11 Enterprise
+machine: the **Microsoft Visual C++ Redistributable (x64)**. `greenlet`,
+which SQLAlchemy's async engine depends on, is a C++ extension whose wheel
+does not bundle the runtime, so without it every SQLite call fails with a
+cryptic `DLL load failed while importing _greenlet`. GitHub's CI image has
+the redistributable preinstalled, which is why CI cannot catch this. Install
+it once, from an administrator PowerShell:
+
+```powershell
+Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile "$env:TEMP\vc_redist.x64.exe"
+& "$env:TEMP\vc_redist.x64.exe" /install /quiet /norestart
+```

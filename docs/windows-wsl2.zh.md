@@ -220,3 +220,13 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 (Windows)` 这个 job），覆盖了锁、md 层、检索和 cascade 流水线。还缺两样：集成套件没在
 Windows 上跑，也没人在真的 Windows 机器上完整跑过一次 `everos serve`。这两件事没做完之前，
 这篇指南只为 WSL2 这条路背书。
+
+有一个前置条件已经在一台干净的 Windows 11 企业版机器上踩出来了：**Microsoft Visual C++
+运行库（x64）**。SQLAlchemy 的异步引擎依赖 `greenlet`，它是 C++ 扩展、轮子不自带运行库，
+缺了之后每一次 SQLite 调用都会报一句看不懂的 `DLL load failed while importing _greenlet`。
+GitHub 的 CI 镜像预装了这个运行库，所以 CI 抓不到。装一次就好，管理员 PowerShell：
+
+```powershell
+Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile "$env:TEMP\vc_redist.x64.exe"
+& "$env:TEMP\vc_redist.x64.exe" /install /quiet /norestart
+```
