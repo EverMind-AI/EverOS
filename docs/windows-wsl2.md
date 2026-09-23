@@ -231,10 +231,8 @@ machine: the **Microsoft Visual C++ Redistributable (x64)**. `greenlet`,
 which SQLAlchemy's async engine depends on, is a C++ extension whose wheel
 does not bundle the runtime, so without it every SQLite call fails with a
 cryptic `DLL load failed while importing _greenlet`. GitHub's CI image has
-the redistributable preinstalled, which is why CI cannot catch this. Install
-it once, from an administrator PowerShell:
-
-```powershell
-Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile "$env:TEMP\vc_redist.x64.exe"
-& "$env:TEMP\vc_redist.x64.exe" /install /quiet /norestart
-```
+the redistributable preinstalled, which is why CI cannot catch this. EverOS
+now carries the runtime itself: the Windows-only `msvc-runtime` dependency
+puts the DLLs in `sys.prefix`, and `everos/__init__.py` registers that
+directory with the DLL loader before anything else is imported. Nothing to
+install, no administrator rights needed.
