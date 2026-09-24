@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-24
+
+**A fresh install works again.** The `openai` SDK released its 3.x line on
+2026-09-24; an unconstrained install picked it up together with an httpx
+pre-release, and every LLM and embedding call failed before reaching the
+network. This release pins the SDK to the 2.x line the project is tested
+against. Nothing else changed since 1.4.0.
+
+### Fixed
+
+- **`openai` is pinned below 3.** Fresh installs from PyPI resolved
+  `openai 3.19.2`, whose client raises `AttributeError: module 'httpx' has no
+  attribute 'Timeout'` on every request, so memorize and hybrid / vector
+  search returned 500. Existing environments built from `uv.lock` were never
+  affected.
+
+### Upgrade
+
+- `pip install --upgrade everos` brings `openai` back to 2.x. If a fresh
+  install of 1.4.0 (or any earlier version) today shows the `httpx` error
+  above, upgrade to 1.4.1 or run `pip install "openai<3"`.
+
 ## [1.4.0] - 2026-09-24
 
 **EverOS runs natively on Windows, and dense search stops scanning the whole

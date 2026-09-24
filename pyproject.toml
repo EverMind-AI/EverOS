@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.4.0"
+version = "1.4.1"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -45,7 +45,9 @@ dependencies = [
     "greenlet>=3.0",              # Required by SQLAlchemy async
 
     # LLM & embedding (one provider per file pattern)
-    "openai>=1.0.0",
+    # <3: openai 3.x (2026-09-24) moved to the httpx 1.0 pre-release line and its
+    # client raises AttributeError on every request; 2.x is what the lock tests.
+    "openai>=1.0.0,<3",
 
     # Markdown / file system
     "PyYAML>=6.0",                # YAML frontmatter parsing
