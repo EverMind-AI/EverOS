@@ -24,6 +24,7 @@ from collections.abc import Sequence
 
 import openai
 
+from everos.component.utils.attribution import aimlapi_headers
 from everos.core.errors import EmbeddingInputError
 from everos.core.observability.tracing import memory_span, set_generation_usage
 
@@ -87,11 +88,14 @@ class OpenAIEmbeddingProvider:
         self._model = model
         self._batch_size = batch_size
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        # Partner attribution, merged into (not over) the SDK's own
+        # defaults and empty unless ``base_url`` is an aimlapi.com host.
         self._client = openai.AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            default_headers=aimlapi_headers(base_url) or None,
         )
 
     async def embed(self, text: str) -> list[float]:
