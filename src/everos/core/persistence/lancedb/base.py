@@ -34,7 +34,7 @@ from typing import ClassVar
 
 import pyarrow as pa
 from lancedb import AsyncTable
-from lancedb.index import FTS
+from lancedb.index import FTS, IvfFlat
 from lancedb.pydantic import LanceModel
 from pydantic import Field
 
@@ -176,6 +176,50 @@ class BaseLanceTable(LanceModel):
                     ascii_folding=True,
                 ),
             )
+
+    @classmethod
+    def vector_columns(cls) -> list[str]:
+        """Names of the schema's vector columns (Arrow fixed-size lists)."""
+        return [
+            field.name
+            for field in cls.to_arrow_schema()
+            if pa.types.is_fixed_size_list(field.type)
+        ]
+
+    @classmethod
+    async def ensure_vector_indexes(
+        cls, table: AsyncTable, *, min_rows: int, replace: bool = False
+    ) -> list[str]:
+        """Create an IVF_FLAT (cosine) index on each vector column that has
+        at least ``min_rows`` non-null vectors; return the columns indexed.
+
+        Without an index LanceDB answers ``nearest_to`` with a brute-force
+        scan of the whole column — linear in rows and in bytes (27k rows of
+        1024-dim float32 is 112 MB and ~0.6 s per query on a laptop SSD),
+        and a hybrid search issues two or three of them. IVF_FLAT keeps
+        exact distances inside the probed partitions, so at these sizes the
+        recall cost is small; ``cosine`` matches the query side
+        (``distance_type("cosine")`` in ``dense_search``). Columns that are
+        still all-null (a Tier 1 store has no embeddings) are skipped: there
+        is nothing to train on. Idempotent unless ``replace``; the rebuild
+        cadence passes ``replace=True`` to retrain in place.
+        """
+        columns = cls.vector_columns()
+        if not columns:
+            return []
+        indices = await table.list_indices()
+        indexed = {col for idx in indices for col in (idx.columns or [])}
+        built: list[str] = []
+        for column in columns:
+            if column in indexed and not replace:
+                continue
+            if await table.count_rows(f"{column} IS NOT NULL") < min_rows:
+                continue
+            await table.create_index(
+                column, replace=replace, config=IvfFlat(distance_type="cosine")
+            )
+            built.append(column)
+        return built
 
 
 def touch(record: BaseLanceTable) -> BaseLanceTable:
