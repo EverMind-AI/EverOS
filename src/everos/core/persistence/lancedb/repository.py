@@ -208,6 +208,23 @@ def _remove_empty_index_dirs(
     return removed
 
 
+_TRANSIENT_EXECUTION_MARKERS = ("Spill has sent an error",)
+"""Substrings of lance error messages that name a query-execution failure a
+retry clears. ``LanceError(IO): Execution error: Spill has sent an error`` is
+DataFusion's sort / merge spill to the OS temp dir failing mid-query; lancedb
+raises it as a bare ``RuntimeError``. Seen only on the Windows soak box under
+nine concurrent clients (187 / 180 / 34 times over three runs), never on an
+idle box, and the same row projected fine on the next attempt — yet the worker
+filed every one as unrecoverable, so ~200 md files per run needed a manual
+``cascade fix``. Match the exact phrase: a generic IO error (disk full, file
+gone) must stay permanent."""
+
+
+def _is_transient_execution_error(exc: BaseException) -> bool:
+    text = str(exc)
+    return any(marker in text for marker in _TRANSIENT_EXECUTION_MARKERS)
+
+
 class LanceRepoBase[T: BaseLanceTable]:
     """Generic CRUD repository for one LanceDB table.
 
@@ -295,6 +312,19 @@ class LanceRepoBase[T: BaseLanceTable]:
             )
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its {budget:g}s deadline"
+            ) from exc
+        except RuntimeError as exc:
+            if not _is_transient_execution_error(exc):
+                raise
+            logger.warning(
+                "lancedb_transient_execution_error",
+                table=self.table_name,
+                op=op,
+                error=str(exc)[:200],
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} hit a transient lance "
+                f"execution error: {exc}"
             ) from exc
 
     @asynccontextmanager
