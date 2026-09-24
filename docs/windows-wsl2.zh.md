@@ -1,6 +1,7 @@
 # 在 Windows 上跑 EverOS（WSL2）
 
-EverOS 的开发和 CI 都在 Linux 和 macOS 上。Windows 上走 WSL2。
+EverOS 的开发和 CI 在 Linux 上，单测也在 Windows 的 CI 上跑，并且在一台干净的 Windows 11 机器上
+完整验过（见文末「直接在 Windows 上装行不行」）。Windows 上既可以直接装，也可以走 WSL2；这篇主要讲 WSL2。
 
 WSL2 是 Windows 自带的一套真 Linux 内核，不是模拟器也不是虚拟机软件。装完之后
 EverOS 就跟跑在一台 Ubuntu 服务器上没区别，文件锁、向量索引、文件监听全部是
@@ -219,33 +220,43 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 行。在一台干净的 Windows 11 企业版笔记本（Intel Core Ultra 7 155H、32 GB、没装 Visual C++
 运行库）上用 `uv` 的 Python 3.12 验过：
 
-- `pip install everos` → `everos init` → `everos server start`，中间不需要手工做任何事。
-  唯一一个 Windows 专用依赖是 `msvc-runtime`，它提供 `greenlet` 需要的 C++ 运行库（见下文）。
-- 这台机器上的测试：单测 **2576 通过 / 4 跳过**，集成 **183 通过 / 5 跳过**，真实 LLM 的
-  `slow` 用例 **28 通过 / 1 跳过**。CI 在 `windows-latest` 上跑单测（`unit tests (Windows)`）。
+- 用 `uv` 从源码 checkout 装好之后，`everos init` → `everos server start`，除了装 Python 之外
+  不需要手工做任何事。Windows 专用依赖有两个：`msvc-runtime`（提供 `greenlet` 需要的 C++ 运行库，
+  见下文）和 `pywin32`（`portalocker` 用它做文件锁）。
+- 测试：单测在 CI 的 `windows-latest` 上是绿的（`unit tests (Windows)`，2583 通过 / 4 跳过，
+  与 Linux 同数）；这台机器上跑了集成 **183 通过 / 5 跳过** 和真实 LLM 的 `slow` 用例
+  **28 通过 / 1 跳过**，都在 Python 3.12 下。
 - 四类记忆——episode、profile、agent case、agent skill——都由 Tier 3 服务（真实 LLM、embedding、
   rerank）产出，并通过 `/get` 和 `/search` 取回。
 - 10 小时浸泡（写入和改写约 78 000 条 md 条目、16 000 次检索、2 300 次走抽取路径的 `/add`，
   另有两个并发的 `everos cascade sync` 进程在同一棵目录树上不停跑）结束时索引完好：每张表都能打开、
-  schema 校验通过、没有条目丢失；RSS 三小时后稳定在约 2.3 GB；LanceDB 目录峰值 6.7 GB，回收到
+  schema 校验通过、每一条格式正确的条目都有对应的行——没有行的只有这轮故意撒进去的畸形文件；
+  RSS 三小时后稳定在约 2.3 GB；LanceDB 目录峰值 6.7 GB，回收到
   2.7 GB（真实数据 437 MB）。这次浸泡另外抓到两个与 Windows 无关的问题，单独跟踪：并发的
   `cascade sync` 进程会把同一行插两次（10 小时后约 4.5% 重复行，没有损坏）；持续写负载下请求
   延迟会变差。
 
-Python：3.12、3.13、3.14（普通构建）不改任何东西就能跑；3.11 被 `requires-python` 和 `src/` 里的
-PEP 695 语法拒绝；free-threaded 的 3.14t 没有 `lancedb` 轮子。
+Python：这台机器上跑的是 3.12；3.13 和 3.14（普通构建）在 CI 和 macOS 上不改任何东西就能过同一套
+测试；3.11 被 `requires-python` 和 `src/` 里的 PEP 695 语法拒绝；free-threaded 的 3.14t 没有
+`lancedb` 轮子。
 
 Windows 上值得知道的几件事：
 
 - 另一个进程（cascade worker，或者 Defender 正在扫刚写好的文件）打开着目标文件时，`os.replace`
-  会报 `PermissionError`。md 写入器会带退避重试；浸泡里出现 49 次，全部重试成功。
+  会报 `PermissionError`。md 写入器会带退避重试（总共约 2.5 秒的耐心），每次重试记一条 debug 日志；
+  浸泡的加载器用的是同一套写法，撞上 49 次，全部重试成功。
 - Windows 搜索会索引 `%USERPROFILE%` 下的所有东西。把记忆目录放在那里，重写压力下会多花大约
   一个核给 `SearchIndexer`；把目录放到别处，或者把它从索引里排除。
 - 文件变更事件来自 `ReadDirectoryChangesW`，一次重命名可能被报成两个事件。cascade 的扫描器会
   按磁盘实际状态对账。
+- 跑过测试的两台机器都开着长路径（`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1`；
+  GitHub 的镜像默认开，干净安装的 Windows 默认不开）。记忆目录嵌套好几层，Lance 的索引目录又是
+  UUID 命名，放在很长的用户目录下可能超过 260 个字符——要么开长路径，要么把目录放短一点。
 
 以前在干净机器上会踩的那个前置条件是 **Microsoft Visual C++ 运行库（x64）**。SQLAlchemy 的
 异步引擎依赖 `greenlet`，它是 C++ 扩展、轮子不自带运行库，缺了之后每一次 SQLite 调用都会报一句
 看不懂的 `DLL load failed while importing _greenlet`。GitHub 的 CI 镜像预装了这个运行库，所以 CI
 抓不到。现在 EverOS 自己带着它：Windows 专用的 `msvc-runtime` 依赖把 DLL 放进 `sys.prefix`，
 `everos/__init__.py` 在导入任何东西之前把这个目录注册给 DLL 加载器。不用装任何东西，也不需要管理员。
+要留意的一点：`msvc-runtime` 只发轮子、按 CPython 小版本发，比它最新轮子更新的 Python 在上游发布之前
+装不了 EverOS 的 Windows 版。

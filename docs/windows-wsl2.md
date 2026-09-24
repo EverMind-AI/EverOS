@@ -2,11 +2,13 @@
 
 > Also available in Chinese: [windows-wsl2.zh.md](windows-wsl2.zh.md)
 
-EverOS is developed and CI-tested on Linux and macOS. On Windows the
-supported path is **WSL2** — a real Linux kernel, so the storage stack
-(`fcntl` locking, LanceDB, inotify) behaves exactly as it does on a Linux
-server. This page is the end-to-end install, including the parts that
-cannot be scripted and the one failure that is silent.
+EverOS is developed and CI-tested on Linux; its unit suite also runs on
+Windows in CI, and it has been exercised end to end on a stock Windows 11
+machine (see [Native Windows](#native-windows) at the end). On Windows you
+can run it natively or under **WSL2** — a real Linux kernel, so the storage
+stack (file locking, LanceDB, inotify) behaves exactly as it does on a
+Linux server. Most of this page is the WSL2 install, including the parts
+that cannot be scripted and the one failure that is silent.
 
 ## Table of contents
 
@@ -222,41 +224,54 @@ EverOS runs directly on Windows. Verified on a stock Windows 11 Enterprise
 laptop (Intel Core Ultra 7 155H, 32 GB, no Visual C++ Redistributable
 installed) with Python 3.12 from `uv`:
 
-- `pip install everos` → `everos init` → `everos server start` works with
-  no manual step. The only Windows-only dependency is `msvc-runtime`, which
-  supplies the C++ runtime `greenlet` needs (details below).
-- Test suites on that machine: unit **2576 passed / 4 skipped**, integration
-  **183 passed / 5 skipped**, live LLM (`slow`) **28 passed / 1 skipped**. CI
-  runs the unit suite on `windows-latest` (`unit tests (Windows)`).
+- Installed with `uv` from a source checkout, `everos init` →
+  `everos server start` needs no manual step beyond having Python. The
+  Windows-only dependencies are `msvc-runtime`, which supplies the C++
+  runtime `greenlet` needs (details below), and `pywin32`, which
+  `portalocker` uses for file locking.
+- Test suites: the unit suite runs green in CI on `windows-latest`
+  (`unit tests (Windows)`, 2583 passed / 4 skipped — the same count as
+  Linux); on that machine, integration **183 passed / 5 skipped** and live
+  LLM (`slow`) **28 passed / 1 skipped**, both under Python 3.12.
 - All four memory kinds — episode, profile, agent case, agent skill — were
   produced by a Tier 3 server (real LLM, embedding and rerank providers) and
   read back through `/get` and `/search`.
 - A 10-hour soak (about 78 000 markdown entries written and rewritten,
   16 000 searches, 2 300 `/add` calls through the extraction path, two
   concurrent `everos cascade sync` processes on the same tree) ended with
-  the index intact: every table opens, schemas verify, no entry lost. RSS
-  levelled at about 2.3 GB after three hours; the LanceDB directory peaked at
-  6.7 GB and reclaimed to 2.7 GB (437 MB of live data). Two findings from
-  that run are tracked separately and are not Windows-specific: concurrent
-  `cascade sync` processes can insert the same row twice (about 4.5 %
-  duplicate rows after 10 hours, no corruption), and request latency
-  degrades under sustained write load.
+  the index intact: every table opens, schemas verify, and every well-formed
+  entry had its row — the only markdown entries without one were the
+  deliberately malformed files the run seeds. RSS levelled at about 2.3 GB
+  after three hours; the LanceDB directory peaked at 6.7 GB and reclaimed
+  to 2.7 GB (437 MB of live data). Two findings from that run are tracked
+  separately and are not Windows-specific: concurrent `cascade sync`
+  processes can insert the same row twice (about 4.5 % duplicate rows after
+  10 hours, no corruption), and request latency degrades under sustained
+  write load.
 
-Python: 3.12, 3.13 and 3.14 (regular build) work unchanged; 3.11 is refused
-by `requires-python` and by the PEP 695 syntax in `src/`; the free-threaded
+Python: 3.12 is what ran on that machine; 3.13 and 3.14 (regular build)
+pass the same suites in CI and on macOS without changes; 3.11 is refused by
+`requires-python` and by the PEP 695 syntax in `src/`; the free-threaded
 3.14t build has no `lancedb` wheel.
 
 Windows specifics worth knowing:
 
 - `os.replace` fails with `PermissionError` while another process — the
   cascade worker, or Defender scanning a fresh file — holds the target open.
-  The markdown writer retries with backoff; the soak saw 49 such retries,
-  all of them succeeded.
+  The markdown writer retries with backoff (about 2.5 s of patience) and
+  logs each retry at debug level; the soak's load generator, which uses
+  the same idiom, hit 49 such violations and recovered from all of them.
 - Windows Search indexes everything under `%USERPROFILE%`. A memory root
   there costs about one CPU core of `SearchIndexer` under heavy writes; put
   the root elsewhere or exclude the directory from indexing.
 - File-change events come from `ReadDirectoryChangesW`, which can report a
   rename as two events. The cascade scanner reconciles against the disk.
+- Both machines that ran the suites had long paths enabled
+  (`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1`;
+  GitHub's image sets it, a stock install does not). Memory roots nest
+  several directories deep and Lance index directories carry UUID names,
+  so a root under a long profile path can cross 260 characters — enable
+  long paths or keep the root short.
 
 The one prerequisite that used to bite on a clean machine is the
 **Microsoft Visual C++ Redistributable (x64)**. `greenlet`, which
@@ -267,4 +282,7 @@ redistributable preinstalled, which is why CI never caught this. EverOS now
 carries the runtime itself: the Windows-only `msvc-runtime` dependency puts
 the DLLs in `sys.prefix`, and `everos/__init__.py` registers that directory
 with the DLL loader before anything else is imported. Nothing to install,
-no administrator rights needed.
+no administrator rights needed. One dependency to watch: `msvc-runtime`
+ships wheels only, one per CPython minor version, so a Python newer than
+its latest wheel cannot install EverOS on Windows until upstream publishes
+one.
