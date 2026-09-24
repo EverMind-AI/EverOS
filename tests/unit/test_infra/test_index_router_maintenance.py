@@ -58,3 +58,12 @@ async def test_router_forwards_ensure_vector_indexes_to_the_lance_repo() -> None
     routed = RoutedIndexRepository(stub, milvus_repo_name="unused")  # type: ignore[arg-type]
     await routed.ensure_vector_indexes()
     assert stub.calls == ["ensure_vector_indexes"]
+
+
+async def test_lance_backend_forwards_ensure_vector_indexes_to_the_repo() -> None:
+    """Attribute presence is not enough: a ``pass`` body would satisfy the
+    protocol and silently never build an index."""
+    stub = _Stub()
+    backend = LanceIndexRepository(stub, schema=object)  # type: ignore[arg-type]
+    await backend.ensure_vector_indexes()
+    assert stub.calls == ["ensure_vector_indexes"]

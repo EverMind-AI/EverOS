@@ -44,6 +44,12 @@ VECTOR_INDEX_ROWS_PER_PARTITION = 4096
 """IVF partition size at build time. Pinned so :data:`VECTOR_QUERY_NPROBES`
 means something: lance's default partition count has changed across releases."""
 
+VECTOR_INDEX_MAX_DELTAS = 16
+"""Delta indices a vector column may accumulate before the heavy beat retrains
+it. Each light beat with new rows adds one; probing 16 of them cost ~1-3 ms extra
+at 27k-100k rows, while a retrain rewrites the whole index (107 MB at 27k x 1024,
+391 MB at 100k), so a trickle writer must not pay that every 300 s."""
+
 VECTOR_QUERY_NPROBES = 32
 """Partitions probed per vector query. 32 partitions of 4096 rows cover the whole
 column, i.e. exact search, up to ~130k rows; past that the unprobed partitions
@@ -217,7 +223,8 @@ class BaseLanceTable(LanceModel):
         Two cases do work; everything else is a no-op:
 
         * no index yet and the column crossed ``min_rows`` -> build one;
-        * the index has grown delta indices -> retrain it in place. Every
+        * the index has grown more than :data:`VECTOR_INDEX_MAX_DELTAS` delta
+          indices -> retrain it in place. Every
           ``optimize()`` on a table with new rows appends one *delta* index
           instead of merging (``num_indices`` +1 per light beat, never
           collapsing on its own), and a query probes every delta, so latency
@@ -225,7 +232,10 @@ class BaseLanceTable(LanceModel):
           measured 5.9 ms at 0 deltas, 25.7 ms at 100, 303 ms at 400 —
           worse than the 24 ms scan the index replaces. The cascade's heavy
           beat (300 s) calls this, so at most ~30 deltas accumulate under
-          sustained writes.
+          sustained writes. The retrain is one atomic index swap (searches
+          never see the column unindexed); a concurrent ``optimize()`` from
+          another process can preempt it with a benign commit conflict, in
+          which case the next heavy beat retries — the same exposure prune has.
 
         ponytail: retraining (``create_index(replace=True)``) rewrites the
         whole index once per heavy beat under load; merging the deltas
@@ -245,7 +255,7 @@ class BaseLanceTable(LanceModel):
             existing = indices.get(column)
             if existing is not None:
                 stats = await table.index_stats(existing.name)
-                if stats is None or stats.num_indices <= 1:
+                if stats is None or stats.num_indices <= VECTOR_INDEX_MAX_DELTAS:
                     continue
             rows = await table.count_rows(f"{column} IS NOT NULL")
             if rows < min_rows:
