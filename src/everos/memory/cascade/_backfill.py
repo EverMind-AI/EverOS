@@ -25,9 +25,10 @@ layering rule (import-linter does not check third-party imports).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -1091,6 +1092,32 @@ def _probe_ome_lock_available() -> bool:
             return False
         portalocker.unlock(handle)
         return True
+    finally:
+        handle.close()
+
+
+@contextlib.contextmanager
+def hold_ome_lock() -> Iterator[None]:
+    """Hold the OME jobstore lock for the duration of a CLI write phase.
+
+    Same file and flags as :meth:`OfflineEngine._acquire_lock`, so a server
+    that starts meanwhile fails at startup with :class:`EngineLockHeldError`
+    instead of becoming a second index writer. Raises
+    :class:`EngineLockHeldError` when another process already holds it.
+    """
+    root = MemoryRoot.resolve()
+    lock_path = Path(str(root.ome_db) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+")  # noqa: SIM115
+    try:
+        try:
+            portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        except portalocker.LockException as exc:
+            raise EngineLockHeldError(f"another process holds {lock_path}") from exc
+        try:
+            yield
+        finally:
+            portalocker.unlock(handle)
     finally:
         handle.close()
 

@@ -547,6 +547,19 @@ re-embedding only happens when the content actually changes.
 
 Typical latency from file write to search availability: **1–3 seconds**.
 
+The read endpoints are served from what the cascade has populated —
+`GET /documents` and `GET /documents/{doc_id}` from SQLite, `/search` from
+the derived index — so they trail the write endpoints: right after
+`POST /documents` returns `201`, `GET /documents/{doc_id}` can still answer
+`404` (≈1 s observed on a laptop), and after `DELETE` returns `200` the
+document can stay readable for several seconds (≈11 s observed on the same
+machine) until the cascade has processed the removal. `PATCH` escapes the
+lag for `GET` because it updates SQLite synchronously and falls back to the
+markdown when the row is not there yet; a `category_id` change still reaches
+`/search` through the cascade like any other write. Clients that need
+read-your-write semantics should poll with a budget rather than assume the
+response is immediately visible.
+
 ## Supported file formats
 
 EverOS accepts text-based files natively. Binary formats require the
