@@ -522,20 +522,29 @@ async def delete_document(
     """
     row = await knowledge_document_repo.get_by_doc_id(doc_id)
     memory_root = MemoryRoot.resolve()
-    if row is not None:
-        topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
-        doc_dir: Path | None = memory_root.root / Path(row.md_path).parent
-    else:
+    if row is None:
         # The index trails the markdown by seconds, so a document created a
         # moment ago has a directory but no row yet. Deleting by the index
         # alone leaves that directory behind for the cascade to index right
-        # back in, and the "deleted" document reappears. The directory name
-        # ends in the doc_id (knowledge_writer), so it is found without the row.
-        topic_count = 0
-        doc_dir = await anyio.to_thread.run_sync(
-            _find_doc_dir, memory_root.knowledge_dir(app_id, project_id), doc_id
+        # back in, and the "deleted" document reappears. Markdown is the
+        # truth: find the directory by its name and count the topic files
+        # it holds, so the response says what was actually removed.
+        topic_count = await anyio.to_thread.run_sync(
+            _remove_unindexed_doc_dirs,
+            memory_root.knowledge_dir(app_id, project_id),
+            doc_id,
         )
-    if doc_dir is not None and await anyio.Path(doc_dir).is_dir():
+        logger.info(
+            "document deleted",
+            doc_id=doc_id,
+            topic_count=topic_count,
+            indexed=False,
+        )
+        return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
+
+    topic_count = await knowledge_topic_sqlite_repo.count_by_doc_id(doc_id)
+    doc_dir = memory_root.root / Path(row.md_path).parent
+    if await anyio.Path(doc_dir).is_dir():
         await anyio.to_thread.run_sync(shutil.rmtree, doc_dir)
 
     logger.info(
@@ -546,11 +555,24 @@ async def delete_document(
     return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
 
 
-def _find_doc_dir(knowledge_dir: Path, doc_id: str) -> Path | None:
-    """Locate ``knowledge/<category>/<title>_<doc_id>/`` without the SQLite row."""
+def _remove_unindexed_doc_dirs(knowledge_dir: Path, doc_id: str) -> int:
+    """Remove every ``knowledge/<category>/<title>_<doc_id>/`` directory.
+
+    Returns the number of topic files (``N_*.md``) that were on disk. The
+    directory name is compared literally — ``delete_document`` is a public
+    service function, so a caller-supplied ``doc_id`` must not act as a glob
+    pattern or a path; only the HTTP route validates the id's shape.
+    """
     if not knowledge_dir.is_dir():
-        return None
-    return next(knowledge_dir.glob(f"*/*_{doc_id}"), None)
+        return 0
+    suffix = f"_{doc_id}"
+    topics = 0
+    for doc_dir in knowledge_dir.glob("*/*"):
+        if not doc_dir.is_dir() or not doc_dir.name.endswith(suffix):
+            continue
+        topics += sum(1 for _ in doc_dir.glob("[0-9]*.md"))
+        shutil.rmtree(doc_dir)
+    return topics
 
 
 async def replace_document(
