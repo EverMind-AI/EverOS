@@ -523,8 +523,10 @@ class LanceDBSettings(BaseModel):
     get an ANN index. Below this a brute-force scan is cheaper than the
     index; above it the scan grows linearly with the table — 27k rows of
     1024-dim vectors was 112 MB and ~0.6 s per query on a laptop SSD, and
-    a hybrid search runs two or three of them. Checked at startup, on the
-    cascade's heavy maintenance beat, and rebuilt on the rebuild cadence."""
+    a hybrid search runs two or three of them. Applied by the cascade worker
+    only: its first rebuild sweep after server start builds a missing index
+    and the heavy maintenance beat keeps it healthy. The CLI never builds
+    one (it would race the running server's commits)."""
 
 
 class CascadeSettings(BaseModel):

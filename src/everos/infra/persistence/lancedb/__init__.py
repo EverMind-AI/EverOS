@@ -27,7 +27,6 @@ first access; row population is the cascade daemon's job (see
 import contextlib
 import datetime as dt
 
-from everos.config.settings import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
@@ -290,14 +289,23 @@ async def ensure_business_indexes() -> None:
     Adding a new business table = adding it to ``_BUSINESS_SCHEMAS``;
     everything else (table name, columns to index) reads off the
     schema's ClassVars.
+
+    Vector (ANN) indexes are deliberately **not** built here. This runs in
+    every process that opens the root — the server lifespan and the CLI's
+    ``_runtime`` — and a CLI command training an index on a live server's
+    table races its commits (soak: ``cascade status`` storms failed with
+    ``Retryable commit conflict`` the moment a table crossed the row
+    threshold). Vector indexes belong to the cascade worker alone: its
+    first rebuild sweep at server start builds a missing one and the heavy
+    beat maintains it (:meth:`BaseLanceTable.ensure_vector_indexes`). FTS
+    stays here because a search on a column without its inverted index
+    raises instead of degrading.
     """
     await migrate_table_schemas()
     await migrate_fts_indexes()
-    min_rows = load_settings().lancedb.vector_index_min_rows
     for schema in _BUSINESS_SCHEMAS:
         table = await get_table(schema.TABLE_NAME, schema)
         await schema.ensure_fts_indexes(table)
-        await schema.ensure_vector_indexes(table, min_rows=min_rows)
 
 
 async def verify_business_schemas() -> None:
