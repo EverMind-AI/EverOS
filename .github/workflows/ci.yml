@@ -149,6 +149,10 @@ jobs:
           curl --fail --location --retry 3 \
             --output /tmp/milvus-compose.yml \
             https://github.com/milvus-io/milvus/releases/download/v2.6.22/milvus-standalone-docker-compose.yml
+          # MinIO stopped publishing to Docker Hub (`minio/minio` now returns
+          # "pull access denied"); the same tags live on quay.io, which is
+          # where the etcd image in this compose file already comes from.
+          sed -i 's#image: minio/minio:#image: quay.io/minio/minio:#' /tmp/milvus-compose.yml
           docker compose -f /tmp/milvus-compose.yml up -d
           for attempt in {1..60}; do
             if curl --fail --silent http://127.0.0.1:9091/healthz >/dev/null; then
