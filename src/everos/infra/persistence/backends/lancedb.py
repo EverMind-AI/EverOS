@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover
 
 from everos.component.utils.datetime import ensure_utc, to_iso_format
 from everos.core.persistence import LanceRepoBase
+from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
 from everos.infra.persistence import lancedb as _lancedb
 
 from ..predicate import (
@@ -220,6 +221,7 @@ class LanceIndexRepository[T: BaseModel]:
             .nearest_to(list(vector))
             .column(vector_field)
             .distance_type("cosine")
+            .nprobes(VECTOR_QUERY_NPROBES)
         )
         expression = _render_optional(where)
         if expression:
@@ -253,6 +255,9 @@ class LanceIndexRepository[T: BaseModel]:
 
     async def rebuild_indexes(self) -> None:
         await self._repo.rebuild_indexes()
+
+    async def ensure_vector_indexes(self) -> None:
+        await self._repo.ensure_vector_indexes()
 
     async def find_by_owner(self, owner_id: str, *, limit: int = 100) -> list[T]:
         return await self.find_where(eq("owner_id", owner_id), limit=limit)

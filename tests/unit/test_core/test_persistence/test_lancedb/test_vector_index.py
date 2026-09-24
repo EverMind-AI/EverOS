@@ -19,6 +19,7 @@ from lancedb import AsyncTable
 from lancedb.pydantic import Vector
 
 from everos.core.persistence.lancedb import BaseLanceTable
+from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
 
 _DIM = 8
 
@@ -79,13 +80,51 @@ async def test_at_the_threshold_an_ivf_flat_index_is_built(
     assert await _vector_indices(vec_table) == [("vector", "IvfFlat")]
 
 
-async def test_ensure_is_idempotent_unless_replace(vec_table: AsyncTable) -> None:
+async def _num_indices(table: AsyncTable) -> int:
+    (name,) = [
+        idx.name
+        for idx in await table.list_indices()
+        if idx.columns and idx.columns[0] == "vector"
+    ]
+    stats = await table.index_stats(name)
+    assert stats is not None
+    return stats.num_indices
+
+
+async def test_delta_indexes_left_by_optimize_are_collapsed(
+    vec_table: AsyncTable,
+) -> None:
+    """Every ``optimize()`` on a table with new rows appends a delta index and
+    a query probes them all; the heavy beat folds them back into one index
+    and otherwise leaves a healthy index alone."""
     await vec_table.add(_rows(60))
-    await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50)
+    assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == ["vector"]
     assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == []
-    rebuilt = await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50, replace=True)
-    assert rebuilt == ["vector"]
+    for _ in range(2):
+        await vec_table.add(_rows(5))
+        await vec_table.optimize()
+    assert await _num_indices(vec_table) == 3, "precondition: one delta per beat"
+    assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == ["vector"]
+    assert await _num_indices(vec_table) == 1
     assert len(await _vector_indices(vec_table)) == 1
+
+
+async def test_nprobes_is_accepted_on_an_unindexed_column(
+    vec_table: AsyncTable,
+) -> None:
+    """``dense_search`` always sets ``nprobes``; a table below the index
+    threshold (Tier 1, a fresh store) must still answer."""
+    await vec_table.add(_rows(10))
+    rows = await (
+        vec_table.query()
+        .nearest_to(_rows(1)[0].vector)
+        .column("vector")
+        .distance_type("cosine")
+        .nprobes(VECTOR_QUERY_NPROBES)
+        .limit(3)
+        .to_list()
+    )
+    assert len(rows) == 3
 
 
 async def test_all_null_vectors_are_skipped_even_above_the_threshold(

@@ -146,8 +146,9 @@ therefore stops the whole md -> LanceDB projection, leaving claimed rows in
 ``processing`` forever with nothing logged (a hang raises nothing, so the
 drain-failure counter stays at zero and ``/health`` keeps reporting healthy).
 Same last-resort shape as :data:`_COMPACT_TIMEOUT_SECONDS`, and generous by
-design: everos builds no vector ANN index, so reads are flat scans — measured
-~62ms over 117k rows, i.e. 60s is ~1000x headroom and never fires normally. On
+design: a vector read is an IVF probe, or a flat scan below the index
+threshold — measured ~62ms over 117k unindexed rows, i.e. 60s is ~1000x
+headroom and never fires normally. On
 expiry the caller gets a retryable :class:`VectorStoreBusyError`, so a drain row
 is retried and a search request fails with a structured error rather than
 hanging the request."""
@@ -657,14 +658,16 @@ class LanceRepoBase[T: BaseLanceTable]:
                     await table.drop_index(idx.name)
             await self.schema.ensure_fts_indexes(table, replace=True)
             await self.schema.ensure_vector_indexes(
-                table, min_rows=_vector_index_min_rows(), replace=True
+                table, min_rows=_vector_index_min_rows()
             )
 
     # ── Read ───────────────────────────────────────────────────────────────
 
     async def ensure_vector_indexes(self) -> list[str]:
         """Build the ANN index on vector columns that crossed the row
-        threshold since startup — the cascade's heavy beat calls this."""
+        threshold since startup, and retrain one whose delta indices piled
+        up — the cascade's heavy beat calls this; the cases are spelled out
+        on :meth:`BaseLanceTable.ensure_vector_indexes`."""
         async with self._locked(_REBUILD_TIMEOUT_SECONDS, "ensure_vector_indexes"):
             table = await self._table()
             return await self.schema.ensure_vector_indexes(

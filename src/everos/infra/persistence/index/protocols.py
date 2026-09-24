@@ -124,6 +124,8 @@ class IndexRepository(Protocol[T]):
 
     async def rebuild_indexes(self) -> None: ...
 
+    async def ensure_vector_indexes(self) -> None: ...
+
 
 @runtime_checkable
 class EpisodeIndexRepository(IndexRepository[T], Protocol[T]):

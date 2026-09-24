@@ -1027,12 +1027,11 @@ class CascadeWorker:
                     )
                 if state is not None:
                     state.last_prune_at = now
-                # A table that crossed the ANN threshold since startup gets its
-                # vector index on the same heavy beat; a no-op otherwise.
-                ensure_vectors = getattr(repo, "ensure_vector_indexes", None)
-                if ensure_vectors is not None:
-                    async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
-                        await ensure_vectors()
+                # Same heavy beat: a table that crossed the ANN threshold since
+                # startup gets its vector index, and one whose light beats piled
+                # up delta indices is retrained; a no-op otherwise.
+                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                    await repo.ensure_vector_indexes()
             else:
                 # Light beat: lock-free compaction. A commit conflict here
                 # is benign — handled below.
