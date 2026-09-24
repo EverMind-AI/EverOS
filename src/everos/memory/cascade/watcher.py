@@ -152,15 +152,27 @@ async def _enqueue_async(
 def _relative_to_root(root: Path, raw: str) -> str | None:
     """Return ``raw`` relative to ``root`` using POSIX separators.
 
-    ``None`` when the path is outside the memory root (defensive — the
-    watcher only watches inside ``root``, but external symlinks could
-    surface).
+    watchdog reports absolute paths inside the watched root, so the common
+    case is a pure string operation. ``resolve()`` is a filesystem round
+    trip per path component — on Windows a ``GetFinalPathNameByHandle``
+    call that goes through Defender — and doing it on every event was about
+    40 % of the worker threads' CPU under write load (py-spy on the 2 h
+    soak). It is kept for the defensive case only: a textual path that is
+    not under ``root`` (an external symlink surfacing inside the tree) or
+    one carrying ``..`` segments.
+
+    ``None`` when the path is outside the memory root even after resolving.
     """
+    path = Path(raw)
+    if ".." not in path.parts:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
     try:
-        rel = Path(raw).resolve().relative_to(root)
+        return path.resolve().relative_to(root).as_posix()
     except ValueError:
         return None
-    return rel.as_posix()
 
 
 def _safe_mtime(raw: str) -> float:
