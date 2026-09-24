@@ -41,6 +41,13 @@ async def test_spill_failure_inside_a_read_becomes_a_busy_error() -> None:
             raise RuntimeError(_SPILL)
 
 
+async def test_spill_failure_inside_a_write_becomes_a_busy_error() -> None:
+    """The soak's spill failures came out of merge_insert (the write path)."""
+    with pytest.raises(VectorStoreBusyError, match="transient lance execution"):
+        async with _Repo()._locked(1.0, "upsert"):
+            raise RuntimeError(_SPILL)
+
+
 async def test_other_runtime_errors_still_propagate_unchanged() -> None:
     with pytest.raises(RuntimeError, match="No space left"):
         async with _Repo()._deadline(1.0, "find_where"):

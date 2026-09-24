@@ -224,11 +224,12 @@ _TRANSIENT_EXECUTION_MARKERS = ("Spill has sent an error",)
 retry clears. ``LanceError(IO): Execution error: Spill has sent an error`` is
 DataFusion's sort / merge spill to the OS temp dir failing mid-query; lancedb
 raises it as a bare ``RuntimeError``. Seen only on the Windows soak box under
-nine concurrent clients (187 / 180 / 34 times over three runs), never on an
+nine concurrent clients (187 / 180 / 34 / 42 times over four runs), never on an
 idle box, and the same row projected fine on the next attempt — yet the worker
 filed every one as unrecoverable, so ~200 md files per run needed a manual
-``cascade fix``. Match the exact phrase: a generic IO error (disk full, file
-gone) must stay permanent."""
+``cascade fix``. The traceback frames put it in ``merge_insert`` (the write
+path, under :meth:`_locked`); the read path is covered as well. Match the
+exact phrase: a generic IO error (disk full, file gone) must stay permanent."""
 
 
 def _is_transient_execution_error(exc: BaseException) -> bool:
@@ -389,6 +390,22 @@ class LanceRepoBase[T: BaseLanceTable]:
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its "
                 f"{budget:g}s write-lock deadline"
+            ) from exc
+        except RuntimeError as exc:
+            # The soak's spill failures came out of ``merge_insert`` (this
+            # path), not the reads: worker -> upsert -> execute_merge_insert.
+            # The write is idempotent by id, so a retry is the right answer.
+            if not _is_transient_execution_error(exc):
+                raise
+            logger.warning(
+                "lancedb_transient_execution_error",
+                table=self.table_name,
+                op=op,
+                error=str(exc)[:200],
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} hit a transient lance "
+                f"execution error: {exc}"
             ) from exc
         else:
             held = time.monotonic() - (acquired_at or started)
