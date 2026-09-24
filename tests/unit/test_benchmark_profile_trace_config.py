@@ -32,7 +32,9 @@ _ARMS = _NAMES
 
 
 def _config(name: str) -> BenchmarkConfig:
-    raw = tomllib.loads((_BENCH / "configs" / f"{name}.toml").read_text(encoding="utf-8"))
+    raw = tomllib.loads(
+        (_BENCH / "configs" / f"{name}.toml").read_text(encoding="utf-8")
+    )
     flat = {k: v for k, v in raw.items() if not isinstance(v, dict)}
     for section in ("answer", "judge"):
         for k, v in (raw.get(section) or {}).items():
@@ -106,7 +108,9 @@ def test_the_longmemeval_baseline_still_names_the_reference_models() -> None:
     in its own file for the same reason -- which is what `longmemeval_qwen38.toml` was
     until it was deleted, having served its one operator run.
     """
-    base = tomllib.loads((_BENCH / "configs" / "longmemeval.toml").read_text(encoding="utf-8"))
+    base = tomllib.loads(
+        (_BENCH / "configs" / "longmemeval.toml").read_text(encoding="utf-8")
+    )
     assert base["backbone_model"] == "deepseek/deepseek-v4-pro-0813"
     # The decider is named by BENCH_DECIDER_MODEL rather than hardcoded: shipping a
     # model the reader does not serve, with an endpoint that may be unset, is the
@@ -132,7 +136,9 @@ def test_every_benchmark_disables_the_inotify_watcher(name: str) -> None:
     not correctness -- but ``EVEROS_DISABLE_CASCADE`` would take the worker with it
     and md would never reach LanceDB at all.
     """
-    raw = tomllib.loads((_BENCH / "configs" / f"{name}.toml").read_text(encoding="utf-8"))
+    raw = tomllib.loads(
+        (_BENCH / "configs" / f"{name}.toml").read_text(encoding="utf-8")
+    )
     assert raw["retrieval_env"]["EVEROS_DISABLE_CASCADE_WATCHER"] == "1"
     # The worker must survive: this is an ingesting run.
     assert "EVEROS_DISABLE_CASCADE" not in raw["retrieval_env"]
