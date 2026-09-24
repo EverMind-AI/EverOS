@@ -195,6 +195,9 @@ class RoutedIndexRepository[T: BaseModel]:
     async def rebuild_indexes(self) -> None:
         await self._repo().rebuild_indexes()
 
+    async def ensure_vector_indexes(self) -> None:
+        await self._repo().ensure_vector_indexes()
+
 
 class RoutedEpisodeRepository(RoutedIndexRepository[Any]):
     def _repo(self) -> EpisodeIndexRepository[Any]:

@@ -306,6 +306,7 @@ class _FakeLanceRepo:
         self.prune_calls: list[float] = []
         self.prune_args: list[dt.timedelta] = []
         self.rebuild_calls: list[float] = []
+        self.ensure_calls: list[float] = []
         self.optimize_delay = optimize_delay
         self.rebuild_delay = rebuild_delay
         self.rebuild_raises = rebuild_raises
@@ -332,6 +333,9 @@ class _FakeLanceRepo:
         if self.rebuild_raises:
             raise RuntimeError("rebuild boom")
         self.rebuild_calls.append(time.monotonic())
+
+    async def ensure_vector_indexes(self) -> None:
+        self.ensure_calls.append(time.monotonic())
 
 
 class _OkHandlerWithRepo(_OkHandler):
@@ -591,6 +595,27 @@ async def test_optimize_prunes_on_first_call_then_throttles(
     await w._flush_optimizers()
     assert len(fake.prune_calls) == 1, "second beat within window must not re-prune"
     assert len(fake.optimize_calls) == 1, "second beat is the light path"
+
+
+async def test_heavy_beat_ensures_vector_indexes(patched_repo: _FakeRepo) -> None:
+    """Vector index build / delta retrain rides the heavy beat only, so a
+    table crossing the row threshold mid-run gets its index on the next
+    prune cadence, not at the 12 h rebuild; light beats leave indexes alone."""
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_prune_interval_seconds=10.0,
+        optimize_prune_retention_seconds=45.0,
+    )
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.ensure_calls) == 1, "heavy beat must ensure vector indexes"
+    await asyncio.sleep(0.02)
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.ensure_calls) == 1, "light beat must not touch indexes"
 
 
 async def test_failed_prune_backs_off_a_cadence_and_keeps_health_signal(

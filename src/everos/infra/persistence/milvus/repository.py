@@ -458,6 +458,9 @@ class MilvusRepoBase[T: BaseModel]:
     async def rebuild_indexes(self) -> None:
         """Milvus AUTOINDEX maintenance is service-managed."""
 
+    async def ensure_vector_indexes(self) -> None:
+        """Milvus builds its vector index at collection creation."""
+
     async def count(self) -> int:
         return await self._count_where(None)
 
