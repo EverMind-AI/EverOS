@@ -165,15 +165,30 @@ async def _enqueue_async(
 def _relative_to_root(root: Path, raw: str) -> str | None:
     """Return ``raw`` relative to ``root`` using POSIX separators.
 
-    ``None`` when the path is outside the memory root (defensive — the
-    watcher only watches inside ``root``, but external symlinks could
-    surface).
+    watchdog reports absolute paths inside the watched root (``root`` is
+    already resolved by ``MemoryRoot``), so the common case is a pure string
+    operation and matches the scanner's key byte for byte. ``resolve()`` on
+    Windows is two ``GetFinalPathNameByHandle`` opens plus a ``stat()`` per
+    event, and a per-component walk when the path is already gone — about
+    40 % of the worker threads' CPU under write load (py-spy on the 2 h
+    soak). It is kept for the defensive case only: a textual path that is
+    not under ``root`` (an external symlink surfacing inside the tree) or
+    one carrying ``..`` segments. Known residue: if ``ReadDirectoryChangesW``
+    reports a file by its 8.3 short name, the key differs from the
+    scanner's long-name key until the next sweep reconciles it.
+
+    ``None`` when the path is outside the memory root even after resolving.
     """
+    path = Path(raw)
+    if ".." not in path.parts:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
     try:
-        rel = Path(raw).resolve().relative_to(root)
+        return path.resolve().relative_to(root).as_posix()
     except ValueError:
         return None
-    return rel.as_posix()
 
 
 def _safe_mtime(raw: str) -> float:
