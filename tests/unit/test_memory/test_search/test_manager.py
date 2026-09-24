@@ -1292,3 +1292,68 @@ async def test_search_omits_query_when_content_off(_search_spans: Any) -> None:
     await mgr.search(_user_req(method=SearchMethod.KEYWORD))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
     assert "langfuse.observation.input" not in attrs
+
+
+@pytest.mark.parametrize(
+    ("top_k", "radius", "expected"),
+    [
+        (-1, None, 0.5),
+        (10, None, None),
+        (-1, 0.0, 0.0),
+        (10, 0.0, 0.0),
+        (-1, 0.8, 0.8),
+        (10, 0.8, 0.8),
+    ],
+)
+@pytest.mark.parametrize("lane", ["episode", "case", "skill", "multiround"])
+async def test_iterative_dispatch_resolves_radius_before_top_k_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    top_k: int,
+    radius: float | None,
+    expected: float | None,
+    lane: str,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    target = {
+        "episode": "search_episodes_agentic",
+        "case": "search_agent_cases_agentic",
+        "skill": "search_agent_skills_agentic",
+        "multiround": "search_episodes_llm_multiround",
+    }[lane]
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr(f"everos.memory.search.manager.{target}", search)
+    mgr = _build_manager(
+        embedding=_StubEmbedding(), reranker=object(), llm_client=object()
+    )
+    method = (
+        SearchMethod.LLM_MULTIROUND if lane == "multiround" else SearchMethod.AGENTIC
+    )
+    req = (_agent_req if lane in {"case", "skill"} else _user_req)(
+        method=method, top_k=top_k, radius=radius
+    )
+    if lane == "case":
+        await mgr._search_agent_cases(req, None)
+    elif lane == "skill":
+        await mgr._search_agent_skills(req, None)
+    else:
+        await mgr._search_episodes(req, None)
+    assert search.await_args.kwargs["radius"] == expected
+    assert search.await_args.kwargs["top_k"] > 0
+
+
+@pytest.mark.parametrize("kind", ["episode", "case", "skill"])
+@pytest.mark.parametrize(
+    "radius, expected", [(0.0, ["low", "edge"]), (0.5, ["edge"]), (1.0, [])]
+)
+async def test_hybrid_radius_filters_dense_but_preserves_sparse(
+    kind: str, radius: float, expected: list[str]
+) -> None:
+    mgr = _build_manager(embedding=_StubEmbedding())
+    recaller = {"episode": mgr._ep, "case": mgr._case, "skill": mgr._skill}[kind]
+    recaller._dense = [Candidate(id="low", score=0.2), Candidate(id="edge", score=0.5)]
+    recaller._sparse = [Candidate(id="low", score=0.1)]
+    req = _user_req(method=SearchMethod.HYBRID, radius=radius)
+    sparse, dense, _ = await mgr._recall_sparse_dense(recaller, req, None, 10)
+    assert [c.id for c in dense] == expected
+    assert [(c.id, c.score) for c in sparse] == [("low", 0.1)]

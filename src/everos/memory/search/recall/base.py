@@ -7,7 +7,7 @@ Every recaller exposes two callsites:
 
 Both are filtered by the precompiled LanceDB ``where`` string and capped
 at ``limit`` (the candidate pool size). The recaller does **not** apply
-``radius``; that runs in the manager so the same value applies before
+``radius``; search orchestration applies the shared cosine floor before
 fusion / rerank.
 
 A shared :class:`RecallerDeps` bundles the providers a recaller needs
