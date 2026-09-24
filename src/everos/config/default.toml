@@ -49,6 +49,9 @@ cache_size_kb = 2048
 #   >0             -> eventual (interval seconds between checks)
 # Uncomment to override:
 # read_consistency_seconds = 5.0
+# Rows (with a non-null vector) before a table's vector columns get an
+# IVF_FLAT index. Below it every vector query scans the whole column.
+# vector_index_min_rows = 2000
 
 [index]
 # Rebuildable vector/BM25 index. Markdown remains the source of truth.

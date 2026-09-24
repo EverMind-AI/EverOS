@@ -27,6 +27,7 @@ first access; row population is the cascade daemon's job (see
 import contextlib
 import datetime as dt
 
+from everos.config.settings import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
@@ -292,9 +293,11 @@ async def ensure_business_indexes() -> None:
     """
     await migrate_table_schemas()
     await migrate_fts_indexes()
+    min_rows = load_settings().lancedb.vector_index_min_rows
     for schema in _BUSINESS_SCHEMAS:
         table = await get_table(schema.TABLE_NAME, schema)
         await schema.ensure_fts_indexes(table)
+        await schema.ensure_vector_indexes(table, min_rows=min_rows)
 
 
 async def verify_business_schemas() -> None:
