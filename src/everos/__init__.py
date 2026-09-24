@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import site
 import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -20,7 +21,9 @@ except PackageNotFoundError:
 _dll_dir_handles: list[object] = []
 
 
-def _register_runtime_dll_dirs(prefix: str = sys.prefix) -> list[str]:
+def _register_runtime_dll_dirs(
+    prefix: str = sys.prefix, user_base: str | None = None
+) -> list[str]:
     """On Windows, let compiled extensions find the MSVC C++ runtime.
 
     ``greenlet`` -- under SQLAlchemy's async engine, so under every SQLite
@@ -42,11 +45,17 @@ def _register_runtime_dll_dirs(prefix: str = sys.prefix) -> list[str]:
     add = getattr(os, "add_dll_directory", None)
     if add is None:
         return []
+    # ``pip install`` falls back to a per-user install when site-packages is
+    # not writable (Python under Program Files); the wheel's data files then
+    # land under ``site.getuserbase()`` rather than ``sys.prefix``.
+    if user_base is None:
+        user_base = site.getuserbase()
     registered: list[str] = []
-    for d in (prefix, os.path.join(prefix, "Scripts")):
-        if os.path.isfile(os.path.join(d, "msvcp140.dll")):
-            _dll_dir_handles.append(add(d))
-            registered.append(d)
+    for base in dict.fromkeys((prefix, user_base)):
+        for d in (base, os.path.join(base, "Scripts")):
+            if os.path.isfile(os.path.join(d, "msvcp140.dll")):
+                _dll_dir_handles.append(add(d))
+                registered.append(d)
     return registered
 
 

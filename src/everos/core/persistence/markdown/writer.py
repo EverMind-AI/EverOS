@@ -50,6 +50,7 @@ from typing import Any
 import anyio
 
 from everos.core.errors import PathTraversalError
+from everos.core.observability.logging import get_logger
 
 from ..memory_root import MemoryRoot
 from .entries import EntryId
@@ -339,8 +340,11 @@ class MarkdownWriter:
         return await self.write_markdown(target, frontmatter=meta, body=body)
 
 
+logger = get_logger(__name__)
+
+
 _REPLACE_ATTEMPTS = 8
-_REPLACE_FIRST_BACKOFF_S = 0.02  # doubles each time: ~5 s of patience in total
+_REPLACE_FIRST_BACKOFF_S = 0.02  # doubles each time: ~2.5 s of patience in total
 
 
 def _replace_with_retry(tmp: Path, target: Path) -> None:
@@ -349,8 +353,10 @@ def _replace_with_retry(tmp: Path, target: Path) -> None:
     On Windows a file some other process holds open cannot be replaced: the
     cascade worker reading it, an antivirus scan right after the last write,
     an editor with it open -- ``os.replace`` raises ``PermissionError``
-    (WinError 5 / 32). POSIX never does; there the first attempt succeeds and
-    this is a plain ``os.replace``. Those holds last milliseconds, so a short
+    (WinError 5 / 32). On POSIX the first attempt succeeds and this is a plain
+    ``os.replace``; the one POSIX ``PermissionError`` (an immutable target,
+    macOS ``uchg``) is permanent and only costs the backoff before it
+    surfaces. Those holds last milliseconds, so a short
     exponential backoff is the standard idiom (git, pip and uv all do it).
     Only ``PermissionError`` is retried, each attempt is still one atomic
     ``os.replace``, and after the budget the error propagates unchanged --
@@ -368,6 +374,12 @@ def _replace_with_retry(tmp: Path, target: Path) -> None:
         except PermissionError:
             if attempt == _REPLACE_ATTEMPTS - 1:
                 raise
+            logger.debug(
+                "markdown_replace_retried",
+                target=str(target),
+                attempt=attempt + 1,
+                backoff_seconds=delay,
+            )
             time.sleep(delay)
             delay *= 2
 

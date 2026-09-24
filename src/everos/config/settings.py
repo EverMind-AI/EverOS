@@ -564,7 +564,7 @@ class CascadeSettings(BaseModel):
     optimize_prune_interval_seconds: float = 300.0
     optimize_prune_retention_seconds: float = 60.0
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
-    scan_interval_seconds: float = 30.0
+    scan_interval_seconds: float = Field(default=30.0, gt=0)
 
 
 class IndexSettings(BaseModel):

@@ -34,9 +34,30 @@ def test_registers_prefix_and_scripts_when_the_runtime_dll_is_there(
     seen: list[str] = []
     monkeypatch.setattr(os, "add_dll_directory", _recording_add(seen), raising=False)
 
-    got = everos._register_runtime_dll_dirs(str(tmp_path))
+    got = everos._register_runtime_dll_dirs(
+        str(tmp_path), user_base=str(tmp_path / "ub")
+    )
 
     assert got == seen == [str(tmp_path), str(tmp_path / "Scripts")]
+
+
+def test_registers_the_per_user_install_dir_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``pip install`` without write access to site-packages lands the wheel's
+    data files under ``site.getuserbase()``, not ``sys.prefix``."""
+    prefix = tmp_path / "prefix"
+    prefix.mkdir()
+    user_base = tmp_path / "AppData" / "Python"
+    (user_base / "Scripts").mkdir(parents=True)
+    (user_base / "msvcp140.dll").write_bytes(b"")
+    (user_base / "Scripts" / "msvcp140.dll").write_bytes(b"")
+    seen: list[str] = []
+    monkeypatch.setattr(os, "add_dll_directory", _recording_add(seen), raising=False)
+
+    got = everos._register_runtime_dll_dirs(str(prefix), user_base=str(user_base))
+
+    assert got == seen == [str(user_base), str(user_base / "Scripts")]
 
 
 def test_skips_directories_without_the_dll(
@@ -48,7 +69,9 @@ def test_skips_directories_without_the_dll(
     seen: list[str] = []
     monkeypatch.setattr(os, "add_dll_directory", _recording_add(seen), raising=False)
 
-    assert everos._register_runtime_dll_dirs(str(tmp_path)) == []
+    assert (
+        everos._register_runtime_dll_dirs(str(tmp_path), user_base=str(tmp_path)) == []
+    )
     assert seen == []
 
 
@@ -59,4 +82,6 @@ def test_is_a_no_op_where_the_os_has_no_add_dll_directory(
     (tmp_path / "msvcp140.dll").write_bytes(b"")
     monkeypatch.delattr(os, "add_dll_directory", raising=False)
 
-    assert everos._register_runtime_dll_dirs(str(tmp_path)) == []
+    assert (
+        everos._register_runtime_dll_dirs(str(tmp_path), user_base=str(tmp_path)) == []
+    )

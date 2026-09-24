@@ -80,7 +80,7 @@ jobs:
 
       # No `make` on the Windows image — call uv directly. The lock is
       # universal (it carries sys_platform == 'win32' resolution markers and
-      # pywin32 for portalocker's Win32 locker), so --frozen resolves here.
+      # pywin32, which portalocker requires on Windows), so --frozen resolves here.
       - name: Install dependencies (frozen)
         run: uv sync --frozen
 

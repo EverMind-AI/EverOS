@@ -1,8 +1,8 @@
 """Process-wide exclusive lock on a memory-root.
 
 Uses ``portalocker`` for the exclusive lock, which dispatches to
-``fcntl.flock`` on POSIX and ``LockFileEx`` on Windows — the same
-whole-file, released-on-process-exit semantics on both. The
+``fcntl.flock`` on POSIX and, on Windows, its default ``msvcrt.locking``
+locker — the same whole-file, released-on-process-exit semantics on both. The
 public surface is an :func:`contextlib.asynccontextmanager` so callers
 use ``async with memory_root_lock(mr):``; the underlying syscalls have
 no async equivalent so they run in a worker thread via

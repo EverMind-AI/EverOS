@@ -320,12 +320,15 @@ async def test_in_place_save_never_registers_as_deleted(
     p.write_text("v1", encoding="utf-8")
     rel = _rel(runtime.root, p)
     await _wait_row(rel)
+    first = await _row(rel)
+    assert first is not None
     p.write_text("v2 -- same file, rewritten in place", encoding="utf-8")
     await asyncio.sleep(_TRAILING_EVENT_GRACE_S)
     row = await _row(rel)
     assert row is not None
     assert row.change_type != "deleted"
     assert row.status == "pending"
+    assert row.mtime > first.mtime, "the in-place save was never delivered"
 
 
 async def test_atomic_replace_over_existing_target_keeps_the_row_alive(
@@ -343,6 +346,8 @@ async def test_atomic_replace_over_existing_target_keeps_the_row_alive(
     rel = _rel(runtime.root, target)
     await _wait_row(rel)
 
+    first = await _row(rel)
+    assert first is not None
     tmp = target.with_name(target.name + ".tmp")  # not kind-matched
     tmp.write_text("v2 via atomic save", encoding="utf-8")
     os.replace(tmp, target)
@@ -355,6 +360,7 @@ async def test_atomic_replace_over_existing_target_keeps_the_row_alive(
         "this file's LanceDB rows while the md is intact"
     )
     assert row.status == "pending"
+    assert row.mtime > first.mtime, "the atomic save was never delivered"
     assert await _row(_rel(runtime.root, tmp)) is None
     assert target.read_text(encoding="utf-8") == "v2 via atomic save"
 
