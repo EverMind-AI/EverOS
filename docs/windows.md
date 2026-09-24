@@ -1,14 +1,14 @@
-# Running EverOS on Windows (WSL2)
+# Running EverOS on Windows
 
-> Also available in Chinese: [windows-wsl2.zh.md](windows-wsl2.zh.md)
+> Also available in Chinese: [windows.zh.md](windows.zh.md)
 
-EverOS is developed and CI-tested on Linux; its unit suite also runs on
-Windows in CI, and it has been exercised end to end on a stock Windows 11
-machine (see [Native Windows](#native-windows) at the end). On Windows you
-can run it natively or under **WSL2** — a real Linux kernel, so the storage
-stack (file locking, LanceDB, inotify) behaves exactly as it does on a
-Linux server. Most of this page is the WSL2 install, including the parts
-that cannot be scripted and the one failure that is silent.
+EverOS runs on Windows in two ways. **Natively** — `pip install everos`
+on a stock Windows 11 machine, verified end to end and covered by the
+`unit tests (Windows)` CI job; that path is [Native Windows](#native-windows)
+and is where to start. Or under **WSL2** — a real Linux kernel, so the
+storage stack (file locking, LanceDB, inotify) behaves exactly as it does
+on a Linux server; the rest of this page is that install, including the
+parts that cannot be scripted and the one failure that is silent.
 
 ## Table of contents
 

@@ -1,7 +1,8 @@
-# 在 Windows 上跑 EverOS（WSL2）
+# 在 Windows 上跑 EverOS
 
-EverOS 的开发和 CI 在 Linux 上，单测也在 Windows 的 CI 上跑，并且在一台干净的 Windows 11 机器上
-完整验过（见文末「直接在 Windows 上装行不行」）。Windows 上既可以直接装，也可以走 WSL2；这篇主要讲 WSL2。
+Windows 上有两条路。**直接装**：在干净的 Windows 11 机器上 `pip install everos`，已完整验过，CI 也有
+`unit tests (Windows)` 这一档——见文末「直接在 Windows 上装行不行」，建议从这里开始。**走 WSL2**：一套真
+Linux 内核，存储栈（文件锁、LanceDB、inotify）与 Linux 服务器上完全一致；这篇其余部分讲的是这条路。
 
 WSL2 是 Windows 自带的一套真 Linux 内核，不是模拟器也不是虚拟机软件。装完之后
 EverOS 就跟跑在一台 Ubuntu 服务器上没区别，文件锁、向量索引、文件监听全部是
