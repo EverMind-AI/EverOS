@@ -220,9 +220,11 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 行。在一台干净的 Windows 11 企业版笔记本（Intel Core Ultra 7 155H、32 GB、没装 Visual C++
 运行库）上用 `uv` 的 Python 3.12 验过：
 
-- 用 `uv` 从源码 checkout 装好之后，`everos init` → `everos server start`，除了装 Python 之外
-  不需要手工做任何事。Windows 专用依赖有两个：`msvc-runtime`（提供 `greenlet` 需要的 C++ 运行库，
-  见下文）和 `pywin32`（`portalocker` 用它做文件锁）。
+- 在一个干净的 venv 里 `pip install` 构建出的轮子（依赖从 PyPI 解析：pyarrow 25.0.1、`msvc-runtime`
+  14.44、lancedb 0.34）→ `everos init` → 在 `everos.toml` 里填上 LLM 的 `api_key`（不填服务会拒绝启动，
+  `init` 也会这么提示）→ `everos server start`：35 秒后健康，`/add`、`/search` 正常。除此之外没有
+  手工步骤。Windows 专用依赖有两个：`msvc-runtime`（提供 `greenlet` 需要的 C++ 运行库，见下文）和
+  `pywin32`（`portalocker` 用它做文件锁）。
 - 测试：单测在 CI 的 `windows-latest` 上是绿的（`unit tests (Windows)`，2583 通过 / 4 跳过，
   与 Linux 同数）；这台机器上跑了集成 **183 通过 / 5 跳过** 和真实 LLM 的 `slow` 用例
   **28 通过 / 1 跳过**，都在 Python 3.12 下。

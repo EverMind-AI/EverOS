@@ -224,8 +224,11 @@ EverOS runs directly on Windows. Verified on a stock Windows 11 Enterprise
 laptop (Intel Core Ultra 7 155H, 32 GB, no Visual C++ Redistributable
 installed) with Python 3.12 from `uv`:
 
-- Installed with `uv` from a source checkout, `everos init` →
-  `everos server start` needs no manual step beyond having Python. The
+- `pip install` of the built wheel into a plain venv (dependencies from
+  PyPI: pyarrow 25.0.1, `msvc-runtime` 14.44, lancedb 0.34) →
+  `everos init` → put an LLM `api_key` in `everos.toml` (the server refuses
+  to start without one, and `init` says so) → `everos server start`: healthy
+  after 35 s, `/add` and `/search` answered. No other manual step. The
   Windows-only dependencies are `msvc-runtime`, which supplies the C++
   runtime `greenlet` needs (details below), and `pywin32`, which
   `portalocker` uses for file locking.
