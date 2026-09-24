@@ -69,7 +69,7 @@ def test_refuses_overwrite_without_force(runner: CliRunner, tmp_path: Path) -> N
     result = runner.invoke(app, ["init", "--root", str(target)])
     assert result.exit_code == 1
     # Original content must be preserved.
-    assert (target / "everos.toml").read_text() == "# user-edited\n"
+    assert (target / "everos.toml").read_text(encoding="utf-8") == "# user-edited\n"
 
 
 def test_force_overwrites(runner: CliRunner, tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ def test_force_overwrites(runner: CliRunner, tmp_path: Path) -> None:
     result = runner.invoke(app, ["init", "--root", str(target), "--force"])
     assert result.exit_code == 0
     # Content is now the shipped template, not the user edit.
-    assert (target / "everos.toml").read_text() != "# user-edited\n"
+    assert (target / "everos.toml").read_text(encoding="utf-8") != "# user-edited\n"
 
 
 def test_print_writes_stdout_not_disk(runner: CliRunner, tmp_path: Path) -> None:
@@ -101,7 +101,7 @@ def test_partial_overwrite_skips_existing(runner: CliRunner, tmp_path: Path) -> 
     result = runner.invoke(app, ["init", "--root", str(target)])
     assert result.exit_code == 0
     # everos.toml preserved, ome.toml created.
-    assert (target / "everos.toml").read_text() == "# user-edited\n"
+    assert (target / "everos.toml").read_text(encoding="utf-8") == "# user-edited\n"
     assert (target / "ome.toml").is_file()
 
 
