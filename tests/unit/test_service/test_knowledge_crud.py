@@ -220,8 +220,11 @@ async def test_delete_document_success(tmp_path: Path) -> None:
     mock_anyio.to_thread.run_sync.assert_awaited_once()
 
 
-async def test_delete_document_idempotent() -> None:
+async def test_delete_document_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Returns deleted_topics=0 without error when document does not exist."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
         mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
 
@@ -230,6 +233,58 @@ async def test_delete_document_idempotent() -> None:
     assert isinstance(result, DeleteResult)
     assert result.doc_id == "d_missing"
     assert result.deleted_topics == 0
+
+
+async def test_delete_document_removes_dir_before_the_index_has_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document created a moment ago has a directory but no SQLite row yet
+    (the cascade trails the markdown by seconds). Delete must still remove the
+    directory — and only that directory — and report the topic files it held.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    kdir = tmp_path / "app1" / "proj1" / "knowledge"
+    doc_dir = kdir / "Technology" / "Release_checklist_d_lagging00001"
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "index.md").write_text("---\ndoc_id: d_lagging00001\n---\n")
+    (doc_dir / "1_before.md").write_text("# before\n")
+    (doc_dir / "2_after.md").write_text("# after\n")
+    sibling = kdir / "Technology" / "Other_notes_d_sibling000001"
+    sibling.mkdir()
+    (sibling / "index.md").write_text("---\ndoc_id: d_sibling000001\n---\n")
+    (kdir / ".taxonomy.md").write_text("# taxonomy\n")
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
+        result = await delete_document("d_lagging00001", "app1", "proj1")
+
+    assert result.deleted_topics == 2
+    assert not doc_dir.exists()
+    assert sibling.is_dir()
+    assert (kdir / ".taxonomy.md").exists()
+
+
+@pytest.mark.parametrize("doc_id", ["d_absent0000001", "*", "*/_original"])
+async def test_delete_document_unindexed_id_not_on_disk_removes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, doc_id: str
+) -> None:
+    """No row and no directory for the id → nothing is touched, including
+    when the id looks like a glob pattern or a path: the name match is literal.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    kdir = tmp_path / "app1" / "proj1" / "knowledge"
+    sibling = kdir / "Technology" / "Other_notes_d_sibling000001"
+    sibling.mkdir(parents=True)
+    (sibling / "index.md").write_text("---\ndoc_id: d_sibling000001\n---\n")
+    (sibling / "_original").mkdir()
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
+        result = await delete_document(doc_id, "app1", "proj1")
+
+    assert result.deleted_topics == 0
+    assert (sibling / "index.md").exists()
+    assert (sibling / "_original").is_dir()
 
 
 # ── list_documents ────────────────────────────────────────────────────────────
