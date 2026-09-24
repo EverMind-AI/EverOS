@@ -69,3 +69,11 @@ def test_relative_to_root_via_symlink_still_resolves(
     assert (
         _relative_to_root(root, str(link / "users" / "u1" / "x.md")) == "users/u1/x.md"
     )
+
+
+def test_relative_to_root_normalises_dotdot_segments(tmp_path: Path) -> None:
+    """A ``..`` segment takes the resolving path so the key stays canonical."""
+    root = tmp_path.resolve()
+    (root / "users" / "u1").mkdir(parents=True)
+    raw = str(root / "users" / "u2" / ".." / "u1" / "x.md")
+    assert _relative_to_root(root, raw) == "users/u1/x.md"
