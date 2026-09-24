@@ -51,7 +51,7 @@ below. The operational endpoints `GET /health`, `GET /metrics` and
 `POST /api/v2/cascade/quiesce` exist but are intentionally outside this
 reference — they are runtime probes and shutdown hooks for deployment, not
 part of the application contract. `quiesce` drains the md → index queue and
-stops the watcher; it is idempotent and returns a bare status body
+stops the watcher; calling it twice is safe, and it returns a bare status body
 (`quiesced`, `drained`, `pending_before`, `pending_after`,
 `failed_permanent`), see `docs/openapi.json`.
 
@@ -120,10 +120,17 @@ returned `"extracted"` (14 s for the case and 32 s for the skill on a
 laptop with a hosted LLM). `GET /health`'s `cascade.pending` does **not**
 cover this window — it only tracks the md → index queue, which is empty
 while the strategy is still thinking. Poll `/get` with a budget instead.
-The agent track also has extraction gates of its own: a session with a
-single user message and no tool use, an assistant turn under ~200 tokens
-with no tool use, or a trajectory that ends on a user message yields no
-case (logged as `agent_case_skipped_by_algo` with the reason).
+The agent track also has extraction gates of its own, applied before any
+LLM call: a trajectory with fewer than three tool-call rounds is rejected as
+too simple (`AgentCaseExtractor(min_tool_call_rounds=3)`, the EverOS
+default — so a session with no tool use never yields a case), and so is one
+that does not end on an assistant text message. Trajectories that pass
+those gates can still be dropped by the extractor's own "worth extracting"
+LLM filter. EverOS logs the skip as `agent_case_skipped_by_algo` with the
+memcell and session ids; the reason itself is on the adjacent everalgo log
+line, `skipping memcell (n_items=N): <reason> <detail>`. The same
+"seconds later" rule for every OME-produced kind is summarised in
+[how-memory-works.md](how-memory-works.md).
 
 ### Conventions
 
