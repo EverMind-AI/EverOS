@@ -14,6 +14,7 @@ file content — that's the worker's job after :meth:`claim_one`.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from pathlib import Path
 
 from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHandler
@@ -78,6 +79,14 @@ class _Handler(FileSystemEventHandler):
     ) -> None:
         self._memory_root = memory_root
         self._loop = loop
+        # Upserts for one path must commit in delivery order. Each one awaits
+        # the database, so left concurrent the last committer wins and a stale
+        # duplicate overwrites a newer row. Windows synthesises a ``created``
+        # for every file under a freshly created parent directory, handing the
+        # same file to this handler four or five times; on the soak box one of
+        # those duplicates landed after an atomic save's ``added`` and put the
+        # first write's mtime back on the row (1 run in 4).
+        self._in_order = asyncio.Lock()
 
     def on_created(self, event: FileSystemEvent) -> None:
         self._enqueue(event.src_path, "added")
@@ -124,9 +133,13 @@ class _Handler(FileSystemEventHandler):
             return
         mtime = _safe_mtime(raw_path)
         asyncio.run_coroutine_threadsafe(
-            _enqueue_async(spec, rel, change_type, mtime),
+            self._serialised(_enqueue_async(spec, rel, change_type, mtime)),
             self._loop,
         )
+
+    async def _serialised(self, upsert: Awaitable[None]) -> None:
+        async with self._in_order:
+            await upsert
 
 
 async def _enqueue_async(
