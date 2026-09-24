@@ -18,7 +18,7 @@ import pytest
 from lancedb import AsyncTable
 from lancedb.pydantic import Vector
 
-from everos.core.persistence.lancedb import BaseLanceTable
+from everos.core.persistence.lancedb import BaseLanceTable, base
 from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
 
 _DIM = 8
@@ -91,19 +91,25 @@ async def _num_indices(table: AsyncTable) -> int:
     return stats.num_indices
 
 
-async def test_delta_indexes_left_by_optimize_are_collapsed(
-    vec_table: AsyncTable,
+async def test_delta_indexes_left_by_optimize_are_collapsed_past_the_cap(
+    vec_table: AsyncTable, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every ``optimize()`` on a table with new rows appends a delta index and
-    a query probes them all; the heavy beat folds them back into one index
-    and otherwise leaves a healthy index alone."""
+    a query probes them all. Up to the cap they are tolerated (a retrain
+    rewrites the whole index); past it the heavy beat folds them into one."""
+    monkeypatch.setattr(base, "VECTOR_INDEX_MAX_DELTAS", 2)
     await vec_table.add(_rows(60))
     assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == ["vector"]
     assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == []
-    for _ in range(2):
-        await vec_table.add(_rows(5))
-        await vec_table.optimize()
-    assert await _num_indices(vec_table) == 3, "precondition: one delta per beat"
+    await vec_table.add(_rows(5))
+    await vec_table.optimize()
+    assert await _num_indices(vec_table) == 2, "precondition: one delta per beat"
+    assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == [], (
+        "within the cap the index is left alone"
+    )
+    await vec_table.add(_rows(5))
+    await vec_table.optimize()
+    assert await _num_indices(vec_table) == 3
     assert await _VecSpec.ensure_vector_indexes(vec_table, min_rows=50) == ["vector"]
     assert await _num_indices(vec_table) == 1
     assert len(await _vector_indices(vec_table)) == 1
