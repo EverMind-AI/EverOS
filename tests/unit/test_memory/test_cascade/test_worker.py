@@ -301,6 +301,7 @@ class _FakeLanceRepo:
         optimize_delay: float = 0.0,
         rebuild_delay: float = 0.0,
         rebuild_raises: bool = False,
+        ensure_raises: bool = False,
     ) -> None:
         self.optimize_calls: list[float] = []
         self.prune_calls: list[float] = []
@@ -310,6 +311,7 @@ class _FakeLanceRepo:
         self.optimize_delay = optimize_delay
         self.rebuild_delay = rebuild_delay
         self.rebuild_raises = rebuild_raises
+        self.ensure_raises = ensure_raises
 
     @property
     def beats(self) -> list[float]:
@@ -336,6 +338,8 @@ class _FakeLanceRepo:
 
     async def ensure_vector_indexes(self) -> None:
         self.ensure_calls.append(time.monotonic())
+        if self.ensure_raises:
+            raise RuntimeError("KMeans cannot train: simulated create_index failure")
 
 
 class _OkHandlerWithRepo(_OkHandler):
@@ -616,6 +620,33 @@ async def test_heavy_beat_ensures_vector_indexes(patched_repo: _FakeRepo) -> Non
     w._schedule_optimize("episode")
     await w._flush_optimizers()
     assert len(fake.ensure_calls) == 1, "light beat must not touch indexes"
+
+
+async def test_vector_index_failure_on_the_heavy_beat_is_contained(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A failing index build / retrain must not escape the maintenance beat
+    or stop maintenance: it is counted like any other optimize failure
+    (visible in the health signal), the prune that ran before it stays
+    credited, and the next beats keep coming."""
+    fake = _FakeLanceRepo(ensure_raises=True)
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_prune_interval_seconds=10.0,
+        optimize_prune_retention_seconds=45.0,
+    )
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()  # raises nothing
+    state = w._optimizer_states["episode"]
+    assert len(fake.ensure_calls) == 1
+    assert state.optimize_failures == 1, "counted, so /health can see a streak"
+    assert state.last_prune_at > 0, "the prune before it stays credited"
+    await asyncio.sleep(0.02)
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.optimize_calls) == 1, "the next (light) beat still runs"
 
 
 async def test_failed_prune_backs_off_a_cadence_and_keeps_health_signal(
