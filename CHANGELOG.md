@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-24
+
+**EverOS runs natively on Windows, and dense search stops scanning the whole
+table.** `pip install everos` on a stock Windows 11 machine now works with no
+manual steps beyond an LLM key; the unit suite runs on Windows in CI. Every
+vector column gets an IVF_FLAT index once it holds enough rows, built and
+maintained by the cascade worker, so hybrid search no longer reads the entire
+column per query. A ten-hour Windows soak drove the rest of this release: a
+second process can no longer write the index behind a running server, watcher
+events for one file commit in the order they arrived, and a transient Lance
+spill failure is retried instead of filing the markdown file as unrecoverable.
+
+### Added
+
+- **Native Windows support.** The package ships the MSVC runtime
+  (`msvc-runtime`, Windows only) and registers its directory before any
+  native extension loads, so a clean machine needs no Visual C++
+  Redistributable. Text fixtures are read as UTF-8 regardless of the system
+  locale, and a `unit tests (Windows)` CI job covers the platform.
+  [docs/windows.md](docs/windows.md) leads with the native install and keeps
+  the WSL2 walkthrough.
+- **Vector (ANN) indexes.** Once a vector column holds
+  `[lancedb] vector_index_min_rows` (default 2000) non-null vectors, the
+  cascade worker builds an IVF_FLAT cosine index on it — on its first rebuild
+  sweep after server start and on the heavy maintenance beat — and retrains it
+  once light-beat delta indices pile past 16. Partition size (4096 rows) and
+  `nprobes` (32) are pinned together, so the search is exact up to ~130k rows.
+  Measured on 27k rows of 1024-dim vectors: 245 ms → 84 ms per query with
+  recall@10 of 0.98. The CLI never builds indexes; only the server's worker
+  does.
+- **`[cascade] scan_interval_seconds`** is a setting (default 30 s) instead of
+  a constant.
+
+### Changed
+
+- **`everos cascade sync`, `cascade fix --apply` and `cascade rebuild` refuse
+  to run next to a running server** (exit code 3) and hold the root's lock for
+  their whole run. Two processes writing the same index inserted every row
+  twice; a running server projects markdown changes on its own.
+- **pyarrow floor raised to 25.0.1.** Materialising timestamp columns no
+  longer imports `pytz` per value on the query hot path (a 312 ms → 13 ms
+  difference per query on Windows).
+- **Watcher paths are relativised without a `resolve()` per event**, which was
+  ~40 % of the worker threads' CPU under write load on Windows.
+- **A late `modified` event for a path that is already gone is recorded as a
+  deletion**, so a create-then-unlink inside the event latency window cannot
+  resurrect a file.
+- **`POST /memory/add` rejects a `role = "tool"` message without
+  `tool_call_id` with 422** instead of failing with 500 inside extraction.
+- **OME strategies only receive event classes they declared.** A bare manual
+  tick no longer reaches business-event strategies (which crashed on it), and a
+  manual trigger reaches a Cron strategy again.
+- **API docs** describe the response envelope's exceptions and the OME latency
+  after a flush.
+- **Milvus CI** pulls MinIO from quay.io (the Docker Hub image was withdrawn).
+
+### Fixed
+
+- **Watcher upserts for one file commit in delivery order.** Each event used to
+  schedule its own upsert and the last committer won; Windows synthesises a
+  `created` per freshly created parent directory, so a stale duplicate could
+  put the first write's mtime back on the row after an atomic save. Sequence
+  numbers are now unique as well.
+- **Transient Lance spill failures are retried.** `LanceError(IO): Execution
+  error: Spill has sent an error` (DataFusion spilling to the temp dir under
+  heavy concurrent writes) surfaced as a bare `RuntimeError` on `merge_insert`
+  and marked the markdown file permanently failed; it is now a retryable error
+  and the same row projects on the next attempt.
+- **Markdown staging swap survives a Windows sharing violation.** `os.replace`
+  over a file another process has open (the worker, an antivirus scan) is
+  retried with backoff instead of failing the write.
+- **Deleting a knowledge document before it was indexed removes its directory**
+  and reports the real topic count instead of leaving the files to be re-indexed.
+
+### Upgrade
+
+- **First server start builds the vector indexes** on every table past the row
+  threshold: seconds per 10k rows of 1024-dim vectors (0.5 s at 27k, ~1.4 s at
+  100k per column), during which searches keep working with a flat scan. Set
+  `[lancedb] vector_index_min_rows` higher to defer it.
+- **Stores created before the `subject_vector` column existed** fail the
+  startup schema check with `LanceDBSchemaMismatchError`. Stop the server and
+  run `EVEROS_ROOT=<memory root> everos cascade rebuild` — it re-indexes from
+  markdown, which stays the source of truth. Note that `cascade rebuild` reads
+  the root from `EVEROS_ROOT`, not from `--root`.
+- **Scripts that ran `everos cascade sync` next to a running server** now get
+  exit code 3. Drop the call (the server projects changes itself) or stop the
+  server first.
+- **pyarrow ≥ 25.0.1** is required; `pip install --upgrade everos` resolves it.
+
 ## [1.3.1] - 2026-09-08
 
 **One reproducible runner for four long-term-memory benchmarks, plus an
