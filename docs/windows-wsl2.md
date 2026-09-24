@@ -218,21 +218,53 @@ wsl --shutdown        # next `wsl` command restarts it and rebuilds the relay
 
 ## Native Windows
 
-Running EverOS directly on Windows, without WSL2, is not yet a supported
-configuration — but it is closer than it was. The unit suite runs green on
-`windows-latest` in CI (the `unit tests (Windows)` job), which covers the
-lock, the markdown layer, search and the cascade pipeline. What is still
-missing: the integration suite does not run on Windows, and nobody has yet
-exercised a full `everos serve` on a Windows machine end to end. Until
-both happen, WSL2 is the path this guide stands behind.
+EverOS runs directly on Windows. Verified on a stock Windows 11 Enterprise
+laptop (Intel Core Ultra 7 155H, 32 GB, no Visual C++ Redistributable
+installed) with Python 3.12 from `uv`:
 
-One prerequisite is already known from a stock Windows 11 Enterprise
-machine: the **Microsoft Visual C++ Redistributable (x64)**. `greenlet`,
-which SQLAlchemy's async engine depends on, is a C++ extension whose wheel
-does not bundle the runtime, so without it every SQLite call fails with a
-cryptic `DLL load failed while importing _greenlet`. GitHub's CI image has
-the redistributable preinstalled, which is why CI cannot catch this. EverOS
-now carries the runtime itself: the Windows-only `msvc-runtime` dependency
-puts the DLLs in `sys.prefix`, and `everos/__init__.py` registers that
-directory with the DLL loader before anything else is imported. Nothing to
-install, no administrator rights needed.
+- `pip install everos` → `everos init` → `everos server start` works with
+  no manual step. The only Windows-only dependency is `msvc-runtime`, which
+  supplies the C++ runtime `greenlet` needs (details below).
+- Test suites on that machine: unit **2576 passed / 4 skipped**, integration
+  **183 passed / 5 skipped**, live LLM (`slow`) **28 passed / 1 skipped**. CI
+  runs the unit suite on `windows-latest` (`unit tests (Windows)`).
+- All four memory kinds — episode, profile, agent case, agent skill — were
+  produced by a Tier 3 server (real LLM, embedding and rerank providers) and
+  read back through `/get` and `/search`.
+- A 10-hour soak (about 78 000 markdown entries written and rewritten,
+  16 000 searches, 2 300 `/add` calls through the extraction path, two
+  concurrent `everos cascade sync` processes on the same tree) ended with
+  the index intact: every table opens, schemas verify, no entry lost. RSS
+  levelled at about 2.3 GB after three hours; the LanceDB directory peaked at
+  6.7 GB and reclaimed to 2.7 GB (437 MB of live data). Two findings from
+  that run are tracked separately and are not Windows-specific: concurrent
+  `cascade sync` processes can insert the same row twice (about 4.5 %
+  duplicate rows after 10 hours, no corruption), and request latency
+  degrades under sustained write load.
+
+Python: 3.12, 3.13 and 3.14 (regular build) work unchanged; 3.11 is refused
+by `requires-python` and by the PEP 695 syntax in `src/`; the free-threaded
+3.14t build has no `lancedb` wheel.
+
+Windows specifics worth knowing:
+
+- `os.replace` fails with `PermissionError` while another process — the
+  cascade worker, or Defender scanning a fresh file — holds the target open.
+  The markdown writer retries with backoff; the soak saw 49 such retries,
+  all of them succeeded.
+- Windows Search indexes everything under `%USERPROFILE%`. A memory root
+  there costs about one CPU core of `SearchIndexer` under heavy writes; put
+  the root elsewhere or exclude the directory from indexing.
+- File-change events come from `ReadDirectoryChangesW`, which can report a
+  rename as two events. The cascade scanner reconciles against the disk.
+
+The one prerequisite that used to bite on a clean machine is the
+**Microsoft Visual C++ Redistributable (x64)**. `greenlet`, which
+SQLAlchemy's async engine depends on, is a C++ extension whose wheel does
+not bundle the runtime, so without it every SQLite call fails with a cryptic
+`DLL load failed while importing _greenlet`. GitHub's CI image has the
+redistributable preinstalled, which is why CI never caught this. EverOS now
+carries the runtime itself: the Windows-only `msvc-runtime` dependency puts
+the DLLs in `sys.prefix`, and `everos/__init__.py` registers that directory
+with the DLL loader before anything else is imported. Nothing to install,
+no administrator rights needed.

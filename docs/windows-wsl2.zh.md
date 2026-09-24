@@ -216,14 +216,36 @@ wsl --shutdown        # 下次跑 wsl 命令会自动重启，转发也跟着重
 
 ## 直接在 Windows 上装行不行
 
-还不算支持，但比之前近了。单测套件在 CI 的 `windows-latest` 上是绿的（`unit tests
-(Windows)` 这个 job），覆盖了锁、md 层、检索和 cascade 流水线。还缺两样：集成套件没在
-Windows 上跑，也没人在真的 Windows 机器上完整跑过一次 `everos serve`。这两件事没做完之前，
-这篇指南只为 WSL2 这条路背书。
+行。在一台干净的 Windows 11 企业版笔记本（Intel Core Ultra 7 155H、32 GB、没装 Visual C++
+运行库）上用 `uv` 的 Python 3.12 验过：
 
-有一个前置条件已经在一台干净的 Windows 11 企业版机器上踩出来了：**Microsoft Visual C++
-运行库（x64）**。SQLAlchemy 的异步引擎依赖 `greenlet`，它是 C++ 扩展、轮子不自带运行库，
-缺了之后每一次 SQLite 调用都会报一句看不懂的 `DLL load failed while importing _greenlet`。
-GitHub 的 CI 镜像预装了这个运行库，所以 CI 抓不到。现在 EverOS 自己带着它：Windows 专用的
-`msvc-runtime` 依赖把 DLL 放进 `sys.prefix`，`everos/__init__.py` 在导入任何东西之前把这个
-目录注册给 DLL 加载器。不用装任何东西，也不需要管理员。
+- `pip install everos` → `everos init` → `everos server start`，中间不需要手工做任何事。
+  唯一一个 Windows 专用依赖是 `msvc-runtime`，它提供 `greenlet` 需要的 C++ 运行库（见下文）。
+- 这台机器上的测试：单测 **2576 通过 / 4 跳过**，集成 **183 通过 / 5 跳过**，真实 LLM 的
+  `slow` 用例 **28 通过 / 1 跳过**。CI 在 `windows-latest` 上跑单测（`unit tests (Windows)`）。
+- 四类记忆——episode、profile、agent case、agent skill——都由 Tier 3 服务（真实 LLM、embedding、
+  rerank）产出，并通过 `/get` 和 `/search` 取回。
+- 10 小时浸泡（写入和改写约 78 000 条 md 条目、16 000 次检索、2 300 次走抽取路径的 `/add`，
+  另有两个并发的 `everos cascade sync` 进程在同一棵目录树上不停跑）结束时索引完好：每张表都能打开、
+  schema 校验通过、没有条目丢失；RSS 三小时后稳定在约 2.3 GB；LanceDB 目录峰值 6.7 GB，回收到
+  2.7 GB（真实数据 437 MB）。这次浸泡另外抓到两个与 Windows 无关的问题，单独跟踪：并发的
+  `cascade sync` 进程会把同一行插两次（10 小时后约 4.5% 重复行，没有损坏）；持续写负载下请求
+  延迟会变差。
+
+Python：3.12、3.13、3.14（普通构建）不改任何东西就能跑；3.11 被 `requires-python` 和 `src/` 里的
+PEP 695 语法拒绝；free-threaded 的 3.14t 没有 `lancedb` 轮子。
+
+Windows 上值得知道的几件事：
+
+- 另一个进程（cascade worker，或者 Defender 正在扫刚写好的文件）打开着目标文件时，`os.replace`
+  会报 `PermissionError`。md 写入器会带退避重试；浸泡里出现 49 次，全部重试成功。
+- Windows 搜索会索引 `%USERPROFILE%` 下的所有东西。把记忆目录放在那里，重写压力下会多花大约
+  一个核给 `SearchIndexer`；把目录放到别处，或者把它从索引里排除。
+- 文件变更事件来自 `ReadDirectoryChangesW`，一次重命名可能被报成两个事件。cascade 的扫描器会
+  按磁盘实际状态对账。
+
+以前在干净机器上会踩的那个前置条件是 **Microsoft Visual C++ 运行库（x64）**。SQLAlchemy 的
+异步引擎依赖 `greenlet`，它是 C++ 扩展、轮子不自带运行库，缺了之后每一次 SQLite 调用都会报一句
+看不懂的 `DLL load failed while importing _greenlet`。GitHub 的 CI 镜像预装了这个运行库，所以 CI
+抓不到。现在 EverOS 自己带着它：Windows 专用的 `msvc-runtime` 依赖把 DLL 放进 `sys.prefix`，
+`everos/__init__.py` 在导入任何东西之前把这个目录注册给 DLL 加载器。不用装任何东西，也不需要管理员。
