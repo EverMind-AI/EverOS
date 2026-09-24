@@ -5,7 +5,7 @@ without standing up the FastAPI app:
 
 - ``cascade sync [PATH]`` — flush the work queue. With ``PATH`` the
   command first force-enqueues that single file (used after a manual
-  md edit when waiting for the watcher is impractical), then drains.
+  md edit with no server running), then drains.
 - ``cascade status`` — print the queue + LSN summary that the daemon
   sees right now.
 - ``cascade fix`` — list every ``failed`` row. With ``--apply``, also
@@ -30,6 +30,7 @@ scanner background task is started.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import os
 from collections.abc import AsyncIterator
@@ -47,6 +48,7 @@ from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.infra.persistence.index import (
     connect,
     drop_business_tables,
@@ -61,6 +63,7 @@ from everos.infra.persistence.sqlite import (
 )
 from everos.memory.cascade import (
     CascadeOrchestrator,
+    hold_ome_lock,
     match_kind,
     ome_lock_is_free,
 )
@@ -136,15 +139,21 @@ _VERBOSE_OPTION_HELP = (
 
 
 @asynccontextmanager
-async def _runtime(*, verify: bool = True, ensure: bool = True) -> AsyncIterator[None]:
+async def _runtime(
+    *, verify: bool = True, ensure: bool = True, exclusive: bool = False
+) -> AsyncIterator[None]:
     """Stand up sqlite + lancedb the same way the API lifespan would.
 
     The CLI uses the same lazy, process-wide singletons the API lifespan
     does. They are **per-process**: a running daemon has its own
-    connection and table-handle cache, so read/write traffic interleaves
-    safely, but a change to the table *set* made here (drop / recreate)
-    is invisible to the daemon's cached handles — which is why
-    ``rebuild`` refuses to run while a server holds the OME lock.
+    connection and table-handle cache, and reads its own LanceDB
+    snapshot. Reads interleave safely; writes do not — a second process
+    upserting the same table cannot see what the daemon just committed
+    (nor the other way round) and both insert the row, so every command
+    that writes the index (``sync``, ``fix --apply``, ``rebuild``) passes
+    ``exclusive=True`` and holds the OME lock for its whole run. Refused
+    with exit code 3 while a server (or another exclusive CLI phase) holds
+    it; a server starting meanwhile fails at its own lock instead.
 
     ``verify=False`` skips :func:`verify_business_schemas` — required by
     ``cascade rebuild``, whose whole purpose is to recover from a table
@@ -159,19 +168,39 @@ async def _runtime(*, verify: bool = True, ensure: bool = True) -> AsyncIterator
     Rebuild recreates the tables and their indexes itself after dropping,
     so skipping the pre-drop pass loses nothing.
     """
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await connect()
-    if verify:
-        await verify_business_schemas()
-    if ensure:
-        await ensure_business_indexes()
+    lock = hold_ome_lock() if exclusive else contextlib.nullcontext()
     try:
-        yield
+        lock.__enter__()
+    except EngineLockHeldError:
+        typer.echo(
+            "error: another process holds this memory root's OME lock — a "
+            "running `everos server`\n"
+            "  (or another exclusive CLI phase). Two processes writing the "
+            "same index insert rows\n"
+            "  twice, so this command needs the root to itself. A server "
+            "projects markdown changes\n"
+            "  on its own unless it was started with EVEROS_DISABLE_CASCADE=1 "
+            "or quiesced; stop it\n"
+            "  first, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=3) from None
+    try:
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        await connect()
+        if verify:
+            await verify_business_schemas()
+        if ensure:
+            await ensure_business_indexes()
+        try:
+            yield
+        finally:
+            await shutdown()
+            await dispose_engine()
     finally:
-        await shutdown()
-        await dispose_engine()
+        lock.__exit__(None, None, None)
 
 
 def _build_orchestrator() -> CascadeOrchestrator:
@@ -215,12 +244,20 @@ def sync(
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
 ) -> None:
-    """Drain the cascade queue (and optionally re-enqueue a path first)."""
+    """Drain the cascade queue (and optionally re-enqueue a path first).
+
+    Holds the OME lock for the run (see :func:`_runtime`): a second process
+    writing the same LanceDB tables inserts rows twice — the server reads
+    its own table snapshot and cannot see what the CLI process just
+    committed, so both decide the row is new (4-5 % duplicate rows after a
+    10-hour soak with two concurrent ``cascade sync`` processes). Refused
+    with exit code 3 while a server holds the root.
+    """
     _apply_root_env(root)
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime():
+        async with _runtime(exclusive=True):
             orchestrator = _build_orchestrator()
             if path is not None:
                 rel = _resolve_relative(path)
@@ -315,7 +352,7 @@ def fix(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime():
+        async with _runtime(exclusive=apply):
             rows = await md_change_state_repo.list_failed()
             if not rows:
                 typer.echo("no failed rows")
@@ -495,7 +532,7 @@ def rebuild(
         # to fix; the startup guard would abort before we could rebuild.
         # ensure=False: the pre-drop migration pass would raise on exactly
         # the damage we are here to repair (see _runtime).
-        async with _runtime(verify=False, ensure=False):
+        async with _runtime(verify=False, ensure=False, exclusive=True):
             # Reset the queue FIRST so every crash window converges on
             # "queue pending → next scan re-indexes". Doing it after the
             # drop leaves a window where a crash yields empty tables with
