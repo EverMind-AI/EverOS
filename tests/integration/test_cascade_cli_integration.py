@@ -15,11 +15,13 @@ in an event loop, which collides with the CLI's own loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as _dt
 import re
 from collections.abc import Iterator
 from pathlib import Path
 
+import portalocker
 import pytest
 from typer.testing import CliRunner
 
@@ -311,6 +313,75 @@ def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
     assert "LanceDB table(s)" not in combined
     assert "cascade queue row(s)" not in combined
     assert "rebuild complete" not in combined
+
+
+@contextlib.contextmanager
+def _server_holds_the_lock(root: Path) -> Iterator[None]:
+    """Hold the OME jobstore lock the way a running ``everos server`` does."""
+    lock_path = root / ".index" / "sqlite" / "ome.db.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+") as handle:
+        portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        try:
+            yield
+        finally:
+            portalocker.unlock(handle)
+
+
+def test_sync_refuses_to_run_while_a_server_holds_the_lock(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sync`` is an index writer; next to a running server it exits 3
+    before opening anything (a second writer inserts rows twice).
+    """
+
+    def _boom() -> None:
+        raise AssertionError("the runtime must not open the DB when refusing")
+
+    monkeypatch.setattr(cascade_mod, "get_engine", _boom)
+    with _server_holds_the_lock(cli_runtime):
+        result = CliRunner().invoke(cascade_mod.app, ["sync"])
+
+    assert result.exit_code == 3, result.output
+    assert "holds this memory root" in result.stderr.lower()
+    assert "stop it" in result.stderr.lower()
+    assert "sync complete" not in result.output
+
+
+def test_fix_apply_refuses_but_fix_and_status_still_run_next_to_a_server(
+    cli_runtime: Path,
+) -> None:
+    """Only the writing commands need the root to themselves."""
+    with _server_holds_the_lock(cli_runtime):
+        applied = CliRunner().invoke(cascade_mod.app, ["fix", "--apply"])
+        listed = CliRunner().invoke(cascade_mod.app, ["fix"])
+        status = CliRunner().invoke(cascade_mod.app, ["status"])
+
+    assert applied.exit_code == 3, applied.output
+    assert "holds this memory root" in applied.stderr.lower()
+    assert listed.exit_code == 0, listed.output + listed.stderr
+    assert status.exit_code == 0, status.output + status.stderr
+
+
+def test_sync_holds_the_lock_while_it_drains(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lock is held for the whole drain, not probed and released — a
+    server starting meanwhile must fail at its own lock, not join in.
+    """
+    seen: list[bool] = []
+
+    class _Orchestrator:
+        async def sync_once(self) -> int:
+            seen.append(cascade_mod.ome_lock_is_free())
+            return 0
+
+    monkeypatch.setattr(cascade_mod, "_build_orchestrator", lambda: _Orchestrator())
+    result = CliRunner().invoke(cascade_mod.app, ["sync"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert seen == [False]  # the lock was ours during the drain
+    assert cascade_mod.ome_lock_is_free()  # and released afterwards
 
 
 # Reduce false negatives on date drift.

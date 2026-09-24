@@ -109,9 +109,10 @@ naturally.
 
 ## One-shot replay: `everos cascade sync [PATH]`
 
-Use this when the watcher missed an event (WSL mount, network share,
-external editor with no inotify) or when you want a deterministic
-flush before, say, a smoke test:
+Use this when no server is running and you want the index caught up
+with the markdown — after batch edits, before a smoke test, or on a
+mount where the watcher misses events (WSL mount, network share,
+external editor with no inotify) while the daemon is down:
 
 ```bash
 everos cascade sync                           # drain everything pending
@@ -120,10 +121,16 @@ everos cascade sync users/u1/episodes/X.md    # re-enqueue + drain
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
-Its drain still runs the same compaction + version-cleanup (`prune`) as
-the daemon, but `prune` uses `delete_unverified=False`, so it never
-deletes a file another process may be mid-commit on. Safe to run in
-parallel with a live `everos server`.
+It holds the OME lock for the whole run and **refuses to start (exit code
+3) while a server holds it**: two processes writing the same LanceDB
+tables cannot see each other's snapshot and both insert the row (4–5 %
+duplicate rows after a 10-hour soak with two concurrent `sync` processes
+next to a server). The same rule applies to `cascade fix --apply` and
+`cascade rebuild`; `cascade status` and `cascade fix` (listing) are
+read-only and work alongside a server. A running server projects every
+markdown change itself, so nothing is lost by waiting for it — unless it
+was started with `EVEROS_DISABLE_CASCADE=1` or has been quiesced, in
+which case stop it before syncing.
 
 ## Rebuild the index: `everos cascade rebuild`
 
@@ -135,12 +142,12 @@ everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
 
-> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the active backend's tables or collections. A running
-> daemon holds
-> cached table handles that would keep pointing at (and writing to) the
-> dropped dataset, corrupting the rebuild. This is the one cascade
-> command that is **not** safe to run alongside a live server.
+> **Stop the `everos server` first.** Like every index-writing cascade
+> command, rebuild refuses to run while a server holds the memory root
+> (exit code 3) — and it has the strongest reason: it **drops and
+> recreates** the active backend's tables or collections. A running daemon
+> holds cached table handles that would keep pointing at (and writing to)
+> the dropped dataset, corrupting the rebuild.
 
 What it does, in order:
 
@@ -231,7 +238,10 @@ Workarounds:
 - Rely on the scanner — at default 30 s interval, throughput is
   bounded but eventually-consistent.
 - Drop the scan interval to ~5 s if the memory root is small.
-- Run `everos cascade sync` explicitly after batch edits.
+- With no server running, run `everos cascade sync` explicitly after batch
+  edits. A running server picks them up itself, and `sync` refuses to run
+  next to it (exit code 3): two processes writing the same index insert
+  rows twice.
 
 ### Daemon process crash mid-batch
 
@@ -373,6 +383,7 @@ is a deployment-side change with no schema work.
   in the entry inline. Tracked separately.
 - **Reference-file change detection (agent_skill)**: edits to
   `references/*.md` siblings won't trigger a re-index — only changes
-  to `SKILL.md` itself fire the watcher. Workaround: run
-  `everos cascade sync agents/<a>/skills/skill_<n>/SKILL.md` after
-  editing references.
+  to `SKILL.md` itself fire the watcher. Workaround: touch or re-save
+  `SKILL.md` so the watcher fires; with the server stopped,
+  `everos cascade sync agents/<a>/skills/skill_<n>/SKILL.md` re-enqueues
+  it directly.
