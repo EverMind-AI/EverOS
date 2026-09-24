@@ -33,7 +33,7 @@ dependencies = [
     # sustained churn (bounded + reclaimable index dir, no compaction crash) — see
     # docs/cascade_runbook.md. Never widen this floor back below 0.34 (older lance
     # cannot read v8 data).
-    "lancedb>=0.34.0,<0.35.0",    # Vector + BM25 + scalar filter (Arrow-based)
+    "lancedb>=0.34.0,<0.39.0",    # Vector + BM25 + scalar filter (Arrow-based)
     # Floor, not a new package: lancedb pulls pyarrow in anyway. 25.0.1 stops
     # the per-value `import pytz` attempt in to_pylist() (24 walked sys.path
     # for every tz-aware timestamp) and materialises rows without a Scalar
@@ -82,10 +82,10 @@ dependencies = [
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
     # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-user-memory==0.4.0",
-    "everalgo-agent-memory==0.4.0",
+    "everalgo-user-memory==0.7.0",
+    "everalgo-agent-memory==0.5.1",
     "everalgo-rank==0.4.1",
-    "everalgo-knowledge==0.1.1",
+    "everalgo-knowledge==0.2.1",
 
     # everalgo's own transitive layer, pinned to what this repo's uv.lock —
     # and therefore the whole test suite — actually resolves. The packages
@@ -98,8 +98,8 @@ dependencies = [
     # (`memorize.mode = "agent"`) install of 1.2.3 while every local suite
     # stayed green on the locked 0.2.1. Raise these deliberately, together
     # with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-boundary==0.2.1",
-    "everalgo-core==0.3.0",
+    "everalgo-boundary==0.3.0",
+    "everalgo-core==0.5.1",
     "everalgo-clustering==0.2.1",
 ]
 
