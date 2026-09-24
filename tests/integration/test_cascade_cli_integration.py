@@ -313,6 +313,30 @@ def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
     assert "rebuild complete" not in combined
 
 
+def test_sync_refuses_to_run_while_a_server_holds_the_lock(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sync`` must refuse next to a running server, like ``rebuild``.
+
+    The daemon already syncs every change; a second process writing the
+    same tables inserts rows twice (the server reads its own snapshot and
+    cannot see the CLI's commit). Same lock probe, same exit code 3.
+    """
+    monkeypatch.setattr(cascade_mod, "ome_lock_is_free", lambda: False)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cascade_mod, "_build_orchestrator", lambda: calls.append("built")
+    )
+
+    result = CliRunner().invoke(cascade_mod.app, ["sync"])
+
+    assert result.exit_code == 3, result.output
+    assert "server" in result.stderr.lower()
+    assert "stop `everos server`" in result.stderr.lower()
+    assert calls == []  # bails before the orchestrator is even built
+    assert "sync complete" not in result.output
+
+
 # Reduce false negatives on date drift.
 def test_resolve_relative_via_command_arg(cli_runtime: Path) -> None:
     """An absolute path under the root works through ``cascade sync <path>``."""

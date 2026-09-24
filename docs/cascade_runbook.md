@@ -135,8 +135,10 @@ everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
 
-> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the active backend's tables or collections. A running
+> **Stop the `everos server` first.** Like `cascade sync`, rebuild refuses
+> to run while a server holds the memory root (exit code 3) — and for a
+> stronger reason: it **drops and recreates** the active backend's tables or
+> collections. A running
 > daemon holds
 > cached table handles that would keep pointing at (and writing to) the
 > dropped dataset, corrupting the rebuild. This is the one cascade
@@ -231,7 +233,10 @@ Workarounds:
 - Rely on the scanner — at default 30 s interval, throughput is
   bounded but eventually-consistent.
 - Drop the scan interval to ~5 s if the memory root is small.
-- Run `everos cascade sync` explicitly after batch edits.
+- With no server running, run `everos cascade sync` explicitly after batch
+  edits. A running server picks them up itself, and `sync` refuses to run
+  next to it (exit code 3): two processes writing the same index insert
+  rows twice.
 
 ### Daemon process crash mid-batch
 

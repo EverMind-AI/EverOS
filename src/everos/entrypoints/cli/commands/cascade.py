@@ -215,9 +215,29 @@ def sync(
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
 ) -> None:
-    """Drain the cascade queue (and optionally re-enqueue a path first)."""
+    """Drain the cascade queue (and optionally re-enqueue a path first).
+
+    Refuses to run while a server holds this memory root: the daemon's
+    worker already syncs every change, and a second process writing the
+    same LanceDB tables inserts rows twice — the server reads its own table
+    snapshot and cannot see what the CLI process just committed, so both
+    decide the row is new (4-5 % duplicate rows after a 10-hour soak with
+    two concurrent ``cascade sync`` processes).
+    """
     _apply_root_env(root)
     _apply_verbose_logging(verbose)
+    if not ome_lock_is_free():
+        typer.echo(
+            "error: a server (or another exclusive CLI phase) is running on "
+            "this memory root.\n"
+            "  The running server already syncs every markdown change; a "
+            "second process writing\n"
+            "  the same index inserts rows twice. Stop `everos server` first, "
+            "or let it pick the\n"
+            "  change up on its own.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
 
     async def _run() -> None:
         async with _runtime():
