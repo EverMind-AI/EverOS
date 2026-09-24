@@ -207,6 +207,11 @@ optimize_prune_interval_seconds = 300.0
 # under LanceDB's 7-day unverified window they then wait out the full 7 days.
 optimize_prune_retention_seconds = 60.0
 optimize_rebuild_interval_seconds = 43200.0
+# How often the scanner walks the memory root for changes the watcher missed.
+# On a mount that delivers no filesystem events (a Windows directory bound into
+# WSL2 or a container) this is the edit-to-searchable latency. Every sweep also
+# stats every md file, which over a slow mount is the cost of a short interval.
+scan_interval_seconds = 30.0
 
 [observability]
 # OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral

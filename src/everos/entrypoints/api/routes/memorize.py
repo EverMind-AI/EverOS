@@ -14,7 +14,7 @@ import re
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from everos.entrypoints.api.utils import extract_request_id
 from everos.service import memorize
@@ -110,6 +110,14 @@ class MessageItemDTO(BaseModel):
     content: str | list[ContentItemDTO]
     tool_calls: list[ToolCallDTO] | None = None
     tool_call_id: str | None = None
+
+    @model_validator(mode="after")
+    def _tool_row_needs_call_id(self) -> MessageItemDTO:
+        # An orphan tool row cannot be mapped to a ConversationItem and would
+        # surface as a 500 from deep inside extraction; refuse it here (422).
+        if self.role == "tool" and not self.tool_call_id:
+            raise ValueError("tool_call_id is required when role is 'tool'")
+        return self
 
 
 class MemorizeAddRequest(BaseModel):

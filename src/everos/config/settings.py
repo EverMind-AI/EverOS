@@ -549,12 +549,22 @@ class CascadeSettings(BaseModel):
       Full index rebuild per kind, which collapses the active index fragment
       count that every ``optimize()`` grows. Bounded by rebuild cost, not
       correctness — a missed sweep only defers cleanup.
+
+    ``scan_interval_seconds``:
+      How often the scanner walks the memory root for what the watcher
+      missed: files written while the daemon was down, editors that
+      move-replace, and mounts that deliver no filesystem events at all (a
+      Windows directory bound into WSL2 or a container). On such a mount this
+      is the only path an md edit takes to the index, so it is the
+      edit-to-searchable latency. Every sweep also ``stat``-s every md file,
+      which over a slow mount is the cost to weigh against it.
     """
 
     optimize_heartbeat_seconds: float = 60.0
     optimize_prune_interval_seconds: float = 300.0
     optimize_prune_retention_seconds: float = 60.0
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
+    scan_interval_seconds: float = Field(default=30.0, gt=0)
 
 
 class IndexSettings(BaseModel):

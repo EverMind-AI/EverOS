@@ -122,6 +122,14 @@ class _Handler(FileSystemEventHandler):
         spec = match_kind(rel)
         if spec is None:
             return
+        # A late ``added`` / ``modified`` for a path that is already gone.
+        # FSEvents coalesces and reorders: a create followed by an unlink
+        # inside its latency window can deliver the modified leg last, and
+        # letting it through would overwrite the ``deleted`` row and
+        # resurrect a file that no longer exists (until the scanner's next
+        # sweep notices). Disk is the truth; record what is actually there.
+        if change_type != "deleted" and not Path(raw_path).exists():
+            change_type = "deleted"
         mtime = _safe_mtime(raw_path)
         asyncio.run_coroutine_threadsafe(
             _enqueue_async(spec, rel, change_type, mtime),

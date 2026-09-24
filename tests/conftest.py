@@ -16,6 +16,16 @@ Cross-suite fixtures:
 
 from __future__ import annotations
 
+# First import in the test process, on purpose. everos/__init__.py registers
+# the MSVC runtime DLL directory with the Windows loader, and that only helps
+# extensions imported *after* it -- sqlalchemy imports greenlet the moment it
+# is imported, and a test module's first line is often `from sqlmodel import`.
+# Any host application that imports sqlalchemy before everos has the same
+# problem; the package-init hook cannot reach it. Until a startup .pth ships
+# the registration for every interpreter in the environment, this line keeps
+# the suite meaningful on a Windows machine without the VC++ redistributable.
+import everos  # noqa: F401  isort: skip
+
 import json
 from collections.abc import Iterator
 from pathlib import Path

@@ -186,6 +186,7 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_INTERVAL_SECONDS", "22")
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_RETENTION_SECONDS", "33")
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_REBUILD_INTERVAL_SECONDS", "44")
+    monkeypatch.setenv("EVEROS_CASCADE__SCAN_INTERVAL_SECONDS", "55")
     load_settings.cache_clear()  # type: ignore[attr-defined]
     try:
         cfg = CascadeConfig.from_settings()
@@ -194,7 +195,8 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
             cfg.optimize_prune_interval_seconds,
             cfg.optimize_prune_retention_seconds,
             cfg.optimize_rebuild_interval_seconds,
-        ) == (11.0, 22.0, 33.0, 44.0)
+            cfg.scan_interval_seconds,
+        ) == (11.0, 22.0, 33.0, 44.0, 55.0)
 
         orch = CascadeOrchestrator(
             memory_root=MemoryRoot.resolve(), tokenizer=build_tokenizer(), config=cfg
@@ -204,6 +206,9 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
         assert worker._optimize_prune_interval == 22.0
         assert worker._optimize_prune_retention == 33.0
         assert worker._optimize_rebuild_interval == 44.0
+        # The scanner is the other consumer; on an event-less mount it is the
+        # only one, so it must see the value too, not just CascadeConfig.
+        assert orch._scanner._interval == 55.0
     finally:
         load_settings.cache_clear()  # type: ignore[attr-defined]
 
@@ -225,6 +230,7 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
         "optimize_prune_interval_seconds",
         "optimize_prune_retention_seconds",
         "optimize_rebuild_interval_seconds",
+        "scan_interval_seconds",
     }
     assert not any("timeout" in f or "deadline" in f for f in exposed)
 

@@ -73,6 +73,10 @@ dependencies = [
     # OME (Offline Memory Evolution) async scheduler & file I/O
     "apscheduler>=3.10.4,<4.0",   # async strategy scheduler chassis
     "portalocker>=2.8.2",          # cross-platform file lock for single-engine guard
+    # Windows only: the MSVC C++ runtime (msvcp140.dll et al.) that greenlet's
+    # wheel links against and a stock Windows does not ship. It lands in
+    # sys.prefix; everos/__init__.py registers that dir with the DLL loader.
+    "msvc-runtime>=14.44; sys_platform == 'win32'",
     "watchfiles>=0.21.0",          # native fs watcher for config hot reload
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 

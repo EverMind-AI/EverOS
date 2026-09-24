@@ -724,7 +724,9 @@ async def test_rebuild_runs_periodically(
         optimize_rebuild_interval_seconds=0.05,  # ~tick every 50ms in this test
     )
     await w.start()
-    await asyncio.sleep(0.2)  # ~4 ticks plus startup sweep
+    # Windows' ~15ms timer granularity stretches a 50ms interval to ~110ms,
+    # so size the window off the observed tick, not the requested one.
+    await asyncio.sleep(0.6)
     await w.stop()
     # Startup sweep + at least 2 interval-driven sweeps.
     assert len(fake.rebuild_calls) >= 3, (

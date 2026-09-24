@@ -38,6 +38,7 @@ import asyncio
 import hashlib
 import os
 import signal
+import sys
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -237,6 +238,11 @@ def test_backfill_cli_synchronous_keyboard_interrupt_exits_130(
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.kill(pid, SIGINT) is TerminateProcess on Windows: it kills the "
+    "pytest process itself (exit code 2) instead of delivering a Ctrl-C",
+)
 def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
     backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

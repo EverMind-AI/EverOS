@@ -275,7 +275,8 @@ file (`episode-<YYYY-MM-DD>.md` etc.).
 assistant emitted in this turn (OpenAI Chat Completions shape).
 
 **`tool_call_id`** — When `role: "tool"`, the `id` of the call this
-message is the response to.
+message is the response to. Required for `role: "tool"`; a tool row
+without it is rejected with `422`.
 
 ### ContentItem
 
@@ -1085,8 +1086,8 @@ Manually trigger a registered OME strategy.
 | `runs` | `list[RunSummary]` | One entry per strategy run *attempt*, not per dispatched route: `{run_id: string, status: string, error?: string}`. A strategy that retried before settling contributes multiple entries sharing one `event_id`. `status` is one of `running` / `success` / `failed` / `dead_letter` / `crashed`. Includes dead-lettered runs |
 
 **`not_dispatched`** means every subscriber was rejected by one of the
-four dispatch gates (`_routes_to` / `enabled` / `applies_to` /
-`Counter`). The most common cause is forgetting `"force": true` on a
+five dispatch gates (event-class subscription / `_routes_to` / `enabled` /
+`applies_to` / `Counter`). The most common cause is forgetting `"force": true` on a
 strategy that is `enabled=false` in `ome.toml` — e.g. triggering
 `reflect_episodes` without `force` while it is disabled in config
 returns `{"status": "not_dispatched", "dispatched": 0, "runs": []}`

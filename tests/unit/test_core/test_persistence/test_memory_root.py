@@ -135,5 +135,7 @@ def test_frozen_dataclass_hashable(tmp_path: Path) -> None:
 
 def test_user_expansion(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.expanduser() consults USERPROFILE on Windows and HOME on POSIX.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     mr = MemoryRoot("~/custom")
     assert mr.root == (tmp_path / "custom").resolve()

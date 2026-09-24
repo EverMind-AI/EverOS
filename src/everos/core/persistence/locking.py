@@ -1,7 +1,8 @@
 """Process-wide exclusive lock on a memory-root.
 
-Uses ``fcntl.flock`` (POSIX advisory locking, available on Linux + macOS;
-Windows is not supported — see project README on platform scope). The
+Uses ``portalocker`` for the exclusive lock, which dispatches to
+``fcntl.flock`` on POSIX and, on Windows, its default ``msvcrt.locking``
+locker — the same whole-file, released-on-process-exit semantics on both. The
 public surface is an :func:`contextlib.asynccontextmanager` so callers
 use ``async with memory_root_lock(mr):``; the underlying syscalls have
 no async equivalent so they run in a worker thread via
@@ -21,13 +22,14 @@ message beyond ``lifespan_provider_startup``.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import anyio
+import portalocker
+from portalocker.exceptions import AlreadyLocked
 
 from everos.core.observability.logging import get_logger
 
@@ -50,7 +52,7 @@ diagnosis, not recovery. The wait is already visible from the first poll
 alive but wedged inside its critical section, the only case this bounds —
 giving up sooner does not un-stick it: the error and the operator's next
 move (inspect the holding process) are the same at 5 minutes or 30.
-``flock`` is released by the kernel on process exit, so a *dead* holder
+The lock is released by the OS on process exit, so a *dead* holder
 never needs this.
 """
 
@@ -89,7 +91,7 @@ async def memory_root_lock(
     lock_path = memory_root.lock_file
 
     # Open the anchor file (create on first use). The fd, not the path, is
-    # what fcntl operates on. ``os.open`` is microsecond-fast but offloaded
+    # what the lock operates on. ``os.open`` is microsecond-fast but offloaded
     # for consistency with the rest of the lock acquisition flow.
     fd = await anyio.to_thread.run_sync(
         lambda: os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
@@ -102,10 +104,10 @@ async def memory_root_lock(
         while True:
             try:
                 await anyio.to_thread.run_sync(
-                    fcntl.flock, fd, fcntl.LOCK_EX | fcntl.LOCK_NB
+                    portalocker.lock, fd, portalocker.LOCK_EX | portalocker.LOCK_NB
                 )
                 break
-            except BlockingIOError as exc:
+            except AlreadyLocked as exc:
                 if not blocking:
                     raise LockError(
                         "another process already holds the memory-root lock "
@@ -123,8 +125,8 @@ async def memory_root_lock(
                         "timed out after "
                         f"{time.monotonic() - started:.1f}s waiting for the "
                         f"memory-root lock at {lock_path}. The holder is "
-                        "still alive (the kernel releases a dead process's "
-                        "flock automatically) — inspect the process holding "
+                        "still alive (the OS releases a dead process's "
+                        "lock automatically) — inspect the process holding "
                         f"{lock_path} rather than retrying this one"
                     ) from exc
                 await anyio.sleep(_LOCK_POLL_INTERVAL_SECONDS)
@@ -146,6 +148,6 @@ async def memory_root_lock(
         yield
     finally:
         try:
-            await anyio.to_thread.run_sync(fcntl.flock, fd, fcntl.LOCK_UN)
+            await anyio.to_thread.run_sync(portalocker.unlock, fd)
         finally:
             await anyio.to_thread.run_sync(os.close, fd)

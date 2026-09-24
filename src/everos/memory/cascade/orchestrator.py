@@ -108,6 +108,7 @@ class CascadeConfig:
             optimize_rebuild_interval_seconds=(
                 cascade.optimize_rebuild_interval_seconds
             ),
+            scan_interval_seconds=cascade.scan_interval_seconds,
         )
 
 

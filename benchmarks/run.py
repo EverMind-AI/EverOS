@@ -528,7 +528,15 @@ class _ServerFleet:
         for port in range(start, start + 400):
             s = socket.socket()
             try:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # SO_REUSEADDR means the opposite thing on Windows: it lets a
+                # second socket bind a port this one already holds, so the
+                # hold-until-spawn above would stop excluding anyone and two
+                # concurrent runs would be handed the same port. Windows spells
+                # the exclusivity this probe needs SO_EXCLUSIVEADDRUSE.
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                else:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind(("127.0.0.1", port))
                 s.listen(1)
             except OSError:

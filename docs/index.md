@@ -49,6 +49,8 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
+| [windows-wsl2.md](windows-wsl2.md) | Install and run EverOS on Windows — natively or via WSL2 |
+| [windows-wsl2.zh.md](windows-wsl2.zh.md) | Chinese mirror of the Windows / WSL2 guide |
 | [github-sync.md](github-sync.md) | Guardrails for refreshing GitHub from internal exports without overwriting GitHub-only workflow files |
 | [benchmarks/README.md](../benchmarks/README.md) | LoCoMo benchmark — run and evaluate |
 

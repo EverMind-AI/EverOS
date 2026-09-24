@@ -63,6 +63,30 @@ jobs:
       - name: Unit tests
         run: make test
 
+  unit-windows:
+    name: unit tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # No `make` on the Windows image — call uv directly. The lock is
+      # universal (it carries sys_platform == 'win32' resolution markers and
+      # pywin32, which portalocker requires on Windows), so --frozen resolves here.
+      - name: Install dependencies (frozen)
+        run: uv sync --frozen
+
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
   unit-py313:
     name: unit tests (3.13)
     runs-on: ubuntu-latest
