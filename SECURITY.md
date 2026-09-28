@@ -7,8 +7,8 @@ not receive backports.
 
 | Version | Supported |
 |---------|-----------|
-| `1.2.x` (current) | ✅ |
-| `1.1.x` and older | ❌ — upgrade to the current line |
+| `1.4.x` (current) | ✅ |
+| `1.3.x` and older | ❌ — upgrade to the current line |
 
 ## Reporting a Vulnerability
 
@@ -58,3 +58,10 @@ following in mind:
   the providers you configure.
 - Memory content is stored as plaintext `.md` files; apply OS-level file
   permissions or disk encryption if your data is sensitive.
+- **What counts as a vulnerability.** An issue qualifies for a security
+  advisory when untrusted input (an ingested document, or a caller outside the
+  supported threat model) can reach data or files beyond what the API already
+  lets that caller touch — for example, writing outside the memory root. An
+  issue a trusted API caller can trigger only against data that same caller can
+  already modify or delete through the API is fixed as a hardening change and
+  noted in the release notes, without an advisory.
