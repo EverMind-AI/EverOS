@@ -95,6 +95,23 @@ class _OkHandler(Handler):
         )
 
 
+class _ConcurrencyTrackingHandler(_OkHandler):
+    """Records peak in-flight handler calls for the batch bound regression."""
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.peak = 0
+
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            await asyncio.sleep(0.01)
+            return await super().handle_added_or_modified(md_path)
+        finally:
+            self.active -= 1
+
+
 class _BareExceptionHandler(_OkHandler):
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
         raise RuntimeError("unexpected boom")
@@ -135,6 +152,21 @@ async def test_ok_handler_marks_done(patched_repo: _FakeRepo) -> None:
     await w.drain_once()
     assert patched_repo.done == ["a.md"]
     assert patched_repo.failed == []
+
+
+async def test_large_batch_limits_concurrent_handler_execution(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Claim 50 rows, but never execute more than four handlers at once."""
+    patched_repo.batch = [_Row(md_path=f"{i}.md") for i in range(50)]
+    handler = _ConcurrencyTrackingHandler()
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    processed = await w.drain_once()
+
+    assert processed == 50
+    assert len(patched_repo.done) == 50
+    assert handler.peak <= 4
 
 
 async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
