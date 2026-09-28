@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from everos.component.utils.datetime import get_utc_now
+from everos.core.errors import PathTraversalError
+from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.sqlite.repos.knowledge import DocumentListPage
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
@@ -398,3 +400,86 @@ async def test_patch_document_not_found_raises() -> None:
 
         with pytest.raises(DocumentNotFoundError):
             await patch_document("d_missing", "app1", "proj1", title="New")
+
+
+# ── patch_document: category move containment ────────────────────────────────
+
+
+def _lay_out_doc(root: MemoryRoot, category: str) -> Path:
+    """Create ``knowledge/<category>/Doc_<id>/`` on disk; return the doc dir."""
+    doc_dir = root.knowledge_dir("app1", "proj1") / category / "Doc_d_testdoc00001"
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "index.md").write_text("---\ntitle: Test Doc\n---\n")
+    (doc_dir / "1_intro.md").write_text("---\ncategory_id: Technology\n---\n")
+    return doc_dir
+
+
+async def _patch_category(root: MemoryRoot, md_path: str, category_id: str) -> None:
+    doc = _doc_row(md_path=md_path)
+    with (
+        patch(f"{_MOD}.MemoryRoot.resolve", return_value=root),
+        patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo,
+    ):
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=doc)
+        mock_doc_repo.upsert_from_handler = AsyncMock(return_value=None)
+        await patch_document("d_testdoc00001", "app1", "proj1", category_id=category_id)
+
+
+@pytest.mark.parametrize(
+    ("category_id", "expected_dir"),
+    [("Research Notes", "Research_Notes"), ("..", "Others"), (".", "Others")],
+)
+async def test_patch_document_category_move_stays_in_knowledge(
+    tmp_path: Path, category_id: str, expected_dir: str
+) -> None:
+    """``.``/``..`` fall back to ``Others`` like the create path does."""
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    md_path = str((doc_dir / "index.md").relative_to(root.root))
+
+    await _patch_category(root, md_path, category_id)
+
+    knowledge_dir = root.knowledge_dir("app1", "proj1")
+    moved = knowledge_dir / expected_dir / "Doc_d_testdoc00001"
+    assert (moved / "index.md").is_file()
+    assert (moved / "1_intro.md").is_file()
+    assert not doc_dir.exists()
+    assert not (knowledge_dir.parent / "Doc_d_testdoc00001").exists()
+
+
+async def test_patch_document_category_move_repairs_escaped_doc(
+    tmp_path: Path,
+) -> None:
+    """A doc an earlier ``..`` move left outside ``knowledge/`` is moved back."""
+    root = MemoryRoot(tmp_path)
+    knowledge_dir = root.knowledge_dir("app1", "proj1")
+    knowledge_dir.mkdir(parents=True)
+    escaped = knowledge_dir.parent / "Doc_d_testdoc00001"
+    escaped.mkdir()
+    (escaped / "index.md").write_text("---\ntitle: Test Doc\n---\n")
+    md_path = str(
+        knowledge_dir.relative_to(root.root) / ".." / escaped.name / "index.md"
+    )
+
+    await _patch_category(root, md_path, "Science")
+
+    assert (knowledge_dir / "Science" / escaped.name / "index.md").is_file()
+    assert not escaped.exists()
+
+
+async def test_patch_document_category_move_rejects_escaping_target(
+    tmp_path: Path,
+) -> None:
+    """A category dir symlinked out of ``knowledge/`` trips the backstop."""
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root.knowledge_dir("app1", "proj1") / "Others").symlink_to(outside)
+    md_path = str((doc_dir / "index.md").relative_to(root.root))
+
+    with pytest.raises(PathTraversalError):
+        await _patch_category(root, md_path, "..")
+
+    assert doc_dir.is_dir()
+    assert not any(outside.iterdir())

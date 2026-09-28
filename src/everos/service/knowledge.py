@@ -42,7 +42,7 @@ from everos.core.errors import (
     TopicNotFoundError,
 )
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
+from everos.core.persistence import MemoryRoot, sanitize_dirname
 from everos.core.persistence.markdown import dump_frontmatter, parse_frontmatter
 from everos.infra.persistence.index import Predicate, all_of, eq
 from everos.infra.persistence.markdown import (
@@ -727,25 +727,24 @@ async def _update_index_frontmatter(
     await apath.write_text(dump_frontmatter(fm) + body, encoding="utf-8")
 
 
-_DIR_SAFE = re.compile(r"[^\w\-.]", re.UNICODE)
-
-
-def _safe_category(raw: str) -> str:
-    """Sanitize category_id for use as a directory name component."""
-    slug = raw.replace(" ", "_")
-    slug = _DIR_SAFE.sub("", slug)[:50]
-    return slug or "Others"
-
-
 async def _move_doc_directory(
     memory_root: MemoryRoot,
-    old_md_path: str,
+    current: _ResolvedDoc,
     new_category: str,
 ) -> str:
-    """Move document directory to new category folder, return new md_path."""
-    old_index = memory_root.root / old_md_path
-    old_dir = old_index.parent
-    new_dir = old_dir.parent.parent / _safe_category(new_category) / old_dir.name
+    """Move document directory to new category folder, return new md_path.
+
+    The category becomes a directory segment through the same
+    ``sanitize_dirname`` rule the create path uses, so ``.``/``..`` fall back
+    to ``Others`` instead of walking out of ``knowledge/``. The resolved
+    target is then asserted to stay inside the project's knowledge directory
+    before any directory is created or moved.
+    """
+    knowledge_dir = memory_root.knowledge_dir(current.app_id, current.project_id)
+    old_dir = (memory_root.root / current.md_path).parent
+    new_dir = knowledge_dir / sanitize_dirname(new_category, "Others") / old_dir.name
+    if not new_dir.resolve().is_relative_to(knowledge_dir.resolve()):
+        raise PathTraversalError(f"category move target escapes knowledge/: {new_dir}")
     await anyio.Path(new_dir.parent).mkdir(parents=True, exist_ok=True)
     await anyio.to_thread.run_sync(shutil.move, str(old_dir), str(new_dir))
     new_index = new_dir / "index.md"
@@ -843,9 +842,7 @@ async def _apply_patch_writes(
     await _update_index_frontmatter(index_path, new_title, new_category)
 
     if new_category != current.category_id:
-        new_md_path = await _move_doc_directory(
-            memory_root, current.md_path, new_category
-        )
+        new_md_path = await _move_doc_directory(memory_root, current, new_category)
         new_doc_dir = memory_root.root / Path(new_md_path).parent
         await _update_topics_category(new_doc_dir, new_category)
 
