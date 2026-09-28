@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Changing a knowledge document's category keeps it inside `knowledge/`.**
+  `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved
+  the document's directory up into the project directory, where the markdown
+  scan no longer finds it. The category now goes through the same rule as
+  document creation, so `.` and `..` fall back to `Others`, and the move is
+  refused if its target would leave `knowledge/`. A document an earlier move
+  left outside is moved back on its next category change.
+
 ## [1.4.1] - 2026-09-24
 
 **A fresh install works again.** The `openai` SDK released its 3.x line on
