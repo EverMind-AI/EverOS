@@ -168,23 +168,37 @@ jobs:
       - name: Install dependencies (frozen)
         run: make install-deps
 
+      # One container instead of the three-service compose file: embedded etcd
+      # plus local-disk segment storage, the same knobs upstream's
+      # scripts/standalone_embed.sh uses. The compose file wants MinIO, and
+      # MinIO now refuses anonymous pulls on both Docker Hub and quay.io
+      # ("unauthorized"), which broke this job. Local storage is a dev/CI mode
+      # -- it drops the object-store hop, not any behaviour these tests read.
       - name: Start Milvus 2.6.22
         run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/milvus-compose.yml \
-            https://github.com/milvus-io/milvus/releases/download/v2.6.22/milvus-standalone-docker-compose.yml
-          # MinIO stopped publishing to Docker Hub (`minio/minio` now returns
-          # "pull access denied"); the same tags live on quay.io, which is
-          # where the etcd image in this compose file already comes from.
-          sed -i 's#image: minio/minio:#image: quay.io/minio/minio:#' /tmp/milvus-compose.yml
-          docker compose -f /tmp/milvus-compose.yml up -d
+          cat > /tmp/embedEtcd.yaml <<'EOF'
+          listen-client-urls: http://0.0.0.0:2379
+          advertise-client-urls: http://0.0.0.0:2379
+          quota-backend-bytes: 4294967296
+          auto-compaction-mode: revision
+          auto-compaction-retention: '1000'
+          EOF
+          docker run -d --name milvus --security-opt seccomp:unconfined \
+            -e ETCD_USE_EMBED=true \
+            -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
+            -e ETCD_CONFIG_PATH=/milvus/configs/embedEtcd.yaml \
+            -e COMMON_STORAGETYPE=local \
+            -e DEPLOY_MODE=STANDALONE \
+            -v /tmp/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml \
+            -p 19530:19530 -p 9091:9091 \
+            milvusdb/milvus:v2.6.22 milvus run standalone
           for attempt in {1..60}; do
             if curl --fail --silent http://127.0.0.1:9091/healthz >/dev/null; then
               exit 0
             fi
             sleep 2
           done
-          docker compose -f /tmp/milvus-compose.yml logs
+          docker logs milvus
           exit 1
 
       - name: Milvus repository contract
@@ -221,7 +235,7 @@ jobs:
 
       - name: Stop Milvus
         if: always()
-        run: docker compose -f /tmp/milvus-compose.yml down -v
+        run: docker rm -f milvus
 
   package:
     name: package build
