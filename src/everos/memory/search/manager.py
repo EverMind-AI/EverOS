@@ -74,6 +74,7 @@ from .dto import (
 from .filters import compile_filters
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import RoundDecider, search_episodes_llm_multiround
+from .radius import apply_radius, effective_radius
 from .shaper import (
     reshape_hybrid_output,
     shape_agent_case_from_candidate,
@@ -111,15 +112,6 @@ _DEFAULT_TOP_K_CAP = 100
 # full ``content``); cap unlimited mode at 10 to keep rerank context
 # bounded. Positive ``top_k`` from the caller bypasses this.
 _AGENT_TOP_K_CAP = 10
-
-# Vector ``radius`` (cosine similarity threshold) default for **unlimited
-# mode only**. In ``top_k > 0`` mode we trust the truncation cap to ditch
-# low-quality tail; in ``top_k = -1`` mode we would otherwise return up to
-# 100 candidates with no quality floor, so we layer a default 0.5
-# similarity threshold the way enterprise does (enterprise uses 0.6 — we
-# pick 0.5 slightly looser because LanceDB cosine vs Milvus cosine score
-# distributions can drift a bit on the same model).
-_DEFAULT_UNLIMITED_RADIUS = 0.5
 
 # ``maxsim_atomic`` recall pool sizing — atomic facts are ~28× denser than
 # episodes (one memcell → 1 episode + ~28 atomic facts), so the fact pool
@@ -369,6 +361,7 @@ class SearchManager:
         if req.method == SearchMethod.AGENTIC:
             return await search_episodes_agentic(
                 req.query,
+                radius=effective_radius(req),
                 owner_id=req.owner_id,
                 where=where,
                 app_id=req.app_id,
@@ -384,6 +377,7 @@ class SearchManager:
         if req.method == SearchMethod.LLM_MULTIROUND:
             return await search_episodes_llm_multiround(
                 req.query,
+                radius=effective_radius(req),
                 owner_id=req.owner_id,
                 where=where,
                 app_id=req.app_id,
@@ -469,7 +463,6 @@ class SearchManager:
                     sparse_candidates=sparse,
                     dense_candidates=dense,
                     top_k=top_k,
-                    radius=_effective_radius(req),
                 ),
                 config=RankConfig(fusion_mode=fusion_mode)
                 if fusion_mode != "rrf"
@@ -493,6 +486,7 @@ class SearchManager:
         if req.method == SearchMethod.AGENTIC:
             return await search_agent_cases_agentic(
                 req.query,
+                radius=effective_radius(req),
                 where=where,
                 case_recaller=self._case,
                 embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
@@ -526,7 +520,6 @@ class SearchManager:
                     sparse_candidates=sparse,
                     dense_candidates=dense,
                     top_k=top_k,
-                    radius=_effective_radius(req),
                 ),
                 config=RankConfig(fusion_mode=fusion_mode)
                 if fusion_mode != "rrf"
@@ -555,6 +548,7 @@ class SearchManager:
         if req.method == SearchMethod.AGENTIC:
             return await search_agent_skills_agentic(
                 req.query,
+                radius=effective_radius(req),
                 where=where,
                 skill_recaller=self._skill,
                 embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
@@ -600,7 +594,6 @@ class SearchManager:
                         sparse_candidates=sparse,
                         dense_candidates=dense,
                         top_k=top_k,
-                        radius=_effective_radius(req),
                     ),
                     config=DEFAULT_RANK_CONFIG,
                     llm=self._llm,
@@ -654,7 +647,7 @@ class SearchManager:
             cands = await recaller.dense_recall(
                 vector, where, limit=self._recall_limit(req.top_k, cap=cap)
             )
-            return self._apply_radius(cands, _effective_radius(req))
+            return apply_radius(cands, effective_radius(req))
 
     async def _recall_sparse_dense(
         self,
@@ -686,7 +679,7 @@ class SearchManager:
                 if vector
                 else _empty_candidates(),
             )
-            dense = self._apply_radius(dense, _effective_radius(req))
+            dense = apply_radius(dense, effective_radius(req))
             return sparse, dense, vector
 
     async def _maxsim_atomic_recall(
@@ -727,7 +720,7 @@ class SearchManager:
                 Candidate(id=c.id, score=s, source="vector", metadata=c.metadata)
             )
         rescored.sort(key=lambda c: c.score, reverse=True)
-        return self._apply_radius(rescored, _effective_radius(req))
+        return apply_radius(rescored, effective_radius(req))
 
     async def _case_bridged_skills(
         self,
@@ -819,12 +812,6 @@ class SearchManager:
         return max(
             top_k_request * _DEFAULT_RECALL_MULTIPLIER, _DEFAULT_RECALL_MULTIPLIER
         )
-
-    @staticmethod
-    def _apply_radius(cands: list[Candidate], radius: float | None) -> list[Candidate]:
-        if radius is None:
-            return cands
-        return [c for c in cands if c.score >= radius]
 
     # ── Component guards ────────────────────────────────────────────
 
@@ -982,26 +969,6 @@ def _effective_llm_rerank(req: SearchRequest) -> bool:
     (via ``rerank_fn``) and intentionally skips Phase-5.
     """
     return req.method == SearchMethod.HYBRID and req.enable_llm_rerank
-
-
-def _effective_radius(req: SearchRequest) -> float | None:
-    """Resolve the cosine-similarity threshold actually applied to dense hits.
-
-    Priority:
-
-    1. Caller-supplied ``req.radius`` always wins (including ``0.0`` when
-       they explicitly want everything).
-    2. Otherwise, ``top_k == -1`` (unlimited) defaults to
-       ``_DEFAULT_UNLIMITED_RADIUS`` so the response keeps a quality
-       floor — matches enterprise's auto-default behaviour.
-    3. Otherwise (normal ``top_k > 0`` mode), return ``None`` and trust
-       truncation to handle tail quality.
-    """
-    if req.radius is not None:
-        return req.radius
-    if req.top_k == -1:
-        return _DEFAULT_UNLIMITED_RADIUS
-    return None
 
 
 async def _empty_candidates() -> list[Candidate]:

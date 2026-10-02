@@ -3708,7 +3708,8 @@
                 "type": "null"
               }
             ],
-            "title": "Radius"
+            "title": "Radius",
+            "description": "Inclusive dense cosine-similarity floor, applied before fusion in vector, hybrid, agentic, and llm_multiround, independently for each sub-query and before user agentic MaxSim pooling. Omitted or null uses 0.5 when top_k=-1, and no floor when top_k>0. Explicit 0 keeps every recalled dense hit, including zero scores (recallers clamp cosine scores to [0, 1]); recall-pool and top_k limits still apply. Does not filter keyword matches, profiles, cluster expansions, linkage candidates, or final fused scores. Ignored by keyword search."
           },
           "min_score": {
             "anyOf": [
