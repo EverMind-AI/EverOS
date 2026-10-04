@@ -4,8 +4,8 @@ DTOs follow the v1 API brief (01_v1_api_brief.md §2 / §3). Routes are
 thin adapters: validate the DTO, dump to dict, hand to service. No
 business logic lives here.
 
-``/flush`` is OSS-only (the cloud edition decides boundary timing
-server-side and does not expose this endpoint).
+``/flush`` force-closes a session's open buffer tail. The cloud edition
+exposes the same endpoint.
 """
 
 from __future__ import annotations
@@ -203,11 +203,7 @@ async def flush_memory(
     req: Annotated[MemorizeFlushRequest, ...],
     request: Request,
 ) -> SuccessEnvelope[FlushResponseData]:
-    """Force boundary detection over the current ``session_id`` buffer.
-
-    [OSS-only] — cloud edition decides boundary timing server-side and
-    does not expose this endpoint.
-    """
+    """Force boundary detection over the current ``session_id`` buffer."""
     request_id = extract_request_id(request)
     result = await memorize(
         {
