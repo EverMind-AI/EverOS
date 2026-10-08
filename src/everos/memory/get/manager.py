@@ -92,6 +92,7 @@ class GetManager:
                     episodes=items,
                     total_count=total,
                     count=len(items),
+                    effective_sort=req.sort_by,
                 )
             case GetMemoryType.PROFILE:
                 profiles = await self._fetch_profile(req.owner_id)
@@ -99,6 +100,7 @@ class GetManager:
                     profiles=profiles,
                     total_count=len(profiles),
                     count=len(profiles),
+                    effective_sort=req.sort_by,
                 )
             case GetMemoryType.AGENT_CASE:
                 rows, total = await self._case.find_where_paginated(
@@ -113,15 +115,33 @@ class GetManager:
                     agent_cases=items,
                     total_count=total,
                     count=len(items),
+                    effective_sort=req.sort_by,
                 )
             case GetMemoryType.AGENT_SKILL:
-                # AgentSkill has no ``timestamp`` column. Silently
-                # downgrade ``sort_by`` to ``updated_at`` (from
+                # AgentSkill has no ``timestamp`` column. Downgrade
+                # ``sort_by`` to ``updated_at`` (from
                 # :class:`BaseLanceTable`) so the caller cannot
-                # accidentally trigger a schema error.
+                # trigger a PyArrow ``KeyError`` in
+                # ``arrow_tbl.sort_by([(sort_by, order)])``. The
+                # original request is preserved in
+                # :attr:`GetData.effective_sort` and a structured
+                # warning is emitted when the override fires so the
+                # loss is observable in logs / metrics (callers diff
+                # ``effective_sort`` against ``request.sort_by`` to
+                # detect the change).
+                effective_sort = "updated_at"
+                if req.sort_by != "updated_at":
+                    logger.warning(
+                        "get.sort_by.downgraded",
+                        memory_type=req.memory_type.value,
+                        requested_sort_by=req.sort_by,
+                        effective_sort_by=effective_sort,
+                        owner_id=req.owner_id,
+                        request_id=request_id,
+                    )
                 rows, total = await self._skill.find_where_paginated(
                     where,
-                    sort_by="updated_at",
+                    sort_by=effective_sort,
                     descending=descending,
                     page=req.page,
                     page_size=req.page_size,
@@ -131,6 +151,7 @@ class GetManager:
                     agent_skills=items,
                     total_count=total,
                     count=len(items),
+                    effective_sort=effective_sort,
                 )
 
         return GetResponse(request_id=request_id, data=data)
