@@ -23,6 +23,7 @@ class AgentCase(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "agent_case"
     BM25_FIELDS: ClassVar[list[str]] = ["task_intent_tokens", "approach_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     """PK = ``<owner_id>_<entry_id>``."""

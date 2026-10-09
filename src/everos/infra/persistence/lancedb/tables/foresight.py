@@ -23,6 +23,7 @@ class Foresight(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "foresight"
     BM25_FIELDS: ClassVar[list[str]] = ["foresight_tokens", "evidence_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     """PK = ``<owner_id>_<entry_id>``."""

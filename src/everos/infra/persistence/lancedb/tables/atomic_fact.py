@@ -22,6 +22,7 @@ class AtomicFact(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "atomic_fact"
     BM25_FIELDS: ClassVar[list[str]] = ["fact_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     """PK = ``<owner_id>_<entry_id>``."""

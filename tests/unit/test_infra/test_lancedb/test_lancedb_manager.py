@@ -7,6 +7,7 @@ are idempotent and rebuild after dispose.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from lancedb.pydantic import Vector
@@ -17,6 +18,8 @@ from everos.infra.persistence.lancedb import lancedb_manager
 
 class _DemoVec(BaseLanceTable):
     """Demo schema — only used by this test module."""
+
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
 
     text: str
     vector: Vector(3)  # type: ignore[valid-type]

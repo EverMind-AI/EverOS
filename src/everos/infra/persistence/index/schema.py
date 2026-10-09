@@ -33,7 +33,6 @@ class IndexField:
     name: str
     kind: IndexFieldKind
     nullable: bool = False
-    primary: bool = False
     max_length: int | None = None
     max_capacity: int | None = None
     dimension: int | None = None
@@ -45,6 +44,9 @@ class IndexSchema:
     model: type[Any]
     fields: tuple[IndexField, ...]
     bm25_fields: tuple[str, ...]
+    primary_key: tuple[str, ...]
+    """Columns that together identify one row — the write key on every
+    backend (declared on the model as ``PRIMARY_KEY``)."""
 
     def field(self, name: str) -> IndexField:
         for field in self.fields:
@@ -70,18 +72,24 @@ def schema_for(model: type[Any]) -> IndexSchema:
     """Build and validate the portable logical schema for ``model``."""
     table_name = _class_var(model, "TABLE_NAME")
     bm25_fields = tuple(_class_var(model, "BM25_FIELDS"))
+    primary_key = tuple(_class_var(model, "PRIMARY_KEY"))
     fields = tuple(
         _normalize_field(name, model_field.annotation)
         for name, model_field in model.model_fields.items()
     )
     declared = {field.name for field in fields}
-    unknown_bm25 = set(bm25_fields) - declared
-    if unknown_bm25:
+    for label, names in (("BM25", bm25_fields), ("primary-key", primary_key)):
+        unknown = set(names) - declared
+        if unknown:
+            raise ValueError(
+                f"derived-index schema {table_name!r} has unknown {label} fields: "
+                f"{sorted(unknown)}"
+            )
+    if not primary_key:
         raise ValueError(
-            f"derived-index schema {table_name!r} has unknown BM25 fields: "
-            f"{sorted(unknown_bm25)}"
+            f"derived-index schema {table_name!r} has an empty PRIMARY_KEY"
         )
-    return IndexSchema(table_name, model, fields, bm25_fields)
+    return IndexSchema(table_name, model, fields, bm25_fields, primary_key)
 
 
 def _normalize_field(name: str, annotation: Any) -> IndexField:
@@ -132,7 +140,6 @@ def _normalize_field(name: str, annotation: Any) -> IndexField:
         name=name,
         kind=kind,
         nullable=optional,
-        primary=name == "id",
         max_length=max_length,
         max_capacity=max_capacity,
         dimension=dimension,

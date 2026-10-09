@@ -25,6 +25,7 @@ _DIM = 8
 
 
 class _VecSpec(BaseLanceTable):
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
     TABLE_NAME: ClassVar[str] = "vec_probe"
     BM25_FIELDS: ClassVar[list[str]] = ["body"]
 

@@ -45,6 +45,8 @@ from everos.core.persistence.lancedb import BaseLanceTable
 class _FtsSpec(BaseLanceTable):
     """Minimal schema with one BM25-indexed column for FTS-layer probes."""
 
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+
     TABLE_NAME: ClassVar[str] = "fts_probe"
     BM25_FIELDS: ClassVar[list[str]] = ["body"]
 

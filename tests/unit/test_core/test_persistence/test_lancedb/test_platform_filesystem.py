@@ -37,6 +37,7 @@ from everos.core.persistence.lancedb.repository import (
 
 
 class _Probe(BaseLanceTable):
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
     TABLE_NAME: ClassVar[str] = "_probe"
 
     id: str

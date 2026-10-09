@@ -22,6 +22,7 @@ class AgentSkill(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "agent_skill"
     BM25_FIELDS: ClassVar[list[str]] = ["description_tokens", "content_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     """PK = ``<owner_id>_<skill_name>``."""

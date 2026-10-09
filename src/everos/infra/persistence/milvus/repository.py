@@ -780,10 +780,10 @@ class MilvusRepoBase[T: BaseModel]:
                 _PhysicalField(
                     name=field.name,
                     datatype=DataType.VARCHAR,
-                    is_primary=field.primary,
+                    is_primary=field.name == "id",
                     # A BM25 input is written as "" rather than null so the
                     # analyzer always has something to tokenize.
-                    nullable=field.nullable and not field.primary and not is_bm25,
+                    nullable=field.nullable and field.name != "id" and not is_bm25,
                     max_length=field.max_length,
                     enable_analyzer=is_bm25,
                 )

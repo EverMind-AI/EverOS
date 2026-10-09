@@ -20,6 +20,7 @@ _SPILL = (
 
 
 class _Note(BaseLanceTable):
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
     TABLE_NAME: ClassVar[str] = "_note"
     id: str
 

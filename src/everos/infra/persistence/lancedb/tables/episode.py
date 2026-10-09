@@ -24,6 +24,7 @@ class Episode(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "episode"
     BM25_FIELDS: ClassVar[list[str]] = ["episode_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     """PK = ``<owner_id>_<entry_id>`` (scalar PK)."""

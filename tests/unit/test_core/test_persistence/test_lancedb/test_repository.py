@@ -41,6 +41,8 @@ from everos.core.persistence.lancedb import (
 class _Note(BaseLanceTable):
     """Minimal daily-log-shaped table for chassis tests."""
 
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+
     TABLE_NAME: ClassVar[str] = "_note"
 
     id: str
@@ -58,6 +60,8 @@ class _Note(BaseLanceTable):
 
 class _SearchNote(BaseLanceTable):
     """Schema with BM25_FIELDS declared — exercises FTS index setup."""
+
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
 
     TABLE_NAME: ClassVar[str] = "_search_note"
     BM25_FIELDS: ClassVar[list[str]] = ["tokens"]
@@ -622,6 +626,7 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
 
     class _OtherNote(BaseLanceTable):
+        PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
         TABLE_NAME: ClassVar[str] = "_other_note"
         id: str
         owner_id: str
