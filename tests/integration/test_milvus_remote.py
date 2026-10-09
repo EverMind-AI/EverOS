@@ -422,7 +422,7 @@ async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
     )
 
     stored = await episode_repo.find_one_where(
-        primary_key("default", "default", "u1_vec_update")
+        primary_key("test_app", "test_project", "u1_vec_update")
     )
     assert stored is not None
     assert stored.deprecated_by == "u1_replacement"
@@ -462,7 +462,7 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
     await episode_repo.upsert([row])
 
     stored = await episode_repo.find_one_where(
-        primary_key("default", "default", "u1_pre2001")
+        primary_key("test_app", "test_project", "u1_pre2001")
     )
     assert stored is not None
     assert stored.timestamp == old

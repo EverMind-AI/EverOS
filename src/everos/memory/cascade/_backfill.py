@@ -638,7 +638,7 @@ async def _backfill_table(
         # round-1 wall-clock invariant; one-sided batches skip the
         # gather to avoid a wasted ``embed_batch({})`` round-trip.
         primary_vectors: list[list[float] | None]
-        subject_vectors: dict[str, list[float]]
+        subject_vectors: dict[tuple[str, str, str], list[float]]
         if primary_rows and subject_rows:
             primary_vectors, subject_vectors = await asyncio.gather(
                 _embed_primary_batch(provider, primary_rows, backlog.table_name),
@@ -735,7 +735,7 @@ async def _backfill_table(
                     table=backlog.table_name,
                     row_id=row.id,
                     missing_side=(
-                        "primary" if row.id not in primary_map else "subject"
+                        "primary" if row.key not in primary_map else "subject"
                     ),
                 )
                 continue
