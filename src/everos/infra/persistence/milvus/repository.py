@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -46,10 +46,43 @@ expects the engine to clamp. Clamping here keeps that expectation true on
 both backends instead of making every caller learn one engine's limit."""
 _SPARSE_SUFFIX = "__sparse"
 _PRESENT_SUFFIX = "__present"
+_PK_FIELD = "__pk"
+_PK_SEPARATOR = "/"
+_PK_MAX_LENGTH = 65_535
+"""Milvus has one scalar primary key per collection, so the declared
+PRIMARY_KEY columns are joined into the private ``__pk`` column. No key
+column can contain the separator: app_id / project_id / owner_id / skill
+name are directory segments on disk and entry_id is ``<prefix>_<date>_<seq>``;
+``_compose_pk`` rejects a value that does."""
 
 
 class MilvusValueLimitError(ValueError):
     """A row exceeds a documented Milvus VARCHAR, array, or vector limit."""
+
+
+def _compose_pk(schema: IndexSchema, row: Mapping[str, Any]) -> str:
+    """Join the row's PRIMARY_KEY values into the ``__pk`` scalar.
+
+    Milvus keys a collection on exactly one field, so the declared key
+    columns are concatenated in declaration order. Rejects a component
+    containing the separator (the join would stop being injective) and a
+    result over the VARCHAR limit (``_validate_raw_record`` only covers
+    logical fields, not this physical one).
+    """
+    parts = [str(row[column]) for column in schema.primary_key]
+    for column, part in zip(schema.primary_key, parts, strict=True):
+        if _PK_SEPARATOR in part:
+            raise MilvusValueLimitError(
+                f"{schema.table_name}.{column} contains {_PK_SEPARATOR!r}: {part!r}"
+            )
+    pk = _PK_SEPARATOR.join(parts)
+    size = len(pk.encode("utf-8"))
+    if size > _PK_MAX_LENGTH:
+        raise MilvusValueLimitError(
+            f"{schema.table_name}.{_PK_FIELD} is {size} UTF-8 bytes; "
+            f"Milvus limit is {_PK_MAX_LENGTH}"
+        )
+    return pk
 
 
 @dataclass(frozen=True)
@@ -434,6 +467,7 @@ class MilvusRepoBase[T: BaseModel]:
                 merged = dict(row)
                 for key, value in updates.items():
                     self._write_field_value(merged, key, value)
+                merged[_PK_FIELD] = _compose_pk(self.index_schema, merged)
                 self._validate_raw_record(merged)
                 patched.append(merged)
             await _run(client.upsert, self.collection_name, patched)
@@ -468,18 +502,8 @@ class MilvusRepoBase[T: BaseModel]:
         return int(rows[0].get("count(*)", 0)) if rows else 0
 
     async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
-        if id_field != "id":
-            rows = await self.find_where(eq(id_field, id_value), limit=1)
-            return rows[0] if rows else None
-        await self.ensure_collection()
-        client = await get_client()
-        rows = await _run(
-            client.get,
-            self.collection_name,
-            ids=[id_value],
-            output_fields=self._output_fields(include_vectors=True),
-        )
-        return self._model_from_milvus(rows[0]) if rows else None
+        rows = await self.find_where(eq(id_field, id_value), limit=1)
+        return rows[0] if rows else None
 
     async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
         rows = await self._query_raw(where, limit=limit, include_vectors=True)
@@ -742,7 +766,14 @@ class MilvusRepoBase[T: BaseModel]:
 
     def _physical_fields(self) -> tuple[_PhysicalField, ...]:
         """Every Milvus column this table declares, in creation order."""
-        out: list[_PhysicalField] = []
+        out: list[_PhysicalField] = [
+            _PhysicalField(
+                name=_PK_FIELD,
+                datatype=DataType.VARCHAR,
+                is_primary=True,
+                max_length=_PK_MAX_LENGTH,
+            )
+        ]
         for field in self.index_schema.fields:
             out.extend(self._physical_for(field))
         if not self.index_schema.vector_fields:
@@ -769,10 +800,9 @@ class MilvusRepoBase[T: BaseModel]:
                 _PhysicalField(
                     name=field.name,
                     datatype=DataType.VARCHAR,
-                    is_primary=field.name == "id",
                     # A BM25 input is written as "" rather than null so the
                     # analyzer always has something to tokenize.
-                    nullable=field.nullable and field.name != "id" and not is_bm25,
+                    nullable=field.nullable and not is_bm25,
                     max_length=field.max_length,
                     enable_analyzer=is_bm25,
                 )
@@ -871,6 +901,7 @@ class MilvusRepoBase[T: BaseModel]:
                 out[field.name] = value
         if not self.index_schema.vector_fields:
             out[_DUMMY_VECTOR_FIELD] = [0.0] * _DUMMY_VECTOR_DIMENSION
+        out[_PK_FIELD] = _compose_pk(self.index_schema, out)
         self._validate_raw_record(out)
         return out
 

@@ -15,7 +15,7 @@ from everos.infra.persistence.lancedb import (
     KnowledgeTopic,
     UserProfile,
 )
-from everos.infra.persistence.predicate import all_of, eq, gt, is_null
+from everos.infra.persistence.predicate import all_of, eq, gt, is_null, primary_key
 
 from .repository import MilvusRepoBase
 
@@ -122,7 +122,13 @@ class _AgentSkillRepo(MilvusRepoBase[AgentSkill]):
         out: list[AgentSkill] = []
         for row in rows:
             rid = row.get("id")
-            if isinstance(rid, str) and (item := await self.get_by_id(rid)) is not None:
+            if not isinstance(rid, str):
+                continue
+            # `id` repeats across (app_id, project_id) spaces: hydrate by the full key.
+            item = await self.find_one_where(
+                primary_key(str(row["app_id"]), str(row["project_id"]), rid)
+            )
+            if item is not None:
                 out.append(item)
         return out
 

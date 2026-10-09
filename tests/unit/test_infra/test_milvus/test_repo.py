@@ -308,7 +308,7 @@ async def test_verify_rejects_primary_and_nullable_drift(
     milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
     response = _describe_response(milvus_repo)
     for field in response["fields"]:
-        if field["name"] == "id":
+        if field["name"] == "__pk":
             field.pop("is_primary", None)
         if field["name"] == "deprecated_by":
             field.pop("nullable", None)
@@ -316,7 +316,7 @@ async def test_verify_rejects_primary_and_nullable_drift(
 
     with pytest.raises(MilvusSchemaMismatchError) as excinfo:
         await milvus_repo.verify_collection()
-    assert "id: is_primary" in str(excinfo.value)
+    assert "__pk: is_primary" in str(excinfo.value)
     assert "deprecated_by: nullable" in str(excinfo.value)
 
 
@@ -513,9 +513,10 @@ async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
 # Only a run against a real Milvus can prove the declaration matches what the
 # server actually stores; see tests/integration/test_milvus_remote.py.
 _EPISODE_PHYSICAL = (
+    ("__pk", DataType.VARCHAR, "is_primary", 65535),
     ("created_at_ms", DataType.INT64),
     ("updated_at_ms", DataType.INT64),
-    ("id", DataType.VARCHAR, "is_primary", 512),
+    ("id", DataType.VARCHAR, "", 512),
     ("entry_id", DataType.VARCHAR, "", 65535),
     ("owner_id", DataType.VARCHAR, "", 65535),
     ("owner_type", DataType.VARCHAR, "", 65535),
@@ -580,7 +581,8 @@ def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     assert not [
         f for f in actual.values() if f.datatype is DataType.SPARSE_FLOAT_VECTOR
     ]
-    assert actual["id"].is_primary is True
+    assert actual["__pk"].is_primary is True
+    assert actual["id"].is_primary is False
     assert actual["summary"].nullable is False
 
 

@@ -512,3 +512,93 @@ async def test_verify_accepts_collection_schema_functions_and_indexes() -> None:
     await episode_repo.delete_by_md_path(
         "test_app/test_project/users/u1/episodes/day.md"
     )
+
+
+async def test_cross_project_rows_share_an_id() -> None:
+    """A12 / A1 on Milvus: the same ``id`` in two projects is two rows."""
+    from everos.infra.persistence.index import episode_repo, eq, primary_key
+
+    now = dt.datetime(2026, 9, 14, 10, 0, tzinfo=dt.UTC)
+    alpha = _episode(
+        row_id="u1_ep_1",
+        entry_id="ep_1",
+        session_id="s",
+        text="rust",
+        vector_axis=1,
+        subject_axis=2,
+        timestamp=now,
+    )
+    beta = alpha.model_copy(
+        update={
+            "project_id": "beta",
+            "episode": "go",
+            "md_path": "test_app/beta/users/u1/episodes/day.md",
+        }
+    )
+    await episode_repo.upsert([alpha])
+    await episode_repo.upsert([beta])
+    assert await episode_repo.count_where(eq("owner_id", "u1")) == 2
+    got_alpha = await episode_repo.find_one_where(
+        primary_key("test_app", "test_project", "u1_ep_1")
+    )
+    got_beta = await episode_repo.find_one_where(
+        primary_key("test_app", "beta", "u1_ep_1")
+    )
+    assert got_alpha is not None and got_alpha.episode == "rust"
+    assert got_beta is not None and got_beta.episode == "go"
+    # same key again is an update, not a third row
+    await episode_repo.upsert([beta.model_copy(update={"episode": "go v2"})])
+    assert await episode_repo.count_where(eq("owner_id", "u1")) == 2
+
+
+async def test_find_topk_relevant_in_cluster_hydrates_own_scope() -> None:
+    """A24: the by-id hydration after dense search stays inside the caller's space."""
+    from everos.infra.persistence.index import (
+        AgentSkill,
+        agent_skill_repo,
+        eq,
+        primary_key,
+    )
+
+    def skill(project: str, description: str) -> AgentSkill:
+        vector = [0.0] * 1024
+        vector[3] = 1.0
+        return AgentSkill(
+            id="agent_run_the_linter",
+            owner_id="agent",
+            owner_type="agent",
+            app_id="test_app",
+            project_id=project,
+            name="run_the_linter",
+            description=description,
+            description_tokens=description,
+            content=description,
+            content_tokens=description,
+            confidence=0.9,
+            maturity_score=1.0,
+            source_case_ids=[],
+            cluster_id="cl_1",
+            md_path=(
+                f"test_app/{project}/agents/agent/skills/skill_run_the_linter/SKILL.md"
+            ),
+            content_sha256=project,
+            vector=vector,
+        )
+
+    repo = agent_skill_repo._repo()  # type: ignore[attr-defined]
+    await repo.ensure_collection()
+    await agent_skill_repo.upsert(
+        [skill("alpha", "alpha flavour"), skill("beta", "beta flavour")]
+    )
+    assert await agent_skill_repo.count_where(eq("owner_id", "agent")) == 2
+    query = [0.0] * 1024
+    query[3] = 1.0
+    hits = await repo.find_topk_relevant_in_cluster(
+        owner_id="agent", cluster_id="cl_1", query_vector=query, top_k=5
+    )
+    assert {h.project_id for h in hits} == {"alpha", "beta"}
+    for hit in hits:
+        same = await agent_skill_repo.find_one_where(
+            primary_key("test_app", hit.project_id, hit.id)
+        )
+        assert same is not None and same.description == hit.description
