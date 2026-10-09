@@ -30,7 +30,6 @@ Note:
 from __future__ import annotations
 
 import datetime as dt
-from typing import ClassVar
 
 import pyarrow as pa
 from lancedb import AsyncTable
@@ -39,6 +38,8 @@ from lancedb.pydantic import LanceModel
 from pydantic import Field
 
 from everos.component.utils.datetime import get_utc_now
+
+from ..index_record import IndexRecordMeta
 
 VECTOR_INDEX_ROWS_PER_PARTITION = 4096
 """IVF partition size at build time. Pinned so :data:`VECTOR_QUERY_NPROBES`
@@ -57,34 +58,14 @@ are skipped and recall degrades gradually. Every ``nearest_to`` in the tree sets
 it, so the index and the query agree on what "exact" costs."""
 
 
-class BaseLanceTable(LanceModel):
-    """Pydantic / LanceDB base with ``created_at`` / ``updated_at`` and
-    schema-level LanceDB metadata (``TABLE_NAME`` / ``BM25_FIELDS``).
+class BaseLanceTable(IndexRecordMeta, LanceModel):
+    """LanceDB mechanics only: Arrow schema, FTS / vector index upkeep.
 
-    The schema is the single source of truth for everything LanceDB
-    needs to materialise the table: column shape, table name, vector
-    dim (declared per-subclass), and which columns carry an FTS index.
-    Repos read these ClassVars; they do not duplicate them.
+    The declarations every backend reads (``TABLE_NAME`` / ``BM25_FIELDS`` /
+    ``PRIMARY_KEY``) live on :class:`IndexRecordMeta`; this class adds the
+    ``created_at`` / ``updated_at`` columns and the LanceDB-specific
+    materialisation. Repos read the ClassVars; they do not duplicate them.
     """
-
-    TABLE_NAME: ClassVar[str] = ""
-    """LanceDB table name. Business schemas must override (e.g.
-    ``"episode"``). Left empty on chassis / test schemas that construct
-    their table inline."""
-
-    BM25_FIELDS: ClassVar[list[str]] = []
-    """Columns to build LanceDB FTS (BM25) indexes on.
-
-    Each declared column must already exist as a ``str`` (or
-    ``str | None``) field on the schema. Tokens are assumed to be
-    **app-layer pre-tokenised** (space-joined); the FTS index uses
-    ``base_tokenizer="whitespace"`` so segmentation is owned by the
-    app layer (:class:`JiebaTokenizer`). The same boundary owns stop-
-    word filtering (English + Chinese); FTS-side ``remove_stop_words``
-    is OFF. FTS *does* keep lightweight English-aware normalisation
-    (``lower_case`` / ``stem`` / ``ascii_folding``) as a belt-and-
-    braces layer on the same English tokens that survive jieba.
-    See :meth:`ensure_fts_indexes` below for the exact knobs."""
 
     created_at: dt.datetime = Field(default_factory=get_utc_now)
     updated_at: dt.datetime = Field(default_factory=get_utc_now)
