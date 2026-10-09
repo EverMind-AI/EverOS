@@ -6,8 +6,8 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceRepoBase
 
+from ...records.user_profile import UserProfile
 from ..lancedb_manager import get_table
-from ..tables.user_profile import UserProfile
 
 
 class _UserProfileRepo(LanceRepoBase[UserProfile]):

@@ -30,9 +30,14 @@ import datetime as dt
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
-# Importing ``tables`` registers every business :class:`BaseLanceTable`
-# schema so callers can rely on the package alone to surface every schema.
-from . import tables as tables
+from ..records import AgentCase as AgentCase
+from ..records import AgentSkill as AgentSkill
+from ..records import AtomicFact as AtomicFact
+from ..records import Episode as Episode
+from ..records import Foresight as Foresight
+from ..records import KnowledgeTopic as KnowledgeTopic
+from ..records import ParentType as ParentType
+from ..records import UserProfile as UserProfile
 from .lancedb_manager import dispose_connection as dispose_connection
 from .lancedb_manager import drop_tables as _drop_tables
 from .lancedb_manager import get_connection as get_connection
@@ -44,14 +49,6 @@ from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
 from .repos import knowledge_topic_repo as knowledge_topic_repo
 from .repos import user_profile_repo as user_profile_repo
-from .tables import AgentCase as AgentCase
-from .tables import AgentSkill as AgentSkill
-from .tables import AtomicFact as AtomicFact
-from .tables import Episode as Episode
-from .tables import Foresight as Foresight
-from .tables import KnowledgeTopic as KnowledgeTopic
-from .tables import ParentType as ParentType
-from .tables import UserProfile as UserProfile
 
 _BUSINESS_SCHEMAS = (
     Episode,

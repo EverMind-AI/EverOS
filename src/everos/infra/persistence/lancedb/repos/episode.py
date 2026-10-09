@@ -11,8 +11,8 @@ from lancedb import AsyncTable
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase
 from everos.core.persistence.lancedb.repository import _q
 
+from ...records.episode import Episode
 from ..lancedb_manager import get_table
-from ..tables.episode import Episode
 
 
 class _EpisodeRepo(LanceDailyLogRepoBase[Episode]):

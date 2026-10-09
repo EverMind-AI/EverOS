@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from everos.infra.persistence.lancedb.tables import (
+from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
     AtomicFact,
@@ -73,12 +73,12 @@ def test_knowledge_topic_vector_nullable():
 
 def test_dim_unchanged():
     """_DIM stays at 1024 across all table modules — only nullability moves."""
-    from everos.infra.persistence.lancedb.tables import agent_case as m1
-    from everos.infra.persistence.lancedb.tables import agent_skill as m2
-    from everos.infra.persistence.lancedb.tables import atomic_fact as m3
-    from everos.infra.persistence.lancedb.tables import episode as m4
-    from everos.infra.persistence.lancedb.tables import foresight as m5
-    from everos.infra.persistence.lancedb.tables import knowledge_topic as m6
+    from everos.infra.persistence.records import agent_case as m1
+    from everos.infra.persistence.records import agent_skill as m2
+    from everos.infra.persistence.records import atomic_fact as m3
+    from everos.infra.persistence.records import episode as m4
+    from everos.infra.persistence.records import foresight as m5
+    from everos.infra.persistence.records import knowledge_topic as m6
 
     for module in (m1, m2, m3, m4, m5, m6):
         assert module._DIM == 1024

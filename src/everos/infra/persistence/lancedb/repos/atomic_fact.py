@@ -6,8 +6,8 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase
 
+from ...records.atomic_fact import AtomicFact
 from ..lancedb_manager import get_table
-from ..tables.atomic_fact import AtomicFact
 
 
 class _AtomicFactRepo(LanceDailyLogRepoBase[AtomicFact]):

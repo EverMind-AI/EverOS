@@ -266,6 +266,7 @@ forbidden_modules = [
     "everos.infra.persistence.lancedb.**",
     "everos.infra.persistence.sqlite.**",
     "everos.infra.persistence.index.**",
+    "everos.infra.persistence.records.**",
     "everos.infra.persistence.milvus.**",
     "everos.infra.persistence.backends.**",
 ]
@@ -288,7 +289,7 @@ ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
-    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.tables",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",

@@ -6,8 +6,8 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase
 
+from ...records.foresight import Foresight
 from ..lancedb_manager import get_table
-from ..tables.foresight import Foresight
 
 
 class _ForesightRepo(LanceDailyLogRepoBase[Foresight]):

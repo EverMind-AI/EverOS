@@ -6,8 +6,8 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceRepoBase
 
+from ...records.knowledge_topic import KnowledgeTopic
 from ..lancedb_manager import get_table
-from ..tables.knowledge_topic import KnowledgeTopic
 
 
 class _KnowledgeTopicRepo(LanceRepoBase[KnowledgeTopic]):

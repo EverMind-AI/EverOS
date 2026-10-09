@@ -211,9 +211,9 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
 
     from everos.core.persistence import MemoryRoot
     from everos.infra.persistence.lancedb import get_table
-    from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
-    from everos.infra.persistence.lancedb.tables.episode import Episode
     from everos.infra.persistence.markdown import AtomicFactWriter
+    from everos.infra.persistence.records.atomic_fact import AtomicFact
+    from everos.infra.persistence.records.episode import Episode
 
     root = MemoryRoot.resolve()
     root.ensure()

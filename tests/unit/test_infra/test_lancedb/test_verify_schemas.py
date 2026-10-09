@@ -28,7 +28,7 @@ from everos.infra.persistence.lancedb import (
     lancedb_manager,
     verify_business_schemas,
 )
-from everos.infra.persistence.lancedb.tables.episode import Episode
+from everos.infra.persistence.records.episode import Episode
 
 
 @pytest.fixture(autouse=True)

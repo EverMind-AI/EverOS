@@ -1,11 +1,11 @@
-"""LanceDB table schemas (one ``BaseLanceTable`` subclass per business table).
+"""Derived-index record models (one ``BaseLanceTable`` subclass per business table).
 
 Schemas live here; cascade-daemon-driven row population is wired
 through the matching repo singletons in :mod:`..repos`.
 
 External usage::
 
-    from everos.infra.persistence.lancedb.tables import (
+    from everos.infra.persistence.records import (
         Episode,
         AtomicFact,
         Foresight,
