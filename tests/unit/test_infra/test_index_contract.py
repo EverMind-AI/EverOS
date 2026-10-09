@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import os
 import re
 import subprocess
@@ -31,6 +32,7 @@ from everos.infra.persistence.index import (
     drop_business_tables,
     episode_repo,
     eq,
+    primary_key,
     shutdown,
 )
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
@@ -279,3 +281,18 @@ async def test_repository_maintenance_contract_is_executable(
     await episode_repo.optimize()
     await episode_repo.prune(dt.timedelta(days=7))
     await episode_repo.rebuild_indexes()
+
+
+def test_contract_has_no_way_around_the_primary_key() -> None:
+    """The only write is a merge on the declared key: no `by`, no plain insert."""
+    assert "by" not in inspect.signature(IndexRepository.upsert).parameters
+    assert not hasattr(IndexRepository, "add")
+    for repo in ALL_REPOS:
+        assert not hasattr(repo, "add"), repo.table_name
+
+
+def test_primary_key_predicate_renders_three_equalities() -> None:
+    rendered = render_predicate(primary_key("claude-code", "alpha", "u1_ep_1"))
+    assert rendered == (
+        "((app_id = 'claude-code') AND (project_id = 'alpha') AND (id = 'u1_ep_1'))"
+    )

@@ -406,18 +406,7 @@ class MilvusRepoBase[T: BaseModel]:
                 "`everos cascade rebuild`."
             )
 
-    async def add(self, records: Sequence[T]) -> None:
-        if not records:
-            return
-        await self.ensure_collection()
-        payload = [self._to_milvus_record(record) for record in records]
-        client = await get_client()
-        async with self._write_lock(self.collection_name):
-            await _run(client.insert, self.collection_name, payload)
-
-    async def upsert(self, records: Sequence[T], *, by: str = "id") -> None:
-        if by != "id":
-            raise ValueError("MilvusRepoBase only supports upsert by id")
+    async def upsert(self, records: Sequence[T]) -> None:
         if not records:
             return
         await self.ensure_collection()

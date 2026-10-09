@@ -108,9 +108,6 @@ class LanceIndexRepository[T: BaseModel]:
     def table_name(self) -> str:
         return str(self.schema.TABLE_NAME)  # type: ignore[attr-defined]
 
-    async def add(self, records: Sequence[T]) -> None:
-        await self._repo.add(records)
-
     async def upsert(self, records: Sequence[T]) -> None:
         await self._repo.upsert(records)
 
