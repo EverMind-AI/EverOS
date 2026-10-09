@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The same owner's memories in two projects no longer overwrite each other
+  in the derived index.** Index rows were merged on `id` alone, and `id` is
+  unique only within one `(app_id, project_id)`: a user's episodes, atomic
+  facts, agent cases, foresights, skills and profile written under a second
+  project replaced the first project's rows (markdown was never affected).
+  Every table now declares `PRIMARY_KEY = ("app_id", "project_id", "id")`;
+  LanceDB merges on it and Milvus keys its collections on the composed
+  `__pk` column. Profile search and get, the handlers' change detection and
+  the vector backfill address rows by the full key.
+
 - **Changing a knowledge document's category keeps it inside `knowledge/`.**
   `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved
   the document's directory up into the project directory, where the markdown
@@ -17,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused if its target would leave `knowledge/`. A document an earlier move
   left outside is moved back on its next category change. Reported by
   White0xdi3.
+
+### Changed
+
+- **Milvus collections must be rebuilt once after upgrading.** They gain the
+  `__pk` primary-key column; the server refuses to start on an old
+  collection and names `everos cascade rebuild`, which recreates them from
+  markdown.
+- **`everos cascade sync --force-all`** re-reconciles every indexed markdown
+  file against the index. Rows a multi-project root lost to the overwrite
+  before this release come back without a full rebuild; a healthy root is a
+  no-op. A single-project root needs nothing.
+- Response `id`s are unique within `(app_id, project_id)`, not globally; the
+  shape of `id` is unchanged.
 
 ## [1.4.1] - 2026-09-24
 

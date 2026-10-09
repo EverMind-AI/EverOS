@@ -278,6 +278,9 @@ async def migrate_table_schemas() -> None:
         logger.info("table_schema_migration_done", version=_TABLE_SCHEMA_VERSION)
 
 
+# TODO(#477): BTree scalar index on `id` for the business tables — a 4x win on
+# keyed lookups at 100k rows, but it must join rebuild_indexes() and
+# `cascade rebuild` first and be soaked for index-directory growth.
 async def ensure_business_indexes() -> None:
     """Ensure FTS (BM25) indexes for every business table (idempotent).
 

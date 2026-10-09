@@ -782,6 +782,11 @@ query within this episode (already nested, no separate call needed).
 | `score` | `number` | Fused retrieval score for this episode |
 | `atomic_facts` | `array<SearchAtomicFactItem>` | Sub-facts extracted from the same episode that matched the query |
 
+> **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
+> under two projects (each project keeps its own daily files and sequence);
+> address a row globally by `(app_id, project_id, id)`. Within one response
+> ids never repeat, because a request is always scoped to one project.
+
 #### SearchAtomicFactItem
 
 A single-sentence fact pulled out of an episode during extraction.
@@ -1001,6 +1006,11 @@ sub-facts).
 | `subject` | `string` | One-line subject |
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | — |
+
+> **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
+> under two projects (each project keeps its own daily files and sequence);
+> address a row globally by `(app_id, project_id, id)`. Within one response
+> ids never repeat, because a request is always scoped to one project.
 
 #### GetProfileItem
 
