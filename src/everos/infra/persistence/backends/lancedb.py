@@ -111,8 +111,8 @@ class LanceIndexRepository[T: BaseModel]:
     async def add(self, records: Sequence[T]) -> None:
         await self._repo.add(records)
 
-    async def upsert(self, records: Sequence[T], *, by: str = "id") -> None:
-        await self._repo.upsert(records, by=by)
+    async def upsert(self, records: Sequence[T]) -> None:
+        await self._repo.upsert(records)
 
     async def count(self) -> int:
         return await self._repo.count()

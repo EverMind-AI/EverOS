@@ -60,6 +60,7 @@ from .predicate import (
     lte,
     ne,
     one_of,
+    primary_key,
 )
 from .protocols import (
     AgentSkillIndexRepository,
@@ -209,6 +210,7 @@ __all__ = [
     "lte",
     "ne",
     "one_of",
+    "primary_key",
     "repo_for_schema",
     "schema_for",
     "shutdown",

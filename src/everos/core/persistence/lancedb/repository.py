@@ -462,26 +462,30 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     # ── Upsert ─────────────────────────────────────────────────────────────
 
-    async def upsert(
-        self,
-        records: Sequence[T],
-        *,
-        by: str = "id",
-    ) -> None:
-        """Upsert records keyed by ``by`` (PK column, default ``"id"``).
+    async def upsert(self, records: Sequence[T]) -> None:
+        """Merge ``records`` into the table on ``schema.PRIMARY_KEY``.
 
-        Wraps LanceDB's ``merge_insert(on=...)`` fluent builder with the
-        equivalent of ``INSERT ... ON CONFLICT(by) DO UPDATE`` — matching
-        rows are replaced wholesale, non-matching rows inserted.
+        Invariant: every write to a business table is a merge on its
+        declared primary key. ``merge_insert(on=...)`` is the only
+        uniqueness LanceDB offers — a key match replaces the row wholesale,
+        no match inserts — so as long as this is the sole write path, two
+        rows with one key cannot come into existence. There is no ``by``
+        parameter on purpose: the key is the table's declaration, not the
+        caller's choice.
 
         Cascade uses this when reconciling md → LanceDB: an entry seen
         for the first time inserts; an entry that was edited in md
         updates its existing row.
         """
+        key = getattr(self.schema, "PRIMARY_KEY", None)
+        if not key:
+            raise ValueError(
+                f"derived-index model {self.schema.__name__} has no PRIMARY_KEY"
+            )
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
             table = await self._table()
             await (
-                table.merge_insert(by)
+                table.merge_insert(list(key))
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
                 .execute(list(records))
