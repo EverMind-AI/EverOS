@@ -44,9 +44,11 @@ registered in `cli/main.py`. The CLI is intentionally small — hot-path
 business (`/add` `/flush` `/search` `/get`) is the **HTTP API**, not the
 CLI; the CLI covers setup (`init`), running the server, and index ops
 (`cascade`). There is no `reindex` command — for an incremental
-catch-up run `everos cascade sync`; to rebuild the whole index from
-markdown (recovery from drift / corruption) run `everos cascade
-rebuild`.
+catch-up run `everos cascade sync`; to re-reconcile every indexed
+markdown file without re-embedding what is unchanged run `everos cascade
+sync --force-all`; to rebuild the whole index from markdown (recovery
+from drift / corruption, and once after upgrading a Milvus root to 1.4.2)
+run `everos cascade rebuild`.
 
 ## `everos server start`
 

@@ -40,7 +40,7 @@ entrypoints → service → memory → infra
 | memory → infra | ✅ |
 | memory → service | ❌ |
 | infra → memory | ❌ |
-| infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate) |
+| infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
 | any → component / core / config | ✅ (cross-cutting) |
 
 Enforced via `import-linter` in CI:

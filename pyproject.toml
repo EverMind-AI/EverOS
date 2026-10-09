@@ -285,6 +285,11 @@ forbidden_modules = [
 # (e.g. ``from everos.infra.persistence.sqlite.tables import X`` written
 # in ``service`` or ``entrypoints``) remain blocked — that edge is not
 # in this whitelist.
+#
+# One edge below is *not* intra-subpackage wiring: ``lancedb -> records``.
+# ``records/`` holds the table declarations every index backend reads
+# (TABLE_NAME / BM25_FIELDS / PRIMARY_KEY); it is the one shared schema
+# module inside ``persistence/`` (docs/architecture.md, dependency table).
 ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",

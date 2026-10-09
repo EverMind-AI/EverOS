@@ -117,7 +117,16 @@ external editor with no inotify) while the daemon is down:
 ```bash
 everos cascade sync                           # drain everything pending
 everos cascade sync users/u1/episodes/X.md    # re-enqueue + drain
+everos cascade sync --force-all               # re-enqueue EVERY indexed md, then drain
 ```
+
+`--force-all` re-queues every markdown file the ledger knows about (done,
+failed and pending alike) and lets the handlers reconcile each one against
+the index. A healthy root is a no-op for the embedder — unchanged entries
+are skipped by digest — so it is the recovery for an index that lost rows
+without a full rebuild: a multi-project root upgraded from a release before
+1.4.2 gets back the rows one project overwrote in another. Its summary
+line lists how many files were in each ledger state before the drain.
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
@@ -175,6 +184,12 @@ Why not a bare `rm`:
 For a remote Milvus backend, rebuild acts only on collections whose names use
 the configured `collection_prefix`. Use a unique prefix or dedicated database
 before running it on a shared Milvus Server or Zilliz Cloud deployment.
+
+Upgrading a Milvus root to 1.4.2 needs one rebuild: the collections gain the
+`__pk` primary-key column, so the first start refuses with
+`schema drift: missing=['__pk'] …` and names this command. Run it once with
+the server stopped (`--root` is an option of the `cascade` group:
+`everos cascade --root <root> rebuild --yes`).
 
 ## Recovery paths
 

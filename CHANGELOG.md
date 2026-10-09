@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every table now declares `PRIMARY_KEY = ("app_id", "project_id", "id")`;
   LanceDB merges on it and Milvus keys its collections on the composed
   `__pk` column. Profile search and get, the handlers' change detection and
-  the vector backfill address rows by the full key.
+  the vector backfill address rows by the full key; the backfill also keeps
+  each row's own vector within a batch, and reflection deprecates atomic
+  facts only inside the project it merged.
 
 - **Changing a knowledge document's category keeps it inside `knowledge/`.**
   `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved
