@@ -15,6 +15,7 @@ from everos.infra.persistence.index import (
     Foresight,
     KnowledgeTopic,
     UserProfile,
+    check_primary_keys,
 )
 from everos.infra.persistence.index.schema import schema_for
 
@@ -66,3 +67,16 @@ def test_empty_primary_key_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="empty PRIMARY_KEY"):
         schema_for(_Empty)
+
+
+def test_check_primary_keys_rejects_undeclared_schema() -> None:
+    class _Undeclared(BaseLanceTable):
+        TABLE_NAME: ClassVar[str] = "_undeclared"
+        id: str
+
+    with pytest.raises(ValueError, match="_Undeclared has no PRIMARY_KEY"):
+        check_primary_keys((_Undeclared,))
+
+
+def test_check_primary_keys_accepts_every_business_table() -> None:
+    check_primary_keys(BUSINESS_TABLES)

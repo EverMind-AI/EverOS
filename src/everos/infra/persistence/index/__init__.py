@@ -8,6 +8,7 @@ do not branch on physical storage.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from everos.config import load_settings
@@ -120,7 +121,18 @@ async def connect() -> Any:
     return await _backend().connect()
 
 
+def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
+    """Fail at startup, not at first write, when a table has no PRIMARY_KEY.
+
+    ``schema_for`` raises the same message the LanceDB write path raises, so
+    an undeclared table is caught by whichever runs first, on either backend.
+    """
+    for schema in schemas:
+        schema_for(schema)
+
+
 async def startup() -> Any:
+    check_primary_keys(repo.schema for repo in ALL_REPOS)
     return await _backend().startup()
 
 
@@ -129,6 +141,7 @@ async def shutdown() -> None:
 
 
 async def ensure_business_indexes() -> None:
+    check_primary_keys(repo.schema for repo in ALL_REPOS)
     await _backend().ensure_business_indexes()
 
 
@@ -179,6 +192,7 @@ __all__ = [
     "all_of",
     "any_of",
     "atomic_fact_repo",
+    "check_primary_keys",
     "compare",
     "connect",
     "contains",
