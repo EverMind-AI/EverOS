@@ -260,7 +260,9 @@ class LanceRepoBase[T: BaseLanceTable]:
                    return await get_table(self.schema.TABLE_NAME, self.schema)
 
            episode_repo = _EpisodeRepo()
-           await episode_repo.add([Episode(text=..., vector=[...])])
+           # business tables are written through ``upsert`` (merge on the
+           # declared PRIMARY_KEY); ``add`` is the chassis insert primitive
+           await episode_repo.upsert([Episode(text=..., vector=[...])])
 
     The LanceDB table name lives on the schema (``BaseLanceTable.TABLE_NAME``)
     so every LanceDB-side metadatum — column shape, table name,
