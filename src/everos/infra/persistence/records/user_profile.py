@@ -29,7 +29,8 @@ class UserProfile(BaseLanceTable):
     # No BM25 columns: profile recall is KV-by-owner today.
 
     id: str
-    """PK = ``owner_id`` (one row per user)."""
+    """``owner_id`` (one row per user per ``(app_id, project_id)``) — the row
+    key is the declared ``PRIMARY_KEY``."""
 
     owner_id: str
     owner_type: str

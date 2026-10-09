@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from everos.infra.persistence.predicate import AnyOf, Comparison, IsNull, Predicate
+from everos.infra.persistence.predicate import AnyOf, IsNull, Predicate
 from everos.memory.cascade._backfill import (
     NullBackfillPresenter,
     _backfill_table,
@@ -204,10 +204,10 @@ async def test_orthogonal_partial_states_all_recover() -> None:
     # Recover per-id updates from the neutral predicate tree.
     updates_by_id: dict[str, dict[str, Any]] = {}
     for values, where in repo.updates:
-        assert isinstance(where, Comparison)
-        assert where.field == "id"
-        row_id = str(where.value)
-        updates_by_id[row_id] = values
+        # The update is addressed by the full (app_id, project_id, id) key.
+        key = {c.field: str(c.value) for c in where.children}
+        assert set(key) == {"app_id", "project_id", "id"}
+        updates_by_id[key["id"]] = values
 
     assert set(updates_by_id) == {"both", "subj_only", "prim_only"}
     assert "vector" in updates_by_id["both"]
@@ -250,3 +250,39 @@ def test_extract_row_skips_legitimate_null_subject() -> None:
     }
     out = _extract_row(raw, spec, _FakeTokenizer())
     assert out is _ROW_SKIPPED
+
+
+async def test_update_is_addressed_by_full_key() -> None:
+    """Two spaces sharing an ``id``: each update targets its own row only."""
+    repo = _RecordingRepo()
+    spec = _episode_spec(repo)
+    rows = [
+        _NullVectorRow(
+            id="shared",
+            text="alpha text",
+            subject_text=None,
+            tokens=2,
+            needs_primary=True,
+            needs_subject=False,
+            project_id="alpha",
+        ),
+        _NullVectorRow(
+            id="shared",
+            text="beta text",
+            subject_text=None,
+            tokens=2,
+            needs_primary=True,
+            needs_subject=False,
+            project_id="beta",
+        ),
+    ]
+    backlog = _TableBacklog(spec=spec, rows=rows)
+    result = await _backfill_table(
+        backlog, _AllSucceedProvider(), presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
+    assert result.rows_failed == 0
+    keys = [
+        {c.field: str(c.value) for c in where.children} for _, where in repo.updates
+    ]
+    assert sorted(k["project_id"] for k in keys) == ["alpha", "beta"]
+    assert all(k["id"] == "shared" and k["app_id"] == "default" for k in keys)

@@ -27,7 +27,7 @@ import json
 from typing import Any, ClassVar
 
 from everos.core.persistence import MarkdownReader
-from everos.infra.persistence.index import UserProfile, user_profile_repo
+from everos.infra.persistence.index import UserProfile, primary_key, user_profile_repo
 
 from ..types import HandlerOutcome
 from ._common import content_sha256 as compute_content_sha256
@@ -81,7 +81,9 @@ class UserProfileHandler(Handler):
         )
 
         row_id = owner_id
-        prior = await user_profile_repo.get_by_id(row_id)
+        prior = await user_profile_repo.find_one_where(
+            primary_key(app_id, project_id, row_id)
+        )
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(
                 md_path=md_path,

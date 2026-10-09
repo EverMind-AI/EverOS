@@ -61,10 +61,10 @@ from everos.infra.persistence.index import (
     any_of,
     atomic_fact_repo,
     episode_repo,
-    eq,
     foresight_repo,
     is_null,
     knowledge_topic_repo,
+    primary_key,
     repo_for_schema,
     schema_for,
 )
@@ -315,6 +315,8 @@ class _NullVectorRow:
     tokens: int
     needs_primary: bool = True
     needs_subject: bool = True
+    app_id: str = "default"
+    project_id: str = "default"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -431,6 +433,8 @@ def _extract_row(
         tokens=len(tokenizer.tokenize(token_source)),
         needs_primary=needs_primary,
         needs_subject=needs_subject,
+        app_id=str(raw.get("app_id", "default")),
+        project_id=str(raw.get("project_id", "default")),
     )
 
 
@@ -702,7 +706,9 @@ async def _backfill_table(
                 and row.id not in subject_vectors
             )
             try:
-                await backlog.spec.repo.update(updates, where=eq("id", row.id))
+                await backlog.spec.repo.update(
+                    updates, where=primary_key(row.app_id, row.project_id, row.id)
+                )
             except Exception:
                 result.rows_failed += 1
                 logger.warning(

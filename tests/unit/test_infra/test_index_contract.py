@@ -267,7 +267,9 @@ async def test_repository_port_crud_count_and_uncapped_scan(
         {"subject": "updated"},
         where=eq("id", rows[0].id),
     )
-    updated = await episode_repo.get_by_id(rows[0].id)
+    updated = await episode_repo.find_one_where(
+        primary_key(rows[0].app_id, rows[0].project_id, rows[0].id)
+    )
     assert updated is not None and updated.subject == "updated"
 
     await episode_repo.delete(eq("id", rows[0].id))

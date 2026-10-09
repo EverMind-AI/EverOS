@@ -13,6 +13,7 @@ columns are populated as usual — but with ``vector`` (and, for Episode,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -183,8 +184,15 @@ class _FakeSkillRepo:
         self.rows: dict = {}
         self.upserts: list = []
 
-    async def get_by_id(self, row_id: str):  # type: ignore[no-untyped-def]
-        return self.rows.get(row_id)
+    async def find_one_where(self, where: Any) -> Any | None:
+        wanted = {c.field: c.value for c in where.children}
+        row = self.rows.get(wanted["id"])
+        if row is None or (row.app_id, row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
+        return row
 
     async def upsert(self, rows) -> None:  # type: ignore[no-untyped-def]
         self.upserts.append(list(rows))

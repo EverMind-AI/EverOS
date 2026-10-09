@@ -25,7 +25,8 @@ class AgentSkill(BaseLanceTable):
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
-    """PK = ``<owner_id>_<skill_name>``."""
+    """``<owner_id>_<skill_name>``; unique within ``(app_id, project_id)`` — the
+    row key is the declared ``PRIMARY_KEY``."""
 
     owner_id: str
     """The owning ``agent_id``."""

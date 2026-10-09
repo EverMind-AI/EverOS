@@ -50,9 +50,6 @@ class RoutedIndexRepository[T: BaseModel]:
     async def count_where(self, where: Predicate | None = None) -> int:
         return await self._repo().count_where(where)
 
-    async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
-        return await self._repo().get_by_id(id_value, id_field=id_field)
-
     async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
         return await self._repo().find_where(where, limit=limit)
 

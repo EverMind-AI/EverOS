@@ -25,7 +25,8 @@ class AtomicFact(BaseLanceTable):
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
-    """PK = ``<owner_id>_<entry_id>``."""
+    """``<owner_id>_<entry_id>``; unique within ``(app_id, project_id)`` — the
+    row key is the declared ``PRIMARY_KEY``."""
 
     entry_id: str
     """md-side seq id ``af_<YYYYMMDD>_<NNNN>``."""

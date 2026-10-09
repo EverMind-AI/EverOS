@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,8 +37,15 @@ class _FakeProfileRepo:
         self.upserts: list[list[UserProfile]] = []
         self.deletes: list[str] = []
 
-    async def get_by_id(self, row_id: str) -> UserProfile | None:
-        return self.rows.get(row_id)
+    async def find_one_where(self, where: Any) -> UserProfile | None:
+        wanted = {c.field: c.value for c in where.children}
+        row = self.rows.get(wanted["id"])
+        if row is None or (row.app_id, row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
+        return row
 
     async def upsert(self, rows: list[UserProfile]) -> None:
         self.upserts.append(list(rows))
@@ -240,3 +248,36 @@ async def test_handle_deleted_drops_row(
     assert outcome.deleted == 1
     assert fake_repo.deletes == [md_path]
     assert "u_alice" not in fake_repo.rows
+
+
+async def test_second_project_same_owner_is_a_new_row(
+    memory_root: MemoryRoot, fake_repo: _FakeProfileRepo
+) -> None:
+    """Identical profile content under another project is a new row.
+
+    The digest short-circuit looks the prior up by the full key; by ``id``
+    alone it would find the other project's row, see the same digest, and
+    report ``skipped`` — the exact shape of the cross-project overwrite.
+    """
+    kwargs = dict(
+        summary="Same person, two projects.",
+        explicit_info=[{"fact": "shared"}],
+        implicit_traits=[],
+    )
+    first = await _write_profile(memory_root, "u_same", **kwargs)
+    assert (await _handler(memory_root).handle_added_or_modified(first)).upserted == 1
+
+    writer = ProfileWriter(memory_root)
+    fm = UserProfileFrontmatter(
+        id="user_profile_u_same",
+        user_id="u_same",
+        profile_timestamp_ms=1_700_000_000_000,
+        **kwargs,
+    )
+    await writer.write("u_same", frontmatter=fm, body="display text", project_id="beta")
+    second = "default_app/beta/users/u_same/user.md"
+    assert (memory_root.root / second).exists()
+
+    outcome = await _handler(memory_root).handle_added_or_modified(second)
+    assert (outcome.upserted, outcome.skipped) == (1, 0)
+    assert fake_repo.upserts[1][0].project_id == "beta"

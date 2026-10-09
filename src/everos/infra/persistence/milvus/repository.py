@@ -501,10 +501,6 @@ class MilvusRepoBase[T: BaseModel]:
         )
         return int(rows[0].get("count(*)", 0)) if rows else 0
 
-    async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
-        rows = await self.find_where(eq(id_field, id_value), limit=1)
-        return rows[0] if rows else None
-
     async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
         rows = await self._query_raw(where, limit=limit, include_vectors=True)
         return [self._model_from_milvus(row) for row in rows]

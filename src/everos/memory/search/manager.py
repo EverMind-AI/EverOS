@@ -628,7 +628,9 @@ class SearchManager:
     async def _fetch_profile(self, req: SearchRequest) -> list[SearchProfileItem]:
         if not req.include_profile or req.owner_type != "user":
             return []
-        return await self._profile.fetch(req.owner_id)
+        return await self._profile.fetch(
+            req.owner_id, app_id=req.app_id, project_id=req.project_id
+        )
 
     # ── Recall helpers ──────────────────────────────────────────────
 
