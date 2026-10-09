@@ -391,6 +391,21 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             )
             return list(rows)
 
+    async def list_all(self) -> list[MdChangeState]:
+        """Return every row regardless of status, oldest LSN first.
+
+        Drives ``cascade sync --force-all``: each row is force-enqueued so
+        the handlers re-reconcile every indexed md against the index.
+        No status filter on purpose — ``failed`` rows must come back too.
+        """
+        async with session_scope(self._factory) as s:
+            rows = (
+                (await s.execute(select(MdChangeState).order_by(MdChangeState.lsn)))
+                .scalars()
+                .all()
+            )
+            return list(rows)
+
     async def reset_retryable_to_pending(self) -> int:
         """`cascade fix --apply` engine: re-enqueue every retryable row.
 

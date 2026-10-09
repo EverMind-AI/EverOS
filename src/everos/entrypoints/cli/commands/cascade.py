@@ -33,6 +33,7 @@ import asyncio
 import contextlib
 import enum
 import os
+from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -243,6 +244,15 @@ def sync(
         bool | None,
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
+    force_all: Annotated[
+        bool,
+        typer.Option(
+            "--force-all",
+            help="Force-enqueue every indexed md before draining; entries whose "
+            "rows are present and unchanged are skipped by the handlers, so "
+            "only lost or edited entries get re-embedded.",
+        ),
+    ] = False,
 ) -> None:
     """Drain the cascade queue (and optionally re-enqueue a path first).
 
@@ -256,9 +266,21 @@ def sync(
     _apply_root_env(root)
     _apply_verbose_logging(verbose)
 
+    if force_all and path is not None:
+        raise typer.BadParameter("--force-all re-enqueues every md; do not pass PATH")
+
     async def _run() -> None:
         async with _runtime(exclusive=True):
             orchestrator = _build_orchestrator()
+            if force_all:
+                rows = await md_change_state_repo.list_all()
+                for row in rows:
+                    await md_change_state_repo.force_enqueue(row.md_path, row.kind)
+                by_status = Counter(row.status for row in rows)
+                typer.echo(
+                    f"force-enqueued {len(rows)} md file(s): "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
+                )
             if path is not None:
                 rel = _resolve_relative(path)
                 spec = match_kind(rel)
