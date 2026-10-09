@@ -1,7 +1,12 @@
-"""Derived-index record models (one ``BaseLanceTable`` subclass per business table).
+"""Derived-index record declarations, one model per business table.
 
-Schemas live here; cascade-daemon-driven row population is wired
-through the matching repo singletons in :mod:`..repos`.
+Every index backend reads the same ``TABLE_NAME`` / ``BM25_FIELDS`` /
+``PRIMARY_KEY`` declarations from these models (``IndexRecordMeta``). The
+models are still ``BaseLanceTable`` subclasses with LanceDB ``Vector``
+columns — decoupling them from the lancedb library is issue #476. Row
+population is driven by the cascade through the repo singletons in
+:mod:`everos.infra.persistence.lancedb.repos` and
+:mod:`everos.infra.persistence.milvus.repos`.
 
 External usage::
 

@@ -456,7 +456,16 @@ class MilvusRepoBase[T: BaseModel]:
         outside it, two concurrent updates to one row (backfill writing
         ``vector`` while reflection writes ``deprecated_by``) each overwrite
         the other's column with the value they read before it landed.
+
+        A primary-key column in ``updates`` is refused: the re-upsert would
+        land under a new ``__pk`` and leave the old row behind.
         """
+        clash = sorted(set(updates) & set(self.index_schema.primary_key))
+        if clash:
+            raise ValueError(
+                f"update() cannot change primary-key column(s) {clash} of "
+                f"{self.collection_name}; delete the row and upsert it instead"
+            )
         client = await get_client()
         async with self._write_lock(self.collection_name):
             rows = await self._scan_raw(where, include_vectors=True)

@@ -179,6 +179,29 @@ async def test_empty_candidates_returns_empty() -> None:
     assert reports == []
 
 
+async def test_deprecate_lance_facts_is_scoped_to_the_project() -> None:
+    """``parent_id`` restarts per (app, project, day), so the fact
+    deprecation must carry the scope like its episode sibling does."""
+    from everos.infra.persistence.backends.lancedb import render_predicate
+
+    atomic_fact_store = MagicMock()
+    atomic_fact_store.update = AsyncMock()
+    orch = _build_orchestrator(atomic_fact_store=atomic_fact_store)
+    n = await orch._deprecate_lance_facts(
+        parent_ids={"ep_20260601_0001"},
+        owner_id="u_alice",
+        app_id="claude-code",
+        project_id="alpha",
+        merged_entry_id="ep_20260614_0001",
+    )
+    assert n == 1
+    where = atomic_fact_store.update.await_args.kwargs["where"]
+    rendered = render_predicate(where)
+    assert "(app_id = 'claude-code')" in rendered
+    assert "(project_id = 'alpha')" in rendered
+    assert "(parent_id = 'ep_20260601_0001')" in rendered
+
+
 async def test_run_init_mode_merges_and_deprecates() -> None:
     """Full INIT flow: 2 episode members -> merge -> write -> deprecate."""
     cluster_repo = MagicMock()

@@ -125,8 +125,10 @@ async def connect() -> Any:
 def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
     """Fail at startup, not at first write, when a table has no PRIMARY_KEY.
 
-    ``schema_for`` raises the same message the LanceDB write path raises, so
-    an undeclared table is caught by whichever runs first, on either backend.
+    For an undeclared table ``schema_for`` raises the same "has no
+    PRIMARY_KEY" message the LanceDB write path raises, so it is caught by
+    whichever runs first, on either backend; the write-path check stays as
+    the last line of defence for repositories built outside this facade.
     """
     for schema in schemas:
         schema_for(schema)

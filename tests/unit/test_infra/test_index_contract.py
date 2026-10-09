@@ -289,8 +289,10 @@ def test_contract_has_no_way_around_the_primary_key() -> None:
     """The only write is a merge on the declared key: no `by`, no plain insert."""
     assert "by" not in inspect.signature(IndexRepository.upsert).parameters
     assert not hasattr(IndexRepository, "add")
+    assert not hasattr(IndexRepository, "get_by_id")
     for repo in ALL_REPOS:
         assert not hasattr(repo, "add"), repo.table_name
+        assert not hasattr(repo, "get_by_id"), repo.table_name
 
 
 def test_primary_key_predicate_renders_three_equalities() -> None:

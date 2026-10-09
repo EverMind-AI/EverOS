@@ -18,7 +18,7 @@ External usage::
         knowledge_topic_repo,
     )
 
-    await episode_repo.add([Episode(...)])
+    await episode_repo.upsert([Episode(...)])   # merged on the declared PRIMARY_KEY
 """
 
 from .agent_case import agent_case_repo as agent_case_repo

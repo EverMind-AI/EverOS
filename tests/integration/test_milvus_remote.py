@@ -113,6 +113,7 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         episode_repo,
         eq,
         is_null,
+        primary_key,
         user_profile_repo,
     )
     from everos.memory.search import FilterNode
@@ -216,7 +217,9 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         await user_profile_repo.update(
             {"summary": "updated profile"}, where=eq("id", "u1")
         )
-        updated_profile = await user_profile_repo.get_by_id("u1")
+        updated_profile = await user_profile_repo.find_one_where(
+            primary_key("test_app", "test_project", "u1")
+        )
         assert updated_profile is not None
         assert updated_profile.summary == "updated profile"
 
@@ -400,7 +403,7 @@ async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
     vector column — so the read-back-and-re-upsert of a 1024-d vector (the
     path backfill and reflection both take) was never exercised remotely.
     """
-    from everos.infra.persistence.index import episode_repo, eq
+    from everos.infra.persistence.index import episode_repo, eq, primary_key
 
     now = dt.datetime(2026, 3, 1, 12, 0, tzinfo=dt.UTC)
     row = _episode(
@@ -418,7 +421,9 @@ async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
         {"deprecated_by": "u1_replacement"}, where=eq("id", "u1_vec_update")
     )
 
-    stored = await episode_repo.get_by_id("u1_vec_update")
+    stored = await episode_repo.find_one_where(
+        primary_key("default", "default", "u1_vec_update")
+    )
     assert stored is not None
     assert stored.deprecated_by == "u1_replacement"
     # The untouched columns must survive the round-trip intact.
@@ -442,7 +447,7 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
     parse milliseconds unconditionally. A seconds-vs-ms heuristic sends any
     pre-2001-09-09 instant into the year 30000 and raises on the way back.
     """
-    from everos.infra.persistence.index import episode_repo, eq
+    from everos.infra.persistence.index import episode_repo, eq, primary_key
 
     old = dt.datetime(1999, 1, 1, tzinfo=dt.UTC)
     row = _episode(
@@ -456,7 +461,9 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
     )
     await episode_repo.upsert([row])
 
-    stored = await episode_repo.get_by_id("u1_pre2001")
+    stored = await episode_repo.find_one_where(
+        primary_key("default", "default", "u1_pre2001")
+    )
     assert stored is not None
     assert stored.timestamp == old
 

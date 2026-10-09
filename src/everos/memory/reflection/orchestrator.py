@@ -811,6 +811,8 @@ class ReflectionOrchestrator:
         deprecated_fact_count = await self._deprecate_lance_facts(
             parent_ids=to_deprecate,
             owner_id=owner_id,
+            app_id=app_id,
+            project_id=project_id,
             merged_entry_id=merged_entry_id,
         )
         return deprecated_ep_count, deprecated_fact_count
@@ -870,13 +872,21 @@ class ReflectionOrchestrator:
         *,
         parent_ids: set[str],
         owner_id: str,
+        app_id: str,
+        project_id: str,
         merged_entry_id: str,
     ) -> int:
         """Mark deprecated atomic facts in LanceDB.
 
+        ``parent_id`` is an entry id, and entry ids restart per
+        (app, project, day): the scope columns keep one project's
+        reflection from deprecating another project's facts.
+
         Args:
             parent_ids: Parent IDs (memcell or episode) whose facts to deprecate.
             owner_id: Target owner identifier.
+            app_id: Application scope.
+            project_id: Project scope.
             merged_entry_id: Entry ID of the replacement merged episode.
 
         Returns:
@@ -891,6 +901,8 @@ class ReflectionOrchestrator:
                 where=all_of(
                     eq("parent_id", pid),
                     eq("owner_id", owner_id),
+                    eq("app_id", app_id),
+                    eq("project_id", project_id),
                     is_null("deprecated_by"),
                 ),
             )

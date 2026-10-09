@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from everos.component.utils.datetime import from_timestamp
-from everos.infra.persistence.lancedb import (
+from everos.infra.persistence.predicate import all_of, eq, gt, is_null, primary_key
+from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,
     AtomicFact,
@@ -15,7 +16,6 @@ from everos.infra.persistence.lancedb import (
     KnowledgeTopic,
     UserProfile,
 )
-from everos.infra.persistence.predicate import all_of, eq, gt, is_null, primary_key
 
 from .repository import MilvusRepoBase
 

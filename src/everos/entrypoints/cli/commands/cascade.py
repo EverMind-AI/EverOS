@@ -277,9 +277,10 @@ def sync(
                 for row in rows:
                     await md_change_state_repo.force_enqueue(row.md_path, row.kind)
                 by_status = Counter(row.status for row in rows)
+                summary = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
                 typer.echo(
-                    f"force-enqueued {len(rows)} md file(s): "
-                    + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
+                    f"force-enqueued {len(rows)} md file(s)"
+                    + (f": {summary}" if summary else "")
                 )
             if path is not None:
                 rel = _resolve_relative(path)

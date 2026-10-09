@@ -87,6 +87,13 @@ class _AllSucceedProvider:
         return [[9.9] * 3 for _ in texts]
 
 
+class _DistinctProvider:
+    """A vector that depends on the text, so a swapped payload is visible."""
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [[float(len(t))] * 3 for t in texts]
+
+
 def _episode_spec(repo: _RecordingRepo) -> _TableSpec:
     return _TableSpec(
         schema=_EpisodeLikeSchema,  # type: ignore[arg-type]
@@ -278,7 +285,7 @@ async def test_update_is_addressed_by_full_key() -> None:
     ]
     backlog = _TableBacklog(spec=spec, rows=rows)
     result = await _backfill_table(
-        backlog, _AllSucceedProvider(), presenter=NullBackfillPresenter()
+        backlog, _DistinctProvider(), presenter=NullBackfillPresenter()
     )  # type: ignore[arg-type]
     assert result.rows_failed == 0
     keys = [
@@ -286,3 +293,11 @@ async def test_update_is_addressed_by_full_key() -> None:
     ]
     assert sorted(k["project_id"] for k in keys) == ["alpha", "beta"]
     assert all(k["id"] == "shared" and k["app_id"] == "default" for k in keys)
+    # … and each row receives the vector of ITS OWN text: the batch maps
+    # are keyed by the full key, not by the colliding ``id``.
+    by_project = {
+        k["project_id"]: values
+        for k, (values, _) in zip(keys, repo.updates, strict=True)
+    }
+    assert by_project["alpha"]["vector"] == [float(len("alpha text"))] * 3
+    assert by_project["beta"]["vector"] == [float(len("beta text"))] * 3

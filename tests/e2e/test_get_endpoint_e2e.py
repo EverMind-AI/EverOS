@@ -162,7 +162,7 @@ async def test_get_episodes_returns_page_and_total(
     client: AsyncClient,
 ) -> None:
     """5 rows in, page_size=2 → 2 episodes back + total_count=5."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 6)],
     )
     resp = await client.post(
@@ -195,7 +195,7 @@ async def test_get_episodes_filtered_by_session_id(
     client: AsyncClient,
 ) -> None:
     """Filter narrows results to the matching ``session_id`` only."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_a"),
@@ -257,7 +257,7 @@ async def test_get_profile_returns_seeded_row(client: AsyncClient) -> None:
     White-box surface: ``user_profile_repo`` (the same table /search's
     ``include_profile`` reads).
     """
-    await user_profile_repo.add(
+    await user_profile_repo.upsert(
         [
             UserProfile(
                 id="u1",
@@ -301,7 +301,7 @@ async def test_get_episodes_page_two_returns_correct_slice(
     client: AsyncClient,
 ) -> None:
     """5 rows / page_size=2 / page=2 → middle slice (rows 3 + 4 by DESC ts)."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 6)],
     )
     resp = await client.post(
@@ -324,7 +324,7 @@ async def test_get_episodes_page_two_returns_correct_slice(
 
 async def test_get_episodes_sort_order_asc(client: AsyncClient) -> None:
     """``sort_order=asc`` flips the order (oldest first)."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 4)],
     )
     resp = await client.post(
@@ -345,7 +345,7 @@ async def test_get_episodes_sort_order_asc(client: AsyncClient) -> None:
 
 async def test_get_agent_cases_happy_path(client: AsyncClient) -> None:
     """``agent_case`` listing returns shaped items, populates only that array."""
-    await agent_case_repo.add(
+    await agent_case_repo.upsert(
         [_agent_case(f"ac_{i:03d}", day=i) for i in range(1, 4)],
     )
     resp = await client.post(
@@ -377,7 +377,7 @@ async def test_get_agent_cases_happy_path(client: AsyncClient) -> None:
 
 async def test_get_agent_cases_filtered_by_session(client: AsyncClient) -> None:
     """Filter narrows ``agent_case`` rows to the session."""
-    await agent_case_repo.add(
+    await agent_case_repo.upsert(
         [
             _agent_case("ac_001", session="sess_x"),
             _agent_case("ac_002", session="sess_x"),
@@ -401,7 +401,7 @@ async def test_get_agent_cases_filtered_by_session(client: AsyncClient) -> None:
 
 async def test_get_agent_skills_happy_path(client: AsyncClient) -> None:
     """``agent_skill`` listing — sort silently uses ``updated_at``."""
-    await agent_skill_repo.add(
+    await agent_skill_repo.upsert(
         [_agent_skill(name) for name in ("planner", "summariser")],
     )
     resp = await client.post(
@@ -423,7 +423,7 @@ async def test_get_agent_skills_sort_by_timestamp_silently_downgraded(
 ) -> None:
     """Explicit ``sort_by=timestamp`` does not 500 — manager rewrites to
     ``updated_at`` (the only temporal column on ``agent_skill``)."""
-    await agent_skill_repo.add([_agent_skill("planner")])
+    await agent_skill_repo.upsert([_agent_skill("planner")])
     resp = await client.post(
         "/api/v1/memory/get",
         json={
@@ -441,7 +441,7 @@ async def test_get_agent_skills_sort_by_timestamp_silently_downgraded(
 
 async def test_get_episodes_filtered_by_ne_session(client: AsyncClient) -> None:
     """``ne`` op on a str field excludes matching rows end-to-end."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_internal"),
@@ -467,7 +467,7 @@ async def test_get_episodes_filtered_by_iso_timestamp(
     client: AsyncClient,
 ) -> None:
     """ISO 8601 string timestamp literal is accepted alongside epoch ms."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", day=1),  # 2026-01-01
             _episode("ep_002", day=5),  # 2026-01-05
@@ -489,7 +489,7 @@ async def test_get_episodes_filtered_by_iso_timestamp(
 
 async def test_get_episodes_filtered_by_parent_id(client: AsyncClient) -> None:
     """Core use case: every episode derived from one memcell."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", parent_id="mc_target"),
             _episode("ep_002", parent_id="mc_target"),
@@ -515,7 +515,7 @@ async def test_get_episodes_filtered_by_sender_id_in(
     client: AsyncClient,
 ) -> None:
     """``sender_id: {"in": [...]}`` → ``array_has(sender_ids, ...) OR ...``."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", sender_ids=["alice", "assistant"]),
             _episode("ep_002", sender_ids=["bob", "assistant"]),
@@ -539,7 +539,7 @@ async def test_get_episodes_filtered_by_sender_id_in(
 
 async def test_get_episodes_nested_and_inside_or(client: AsyncClient) -> None:
     """Nested ``AND`` inside ``OR`` — parity with /search combinator semantics."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", session="sess_a", parent_id="mc_target"),
             _episode("ep_002", session="sess_a", parent_id="mc_other"),
@@ -589,7 +589,7 @@ async def test_get_top_level_and_or_compiles_and_filters(
     client: AsyncClient,
 ) -> None:
     """``AND`` / ``OR`` combinators are accepted (parity with /search)."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_b"),
@@ -615,7 +615,7 @@ async def test_get_episodes_filtered_by_timestamp_range(
     client: AsyncClient,
 ) -> None:
     """``timestamp: {gte, lt}`` — same-field double op compiles to implicit AND."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", day=1),  # 2026-01-01
             _episode("ep_002", day=3),  # 2026-01-03
@@ -647,7 +647,7 @@ async def test_get_episodes_filtered_by_timestamp_range(
 
 async def test_get_episodes_top_level_and_filter(client: AsyncClient) -> None:
     """Explicit top-level ``AND`` — distinct from implicit multi-field AND."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", session="sess_a", parent_id="mc_target"),
             _episode("ep_002", session="sess_a", parent_id="mc_other"),
@@ -709,7 +709,7 @@ async def test_get_truncates_above_max_fetch(
 
     configure_logging(level="WARNING")
 
-    await episode_repo.add(
+    await episode_repo.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 11)],
     )
     original = episode_repo.find_where_paginated
@@ -760,7 +760,7 @@ async def test_get_concurrent_owners_no_cross_contamination(
     """Concurrent /get requests against different ``owner_id`` partitions
     return only their own rows. ``GetManager`` is a lazy singleton —
     this also exercises first-request lazy-init under contention."""
-    await episode_repo.add(
+    await episode_repo.upsert(
         [
             _episode("ep_001", owner="u1"),
             _episode("ep_002", owner="u1"),
@@ -801,9 +801,9 @@ async def test_get_concurrent_different_memory_types(client: AsyncClient) -> Non
     """Concurrent /get on different ``memory_type`` (episode + agent_case +
     agent_skill) returns each kind in its own envelope slot, with no
     cross-array bleed."""
-    await episode_repo.add([_episode("ep_001", owner="u1")])
-    await agent_case_repo.add([_agent_case("ac_001", owner="a1")])
-    await agent_skill_repo.add([_agent_skill("planner", owner="a1")])
+    await episode_repo.upsert([_episode("ep_001", owner="u1")])
+    await agent_case_repo.upsert([_agent_case("ac_001", owner="a1")])
+    await agent_skill_repo.upsert([_agent_skill("planner", owner="a1")])
 
     async def query(payload: dict[str, object]) -> dict[str, object]:
         resp = await client.post("/api/v1/memory/get", json=payload)
@@ -844,7 +844,7 @@ async def test_get_concurrent_lazy_init_builds_one_manager(
     requests against a virgin manager all succeed and leave one instance."""
     # ``client`` fixture already reset _manager to None.
     assert get_service_mod._manager is None
-    await episode_repo.add([_episode("ep_001")])
+    await episode_repo.upsert([_episode("ep_001")])
 
     payload = {
         "user_id": "u1",

@@ -438,7 +438,7 @@ async def seed_atomic_fact_for_episode(
 
     entry_id = f"af_seed_{episode_row['entry_id']}"
     owner_id = episode_row["owner_id"]
-    await atomic_fact_repo.add(
+    await atomic_fact_repo.upsert(
         [
             AtomicFact(
                 id=f"{owner_id}_{entry_id}",
