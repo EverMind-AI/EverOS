@@ -376,11 +376,16 @@ def test_sync_holds_the_lock_while_it_drains(
             seen.append(cascade_mod.ome_lock_is_free())
             return 0
 
+        async def drain_once(self) -> int:
+            # the CLI keeps draining until a pass processes nothing
+            seen.append(cascade_mod.ome_lock_is_free())
+            return 0
+
     monkeypatch.setattr(cascade_mod, "_build_orchestrator", lambda: _Orchestrator())
     result = CliRunner().invoke(cascade_mod.app, ["sync"])
 
     assert result.exit_code == 0, result.output + result.stderr
-    assert seen == [False]  # the lock was ours during the drain
+    assert seen == [False, False]  # the lock was ours for the scan and every drain
     assert cascade_mod.ome_lock_is_free()  # and released afterwards
 
 
