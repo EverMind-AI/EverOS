@@ -24,6 +24,7 @@ already know what you want to do and need to know exactly how.
 | [knowledge.md](knowledge.md) | Knowledge base module — upload, search, taxonomy, storage layout |
 | [reflection.md](reflection.md) | Reflection — offline memory consolidation: enable, schedule, storage, triggering |
 | [cli.md](cli.md) | `everos` CLI subcommands + env var conventions |
+| [mcp.md](mcp.md) | Connect MCP clients (Claude Code, Codex, Cursor, Claude Desktop) through the official `everos-mcp` server |
 | [storage_layout.md](storage_layout.md) | Memory-root tree + frontmatter chassis + EntryId encoding |
 | [prompt_slots.md](prompt_slots.md) | PromptSlot loader — bundled default prompts (Layer 1 live; app/runtime overlays planned) |
 | [configuration.md](configuration.md) | TOML / env-var configuration reference |

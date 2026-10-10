@@ -44,13 +44,13 @@ Browser-native hive-mind for CLI coding agents - Claude Code, Codex, Gemini, and
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
+[![banner-gif](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)](https://github.com/EverMind-AI/EverOS-MCP)
 
-#### AI Coding Assistants with EverOS
+#### MCP Server for AI Coding Assistants
 
-Universal long-term memory layer for AI coding assistants, powered by EverOS.
+Plug EverOS memory into Claude Code, Codex, Claude Desktop or Cursor with `uvx everos-mcp`. Works with EverOS Cloud and with this self-hosted server.
 
-[Code](https://github.com/tt-a1i/evermemos-mcp)
+[Code](https://github.com/EverMind-AI/EverOS-MCP) · [Setup guide](mcp.md)
 
 </td>
 </tr>

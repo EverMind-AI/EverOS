@@ -97,3 +97,6 @@ def register(parent: typer.Typer) -> None:
         typer.echo(f"  1. Edit {everos_toml} — fill in API keys (see comments inside)")
         root_flag = f" --root {resolved}" if root else ""
         typer.echo(f"  2. Run: everos server start{root_flag}")
+        typer.echo(
+            "  3. Connect an MCP client (Claude Code, Codex, Cursor): see docs/mcp.md"
+        )

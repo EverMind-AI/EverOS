@@ -81,6 +81,11 @@ def start(
 
     bootstrap_logger = logging.getLogger("everos.cli.server")
     bootstrap_logger.info("starting everos on %s:%d", host_resolved, port_resolved)
+    bootstrap_logger.info(
+        "MCP clients: uvx everos-mcp with EVEROS_BASE_URL=http://%s:%d (docs/mcp.md)",
+        host_resolved,
+        port_resolved,
+    )
     if host_resolved == "0.0.0.0":
         bootstrap_logger.warning(
             "binding to 0.0.0.0 exposes the API on all interfaces; EverOS "
