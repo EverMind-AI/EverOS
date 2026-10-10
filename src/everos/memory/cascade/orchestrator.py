@@ -47,7 +47,12 @@ INDEX_RECONCILE_VERSION = 1
 reconciled against the index once. v1 (1.4.2): rows are keyed on
 ``(app_id, project_id, id)`` instead of ``id`` alone — a multi-project root
 indexed by an earlier release lost rows to the overwrite, and the handlers'
-per-entry diff brings them back."""
+per-entry diff brings them back.
+
+The pass recovers rows that are missing or whose content digest changed;
+it does not rewrite rows whose other columns changed. A change to a
+column, a scope field or a derived value needs ``cascade rebuild``, not a
+bump here."""
 
 _RECONCILE_MARKER = ".index_reconcile_version"
 
@@ -66,21 +71,25 @@ async def reconcile_index_once(
     the ledger a second time. The handlers skip entries whose rows are
     present and unchanged by digest, so a healthy root pays one read pass
     and no embedding; only rows that were actually lost are re-embedded.
-    This takes no lock of its own: index writers are serialised between
-    processes by the OME lock the server and the exclusive CLI commands
-    hold (``_runtime`` in the cascade CLI), not by anything here.
+    This takes no lock of its own. The exclusive CLI commands hold the OME
+    lock for their whole run; the server acquires it only at lifespan
+    order 50, after the cascade lifespan (order 12) has started the worker,
+    so a server starting while ``cascade sync --force-all`` runs writes the
+    index alongside it until its own lock attempt fails — a window that
+    predates this pass, which now fills it with the whole ledger instead of
+    the pending backlog.
     """
     marker = memory_root.index_dir / _RECONCILE_MARKER
-    if not force:
-        try:
-            current = int(marker.read_text(encoding="utf-8").strip())
-        except (FileNotFoundError, ValueError):
-            current = 0
-        if current >= INDEX_RECONCILE_VERSION:
-            return []
+    try:
+        current = int(marker.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        current = 0
+    if not force and current >= INDEX_RECONCILE_VERSION:
+        return []
     rows = await md_change_state_repo.force_enqueue_all()
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(str(INDEX_RECONCILE_VERSION), encoding="utf-8")
+    # max(): an older binary's forced pass must not roll a newer root back.
+    marker.write_text(str(max(current, INDEX_RECONCILE_VERSION)), encoding="utf-8")
     logger.info(
         "cascade_index_reconcile_enqueued",
         version=INDEX_RECONCILE_VERSION,
@@ -270,8 +279,9 @@ class CascadeOrchestrator:
                 which the current process may not have handlers for)
                 as permanently failed.
 
-        Returns the number of rows processed in this drain. The CLI
-        loops on the returned count to know when to stop.
+        Returns the number of rows processed in this drain; the worker
+        bounds one drain, so the CLI keeps calling :meth:`drain_once` until
+        a pass processes nothing.
 
         An unscoped pass is a full pass over the root, so it first runs
         :func:`reconcile_index_once`; a ``kinds``-scoped pass drains only

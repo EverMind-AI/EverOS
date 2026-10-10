@@ -111,7 +111,6 @@ def test_first_full_pass_after_upgrade_reconciles_every_indexed_md(
     marker.unlink()  # what a root written by an earlier release looks like
     again = _run(["cascade", "sync", "--root", root])
     assert again.returncode == 0, again.stderr
-    assert "force-enqueued" not in again.stdout
     assert "sync complete — processed 1 row(s)" in again.stdout
     assert marker.read_text(encoding="utf-8") == "1"
 

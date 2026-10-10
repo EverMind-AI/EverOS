@@ -156,7 +156,9 @@ async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
     repo: _MdChangeStateRepo,
 ) -> None:
     """Every row comes back pending with its recorded mtime, so the scanner
-    does not queue each file a second time for a changed mtime."""
+    does not queue each file a second time for a changed mtime — and with a
+    fresh retry budget, so a row that exhausted it still reaches the handler.
+    """
     done = "users/u/episodes/episode-2026-05-12.md"
     failed = "users/u/user.md"
     await repo.upsert(done, kind="episode", change_type="added", mtime=11.0)
@@ -164,7 +166,7 @@ async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
     await repo.mark_done(done)
     await repo.upsert(failed, kind="user_profile", change_type="added", mtime=22.0)
     await repo.claim_one(failed)
-    await repo.mark_failed(failed, retryable=False, error="boom", new_retry_count=1)
+    await repo.mark_failed(failed, retryable=False, error="boom", new_retry_count=12)
 
     before = await repo.force_enqueue_all()
 
@@ -178,6 +180,7 @@ async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
         assert row.status == "pending"
         assert row.change_type == "modified"
         assert row.mtime == mtime
+        assert row.retry_count == 0
 
 
 async def test_list_all_returns_every_status_in_lsn_order(

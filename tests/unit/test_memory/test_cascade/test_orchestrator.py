@@ -72,6 +72,22 @@ async def test_double_start_is_idempotent(runtime: MemoryRoot) -> None:
         await orch.stop()
 
 
+async def test_start_settles_the_reconcile_marker(runtime: MemoryRoot) -> None:
+    """The server path: the first ``start()`` on a root runs the one-time
+    reconcile and records it, so the next start does not queue the ledger."""
+    from everos.memory.cascade.orchestrator import reconcile_index_once
+
+    with patch("everos.memory.cascade.orchestrator.CascadeWatcher"):
+        orch = _make_orchestrator(runtime)
+        await orch.start()
+        try:
+            marker = runtime.index_dir / ".index_reconcile_version"
+            assert marker.read_text(encoding="utf-8") == "1"
+            assert await reconcile_index_once(runtime) == []
+        finally:
+            await orch.stop()
+
+
 async def test_stop_before_start_is_noop(runtime: MemoryRoot) -> None:
     orch = _make_orchestrator(runtime)
     await orch.stop()  # must not raise; nothing to do
