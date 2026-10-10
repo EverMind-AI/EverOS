@@ -195,26 +195,41 @@ from .episode import episode_state_repo as episode_state_repo
 
 ---
 
-## 5. (Optional) LanceDB index — 4 steps
+## 5. (Optional) Derived index — 4 steps
 
 Skip this section if the kind doesn't need vector / BM25 / hybrid retrieval.
 
-### 5.1 Schema — `infra/persistence/lancedb/tables/<name>.py`
+### 5.1 Record declaration — `infra/persistence/records/<name>.py`
 
 ```python
+from typing import ClassVar
+
 from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
 
 class EpisodeIndex(BaseLanceTable):
+    TABLE_NAME: ClassVar[str] = "episode_index"
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
+
+    id: str
+    app_id: str = "default"
+    project_id: str = "default"
     entry_id: str
     text: str
     tags: list[str]
-    vector: Vector(384)  # type: ignore[valid-type]
+    vector: Vector(1024) | None = None  # type: ignore[valid-type]
 ```
 
-`Vector(N)` must match your embedding dimension.
+`TABLE_NAME` / `BM25_FIELDS` / `PRIMARY_KEY` are the backend-neutral
+declarations every index backend reads (`IndexRecordMeta`). `PRIMARY_KEY`
+has **no default**: `check_primary_keys` refuses to start, and LanceDB
+`upsert` refuses to write, a table that does not declare one. `id` is unique
+only within `(app_id, project_id)`, so every business table declares the
+three-column key — LanceDB merges on it, Milvus keys the collection on a
+composed `__pk` and rejects key components containing `/`. `Vector(N)` must
+match your embedding dimension.
 
-### 5.2 Re-export — `tables/__init__.py`
+### 5.2 Re-export — `records/__init__.py`
 
 ```python
 from .episode import EpisodeIndex as EpisodeIndex
@@ -226,21 +241,24 @@ from .episode import EpisodeIndex as EpisodeIndex
 from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceRepoBase
+from everos.infra.persistence.records import EpisodeIndex
 
 from ..lancedb_manager import get_table
-from ..tables import EpisodeIndex
 
 
 class _EpisodeIndexRepo(LanceRepoBase[EpisodeIndex]):
     schema = EpisodeIndex
-    table_name = "episode_index"
 
     async def _table_lookup(self) -> AsyncTable:
-        return await get_table(self.table_name, self.schema)
+        return await get_table(self.schema.TABLE_NAME, self.schema)
 
 
 episode_index_repo = _EpisodeIndexRepo()
 ```
+
+Business code writes through the `everos.infra.persistence.index` facade:
+`upsert(records)` merges on the declared key and is the only write; look a
+row up with `find_one_where(primary_key(app_id, project_id, row_id))`.
 
 ### 5.4 Re-export — `repos/__init__.py`
 
