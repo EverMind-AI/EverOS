@@ -9,6 +9,7 @@ while a file whose rows were lost comes back.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -39,6 +40,11 @@ def _hermetic_env() -> dict[str, str]:
     env["EVEROS_LLM__API_KEY"] = ""
     env["EVEROS_EMBEDDING__API_KEY"] = ""
     env["EVEROS_RERANK__API_KEY"] = ""
+    # CI runners export FORCE_COLOR; Typer then splits option names with
+    # escape sequences, which the substring assertions below must not see.
+    env.pop("FORCE_COLOR", None)
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
     return env
 
 
@@ -57,7 +63,8 @@ def test_force_all_and_path_are_mutually_exclusive(tmp_path: Path) -> None:
         ["cascade", "sync", "--force-all", "some/file.md", "--root", str(tmp_path)]
     )
     assert result.returncode == 2, result.stderr
-    assert "--force-all" in result.stderr and "PATH" in result.stderr
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
+    assert "--force-all" in plain and "PATH" in plain
 
 
 def test_force_all_reenqueues_every_indexed_md(tmp_path: Path) -> None:
