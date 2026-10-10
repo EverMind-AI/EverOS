@@ -773,7 +773,7 @@ EverMind 将记忆研究、可直接使用的产品与实际集成连接为一�
 > 和 integration examples 都很有价值。也欢迎在社交媒体上分享你的项目，启发更多人。
 >
 > 你可以在 𝕏 上联系 EverOS maintainer [@ElliotChen](https://x.com/ElliotChen)，
-> 或在 GitHub 上联系 [@cyfyifanchen](https://github.com/cyfyifanchen)，获取项目更新、
+> 或在 GitHub 上联系 [@cyfyanchen](https://github.com/cyfyanchen)，获取项目更新、
 > 讨论和协作机会。
 
 ![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
