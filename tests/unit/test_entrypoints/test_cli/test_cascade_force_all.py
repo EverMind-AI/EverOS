@@ -87,3 +87,34 @@ def test_force_all_reenqueues_every_indexed_md(tmp_path: Path) -> None:
     assert status.returncode == 0, status.stderr
     assert "done:                     1" in status.stdout
     assert "failed (retryable=TRUE):  0" in status.stdout
+
+
+def test_first_full_pass_after_upgrade_reconciles_every_indexed_md(
+    tmp_path: Path,
+) -> None:
+    """A root indexed by a release before 1.4.2 carries no reconcile marker:
+    the first full pass over it (server start or ``cascade sync``) re-enqueues
+    every indexed md once, writes the marker, and later passes are ordinary.
+    """
+    root = str(tmp_path)
+    assert _run(["init", "--root", root]).returncode == 0
+    md = tmp_path / "default_app" / "default_project" / "users" / "u1" / "user.md"
+    md.parent.mkdir(parents=True)
+    md.write_text(PROFILE_MD, encoding="utf-8")
+
+    first = _run(["cascade", "sync", "--root", root])
+    assert first.returncode == 0, first.stderr
+    assert "sync complete — processed 1 row(s)" in first.stdout
+    marker = tmp_path / ".index" / ".index_reconcile_version"
+    assert marker.read_text(encoding="utf-8") == "1"
+
+    marker.unlink()  # what a root written by an earlier release looks like
+    again = _run(["cascade", "sync", "--root", root])
+    assert again.returncode == 0, again.stderr
+    assert "force-enqueued" not in again.stdout
+    assert "sync complete — processed 1 row(s)" in again.stdout
+    assert marker.read_text(encoding="utf-8") == "1"
+
+    third = _run(["cascade", "sync", "--root", root])
+    assert third.returncode == 0, third.stderr
+    assert "sync complete — processed 0 row(s)" in third.stdout

@@ -46,7 +46,8 @@ CLI; the CLI covers setup (`init`), running the server, and index ops
 (`cascade`). There is no `reindex` command — for an incremental
 catch-up run `everos cascade sync`; to re-reconcile every indexed
 markdown file without re-embedding what is unchanged run `everos cascade
-sync --force-all`; to rebuild the whole index from markdown (recovery
+sync --force-all` (the first full pass after upgrading from before 1.4.2
+does this by itself); to rebuild the whole index from markdown (recovery
 from drift / corruption, and once after upgrading a Milvus root to 1.4.2)
 run `everos cascade rebuild`.
 

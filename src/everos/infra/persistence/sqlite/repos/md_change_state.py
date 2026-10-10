@@ -169,19 +169,40 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             await s.commit()
             return new_lsn
 
-    async def force_enqueue(self, md_path: str, kind: str) -> int:
+    async def force_enqueue(
+        self, md_path: str, kind: str, *, mtime: float = 0.0
+    ) -> int:
         """`cascade sync --path` entry: re-enqueue regardless of status.
 
         Semantically the same as :meth:`upsert` with ``change_type
         ='modified'``; named separately because the CLI flow has no
-        watcher / scanner event to attribute the row to.
+        watcher / scanner event to attribute the row to. A caller that
+        has the row's recorded ``mtime`` passes it on, so the scanner does
+        not see a changed mtime and queue the file a second time.
         """
         return await self.upsert(
             md_path,
             kind=kind,
             change_type="modified",
-            mtime=0.0,
+            mtime=mtime,
         )
+
+    async def force_enqueue_all(self) -> list[MdChangeState]:
+        """Re-enqueue every row the ledger knows about; return the rows as
+        they were before, oldest LSN first.
+
+        Drives ``cascade sync --force-all`` and the one-time index
+        reconcile at startup: the handlers re-reconcile each md against
+        the index, so a file whose rows are present and unchanged costs
+        no embedding while a file whose rows were lost comes back. No
+        status filter on purpose — ``failed`` rows must come back too.
+        """
+        rows = await self.list_all()
+        # ponytail: one upsert (one commit) per file; batch into a single
+        # session if a root with tens of thousands of md files makes startup wait.
+        for row in rows:
+            await self.force_enqueue(row.md_path, row.kind, mtime=row.mtime)
+        return rows
 
     # ── Worker claim ───────────────────────────────────────────────────────
 
@@ -394,9 +415,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
     async def list_all(self) -> list[MdChangeState]:
         """Return every row regardless of status, oldest LSN first.
 
-        Drives ``cascade sync --force-all``: each row is force-enqueued so
-        the handlers re-reconcile every indexed md against the index.
-        No status filter on purpose — ``failed`` rows must come back too.
+        Backs :meth:`force_enqueue_all`; no status filter on purpose.
         """
         async with session_scope(self._factory) as s:
             rows = (

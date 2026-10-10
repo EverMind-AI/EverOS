@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each row's own vector within a batch, and reflection deprecates atomic
   facts only inside the project it merged.
 
+- **A multi-project LanceDB root indexed before this release gets its
+  overwritten rows back by itself.** The first full pass over the root
+  after upgrading (server start, or `everos cascade sync`) re-reconciles
+  every indexed markdown file against the index once and records that in
+  `.index/.index_reconcile_version`. Entries whose rows are present and
+  unchanged are skipped by digest, so a healthy root pays one read pass
+  and no embedding; only the rows that were lost are re-embedded.
+  `everos cascade sync --force-all` runs the same pass on demand.
+
 - **Changing a knowledge document's category keeps it inside `knowledge/`.**
   `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved
   the document's directory up into the project directory, where the markdown
@@ -36,10 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__pk` primary-key column; the server refuses to start on an old
   collection and names `everos cascade rebuild`, which recreates them from
   markdown.
-- **`everos cascade sync --force-all`** re-reconciles every indexed markdown
-  file against the index. Rows a multi-project root lost to the overwrite
-  before this release come back without a full rebuild; a healthy root is a
-  no-op. A single-project root needs nothing.
 - Response `id`s are unique within `(app_id, project_id)`, not globally; the
   shape of `id` is unchanged.
 

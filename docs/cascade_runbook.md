@@ -128,6 +128,13 @@ without a full rebuild: a multi-project root upgraded from a release before
 1.4.2 gets back the rows one project overwrote in another. Its summary
 line lists how many files were in each ledger state before the drain.
 
+That pass also runs by itself, once per root: the first full pass after
+upgrading from a release before 1.4.2 (a server start, or an unscoped
+`everos cascade sync`) force-enqueues every ledger row and writes
+`.index/.index_reconcile_version`, so no upgrade step is needed and later
+starts are ordinary. Delete the marker to make the next start repeat it,
+or run `--force-all` for an explicit pass.
+
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
 It holds the OME lock for the whole run and **refuses to start (exit code

@@ -152,6 +152,34 @@ async def test_force_enqueue_resurrects_done_row(
     assert row.change_type == "modified"
 
 
+async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Every row comes back pending with its recorded mtime, so the scanner
+    does not queue each file a second time for a changed mtime."""
+    done = "users/u/episodes/episode-2026-05-12.md"
+    failed = "users/u/user.md"
+    await repo.upsert(done, kind="episode", change_type="added", mtime=11.0)
+    await repo.claim_one(done)
+    await repo.mark_done(done)
+    await repo.upsert(failed, kind="user_profile", change_type="added", mtime=22.0)
+    await repo.claim_one(failed)
+    await repo.mark_failed(failed, retryable=False, error="boom", new_retry_count=1)
+
+    before = await repo.force_enqueue_all()
+
+    assert [(r.md_path, r.status) for r in before] == [
+        (done, "done"),
+        (failed, "failed"),
+    ]
+    for path, mtime in ((done, 11.0), (failed, 22.0)):
+        row = await repo.get_by_id(path)
+        assert row is not None
+        assert row.status == "pending"
+        assert row.change_type == "modified"
+        assert row.mtime == mtime
+
+
 async def test_list_all_returns_every_status_in_lsn_order(
     repo: _MdChangeStateRepo,
 ) -> None:

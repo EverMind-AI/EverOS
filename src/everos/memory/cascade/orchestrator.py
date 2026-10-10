@@ -38,6 +38,45 @@ from .worker import (
 
 logger = get_logger(__name__)
 
+INDEX_RECONCILE_VERSION = 1
+"""Bump when the index's row identity changes and every indexed md must be
+reconciled against the index once. v1 (1.4.2): rows are keyed on
+``(app_id, project_id, id)`` instead of ``id`` alone — a multi-project root
+indexed by an earlier release lost rows to the overwrite, and the handlers'
+per-entry diff brings them back."""
+
+_RECONCILE_MARKER = ".index_reconcile_version"
+
+
+async def reconcile_index_once(memory_root: MemoryRoot) -> int:
+    """Force-enqueue every indexed md the first time a root is opened at
+    :data:`INDEX_RECONCILE_VERSION`; return how many were enqueued.
+
+    ``<index_dir>/.index_reconcile_version`` records the version the root
+    was last reconciled for, so every later start is a no-op. The handlers
+    skip entries whose rows are present and unchanged by digest, so a
+    healthy root pays one read pass and no embedding; only rows that were
+    actually lost are re-embedded. No lock: two processes doing this at
+    once re-enqueue the same paths (the ledger upsert is keyed on
+    ``md_path``) and write the same marker.
+    """
+    marker = memory_root.index_dir / _RECONCILE_MARKER
+    try:
+        current = int(marker.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        current = 0
+    if current >= INDEX_RECONCILE_VERSION:
+        return 0
+    rows = await md_change_state_repo.force_enqueue_all()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(str(INDEX_RECONCILE_VERSION), encoding="utf-8")
+    logger.info(
+        "cascade_index_reconcile_enqueued",
+        version=INDEX_RECONCILE_VERSION,
+        count=len(rows),
+    )
+    return len(rows)
+
 
 @dataclasses.dataclass(frozen=True)
 class CascadeHealth:
@@ -178,6 +217,7 @@ class CascadeOrchestrator:
         orphans = await md_change_state_repo.recover_orphan_processing()
         if orphans:
             logger.info("cascade_recovered_orphan_processing", count=orphans)
+        await reconcile_index_once(self._memory_root)
         if os.getenv("EVEROS_DISABLE_CASCADE_WATCHER", "").strip().lower() in (
             "1",
             "true",
@@ -221,6 +261,10 @@ class CascadeOrchestrator:
         Returns the number of rows processed in this drain. The CLI
         loops on the returned count to know when to stop.
 
+        An unscoped pass is a full pass over the root, so it first runs
+        :func:`reconcile_index_once`; a ``kinds``-scoped pass drains only
+        those kinds and must not leave the rest queued behind it.
+
         The ``kinds`` filter is threaded through **both** the scanner
         AND the worker drain: the scanner scopes what gets enqueued,
         the worker scopes what gets claimed. Round-1 wired only the
@@ -228,6 +272,8 @@ class CascadeOrchestrator:
         knowledge md queued in a prior tick and mark it permanently
         failed — round-2 closes that end.
         """
+        if kinds is None:
+            await reconcile_index_once(self._memory_root)
         await self._scanner.scan_once(kinds=kinds)
         return await self._worker.drain_until_empty(kinds=kinds)
 

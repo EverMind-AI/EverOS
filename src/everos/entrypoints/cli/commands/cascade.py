@@ -250,7 +250,8 @@ def sync(
             "--force-all",
             help="Force-enqueue every indexed md before draining; entries whose "
             "rows are present and unchanged are skipped by the handlers, so "
-            "only lost or edited entries get re-embedded.",
+            "only lost or edited entries get re-embedded. The first full pass "
+            "after upgrading from a release before 1.4.2 does this by itself.",
         ),
     ] = False,
 ) -> None:
@@ -273,9 +274,7 @@ def sync(
         async with _runtime(exclusive=True):
             orchestrator = _build_orchestrator()
             if force_all:
-                rows = await md_change_state_repo.list_all()
-                for row in rows:
-                    await md_change_state_repo.force_enqueue(row.md_path, row.kind)
+                rows = await md_change_state_repo.force_enqueue_all()
                 by_status = Counter(row.status for row in rows)
                 summary = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
                 typer.echo(
