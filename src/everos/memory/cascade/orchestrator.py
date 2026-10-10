@@ -22,7 +22,11 @@ from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.sqlite import QueueSummary, md_change_state_repo
+from everos.infra.persistence.sqlite import (
+    MdChangeState,
+    QueueSummary,
+    md_change_state_repo,
+)
 
 from .handlers import HandlerDeps
 from .registry import build_handlers
@@ -48,25 +52,32 @@ per-entry diff brings them back."""
 _RECONCILE_MARKER = ".index_reconcile_version"
 
 
-async def reconcile_index_once(memory_root: MemoryRoot) -> int:
+async def reconcile_index_once(
+    memory_root: MemoryRoot, *, force: bool = False
+) -> list[MdChangeState]:
     """Force-enqueue every indexed md the first time a root is opened at
-    :data:`INDEX_RECONCILE_VERSION`; return how many were enqueued.
+    :data:`INDEX_RECONCILE_VERSION`, or whenever ``force`` is set; return
+    the rows enqueued (empty when the marker is already current).
 
     ``<index_dir>/.index_reconcile_version`` records the version the root
-    was last reconciled for, so every later start is a no-op. The handlers
-    skip entries whose rows are present and unchanged by digest, so a
-    healthy root pays one read pass and no embedding; only rows that were
-    actually lost are re-embedded. No lock: two processes doing this at
-    once re-enqueue the same paths (the ledger upsert is keyed on
-    ``md_path``) and write the same marker.
+    was last reconciled for, so every later start is a no-op. A forced pass
+    (``cascade sync --force-all``) settles the marker too, so the unscoped
+    :meth:`CascadeOrchestrator.sync_once` that follows it does not queue
+    the ledger a second time. The handlers skip entries whose rows are
+    present and unchanged by digest, so a healthy root pays one read pass
+    and no embedding; only rows that were actually lost are re-embedded.
+    This takes no lock of its own: index writers are serialised between
+    processes by the OME lock the server and the exclusive CLI commands
+    hold (``_runtime`` in the cascade CLI), not by anything here.
     """
     marker = memory_root.index_dir / _RECONCILE_MARKER
-    try:
-        current = int(marker.read_text(encoding="utf-8").strip())
-    except (FileNotFoundError, ValueError):
-        current = 0
-    if current >= INDEX_RECONCILE_VERSION:
-        return 0
+    if not force:
+        try:
+            current = int(marker.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, ValueError):
+            current = 0
+        if current >= INDEX_RECONCILE_VERSION:
+            return []
     rows = await md_change_state_repo.force_enqueue_all()
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(INDEX_RECONCILE_VERSION), encoding="utf-8")
@@ -74,8 +85,9 @@ async def reconcile_index_once(memory_root: MemoryRoot) -> int:
         "cascade_index_reconcile_enqueued",
         version=INDEX_RECONCILE_VERSION,
         count=len(rows),
+        forced=force,
     )
-    return len(rows)
+    return rows
 
 
 @dataclasses.dataclass(frozen=True)
@@ -276,6 +288,14 @@ class CascadeOrchestrator:
             await reconcile_index_once(self._memory_root)
         await self._scanner.scan_once(kinds=kinds)
         return await self._worker.drain_until_empty(kinds=kinds)
+
+    async def force_enqueue_all(self) -> list[MdChangeState]:
+        """``cascade sync --force-all``: the reconcile pass on demand.
+
+        Settles the marker as well, so the :meth:`sync_once` that follows
+        does not queue the whole ledger a second time.
+        """
+        return await reconcile_index_once(self._memory_root, force=True)
 
     async def drain_once(self) -> int:
         """Drain the queue exactly once without scanning first."""

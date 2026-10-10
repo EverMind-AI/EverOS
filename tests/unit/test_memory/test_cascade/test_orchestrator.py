@@ -147,6 +147,30 @@ async def test_permanent_failures_are_informational_not_unhealthy(
     assert health.reasons == []
 
 
+async def test_forced_reconcile_settles_the_marker(runtime: MemoryRoot) -> None:
+    """``cascade sync --force-all`` runs the reconcile pass on demand and
+    records it, so the unscoped ``sync_once`` right after it does not queue
+    the whole ledger a second time."""
+    from everos.infra.persistence.sqlite import md_change_state_repo
+    from everos.memory.cascade.orchestrator import reconcile_index_once
+
+    path = "users/u1/episodes/ep_1.md"
+    orch = _make_orchestrator(runtime)
+    await md_change_state_repo.upsert(
+        path, kind="episode", change_type="added", mtime=1.0
+    )
+    await md_change_state_repo.claim_pending_batch(10)
+    await md_change_state_repo.mark_done(path)
+
+    forced = await orch.force_enqueue_all()
+
+    assert [r.md_path for r in forced] == [path]
+    row = await md_change_state_repo.get_by_id(path)
+    assert row is not None and row.status == "pending" and row.mtime == 1.0
+    assert (runtime.index_dir / ".index_reconcile_version").read_text() == "1"
+    assert await reconcile_index_once(runtime) == []
+
+
 async def test_operational_signal_flips_healthy(
     runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

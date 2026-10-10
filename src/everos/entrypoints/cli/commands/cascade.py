@@ -274,7 +274,7 @@ def sync(
         async with _runtime(exclusive=True):
             orchestrator = _build_orchestrator()
             if force_all:
-                rows = await md_change_state_repo.force_enqueue_all()
+                rows = await orchestrator.force_enqueue_all()
                 by_status = Counter(row.status for row in rows)
                 summary = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
                 typer.echo(
