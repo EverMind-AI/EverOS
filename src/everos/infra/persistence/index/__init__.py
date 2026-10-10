@@ -14,30 +14,7 @@ from typing import Any
 from everos.config import load_settings
 from everos.infra.persistence import lancedb as _lancedb
 
-from ..backends.lancedb import (
-    agent_case_repo as _lance_agent_case_repo,
-)
-from ..backends.lancedb import (
-    agent_skill_repo as _lance_agent_skill_repo,
-)
-from ..backends.lancedb import (
-    atomic_fact_repo as _lance_atomic_fact_repo,
-)
-from ..backends.lancedb import (
-    episode_repo as _lance_episode_repo,
-)
-from ..backends.lancedb import (
-    foresight_repo as _lance_foresight_repo,
-)
-from ..backends.lancedb import (
-    knowledge_topic_repo as _lance_knowledge_topic_repo,
-)
-from ..backends.lancedb import (
-    lance_index_backend,
-)
-from ..backends.lancedb import (
-    user_profile_repo as _lance_user_profile_repo,
-)
+from ..backends.lancedb import lance_index_backend
 from ..backends.milvus import milvus_index_backend
 from .predicate import (
     All,
@@ -74,6 +51,14 @@ from .router import (
     RoutedIndexRepository,
 )
 from .schema import IndexField, IndexFieldKind, IndexSchema, schema_for
+
+_lance_episode_repo = _lancedb.episode_repo
+_lance_atomic_fact_repo = _lancedb.atomic_fact_repo
+_lance_foresight_repo = _lancedb.foresight_repo
+_lance_agent_case_repo = _lancedb.agent_case_repo
+_lance_agent_skill_repo = _lancedb.agent_skill_repo
+_lance_user_profile_repo = _lancedb.user_profile_repo
+_lance_knowledge_topic_repo = _lancedb.knowledge_topic_repo
 
 AgentCase = _lancedb.AgentCase
 AgentSkill = _lancedb.AgentSkill

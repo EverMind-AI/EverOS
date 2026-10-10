@@ -13,9 +13,10 @@ from everos.core.persistence.lancedb.repository import _q
 
 from ...records.episode import Episode
 from ..lancedb_manager import get_table
+from ._contract import LanceIndexContract
 
 
-class _EpisodeRepo(LanceDailyLogRepoBase[Episode]):
+class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
     schema = Episode
 
     async def _table_lookup(self) -> AsyncTable:

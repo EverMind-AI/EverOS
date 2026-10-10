@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from everos.infra.persistence.backends.lancedb import LanceIndexRepository
+from everos.core.persistence import LanceRepoBase
+from everos.infra.persistence import lancedb as _lancedb
 from everos.infra.persistence.index.protocols import IndexRepository
 from everos.infra.persistence.index.router import RoutedIndexRepository
 
@@ -31,7 +32,7 @@ class _Stub:
 
 @pytest.mark.parametrize("name", _MAINTENANCE)
 def test_every_repository_class_exposes_the_maintenance_method(name: str) -> None:
-    for cls in (LanceIndexRepository, RoutedIndexRepository):
+    for cls in (type(_lancedb.episode_repo), RoutedIndexRepository):
         assert callable(getattr(cls, name, None)), f"{cls.__name__}.{name} missing"
     assert name in IndexRepository.__protocol_attrs__  # type: ignore[attr-defined]
 
@@ -60,10 +61,25 @@ async def test_router_forwards_ensure_vector_indexes_to_the_lance_repo() -> None
     assert stub.calls == ["ensure_vector_indexes"]
 
 
-async def test_lance_backend_forwards_ensure_vector_indexes_to_the_repo() -> None:
+def test_lance_repositories_run_the_chassis_maintenance_methods() -> None:
     """Attribute presence is not enough: a ``pass`` body would satisfy the
-    protocol and silently never build an index."""
-    stub = _Stub()
-    backend = LanceIndexRepository(stub, schema=object)  # type: ignore[arg-type]
-    await backend.ensure_vector_indexes()
-    assert stub.calls == ["ensure_vector_indexes"]
+    protocol and silently never build an index. The LanceDB singletons speak
+    the contract themselves, so each maintenance method must be the chassis
+    implementation, not a stub left by the contract mixin."""
+    for repo in (
+        _lancedb.ALL_REPOS
+        if hasattr(_lancedb, "ALL_REPOS")
+        else (
+            _lancedb.episode_repo,
+            _lancedb.atomic_fact_repo,
+            _lancedb.foresight_repo,
+            _lancedb.agent_case_repo,
+            _lancedb.agent_skill_repo,
+            _lancedb.user_profile_repo,
+            _lancedb.knowledge_topic_repo,
+        )
+    ):
+        for name in _MAINTENANCE:
+            assert getattr(type(repo), name) is getattr(LanceRepoBase, name), (
+                f"{type(repo).__name__}.{name}"
+            )

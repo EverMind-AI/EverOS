@@ -2,7 +2,7 @@
 
 Real ``EpisodeWriter`` (two md files whose entry sequences both start at
 ``ep_<date>_00000001``), real ``EpisodeHandler``, real temporary LanceDB
-behind ``LanceIndexRepository``. No fake repo: the collision lived in the
+speaking the index contract. No fake repo: the collision lived in the
 merge key the repository hands to LanceDB, and a fake models whatever key
 semantics its author assumed.
 """
@@ -19,8 +19,8 @@ from everos.component.tokenizer import Tokenizer
 from everos.config import LanceDBSettings
 from everos.core.persistence import LanceRepoBase, MemoryRoot
 from everos.core.persistence.lancedb import open_lancedb_connection
-from everos.infra.persistence.backends.lancedb import LanceIndexRepository
 from everos.infra.persistence.index import Episode, all_of, eq
+from everos.infra.persistence.lancedb import LanceIndexContract
 from everos.infra.persistence.markdown import EpisodeWriter
 from everos.memory.cascade.handlers import HandlerDeps
 from everos.memory.cascade.handlers.episode import EpisodeHandler
@@ -44,7 +44,7 @@ class _Embedder(EmbeddingProvider):
         return [await self.embed(t) for t in texts]
 
 
-class _EpisodeRepo(LanceRepoBase[Episode]):
+class _EpisodeRepo(LanceIndexContract[Episode], LanceRepoBase[Episode]):
     schema = Episode
 
 
@@ -81,7 +81,7 @@ async def test_same_owner_same_day_in_two_projects_keeps_two_rows(
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
     table = await conn.create_table(Episode.TABLE_NAME, schema=Episode)
-    repo = LanceIndexRepository(_EpisodeRepo(table=table), Episode)
+    repo = _EpisodeRepo(table=table)
     monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
     monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=_Embedder()))
 

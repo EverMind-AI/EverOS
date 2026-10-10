@@ -42,12 +42,15 @@ from .lancedb_manager import dispose_connection as dispose_connection
 from .lancedb_manager import drop_tables as _drop_tables
 from .lancedb_manager import get_connection as get_connection
 from .lancedb_manager import get_table as get_table
+from .repos import LanceIndexContract as LanceIndexContract
 from .repos import agent_case_repo as agent_case_repo
 from .repos import agent_skill_repo as agent_skill_repo
 from .repos import atomic_fact_repo as atomic_fact_repo
+from .repos import build_or_query as build_or_query
 from .repos import episode_repo as episode_repo
 from .repos import foresight_repo as foresight_repo
 from .repos import knowledge_topic_repo as knowledge_topic_repo
+from .repos import render_predicate as render_predicate
 from .repos import user_profile_repo as user_profile_repo
 
 _BUSINESS_SCHEMAS = (
@@ -395,11 +398,13 @@ __all__ = [
     "KnowledgeTopic",
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",
+    "LanceIndexContract",
     "ParentType",
     "UserProfile",
     "agent_case_repo",
     "agent_skill_repo",
     "atomic_fact_repo",
+    "build_or_query",
     "dispose_connection",
     "drop_business_tables",
     "ensure_business_indexes",
@@ -410,6 +415,7 @@ __all__ = [
     "knowledge_topic_repo",
     "migrate_fts_indexes",
     "migrate_table_schemas",
+    "render_predicate",
     "user_profile_repo",
     "verify_business_schemas",
 ]

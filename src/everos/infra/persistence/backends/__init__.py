@@ -2,8 +2,9 @@
 
 Each module here implements the ports in
 :mod:`everos.infra.persistence.index.protocols` for one storage engine, and
-owns everything specific to it: predicate rendering, physical schema, and the
-connection lifecycle.
+owns its connection lifecycle. The LanceDB repositories speak the contract
+natively (``LanceIndexContract``), so that module is lifecycle only; the
+Milvus repositories were written to the contract from the start.
 
 They live outside :mod:`everos.infra.persistence.index` on purpose. That
 package is the boundary outer layers depend on, and mixing adapters into it

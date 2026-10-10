@@ -8,9 +8,12 @@ from everos.core.persistence.lancedb import LanceDailyLogRepoBase
 
 from ...records.atomic_fact import AtomicFact
 from ..lancedb_manager import get_table
+from ._contract import LanceIndexContract
 
 
-class _AtomicFactRepo(LanceDailyLogRepoBase[AtomicFact]):
+class _AtomicFactRepo(
+    LanceIndexContract[AtomicFact], LanceDailyLogRepoBase[AtomicFact]
+):
     schema = AtomicFact
 
     async def _table_lookup(self) -> AsyncTable:

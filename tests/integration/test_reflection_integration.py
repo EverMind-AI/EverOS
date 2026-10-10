@@ -34,7 +34,7 @@ from everos.core.persistence import (
 )
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
 from everos.infra.ome.testing import FakeStrategyContext
-from everos.infra.persistence.backends.lancedb import LanceIndexRepository
+from everos.infra.persistence.lancedb import LanceIndexContract
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
 from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.records.episode import Episode as LanceEpisode
@@ -67,11 +67,15 @@ class _StubEmbedder:
 # ---------------------------------------------------------------------------
 
 
-class _EpisodeRepo(LanceDailyLogRepoBase[LanceEpisode]):
+class _EpisodeRepo(
+    LanceIndexContract[LanceEpisode], LanceDailyLogRepoBase[LanceEpisode]
+):
     schema = LanceEpisode
 
 
-class _AtomicFactRepo(LanceDailyLogRepoBase[AtomicFact]):
+class _AtomicFactRepo(
+    LanceIndexContract[AtomicFact], LanceDailyLogRepoBase[AtomicFact]
+):
     schema = AtomicFact
 
 
@@ -358,8 +362,8 @@ async def test_reflection_init_merges_cluster_episodes(
         # -- Build the orchestrator with real repos.
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -564,8 +568,8 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
 
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -610,8 +614,8 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         # Fresh orchestrator, same FakeLLM (next pop = update_response).
         orchestrator2 = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -799,8 +803,8 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
 
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,

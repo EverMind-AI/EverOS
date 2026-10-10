@@ -14,10 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.infra.persistence.backends.lancedb import (
-    lance_index_backend,
-    render_predicate,
-)
+from everos.infra.persistence.backends.lancedb import lance_index_backend
 from everos.infra.persistence.backends.milvus import milvus_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
@@ -36,7 +33,7 @@ from everos.infra.persistence.index import (
     shutdown,
 )
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.infra.persistence.lancedb import lancedb_manager, render_predicate
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 

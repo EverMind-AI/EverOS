@@ -8,9 +8,10 @@ from everos.core.persistence.lancedb import LanceRepoBase
 
 from ...records.user_profile import UserProfile
 from ..lancedb_manager import get_table
+from ._contract import LanceIndexContract
 
 
-class _UserProfileRepo(LanceRepoBase[UserProfile]):
+class _UserProfileRepo(LanceIndexContract[UserProfile], LanceRepoBase[UserProfile]):
     schema = UserProfile
 
     async def _table_lookup(self) -> AsyncTable:

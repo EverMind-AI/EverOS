@@ -182,7 +182,7 @@ async def test_empty_candidates_returns_empty() -> None:
 async def test_deprecate_lance_facts_is_scoped_to_the_project() -> None:
     """``parent_id`` restarts per (app, project, day), so the fact
     deprecation must carry the scope like its episode sibling does."""
-    from everos.infra.persistence.backends.lancedb import render_predicate
+    from everos.infra.persistence.lancedb import render_predicate
 
     atomic_fact_store = MagicMock()
     atomic_fact_store.update = AsyncMock()

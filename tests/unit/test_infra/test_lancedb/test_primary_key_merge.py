@@ -16,8 +16,8 @@ from everos.component.utils.datetime import get_utc_now
 from everos.config import LanceDBSettings
 from everos.core.persistence import BaseLanceTable, LanceRepoBase, MemoryRoot
 from everos.core.persistence.lancedb import open_lancedb_connection
-from everos.infra.persistence.backends.lancedb import LanceIndexRepository
 from everos.infra.persistence.index import KnowledgeTopic, primary_key
+from everos.infra.persistence.lancedb import LanceIndexContract
 
 
 class _Scoped(BaseLanceTable):
@@ -29,7 +29,7 @@ class _Scoped(BaseLanceTable):
     text: str
 
 
-class _ScopedRepo(LanceRepoBase[_Scoped]):
+class _ScopedRepo(LanceIndexContract[_Scoped], LanceRepoBase[_Scoped]):
     schema = _Scoped
 
 
@@ -38,7 +38,7 @@ class _Undeclared(BaseLanceTable):
     id: str
 
 
-class _UndeclaredRepo(LanceRepoBase[_Undeclared]):
+class _UndeclaredRepo(LanceIndexContract[_Undeclared], LanceRepoBase[_Undeclared]):
     schema = _Undeclared
 
 
@@ -54,7 +54,7 @@ async def _repo(tmp_path: Path, schema, repo_cls):  # type: ignore[no-untyped-de
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
     table = await conn.create_table(schema.TABLE_NAME, schema=schema)
-    return LanceIndexRepository(repo_cls(table=table), schema)
+    return repo_cls(table=table)
 
 
 async def test_same_id_in_two_projects_keeps_two_rows(tmp_path: Path) -> None:
@@ -81,7 +81,9 @@ async def test_upsert_rejects_undeclared_primary_key(tmp_path: Path) -> None:
         await repo.upsert([_Undeclared(id="x")])
 
 
-class _KnowledgeTopicRepo(LanceRepoBase[KnowledgeTopic]):
+class _KnowledgeTopicRepo(
+    LanceIndexContract[KnowledgeTopic], LanceRepoBase[KnowledgeTopic]
+):
     schema = KnowledgeTopic
 
 
