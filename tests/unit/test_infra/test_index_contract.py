@@ -14,8 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from everos.infra.persistence.backends.lancedb import lance_index_backend
-from everos.infra.persistence.backends.milvus import milvus_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
     All,
@@ -33,7 +31,9 @@ from everos.infra.persistence.index import (
     shutdown,
 )
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
+from everos.infra.persistence.lancedb import index_backend as lance_index_backend
 from everos.infra.persistence.lancedb import lancedb_manager, render_predicate
+from everos.infra.persistence.milvus import index_backend as milvus_index_backend
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 
@@ -201,15 +201,15 @@ def test_lance_predicate_renderer_owns_escaping() -> None:
 @pytest.mark.parametrize(
     "module",
     [
-        "everos.infra.persistence.backends.lancedb",
-        "everos.infra.persistence.backends.milvus",
+        "everos.infra.persistence.lancedb",
+        "everos.infra.persistence.milvus",
         "everos.infra.persistence.index",
     ],
 )
 def test_adapter_and_port_modules_import_in_any_order(module: str) -> None:
     """Each module must import as the process's first everos import.
 
-    The port facade wires the concrete backends at import time, so an adapter
+    The port facade wires the engine packages at import time, so an engine
     reaching back into the ``index`` package closes a cycle: whichever side is
     imported first fails on a partially initialised module. A subprocess is the
     only honest check — inside this process the package is already imported, so

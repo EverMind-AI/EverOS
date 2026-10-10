@@ -8,6 +8,7 @@ normally reached through :mod:`everos.infra.persistence.index`.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
 
@@ -59,9 +60,53 @@ async def drop_business_tables() -> list[str]:
     return dropped
 
 
+class MilvusIndexBackend:
+    """Own remote Milvus connection, collection, and repository lifecycle.
+
+    The ``IndexBackend`` port the ``everos.infra.persistence.index`` facade
+    selects when ``index.backend`` is ``"milvus"``. The facade imports this
+    package only on that branch, so ``pymilvus`` stays an optional extra.
+    """
+
+    name: ClassVar[str] = "milvus"
+
+    @property
+    def repositories(self) -> tuple[Any, ...]:
+        return tuple(ALL_REPOS)
+
+    async def connect(self) -> Any:
+        return await get_client()
+
+    async def startup(self) -> Any:
+        client = await self.connect()
+        # ensure_collection creates a missing collection and drift-checks an
+        # existing one in a single round trip, so unlike the LanceDB backend
+        # there is no separate verify step to run first.
+        await self.ensure_business_indexes()
+        return client
+
+    async def shutdown(self) -> None:
+        await dispose_connection()
+
+    async def ensure_business_indexes(self) -> None:
+        await ensure_business_indexes()
+
+    async def verify_business_schemas(self) -> None:
+        # Same call as ensure_business_indexes: ensure_collection creates a
+        # missing collection and drift-checks an existing one. Kept distinct
+        # because the port and the CLI both address verification by name.
+        await self.ensure_business_indexes()
+
+    async def drop_business_tables(self) -> list[str]:
+        return await drop_business_tables()
+
+
+index_backend = MilvusIndexBackend()
+
 __all__ = [
     "ALL_REPOS",
     "MilvusConfigurationError",
+    "MilvusIndexBackend",
     "MilvusSchemaMismatchError",
     "MilvusValueLimitError",
     "agent_case_repo",
@@ -73,6 +118,7 @@ __all__ = [
     "episode_repo",
     "foresight_repo",
     "get_client",
+    "index_backend",
     "knowledge_topic_repo",
     "user_profile_repo",
 ]

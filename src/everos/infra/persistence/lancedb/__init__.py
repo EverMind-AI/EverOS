@@ -26,6 +26,7 @@ first access; row population is the cascade daemon's job (see
 
 import contextlib
 import datetime as dt
+from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
@@ -388,7 +389,53 @@ async def drop_business_tables() -> list[str]:
     return await _drop_tables([schema.TABLE_NAME for schema in _BUSINESS_SCHEMAS])
 
 
+ALL_REPOS = (
+    episode_repo,
+    atomic_fact_repo,
+    foresight_repo,
+    agent_case_repo,
+    agent_skill_repo,
+    user_profile_repo,
+    knowledge_topic_repo,
+)
+
+
+class LanceIndexBackend:
+    """Own LanceDB connection, schema, index, and repository lifecycle.
+
+    The ``IndexBackend`` port the ``everos.infra.persistence.index`` facade
+    selects when ``index.backend`` is ``"lancedb"``.
+    """
+
+    name: ClassVar[str] = "lancedb"
+    repositories = ALL_REPOS
+
+    async def connect(self) -> Any:
+        return await get_connection()
+
+    async def startup(self) -> Any:
+        connection = await self.connect()
+        await self.verify_business_schemas()
+        await self.ensure_business_indexes()
+        return connection
+
+    async def shutdown(self) -> None:
+        await dispose_connection()
+
+    async def ensure_business_indexes(self) -> None:
+        await ensure_business_indexes()
+
+    async def verify_business_schemas(self) -> None:
+        await verify_business_schemas()
+
+    async def drop_business_tables(self) -> list[str]:
+        return await drop_business_tables()
+
+
+index_backend = LanceIndexBackend()
+
 __all__ = [
+    "ALL_REPOS",
     "BUSINESS_SCHEMAS_WITH_VECTOR",
     "AgentCase",
     "AgentSkill",
@@ -398,6 +445,7 @@ __all__ = [
     "KnowledgeTopic",
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",
+    "LanceIndexBackend",
     "LanceIndexContract",
     "ParentType",
     "UserProfile",
@@ -412,6 +460,7 @@ __all__ = [
     "foresight_repo",
     "get_connection",
     "get_table",
+    "index_backend",
     "knowledge_topic_repo",
     "migrate_fts_indexes",
     "migrate_table_schemas",

@@ -14,8 +14,6 @@ from typing import Any
 from everos.config import load_settings
 from everos.infra.persistence import lancedb as _lancedb
 
-from ..backends.lancedb import lance_index_backend
-from ..backends.milvus import milvus_index_backend
 from .predicate import (
     All,
     AnyOf,
@@ -99,8 +97,11 @@ def active_backend() -> str:
 
 def _backend() -> IndexBackend:
     if active_backend() == "milvus":
-        return milvus_index_backend
-    return lance_index_backend
+        # pymilvus is an optional extra: import the engine only when selected.
+        from everos.infra.persistence import milvus
+
+        return milvus.index_backend
+    return _lancedb.index_backend
 
 
 async def connect() -> Any:
