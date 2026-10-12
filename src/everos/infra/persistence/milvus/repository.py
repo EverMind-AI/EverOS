@@ -6,7 +6,7 @@ import asyncio
 import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, overload
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
@@ -717,7 +717,6 @@ class MilvusRepoBase[T: BaseModel]:
             )
         )
 
-    @overload
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -725,32 +724,10 @@ class MilvusRepoBase[T: BaseModel]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-        columns: None = None,
-    ) -> list[T]: ...
-
-    @overload
-    async def find_by_owner_entries(
-        self,
-        owner_id: str,
-        entry_ids: Sequence[str],
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        columns: Sequence[str],
-    ) -> list[dict[str, Any]]: ...
-
-    async def find_by_owner_entries(
-        self,
-        owner_id: str,
-        entry_ids: Sequence[str],
-        *,
-        app_id: str = "default",
-        project_id: str = "default",
-        columns: Sequence[str] | None = None,
-    ) -> list[T] | list[dict[str, Any]]:
+    ) -> list[T]:
         if not entry_ids:
             return []
-        rows = await self.find_where(
+        return await self.find_where(
             all_of(
                 eq("owner_id", owner_id),
                 one_of("entry_id", list(entry_ids)),
@@ -759,10 +736,6 @@ class MilvusRepoBase[T: BaseModel]:
             ),
             limit=len(entry_ids),
         )
-        if columns is None:
-            return rows
-        # Shape parity with LanceDB only: the full rows are still loaded.
-        return [{name: getattr(row, name) for name in columns} for row in rows]
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100

@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import get_overloads
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -280,10 +281,16 @@ async def test_repository_port_crud_count_and_uncapped_scan(
     assert await episode_repo.count_where(owner) == 100
 
 
+@pytest.mark.parametrize("index_backend", ["lancedb"], indirect=True)
 async def test_find_by_owner_entries_projects_requested_columns(
     index_backend: str,
 ) -> None:
-    """A ``columns`` projection returns raw dicts holding only those columns."""
+    """A ``columns`` projection returns raw dicts holding only those columns.
+
+    LanceDB-only: column projection is pushed down to the query, so there is
+    nothing to assert against Milvus here (see
+    ``test_milvus_find_by_owner_entries_has_no_columns_parameter``).
+    """
     await episode_repo.upsert([_episode(number) for number in range(3)])
 
     rows = await episode_repo.find_by_owner_entries(
@@ -296,9 +303,84 @@ async def test_find_by_owner_entries_projects_requested_columns(
     ]
 
 
+async def test_find_by_owner_entries_columns_select_before_materializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LanceDB pushes ``columns`` into ``.select()`` ahead of ``.to_list()``.
+
+    Guards against the projection regressing into a full ``find_where()``
+    load trimmed down in Python afterwards -- the point of a storage-level
+    projection is that the untrimmed columns never get fetched at all.
+    """
+    from everos.infra.persistence.lancedb import episode_repo as lance_episode_repo
+
+    calls: list[tuple[str, object]] = []
+    fake_rows = [{"entry_id": "ep_0000", "parent_id": "memcell"}]
+
+    class _RecordingQuery:
+        def where(self, expr: str) -> _RecordingQuery:
+            calls.append(("where", expr))
+            return self
+
+        def select(self, columns: list[str]) -> _RecordingQuery:
+            calls.append(("select", columns))
+            return self
+
+        def limit(self, n: int) -> _RecordingQuery:
+            calls.append(("limit", n))
+            return self
+
+        async def to_list(self) -> list[dict[str, object]]:
+            calls.append(("to_list", None))
+            return fake_rows
+
+    class _RecordingTable:
+        def query(self) -> _RecordingQuery:
+            calls.append(("query", None))
+            return _RecordingQuery()
+
+    find_where_spy = AsyncMock(
+        side_effect=AssertionError("columns projection must not fetch full rows")
+    )
+    monkeypatch.setattr(
+        lance_episode_repo, "_table", AsyncMock(return_value=_RecordingTable())
+    )
+    monkeypatch.setattr(lance_episode_repo, "find_where", find_where_spy)
+
+    rows = await lance_episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
+    )
+
+    assert rows == fake_rows
+    find_where_spy.assert_not_called()
+    assert [name for name, _ in calls] == [
+        "query",
+        "where",
+        "select",
+        "limit",
+        "to_list",
+    ]
+    assert dict(calls)["select"] == ["entry_id", "parent_id"]
+
+
+def test_milvus_find_by_owner_entries_has_no_columns_parameter() -> None:
+    """Column projection is a LanceDB-only capability.
+
+    Milvus still loads full rows for every ``find_by_owner_entries`` call
+    (there is no cheaper path on that backend), so the signature carries no
+    ``columns`` parameter and no overloads -- asking it to project would
+    silently lie about doing less work than it does.
+    """
+    assert get_overloads(MilvusRepoBase.find_by_owner_entries) == []
+    assert (
+        "columns"
+        not in inspect.signature(MilvusRepoBase.find_by_owner_entries).parameters
+    )
+
+
 @pytest.mark.parametrize(
     "owner",
-    [IndexRepository, RoutedIndexRepository, LanceIndexContract, MilvusRepoBase],
+    [IndexRepository, RoutedIndexRepository, LanceIndexContract],
 )
 def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
     """Omitting ``columns`` is typed ``list[T]``; a projection is typed dicts."""
