@@ -510,8 +510,12 @@ class MilvusRepoBase[T: BaseModel]:
         )
         return int(rows[0].get("count(*)", 0)) if rows else 0
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
-        rows = await self._query_raw(where, limit=limit, include_vectors=True)
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]:
+        rows = await self._query_raw(
+            where, limit=limit, include_vectors=not skip_vectors
+        )
         return [self._model_from_milvus(row) for row in rows]
 
     async def find_one_where(self, where: Predicate) -> T | None:
@@ -726,6 +730,7 @@ class MilvusRepoBase[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: None = None,
+        skip_vectors: bool = False,
     ) -> list[T]: ...
 
     @overload
@@ -737,6 +742,7 @@ class MilvusRepoBase[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str],
+        skip_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(
@@ -747,6 +753,7 @@ class MilvusRepoBase[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
     ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
@@ -758,14 +765,16 @@ class MilvusRepoBase[T: BaseModel]:
                 eq("project_id", project_id),
             ),
             limit=len(entry_ids),
+            skip_vectors=skip_vectors,
         )
         if columns is None:
             return rows
-        # Return-shape compatibility with LanceDB only: Milvus has no
-        # cheaper read path, so it still loads every column for every
-        # matched row above and only trims the result here. This is NOT
-        # a storage-level projection -- unlike LanceDB's select() push-down,
-        # the fetch cost is identical to omitting `columns` entirely.
+        # Return-shape compatibility with LanceDB only: the columns
+        # parameter itself does not make this read cheaper -- the matched
+        # rows above are loaded in full and only trimmed here. Passing
+        # ``skip_vectors`` is what drops the vector payload from the
+        # Milvus query; without it the fetch cost is identical to
+        # omitting `columns` entirely.
         return [{name: getattr(row, name) for name in columns} for row in rows]
 
     async def find_by_session(

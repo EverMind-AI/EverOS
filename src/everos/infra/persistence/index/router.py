@@ -50,8 +50,12 @@ class RoutedIndexRepository[T: BaseModel]:
     async def count_where(self, where: Predicate | None = None) -> int:
         return await self._repo().count_where(where)
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
-        return await self._repo().find_where(where, limit=limit)
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]:
+        return await self._repo().find_where(
+            where, limit=limit, skip_vectors=skip_vectors
+        )
 
     async def find_one_where(self, where: Predicate) -> T | None:
         return await self._repo().find_one_where(where)
@@ -86,6 +90,7 @@ class RoutedIndexRepository[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: None = None,
+        skip_vectors: bool = False,
     ) -> list[T]: ...
 
     @overload
@@ -97,6 +102,7 @@ class RoutedIndexRepository[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str],
+        skip_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(
@@ -107,6 +113,7 @@ class RoutedIndexRepository[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
     ) -> list[T] | list[dict[str, Any]]:
         return await self._repo().find_by_owner_entries(
             owner_id,
@@ -114,6 +121,7 @@ class RoutedIndexRepository[T: BaseModel]:
             app_id=app_id,
             project_id=project_id,
             columns=columns,
+            skip_vectors=skip_vectors,
         )
 
     async def find_by_session(

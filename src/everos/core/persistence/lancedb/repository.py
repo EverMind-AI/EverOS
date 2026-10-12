@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pyarrow as pa
 from lancedb import AsyncTable
 
 from everos.component.utils.datetime import get_utc_now
@@ -767,6 +768,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         where: str,
         *,
         limit: int = 100,
+        skip_vectors: bool = False,
     ) -> list[T]:
         """Scalar query returning *typed* schema instances.
 
@@ -774,10 +776,24 @@ class LanceRepoBase[T: BaseLanceTable]:
         LanceDB row dicts. No vector ANN; pure scalar filter only.
         Use :meth:`search` when you need ``_distance`` or want to mix
         ANN with filters.
+
+        ``skip_vectors``: leave the vector columns out of the
+        read; they come back as ``None``. Each 1024-D vector becomes 1024
+        Python floats in ``to_list``, so bulk readers that never use them
+        should set this.
         """
         async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
             table = await self._table()
-            rows = await table.query().where(where).limit(limit).to_list()
+            query = table.query().where(where)
+            if skip_vectors:
+                query = query.select(
+                    [
+                        f.name
+                        for f in self.schema.to_arrow_schema()
+                        if not pa.types.is_fixed_size_list(f.type)
+                    ]
+                )
+            rows = await query.limit(limit).to_list()
         return [self.schema.model_validate(r) for r in rows]
 
     async def find_one_where(self, where: str) -> T | None:
@@ -971,7 +987,9 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
+    ) -> list[T] | list[dict[str, Any]]:
         """Bulk point-query by ``(app, project, owner_id, entry_id IN ...)``.
 
         Empty ``entry_ids`` short-circuits to ``[]`` rather than emit a
@@ -979,15 +997,32 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         tuples). The query's ``limit`` is bound to ``len(entry_ids)``
         because at most one row per id can exist under one (app, project,
         owner) scope.
+
+        ``columns``: when set, returns raw dicts holding only
+        those columns instead of typed rows, so callers resolving thousands
+        of ids skip the vector payload. ``skip_vectors`` keeps typed rows
+        but leaves the vectors out (see :meth:`find_where`).
         """
         if not entry_ids:
             return []
         quoted = ", ".join(f"'{_q(eid)}'" for eid in entry_ids)
-        return await self.find_where(
+        where = (
             f"owner_id = '{_q(owner_id)}' AND entry_id IN ({quoted}) "
-            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'",
-            limit=len(entry_ids),
+            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'"
         )
+        if columns is None:
+            return await self.find_where(
+                where, limit=len(entry_ids), skip_vectors=skip_vectors
+            )
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
+            table = await self._table()
+            return (
+                await table.query()
+                .where(where)
+                .select(list(columns))
+                .limit(len(entry_ids))
+                .to_list()
+            )
 
     async def find_by_session(
         self,

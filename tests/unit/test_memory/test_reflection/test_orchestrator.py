@@ -277,6 +277,9 @@ async def test_run_init_mode_merges_and_deprecates() -> None:
 
     reports = await orch.run(ctx=ctx, owner_id="u_alice")
 
+    # Local patch: the reflector reads episode text, never the vectors.
+    assert episode_store.find_by_owner_entries.call_args.kwargs["skip_vectors"]
+
     # Reflector was called in INIT mode (no old_episode kwarg).
     reflector.areflect.assert_awaited_once()
     call_kwargs = reflector.areflect.call_args

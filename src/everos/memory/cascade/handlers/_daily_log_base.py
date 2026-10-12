@@ -115,6 +115,7 @@ class BaseDailyLogHandler(Handler):
         existing = await self.index_repo.find_where(
             eq("md_path", md_path),
             limit=10_000,
+            skip_vectors=True,
         )
         owner_id, owner_type = resolve_owner(parsed.frontmatter, md_path)
         app_id, project_id = resolve_scope(md_path)

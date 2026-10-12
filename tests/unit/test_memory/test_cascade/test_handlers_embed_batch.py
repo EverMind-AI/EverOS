@@ -66,7 +66,9 @@ class _FakeRepo:
     def __init__(self) -> None:
         self.rows: list[Any] = []
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[Any]:
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[Any]:
         if isinstance(where, Comparison) and where.field == "md_path":
             return [r for r in self.rows if r.md_path == where.value]
         return []

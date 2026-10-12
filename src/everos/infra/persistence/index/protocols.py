@@ -41,7 +41,9 @@ class IndexRepository(Protocol[T]):
 
     async def count_where(self, where: Predicate | None = None) -> int: ...
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]: ...
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]: ...
 
     async def find_one_where(self, where: Predicate) -> T | None: ...
 
@@ -67,6 +69,7 @@ class IndexRepository(Protocol[T]):
         app_id: str = "default",
         project_id: str = "default",
         columns: None = None,
+        skip_vectors: bool = False,
     ) -> list[T]: ...
 
     @overload
@@ -78,6 +81,7 @@ class IndexRepository(Protocol[T]):
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str],
+        skip_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(

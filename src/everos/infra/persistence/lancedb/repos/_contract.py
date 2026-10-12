@@ -136,8 +136,12 @@ class LanceIndexContract[T]:
         table = await self._table()
         return await table.count_rows(filter=_render_optional(where))
 
-    async def find_where(self, where: Predicate | str, *, limit: int = 100) -> list[T]:
-        return await super().find_where(_where(where), limit=limit)  # type: ignore[misc]
+    async def find_where(
+        self, where: Predicate | str, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]:
+        return await super().find_where(  # type: ignore[misc]
+            _where(where), limit=limit, skip_vectors=skip_vectors
+        )
 
     async def find_one_where(self, where: Predicate | str) -> T | None:
         return await super().find_one_where(_where(where))  # type: ignore[misc]
@@ -280,6 +284,7 @@ class LanceIndexContract[T]:
         app_id: str = "default",
         project_id: str = "default",
         columns: None = None,
+        skip_vectors: bool = False,
     ) -> list[T]: ...
 
     @overload
@@ -291,6 +296,7 @@ class LanceIndexContract[T]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str],
+        skip_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(
@@ -301,6 +307,7 @@ class LanceIndexContract[T]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
     ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
@@ -311,7 +318,9 @@ class LanceIndexContract[T]:
             eq("project_id", project_id),
         )
         if columns is None:
-            return await self.find_where(predicate, limit=len(entry_ids))
+            return await self.find_where(
+                predicate, limit=len(entry_ids), skip_vectors=skip_vectors
+            )
         # Column projection keeps the vector payload out of the read.
         table = await self._table()
         return await (

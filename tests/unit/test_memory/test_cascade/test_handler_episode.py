@@ -59,7 +59,9 @@ class _FakeEpisodeRepo:
         self.deletes: list[str] = []
         self.rows: list[Episode] = []
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[Episode]:
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[Episode]:
         if isinstance(where, Comparison) and where.field == "md_path":
             md_path = str(where.value)
             return [r for r in self.rows if r.md_path == md_path]

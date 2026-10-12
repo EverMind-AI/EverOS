@@ -551,6 +551,7 @@ class ReflectionOrchestrator:
             entry_ids,
             app_id=app_id,
             project_id=project_id,
+            skip_vectors=True,
         )
         rows.sort(key=lambda e: e.timestamp)
         return rows

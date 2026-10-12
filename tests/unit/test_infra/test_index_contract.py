@@ -414,6 +414,32 @@ def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
     }
 
 
+async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
+    """Cascade diffs and agent-skill / reflection hydration read
+    thousands of rows but never touch the vectors; materialising them as
+    Python floats cost ~1.2 GB per pass on a 25k-row daily atomic_fact log.
+    """
+    rows = [_episode(number) for number in range(3)]
+    for row in rows:
+        row.vector = [0.5] * 1024
+        row.subject_vector = [0.25] * 1024
+    await episode_repo.upsert(rows)
+
+    full = await episode_repo.find_where(eq("owner_id", "owner"))
+    assert all(r.vector is not None for r in full)
+
+    lean = await episode_repo.find_where(eq("owner_id", "owner"), skip_vectors=True)
+    by_owner = await episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000", "ep_0002"], skip_vectors=True
+    )
+
+    assert sorted(r.entry_id for r in lean) == ["ep_0000", "ep_0001", "ep_0002"]
+    assert sorted(r.entry_id for r in by_owner) == ["ep_0000", "ep_0002"]
+    for r in [*lean, *by_owner]:
+        assert r.vector is None and r.subject_vector is None
+        assert r.content_sha256 == rows[int(r.entry_id[-4:])].content_sha256
+
+
 async def test_repository_maintenance_contract_is_executable(
     index_backend: str,
 ) -> None:

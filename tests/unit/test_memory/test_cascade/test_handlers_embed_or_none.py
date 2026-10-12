@@ -217,7 +217,9 @@ class _FakeSkillRepo:
         for row in rows:
             self.rows[row.id] = row
 
-    async def find_where(self, predicate: str, *, limit: int):  # type: ignore[no-untyped-def]
+    async def find_where(
+        self, predicate: str, *, limit: int, skip_vectors: bool = False
+    ):  # type: ignore[no-untyped-def]
         return []
 
     async def delete(self, predicate: str) -> None:  # type: ignore[no-untyped-def]

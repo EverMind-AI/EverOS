@@ -787,6 +787,8 @@ async def test_select_supporting_cases_ranks_by_quality_then_timestamp() -> None
         )
 
     assert [c.entry_id for c in got] == ["ac_c", "ac_b", "ac_a"]
+    # Local patch: only text / quality / timestamp feed the prompt.
+    assert mock_case_repo.find_by_owner_entries.call_args.kwargs["skip_vectors"]
 
 
 async def test_select_supporting_cases_caps_at_max_supporting() -> None:
