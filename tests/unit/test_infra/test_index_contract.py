@@ -285,12 +285,7 @@ async def test_repository_port_crud_count_and_uncapped_scan(
 async def test_find_by_owner_entries_projects_requested_columns(
     index_backend: str,
 ) -> None:
-    """A ``columns`` projection returns raw dicts holding only those columns.
-
-    LanceDB-only: column projection is pushed down to the query, so there is
-    nothing to assert against Milvus here (see
-    ``test_milvus_find_by_owner_entries_has_no_columns_parameter``).
-    """
+    """A ``columns`` projection returns raw dicts holding only those columns."""
     await episode_repo.upsert([_episode(number) for number in range(3)])
 
     rows = await episode_repo.find_by_owner_entries(
@@ -363,24 +358,44 @@ async def test_find_by_owner_entries_columns_select_before_materializing(
     assert dict(calls)["select"] == ["entry_id", "parent_id"]
 
 
-def test_milvus_find_by_owner_entries_has_no_columns_parameter() -> None:
-    """Column projection is a LanceDB-only capability.
+async def test_router_forwards_columns_to_milvus_without_type_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Routing to Milvus with ``columns`` set must not raise ``TypeError``.
 
-    Milvus still loads full rows for every ``find_by_owner_entries`` call
-    (there is no cheaper path on that backend), so the signature carries no
-    ``columns`` parameter and no overloads -- asking it to project would
-    silently lie about doing less work than it does.
+    Regression test: a prior change dropped the ``columns`` parameter from
+    ``MilvusRepoBase.find_by_owner_entries`` while the router kept forwarding
+    it unconditionally, so selecting the Milvus backend and requesting a
+    projection raised ``TypeError: find_by_owner_entries() got an unexpected
+    keyword argument 'columns'``.
     """
-    assert get_overloads(MilvusRepoBase.find_by_owner_entries) == []
-    assert (
-        "columns"
-        not in inspect.signature(MilvusRepoBase.find_by_owner_entries).parameters
-    )
+    from everos.config import load_settings
+    from everos.infra.persistence import milvus
+
+    rows = [_episode(0), _episode(2)]
+    monkeypatch.setattr(milvus.episode_repo, "find_where", AsyncMock(return_value=rows))
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
+    load_settings.cache_clear()
+    try:
+        projected = await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
+        )
+        typed = await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000", "ep_0002"]
+        )
+    finally:
+        load_settings.cache_clear()
+
+    assert sorted(projected, key=lambda r: r["entry_id"]) == [
+        {"entry_id": "ep_0000", "parent_id": "memcell"},
+        {"entry_id": "ep_0002", "parent_id": "memcell"},
+    ]
+    assert typed == rows
 
 
 @pytest.mark.parametrize(
     "owner",
-    [IndexRepository, RoutedIndexRepository, LanceIndexContract],
+    [IndexRepository, RoutedIndexRepository, LanceIndexContract, MilvusRepoBase],
 )
 def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
     """Omitting ``columns`` is typed ``list[T]``; a projection is typed dicts."""

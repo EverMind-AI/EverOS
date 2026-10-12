@@ -108,15 +108,7 @@ class RoutedIndexRepository[T: BaseModel]:
         project_id: str = "default",
         columns: Sequence[str] | None = None,
     ) -> list[T] | list[dict[str, Any]]:
-        repo = self._repo()
-        if columns is None:
-            return await repo.find_by_owner_entries(
-                owner_id, entry_ids, app_id=app_id, project_id=project_id
-            )
-        # Column projection is a LanceDB-only capability; Milvus's
-        # find_by_owner_entries has no columns parameter at all, so it
-        # must not be forwarded unless actually requested.
-        return await repo.find_by_owner_entries(
+        return await self._repo().find_by_owner_entries(
             owner_id,
             entry_ids,
             app_id=app_id,
