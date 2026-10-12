@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the pass does not clear the `deprecated_by` stamps one project's
   reflection left on another project's rows.
 
+- **`POST /cascade/quiesce` freezes a complete index.** Its drain stopped
+  at the worker's per-drain bound, and inside a server it could also stop
+  while the background worker still held the last batch, which the stop
+  that follows then orphaned in `processing`; the ledger an upgrade
+  re-queues made both routine. The drain now runs until the ledger holds
+  nothing pending, waiting for the worker's in-flight batch, and
+  `everos cascade sync` / `rebuild` use the same loop.
+
 - **Changing a knowledge document's category keeps it inside `knowledge/`.**
   `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved
   the document's directory up into the project directory, where the markdown

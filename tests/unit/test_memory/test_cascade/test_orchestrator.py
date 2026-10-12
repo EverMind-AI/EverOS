@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import patch
@@ -298,6 +299,36 @@ async def test_watcher_can_be_disabled_without_losing_the_worker(
         await orch.stop()
 
 
+class _SharedQueue:
+    """A ledger two drainers claim from: this orchestrator's passes and, inside
+    a server, the background worker. ``held`` is the batch the worker has
+    claimed (``processing``), which ``pending`` counts too."""
+
+    def __init__(self, rows: int, bound: int = 5000) -> None:
+        self.rows, self.bound, self.held = rows, bound, 0
+        self.drains: list[int] = []
+        self.summaries: list[int] = []
+
+    async def drain(self, **_: object) -> int:
+        took = min(self.rows, self.bound)
+        self.rows -= took
+        self.drains.append(took)
+        return took
+
+    async def summary(self) -> object:
+        pending = self.rows + self.held
+        self.summaries.append(pending)
+        return type("S", (), {"pending": pending})()
+
+
+def _patched(orch: CascadeOrchestrator, q: _SharedQueue) -> tuple:
+    return (
+        patch.object(orch, "sync_once", side_effect=q.drain),
+        patch.object(orch, "drain_once", side_effect=q.drain),
+        patch.object(orch, "queue_summary", side_effect=q.summary),
+    )
+
+
 async def test_drain_fully_keeps_draining_past_the_worker_bound(
     runtime: MemoryRoot,
 ) -> None:
@@ -306,20 +337,75 @@ async def test_drain_fully_keeps_draining_past_the_worker_bound(
     a caller that stops there reports success with rows still pending.
     """
     orch = _make_orchestrator(runtime)
-    queue = {"rows": 5003}
-    drains: list[int] = []
-
-    async def bounded_drain(**_: object) -> int:
-        took = min(queue["rows"], 5000)
-        queue["rows"] -= took
-        drains.append(took)
-        return took
-
-    with (
-        patch.object(orch, "sync_once", side_effect=bounded_drain),
-        patch.object(orch, "drain_once", side_effect=bounded_drain),
-    ):
+    q = _SharedQueue(rows=5003)
+    a, b, c = _patched(orch, q)
+    with a, b, c:
         assert await orch.drain_fully() == 5003
+    assert q.rows == 0
+    assert q.drains == [
+        5000,
+        3,
+    ]  # the scan's drain, then the rest; the ledger says when to stop
 
-    assert queue["rows"] == 0
-    assert drains == [5000, 3, 0]  # the scan's drain, the rest, the empty pass
+
+async def test_drain_fully_waits_for_a_batch_another_drainer_holds(
+    runtime: MemoryRoot,
+) -> None:
+    """Inside a server the background worker claims batches too. A pass of
+    ours can find nothing pending while the worker still holds the last
+    batch; ``POST /cascade/quiesce`` cancels the worker right after, which
+    would orphan that batch in ``processing`` and freeze a partial index
+    (real host, 12000-row ledger: 50 rows left behind). So the ledger, not
+    our own pass, says when the drain is done.
+    """
+    orch = _make_orchestrator(runtime)
+    q = _SharedQueue(rows=5050)
+    a, b, c = _patched(orch, q)
+    with a, b, c:
+
+        async def first_pass(**_: object) -> int:
+            took = await q.drain()  # 5000 by us; the worker claims the last 50
+            q.rows, q.held = 0, 50
+            return took
+
+        async def worker_finishes_later(**_: object) -> int:
+            # our pass finds nothing pending; the worker's batch lands two polls later
+            if len(q.drains) >= 3:
+                q.held = 0
+            q.drains.append(0)
+            return 0
+
+        orch.sync_once.side_effect = first_pass
+        orch.drain_once.side_effect = worker_finishes_later
+        orch._config = dataclasses.replace(
+            orch._config, worker_poll_interval_seconds=0.01
+        )
+        processed = await orch.drain_fully()
+
+    assert q.summaries and q.summaries[-1] == 0, (
+        "returned while the worker held a batch"
+    )
+    assert processed == 5000
+
+
+async def test_drain_fully_gives_up_when_the_ledger_stops_moving(
+    runtime: MemoryRoot,
+) -> None:
+    """A row stuck in ``processing`` (a hung handler) must not hang the caller
+    forever; after the idle limit the drain returns and the caller reports
+    what is left."""
+    orch = _make_orchestrator(runtime)
+    q = _SharedQueue(rows=0)
+    q.held = 1
+    a, b, c = _patched(orch, q)
+    with (
+        a,
+        b,
+        c,
+        patch("everos.memory.cascade.orchestrator._DRAIN_IDLE_LIMIT_SECONDS", 0.05),
+    ):
+        orch._config = dataclasses.replace(
+            orch._config, worker_poll_interval_seconds=0.01
+        )
+        assert await orch.drain_fully() == 0
+    assert q.summaries[-1] == 1  # gave up with the row still held, and said so

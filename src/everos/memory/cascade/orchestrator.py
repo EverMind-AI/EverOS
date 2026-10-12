@@ -55,6 +55,10 @@ column, a scope field or a derived value needs ``cascade rebuild``, not a
 bump here."""
 
 _RECONCILE_MARKER = ".index_reconcile_version"
+_DRAIN_IDLE_LIMIT_SECONDS = 120.0
+"""How long :meth:`CascadeOrchestrator.drain_fully` keeps polling a ledger
+that holds rows nobody is landing (a handler hung mid-batch) before it
+returns and lets the caller report what is left."""
 
 
 async def reconcile_index_once(
@@ -312,17 +316,39 @@ class CascadeOrchestrator:
         return await self._worker.drain_until_empty()
 
     async def drain_fully(self) -> int:
-        """One scan, then drain until a pass processes nothing.
+        """One scan, then drain until the ledger holds nothing pending.
 
-        The worker bounds a single drain (``max_passes`` x batch size); the
-        ledger the one-time reconcile queues after an upgrade can exceed it,
-        and a caller that stops at the bound -- ``cascade sync`` / ``rebuild``
-        or ``POST /cascade/quiesce`` -- would report success with rows still
-        pending.
+        Two things end a single drain early. The worker bounds one
+        ``drain_until_empty`` (``max_passes`` x batch size), and the ledger
+        the one-time reconcile queues after an upgrade can exceed it. Inside
+        a server the background worker claims batches too, so a pass of ours
+        can find nothing pending while the worker still holds the last
+        batch; ``POST /cascade/quiesce`` cancels the worker right after,
+        which would orphan that batch in ``processing`` and freeze a partial
+        index (seen on a real host: 50 rows left of 12000). So the ledger,
+        not our own pass, says when the drain is done -- ``pending`` counts
+        ``processing`` rows -- and a pass that finds nothing waits one poll
+        interval for the other drainer. A ledger that stops moving for
+        :data:`_DRAIN_IDLE_LIMIT_SECONDS` ends the wait; the caller reports
+        the rows left.
         """
         processed = await self.sync_once()
-        while more := await self.drain_once():
+        idle_seconds = 0.0
+        while (await self.queue_summary()).pending:
+            more = await self.drain_once()
             processed += more
+            if more:
+                idle_seconds = 0.0
+                continue
+            if idle_seconds >= _DRAIN_IDLE_LIMIT_SECONDS:
+                logger.warning(
+                    "cascade_drain_fully_gave_up",
+                    idle_seconds=idle_seconds,
+                    reason="rows stayed pending or processing with nothing landing",
+                )
+                break
+            await asyncio.sleep(self._config.worker_poll_interval_seconds)
+            idle_seconds += self._config.worker_poll_interval_seconds
         return processed
 
     async def queue_summary(self) -> QueueSummary:
