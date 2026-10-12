@@ -65,7 +65,8 @@ class IndexRepository(Protocol[T]):
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]: ...
+        columns: Sequence[str] | None = None,
+    ) -> list[Any]: ...
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100

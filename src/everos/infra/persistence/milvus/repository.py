@@ -724,10 +724,11 @@ class MilvusRepoBase[T: BaseModel]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: Sequence[str] | None = None,
+    ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
-        return await self.find_where(
+        rows = await self.find_where(
             all_of(
                 eq("owner_id", owner_id),
                 one_of("entry_id", list(entry_ids)),
@@ -736,6 +737,10 @@ class MilvusRepoBase[T: BaseModel]:
             ),
             limit=len(entry_ids),
         )
+        if columns is None:
+            return rows
+        # Shape parity with LanceDB only: the full rows are still loaded.
+        return [{name: getattr(row, name) for name in columns} for row in rows]
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100

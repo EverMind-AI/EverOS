@@ -278,17 +278,26 @@ class LanceIndexContract[T]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: Sequence[str] | None = None,
+    ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
-        return await self.find_where(
-            all_of(
-                eq("owner_id", owner_id),
-                one_of("entry_id", list(entry_ids)),
-                eq("app_id", app_id),
-                eq("project_id", project_id),
-            ),
-            limit=len(entry_ids),
+        predicate = all_of(
+            eq("owner_id", owner_id),
+            one_of("entry_id", list(entry_ids)),
+            eq("app_id", app_id),
+            eq("project_id", project_id),
+        )
+        if columns is None:
+            return await self.find_where(predicate, limit=len(entry_ids))
+        # Column projection keeps the vector payload out of the read.
+        table = await self._table()
+        return await (
+            table.query()
+            .where(render_predicate(predicate))
+            .select(list(columns))
+            .limit(len(entry_ids))
+            .to_list()
         )
 
     async def find_by_session(

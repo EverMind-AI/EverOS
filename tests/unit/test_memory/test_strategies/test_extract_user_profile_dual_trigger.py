@@ -233,10 +233,11 @@ async def test_cluster_path_unaffected_by_dual_trigger_refactor(
         preview=[],
         members=["ep_20260101_0001"],
     )
-    ep_row = MagicMock()
-    ep_row.entry_id = "ep_20260101_0001"
-    ep_row.parent_type = "memcell"
-    ep_row.parent_id = "mc_aaaaaaaaaaa1"
+    ep_row = {
+        "entry_id": "ep_20260101_0001",
+        "parent_type": "memcell",
+        "parent_id": "mc_aaaaaaaaaaa1",
+    }
 
     from everalgo.types import ChatMessage
     from everalgo.types import MemCell as AlgoMemCell

@@ -84,12 +84,14 @@ class RoutedIndexRepository[T: BaseModel]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: Sequence[str] | None = None,
+    ) -> list[Any]:
         return await self._repo().find_by_owner_entries(
             owner_id,
             entry_ids,
             app_id=app_id,
             project_id=project_id,
+            columns=columns,
         )
 
     async def find_by_session(

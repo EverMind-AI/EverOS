@@ -54,13 +54,9 @@ def _algo_cluster(*, cluster_id: str, members: list[str], last_ts: int) -> AlgoC
     )
 
 
-def _episode_row(entry_id: str, parent_id: str) -> MagicMock:
-    """Stand-in for a LanceDB Episode row with parent_type=memcell."""
-    row = MagicMock()
-    row.entry_id = entry_id
-    row.parent_type = "memcell"
-    row.parent_id = parent_id
-    return row
+def _episode_row(entry_id: str, parent_id: str) -> dict[str, str]:
+    """Projected LanceDB Episode row with parent_type=memcell."""
+    return {"entry_id": entry_id, "parent_type": "memcell", "parent_id": parent_id}
 
 
 def _memcell_row(memcell_id: str, *, sender_id: str, ts_ms: int) -> MagicMock:
@@ -150,6 +146,12 @@ async def test_init_mode_writes_profile_when_no_existing(
         monkeypatch.setattr(mod, "_reader", None, raising=False)
 
         await extract_user_profile(_event(), FakeStrategyContext())
+
+    # Only the parent refs are fetched, never the full rows with vectors.
+    assert mock_episode_repo.find_by_owner_entries.call_args.kwargs["columns"] == [
+        "parent_type",
+        "parent_id",
+    ]
 
     # INIT mode — old_profile is None.
     extractor_call = mock_extractor_cls.return_value.aextract.call_args

@@ -273,6 +273,22 @@ async def test_repository_port_crud_count_and_uncapped_scan(
     assert await episode_repo.count_where(owner) == 100
 
 
+async def test_find_by_owner_entries_projects_requested_columns(
+    index_backend: str,
+) -> None:
+    """A ``columns`` projection returns raw dicts holding only those columns."""
+    await episode_repo.upsert([_episode(number) for number in range(3)])
+
+    rows = await episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
+    )
+
+    assert sorted(rows, key=lambda r: r["entry_id"]) == [
+        {"entry_id": "ep_0000", "parent_id": "memcell"},
+        {"entry_id": "ep_0002", "parent_id": "memcell"},
+    ]
+
+
 async def test_repository_maintenance_contract_is_executable(
     index_backend: str,
 ) -> None:
