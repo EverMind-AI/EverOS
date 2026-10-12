@@ -5,7 +5,20 @@ All notable changes to **EverOS** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.2] - 2026-10-12
+
+**Memories written under two projects no longer overwrite each other in the
+index.** The derived index merged rows on `id` alone, and `id` is unique only
+within one `(app_id, project_id)`: a user's episodes, atomic facts, agent
+cases, foresights, skills and profile saved under a second project replaced
+the first project's rows in LanceDB and Milvus, so search and `/get` under the
+first project came back empty or returned the other project's text. Markdown
+was never affected. Every index table is now keyed on the full
+`(app_id, project_id, id)`; a LanceDB root upgraded from an earlier release
+gets its lost rows back by itself on the first start, and a Milvus root needs
+one `everos cascade rebuild`. Also in this release: `POST /cascade/quiesce`
+no longer freezes a partial index, and a knowledge document whose category
+changes stays inside `knowledge/`.
 
 ### Fixed
 
@@ -61,6 +74,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markdown.
 - Response `id`s are unique within `(app_id, project_id)`, not globally; the
   shape of `id` is unchanged.
+
+### Upgrade
+
+LanceDB, the default backend: nothing to do. The first start after upgrading
+(or the first `everos cascade sync`) re-reconciles every indexed markdown file
+once and records that in `.index/.index_reconcile_version`; unchanged entries
+are skipped by digest, so a healthy root pays one read pass and no embedding.
+A root with tens of thousands of markdown files spends a few extra seconds on
+that start.
+
+Milvus: the server refuses to start on a collection from an earlier release
+and names the command. Run `everos cascade --root <root> rebuild --yes` once,
+then start it; the collections are recreated from markdown.
+
+Two LanceDB roots need a command instead of the automatic pass. A server
+started with `EVEROS_DISABLE_CASCADE=1` never runs it: stop that server and
+run `everos cascade --root <root> sync --force-all` once. A multi-project
+root where reflection ran before this release needs
+`everos cascade --root <root> rebuild --yes` once, because the pass does not
+clear the `deprecated_by` stamps one project's reflection left on another
+project's rows.
 
 ## [1.4.1] - 2026-09-24
 
