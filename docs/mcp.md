@@ -55,26 +55,22 @@ Optional environment variables: `EVEROS_USER_ID` (memory owner, default `default
 
 ## What the assistant gets
 
-| Tool | What it does | EverOS endpoint |
-|---|---|---|
-| `get_profile` | The synthesized user profile, fetched once per session | `POST /api/v2/memory/get` |
-| `add_memory` | Stores a durable fact or exchange the moment the user states it | `POST /api/v2/memory/add` + `flush` |
-| `search_memory` | Relevance search over past conversations and decisions | `POST /api/v2/memory/search` |
-| `list_memories` | Chronological, paginated browsing | `POST /api/v2/memory/get` |
-| `record_trajectory` | Records how a task was solved so EverOS can distill cases and skills | `POST /api/v2/memory/add` + `flush` |
-| `recall_agent_experience` | Finds distilled cases and skills relevant to the task at hand | `POST /api/v2/memory/search` (agent owner) |
-| `forget_session` | Deletes what this connection stored | `POST /api/v2/memory/delete` — see below |
-
-The server also ships an autonomy protocol through MCP `instructions`, so capable hosts load
-the profile at session start, save new facts and recall context without being asked.
+Seven tools, all backed by this server's `/api/v2/memory/*` endpoints: `get_profile`,
+`add_memory`, `search_memory`, `list_memories`, `record_trajectory`,
+`recall_agent_experience` and `forget_session`. The server also ships an autonomy protocol
+through MCP `instructions`, so capable hosts load the profile at session start, save new
+facts and recall context without being asked. The current tool list and the protocol are
+documented in the [everos-mcp README](https://github.com/EverMind-AI/EverOS-MCP#tools);
+this page only covers what is specific to a self-hosted EverOS.
 
 ## Behaviour on a self-hosted server
 
 - **`forget_session` is not available yet.** Self-hosted EverOS has no session-scoped delete
-  endpoint; the tool reports this instead of failing. Memories are Markdown files under the
-  memory root (`~/.everos/` by default) — delete them there.
-- **New memories are searchable about a second after saving.** `add_memory` returns once
-  extraction has written the Markdown; the index catches up a moment later.
+  endpoint ([#483](https://github.com/EverMind-AI/EverOS/issues/483)); the tool reports this
+  instead of failing. Memories are Markdown files under the memory root (`~/.everos/` by
+  default) — delete them there.
+- **New memories become searchable shortly after saving.** `add_memory` returns once
+  extraction has written the Markdown; the search index catches up a moment later.
   `list_memories` shows new entries sooner than `search_memory`.
 - **Trajectories only become cases when they pass the quality gate.** Short or
   straightforward runs are stored as episodes but produce no reusable case, so

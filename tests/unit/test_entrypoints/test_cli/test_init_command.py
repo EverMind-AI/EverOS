@@ -110,6 +110,9 @@ def test_output_shows_next_steps(runner: CliRunner, tmp_path: Path) -> None:
     result = runner.invoke(app, ["init", "--root", str(target)])
     assert "Next steps" in result.output
     assert "everos server start" in result.output
+    assert (
+        "https://github.com/EverMind-AI/EverOS/blob/main/docs/mcp.md" in result.output
+    )
 
 
 # ``os`` imported above just to keep ruff from complaining; remove if Ruff

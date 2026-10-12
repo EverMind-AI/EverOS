@@ -23,6 +23,25 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# The wheel ships only ``src/everos``, so the guide has to be linked, not pathed.
+MCP_GUIDE_URL = "https://github.com/EverMind-AI/EverOS/blob/main/docs/mcp.md"
+
+_WILDCARD_BINDS = {"0.0.0.0", "::", ""}
+
+
+def mcp_base_url(host: str, port: int) -> str:
+    """The ``EVEROS_BASE_URL`` a client on this machine should use.
+
+    ``host`` is the bind address: a wildcard bind (``0.0.0.0`` / ``::``) is
+    not something a client can connect to, so it becomes loopback; IPv6
+    literals are bracketed so the result is a valid URL.
+    """
+    if host in _WILDCARD_BINDS:
+        host = "127.0.0.1"
+    elif ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
 
 @app.command("start")
 def start(
@@ -82,9 +101,10 @@ def start(
     bootstrap_logger = logging.getLogger("everos.cli.server")
     bootstrap_logger.info("starting everos on %s:%d", host_resolved, port_resolved)
     bootstrap_logger.info(
-        "MCP clients: uvx everos-mcp with EVEROS_BASE_URL=http://%s:%d (docs/mcp.md)",
-        host_resolved,
-        port_resolved,
+        "once up, MCP clients connect with: uvx everos-mcp, "
+        "EVEROS_BASE_URL=%s (guide: %s)",
+        mcp_base_url(host_resolved, port_resolved),
+        MCP_GUIDE_URL,
     )
     if host_resolved == "0.0.0.0":
         bootstrap_logger.warning(
