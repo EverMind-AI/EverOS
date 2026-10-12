@@ -55,11 +55,11 @@ Optional environment variables: `EVEROS_USER_ID` (memory owner, default `default
 
 ## What the assistant gets
 
-Seven tools, all backed by this server's `/api/v2/memory/*` endpoints: `get_profile`,
+Seven tools, backed by this server's `/api/v2/memory/*` endpoints: `get_profile`,
 `add_memory`, `search_memory`, `list_memories`, `record_trajectory`,
-`recall_agent_experience` and `forget_session`. The server also ships an autonomy protocol
-through MCP `instructions`, so capable hosts load the profile at session start, save new
-facts and recall context without being asked. The current tool list and the protocol are
+`recall_agent_experience` and `forget_session` (not yet available here, see below). The
+server also ships an autonomy protocol through MCP `instructions`, so capable hosts load the
+profile at session start, save new facts and recall context without being asked. The current tool list and the protocol are
 documented in the [everos-mcp README](https://github.com/EverMind-AI/EverOS-MCP#tools);
 this page only covers what is specific to a self-hosted EverOS.
 
