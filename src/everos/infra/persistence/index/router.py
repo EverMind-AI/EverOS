@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, overload
 
 from pydantic import BaseModel
 
@@ -77,6 +77,28 @@ class RoutedIndexRepository[T: BaseModel]:
             project_id=project_id,
         )
 
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: None = None,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+    ) -> list[dict[str, Any]]: ...
+
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -85,7 +107,7 @@ class RoutedIndexRepository[T: BaseModel]:
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
-    ) -> list[Any]:
+    ) -> list[T] | list[dict[str, Any]]:
         return await self._repo().find_by_owner_entries(
             owner_id,
             entry_ids,

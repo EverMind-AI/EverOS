@@ -11,6 +11,7 @@ import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import get_overloads
 
 import pytest
 
@@ -30,9 +31,15 @@ from everos.infra.persistence.index import (
     primary_key,
     shutdown,
 )
+from everos.infra.persistence.index.router import RoutedIndexRepository
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
+    lancedb_manager,
+    render_predicate,
+)
 from everos.infra.persistence.lancedb import index_backend as lance_index_backend
-from everos.infra.persistence.lancedb import lancedb_manager, render_predicate
+from everos.infra.persistence.milvus import MilvusRepoBase
 from everos.infra.persistence.milvus import index_backend as milvus_index_backend
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
@@ -287,6 +294,27 @@ async def test_find_by_owner_entries_projects_requested_columns(
         {"entry_id": "ep_0000", "parent_id": "memcell"},
         {"entry_id": "ep_0002", "parent_id": "memcell"},
     ]
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [IndexRepository, RoutedIndexRepository, LanceIndexContract, MilvusRepoBase],
+)
+def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
+    """Omitting ``columns`` is typed ``list[T]``; a projection is typed dicts."""
+    overloads = get_overloads(owner.find_by_owner_entries)
+
+    contract = {
+        inspect.signature(fn).parameters["columns"].annotation: (
+            inspect.signature(fn).return_annotation
+        )
+        for fn in overloads
+    }
+
+    assert contract == {
+        "None": "list[T]",
+        "Sequence[str]": "list[dict[str, Any]]",
+    }
 
 
 async def test_repository_maintenance_contract_is_executable(

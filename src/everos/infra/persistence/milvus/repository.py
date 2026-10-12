@@ -6,7 +6,7 @@ import asyncio
 import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, overload
 
 from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
@@ -716,6 +716,28 @@ class MilvusRepoBase[T: BaseModel]:
                 eq("project_id", project_id),
             )
         )
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: None = None,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+    ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(
         self,

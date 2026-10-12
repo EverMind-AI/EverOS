@@ -17,7 +17,7 @@ import asyncio
 import datetime as dt
 import re
 from collections.abc import Sequence
-from typing import Any, Final
+from typing import Any, Final, overload
 
 from lancedb.query import BooleanQuery, FullTextQuery, MatchQuery
 
@@ -270,6 +270,28 @@ class LanceIndexContract[T]:
                 eq("project_id", project_id),
             )
         )
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: None = None,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+    ) -> list[dict[str, Any]]: ...
 
     async def find_by_owner_entries(
         self,

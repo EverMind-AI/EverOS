@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Any, Protocol, TypeVar, overload, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -58,6 +58,28 @@ class IndexRepository(Protocol[T]):
         project_id: str = "default",
     ) -> T | None: ...
 
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: None = None,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+    ) -> list[dict[str, Any]]: ...
+
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -66,7 +88,7 @@ class IndexRepository(Protocol[T]):
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
-    ) -> list[Any]: ...
+    ) -> list[T] | list[dict[str, Any]]: ...
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100
