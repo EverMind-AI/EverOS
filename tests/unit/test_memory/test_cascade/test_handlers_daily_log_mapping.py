@@ -90,12 +90,26 @@ def _entry(
     )
 
 
+async def _embed_one(handler, **kw):  # type: ignore[no-untyped-def]
+    """Run one entry through the batch embed path (the production route)."""
+    [row] = await handler._embed_entries(
+        [kw["entry"]],
+        kw["owner_id"],
+        kw["owner_type"],
+        kw.get("app_id", "default"),
+        kw.get("project_id", "default"),
+        kw["md_path"],
+    )
+    return row
+
+
 # ── AtomicFact ───────────────────────────────────────────────────────────
 
 
 async def test_atomic_fact_build_row_maps_inline_and_section(tmp_path) -> None:  # type: ignore[no-untyped-def]
     handler = AtomicFactHandler(_deps(tmp_path))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="users/u1/.atomic_facts/atomic_fact-2026-05-14.md",
@@ -141,7 +155,8 @@ async def test_atomic_fact_missing_timestamp_raises(tmp_path) -> None:  # type: 
 
 async def test_foresight_build_row_with_evidence(tmp_path) -> None:  # type: ignore[no-untyped-def]
     handler = ForesightHandler(_deps(tmp_path))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="users/u1/.foresights/foresight-2026-05-14.md",
@@ -173,7 +188,8 @@ async def test_foresight_build_row_with_evidence(tmp_path) -> None:  # type: ign
 
 async def test_foresight_optional_evidence_left_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
     handler = ForesightHandler(_deps(tmp_path))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="x.md",
@@ -200,7 +216,8 @@ async def test_foresight_optional_evidence_left_none(tmp_path) -> None:  # type:
 
 async def test_agent_case_build_row_maps_intent_approach_insight(tmp_path) -> None:  # type: ignore[no-untyped-def]
     handler = AgentCaseHandler(_deps(tmp_path))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="a1",
         owner_type="agent",
         md_path="agents/a1/.cases/agent_case-2026-05-14.md",
@@ -230,7 +247,8 @@ async def test_agent_case_build_row_maps_intent_approach_insight(tmp_path) -> No
 
 async def test_agent_case_optional_insight_left_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
     handler = AgentCaseHandler(_deps(tmp_path))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="a1",
         owner_type="agent",
         md_path="x.md",

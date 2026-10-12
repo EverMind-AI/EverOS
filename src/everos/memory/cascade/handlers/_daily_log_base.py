@@ -26,8 +26,10 @@ from __future__ import annotations
 import abc
 import asyncio
 import dataclasses
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
+from everos.component.embedding import get_embedding_capability
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, StructuredEntry
 from everos.infra.persistence.index import all_of, eq, one_of
@@ -65,9 +67,11 @@ class BaseDailyLogHandler(Handler):
       subset of inline + section fields whose changes should trigger
       re-upsert + re-embed. Each key is ``"section:Name"`` or
       ``"inline:name"``.
+    - :meth:`_embed_texts` (override) — the texts one entry needs embedded.
     - :meth:`_build_row` (override) — turn a :class:`ParsedEntry` plus
-      common context (owner_id / owner_type / md_path) into a typed
-      LanceDB row. Tokenisation + embedding live in the subclass.
+      common context (owner_id / owner_type / md_path) and the vectors
+      for its texts into a typed LanceDB row. Tokenisation lives in the
+      subclass; embedding is batched here, one call per file.
     """
 
     kind: ClassVar[str] = ""
@@ -170,24 +174,46 @@ class BaseDailyLogHandler(Handler):
         project_id: str,
         md_path: str,
     ) -> list[Any]:
-        """Build LanceDB rows for changed entries (embed concurrently)."""
+        """Build LanceDB rows for changed entries.
+
+        Every text the changed entries need goes out in ONE ``embed_batch``
+        call (the provider chunks it by ``batch_size``), not one ``embed``
+        call per entry: the per-entry fan-out queued N single-input requests
+        on the process-wide embedding semaphore ahead of the interactive
+        query embedding (issue #486).
+        """
         if not to_build:
             return []
-        return list(
-            await asyncio.gather(
-                *(
-                    self._build_row(
-                        owner_id=owner_id,
-                        owner_type=owner_type,
-                        app_id=app_id,
-                        project_id=project_id,
-                        md_path=md_path,
-                        entry=entry,
-                    )
-                    for entry in to_build
+        texts_per_entry = [self._embed_texts(entry) for entry in to_build]
+        flat = [text for texts in texts_per_entry for text in texts]
+        vectors: Sequence[list[float] | None] | None
+        vectors = await get_embedding_capability().embed_batch_or_none(flat)
+        if vectors is None:
+            logger.debug(
+                "cascade_handler_embed_skipped",
+                kind=self.kind,
+                md_path=md_path,
+                entries=len(to_build),
+                reason="embedding_capability_unavailable",
+            )
+            vectors = [None] * len(flat)
+        rows: list[Any] = []
+        cursor = 0
+        for entry, texts in zip(to_build, texts_per_entry, strict=True):
+            entry_vectors = vectors[cursor : cursor + len(texts)]
+            cursor += len(texts)
+            rows.append(
+                await self._build_row(
+                    owner_id=owner_id,
+                    owner_type=owner_type,
+                    app_id=app_id,
+                    project_id=project_id,
+                    md_path=md_path,
+                    entry=entry,
+                    vectors=entry_vectors,
                 )
             )
-        )
+        return rows
 
     async def _apply_lance_changes(
         self,
@@ -273,6 +299,11 @@ class BaseDailyLogHandler(Handler):
             )
 
     @abc.abstractmethod
+    def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
+        """Subclass: the texts one entry needs embedded, in the order
+        :meth:`_build_row` receives their ``vectors`` back."""
+
+    @abc.abstractmethod
     async def _build_row(
         self,
         *,
@@ -282,8 +313,13 @@ class BaseDailyLogHandler(Handler):
         project_id: str = "default",
         md_path: str,
         entry: ParsedEntry,
+        vectors: Sequence[list[float] | None] = (),
     ) -> Any:
         """Subclass: build the typed LanceDB row for one parsed entry.
+
+        ``vectors`` aligns with :meth:`_embed_texts`; an empty sequence or
+        ``None`` items mean "no vector" (embedding unavailable) and the row
+        is written with ``vector=None``.
 
         ``app_id`` / ``project_id`` carry the path-derived scope; the base
         always supplies them (via :func:`resolve_scope`). They default to

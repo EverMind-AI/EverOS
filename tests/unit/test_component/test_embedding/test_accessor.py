@@ -20,6 +20,9 @@ class _MockEmbedder:
     async def embed(self, text: str) -> list[float]:
         return [0.1, 0.2, 0.3]
 
+    async def embed_batch(self, texts) -> list[list[float]]:  # type: ignore[no-untyped-def]
+        return [[float(len(t)), 0.2, 0.3] for t in texts]
+
 
 def _reset_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_accessor_mod, "_capability", None, raising=False)
@@ -62,6 +65,18 @@ async def test_embed_or_none_returns_vector_when_available() -> None:
     cap = EmbeddingCapability(provider=_MockEmbedder())
     result = await cap.embed_or_none("hello")
     assert result == [0.1, 0.2, 0.3]
+
+
+async def test_embed_batch_or_none_returns_none_when_unavailable() -> None:
+    cap = EmbeddingCapability(provider=None)
+    assert await cap.embed_batch_or_none(["hello", "world"]) is None
+
+
+async def test_embed_batch_or_none_returns_vectors_in_input_order() -> None:
+    """Callers slice the result back per input, so order is the contract."""
+    cap = EmbeddingCapability(provider=_MockEmbedder())
+    result = await cap.embed_batch_or_none(["ab", "cdef"])
+    assert result == [[2.0, 0.2, 0.3], [4.0, 0.2, 0.3]]
 
 
 def test_require_raises_when_unavailable() -> None:

@@ -3,8 +3,9 @@
 The wrapper encapsulates ``Optional[EmbeddingProvider]`` so consumers
 never see ``None`` directly. Two consumption modes:
 
-- :meth:`embed_or_none` for soft-degrade write paths (cascade handlers
-  that write ``vector=NULL`` when embedding is unavailable).
+- :meth:`embed_or_none` / :meth:`embed_batch_or_none` for soft-degrade
+  write paths (cascade handlers that write ``vector=NULL`` when embedding
+  is unavailable).
 - :meth:`require` for hard-required paths (search VECTOR/HYBRID/AGENTIC)
   that raise :class:`ProviderNotConfiguredError` -> HTTP 422 when missing.
 
@@ -17,6 +18,7 @@ settings and re-implementing the check, the check lives in
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from everos.core.errors import ProviderNotConfiguredError
@@ -44,6 +46,18 @@ class EmbeddingCapability:
         if self.provider is None:
             return None
         return list(await self.provider.embed(text))
+
+    async def embed_batch_or_none(
+        self, texts: Sequence[str]
+    ) -> list[list[float]] | None:
+        """Embed ``texts`` in one batched call if available, else ``None``.
+
+        Same soft-degrade contract as :meth:`embed_or_none`; the provider
+        chunks the request by its configured ``batch_size``.
+        """
+        if self.provider is None:
+            return None
+        return [list(v) for v in await self.provider.embed_batch(texts)]
 
     def require(self) -> EmbeddingProvider:
         """Return the provider, or raise :class:`ProviderNotConfiguredError`.

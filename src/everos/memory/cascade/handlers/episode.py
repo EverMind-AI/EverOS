@@ -34,16 +34,12 @@ BM25/scalar-searchable only.
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Sequence
 
-from everos.component.embedding import get_embedding_capability
-from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import Episode, ParentType, episode_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
-
-logger = get_logger(__name__)
 
 
 class EpisodeHandler(BaseDailyLogHandler):
@@ -65,6 +61,12 @@ class EpisodeHandler(BaseDailyLogHandler):
       call on Subject edits) is accepted under the single-hash design
       (cascade Q2 discussion)."""
 
+    def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
+        s = entry.structured
+        text = s.sections.get("Content", "").strip()
+        subject_text = s.sections.get("Subject", "").strip()
+        return (text, subject_text) if subject_text else (text,)
+
     async def _build_row(
         self,
         *,
@@ -74,28 +76,14 @@ class EpisodeHandler(BaseDailyLogHandler):
         project_id: str = "default",
         md_path: str,
         entry: ParsedEntry,
+        vectors: Sequence[list[float] | None] = (),
     ) -> Episode:
         s = entry.structured
         text = s.sections.get("Content", "").strip()
         subject_text = s.sections.get("Subject", "").strip()
 
-        # Embed content and subject concurrently; skip subject embed when absent.
-        capability = get_embedding_capability()
-        if subject_text:
-            vector, subject_vector = await asyncio.gather(
-                capability.embed_or_none(text),
-                capability.embed_or_none(subject_text),
-            )
-        else:
-            vector = await capability.embed_or_none(text)
-            subject_vector = None
-        if vector is None:
-            logger.debug(
-                "cascade_handler_embed_skipped",
-                kind=self.kind,
-                entry_id=entry.entry_id,
-                reason="embedding_capability_unavailable",
-            )
+        vector = vectors[0] if vectors else None
+        subject_vector = vectors[1] if len(vectors) > 1 else None
 
         # BM25 tokenization covers both body and subject keywords.
         tokenize_source = f"{text} {subject_text}" if subject_text else text

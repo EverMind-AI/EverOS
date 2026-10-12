@@ -377,7 +377,7 @@ class EmbeddingSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
-    max_concurrent: int = Field(default=50, ge=1)
+    max_concurrent: int = Field(default=10, ge=1)
 
 
 class RerankSettings(BaseModel):

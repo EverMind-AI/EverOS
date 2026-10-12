@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`[embedding].max_concurrent` defaults to 10 instead of 5.** The
+  `EmbeddingSettings` class default (50) is aligned to the same value; the
+  shipped `default.toml` always overrode it, so the effective default moves
+  from 5 to 10. (#486)
+
 ### Fixed
 
 - **The same owner's memories in two projects no longer overwrite each other
@@ -43,6 +50,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-queues made both routine. The drain now runs until the ledger holds
   nothing pending, waiting for the worker's in-flight batch, and
   `everos cascade sync` / `rebuild` use the same loop.
+
+- **A cascade pass embeds a file's changed entries in one batched request,
+  not one request per entry.** The four daily-log handlers (episode, atomic
+  fact, foresight, agent case) each called the embedding endpoint once per
+  entry, so a turn that wrote ~20 atomic facts queued ~20 single-input
+  requests on the process-wide embedding semaphore, and the next search's
+  query embedding waited behind all of them: about five times the
+  endpoint's latency at the previous default `max_concurrent = 5`. The
+  handlers now
+  send every text of a file through `embed_batch`, which
+  `[embedding].batch_size` splits into requests (23 entries become 3
+  requests at the default 10), so after a single turn's writes the query
+  embedding waits for one request; a large backlog still queues ahead of
+  it (#473). (#486)
 
 - **Changing a knowledge document's category keeps it inside `knowledge/`.**
   `PATCH /knowledge/documents/{doc_id}` with `category_id` set to `..` moved

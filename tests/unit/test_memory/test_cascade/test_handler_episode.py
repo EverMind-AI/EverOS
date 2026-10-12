@@ -35,7 +35,8 @@ class _StubTokenizer(Tokenizer):
 
 
 class _StubEmbedder(EmbeddingProvider):
-    """Returns a fixed 1024-dim vector; records call count."""
+    """Returns a fixed 1024-dim vector; counts the texts embedded (the
+    batch path reaches ``embed`` once per text via ``embed_batch``)."""
 
     dim = 1024
 
@@ -162,7 +163,7 @@ async def test_added_entry_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     assert outcome.skipped == 0
-    # Subject "Test" is present → two embed calls (content + subject).
+    # Subject "Test" is present → two texts embedded (content + subject).
     assert embedder.calls == 2
     assert len(fake_repo.upserts) == 1
     row = fake_repo.upserts[0][0]
@@ -230,7 +231,7 @@ async def test_modified_entry_reembeds(
     outcome = await handler.handle_added_or_modified(rel)
     assert outcome.upserted == 1
     assert outcome.skipped == 0
-    # Subject "Test" is present → two embed calls (content + subject).
+    # Subject "Test" is present → two texts embedded (content + subject).
     assert embedder.calls == 2
 
 
@@ -239,7 +240,7 @@ async def test_no_subject_skips_subject_embed(
     fake_repo: _FakeEpisodeRepo,
     stub_embedder: _StubEmbedder,
 ) -> None:
-    """When Subject is absent, subject_vector is None; only one embed call is made."""
+    """When Subject is absent, subject_vector is None; only content is embedded."""
     today = _dt.date(2026, 5, 14)
     writer = EpisodeWriter(memory_root)
     await writer.append_entry(
@@ -262,7 +263,7 @@ async def test_no_subject_skips_subject_embed(
     outcome = await handler.handle_added_or_modified(rel)
 
     assert outcome.upserted == 1
-    # No Subject → single embed call for content only.
+    # No Subject → only the content text is embedded.
     assert embedder.calls == 1
     row = fake_repo.upserts[0][0]
     assert row.subject_vector is None

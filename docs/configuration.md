@@ -151,7 +151,13 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `timeout_seconds` | float | `30.0` | No | Request timeout. |
 | `max_retries` | int | `3` | No | Retry count on failure. |
 | `batch_size` | int | `10` | No | Texts per batch request. |
-| `max_concurrent` | int | `5` | No | Max parallel batch requests. |
+| `max_concurrent` | int | `10` | No | Max parallel batch requests. |
+
+`timeout_seconds` bounds one request, and one request carries up to
+`batch_size` texts (the cascade embeds a file's changed entries in one
+batched call). On a slow or serialized local endpoint (CPU Ollama, a single
+GPU) queued batch requests can exceed the timeout: lower `batch_size` and
+`max_concurrent` together, or raise `timeout_seconds`.
 
 ### `[rerank]`
 

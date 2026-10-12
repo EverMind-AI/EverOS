@@ -132,9 +132,12 @@ class OpenAIEmbeddingProvider:
                     )
                 except openai.OpenAIError as exc:
                     raise _classify(exc) from exc
-            if not response.data:
+            # Callers slice the batch back per input, so a short (or empty)
+            # list would silently shift every later vector onto the wrong text.
+            if len(response.data) != len(chunk):
                 raise EmbeddingServiceError(
-                    f"Embedding API returned empty data for {len(chunk)} inputs"
+                    f"Embedding API returned {len(response.data)} vectors "
+                    f"for {len(chunk)} inputs"
                 )
             # Embeddings report only input (prompt) tokens.
             usage = getattr(response, "usage", None)

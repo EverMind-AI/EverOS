@@ -28,14 +28,12 @@ md contract:
 
 from __future__ import annotations
 
-from everos.component.embedding import get_embedding_capability
-from everos.core.observability.logging import get_logger
+from collections.abc import Sequence
+
 from everos.infra.persistence.index import AgentCase, ParentType, agent_case_repo
 
 from ._common import require_float, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
-
-logger = get_logger(__name__)
 
 
 class AgentCaseHandler(BaseDailyLogHandler):
@@ -52,6 +50,9 @@ class AgentCaseHandler(BaseDailyLogHandler):
     """Includes quality_score (semantic score, not audit). Audit
     inline (owner_id / session_id / timestamp / parent_id) is excluded."""
 
+    def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
+        return (entry.structured.sections.get("TaskIntent", "").strip(),)
+
     async def _build_row(
         self,
         *,
@@ -61,6 +62,7 @@ class AgentCaseHandler(BaseDailyLogHandler):
         project_id: str = "default",
         md_path: str,
         entry: ParsedEntry,
+        vectors: Sequence[list[float] | None] = (),
     ) -> AgentCase:
         s = entry.structured
         task_intent = s.sections.get("TaskIntent", "").strip()
@@ -68,14 +70,6 @@ class AgentCaseHandler(BaseDailyLogHandler):
         key_insight = (s.sections.get("KeyInsight") or "").strip() or None
         intent_tokens = self._deps.tokenizer.tokenize(task_intent)
         approach_tokens = self._deps.tokenizer.tokenize(approach)
-        vector = await get_embedding_capability().embed_or_none(task_intent)
-        if vector is None:
-            logger.debug(
-                "cascade_handler_embed_skipped",
-                kind=self.kind,
-                entry_id=entry.entry_id,
-                reason="embedding_capability_unavailable",
-            )
         return AgentCase(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,
@@ -97,5 +91,5 @@ class AgentCaseHandler(BaseDailyLogHandler):
             key_insight=key_insight,
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vector,
+            vector=vectors[0] if vectors else None,
         )

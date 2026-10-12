@@ -28,8 +28,8 @@ md contract:
 
 from __future__ import annotations
 
-from everos.component.embedding import get_embedding_capability
-from everos.core.observability.logging import get_logger
+from collections.abc import Sequence
+
 from everos.infra.persistence.index import Foresight, ParentType, foresight_repo
 
 from ._common import (
@@ -39,8 +39,6 @@ from ._common import (
     require_iso_timestamp,
 )
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
-
-logger = get_logger(__name__)
 
 
 class ForesightHandler(BaseDailyLogHandler):
@@ -60,6 +58,9 @@ class ForesightHandler(BaseDailyLogHandler):
     (owner_id / session_id / timestamp / parent_id / sender_ids) is
     excluded — changes there don't propagate."""
 
+    def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
+        return (entry.structured.sections.get("Foresight", "").strip(),)
+
     async def _build_row(
         self,
         *,
@@ -69,19 +70,12 @@ class ForesightHandler(BaseDailyLogHandler):
         project_id: str = "default",
         md_path: str,
         entry: ParsedEntry,
+        vectors: Sequence[list[float] | None] = (),
     ) -> Foresight:
         s = entry.structured
         text = s.sections.get("Foresight", "").strip()
         evidence = (s.sections.get("Evidence") or "").strip() or None
         tokens = self._deps.tokenizer.tokenize(text)
-        vector = await get_embedding_capability().embed_or_none(text)
-        if vector is None:
-            logger.debug(
-                "cascade_handler_embed_skipped",
-                kind=self.kind,
-                entry_id=entry.entry_id,
-                reason="embedding_capability_unavailable",
-            )
         evidence_tokens = (
             " ".join(self._deps.tokenizer.tokenize(evidence)) if evidence else None
         )
@@ -106,5 +100,5 @@ class ForesightHandler(BaseDailyLogHandler):
             evidence_tokens=evidence_tokens,
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vector,
+            vector=vectors[0] if vectors else None,
         )
