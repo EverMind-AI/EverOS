@@ -224,19 +224,6 @@ def _build_orchestrator() -> CascadeOrchestrator:
     )
 
 
-async def _drain_fully(orchestrator: CascadeOrchestrator) -> int:
-    """One scan, then drain until a pass processes nothing.
-
-    The worker bounds a single drain (``max_passes`` × batch size); the
-    ledger the one-time reconcile queues after an upgrade can exceed it,
-    and the command must not report success with rows still pending.
-    """
-    processed = await orchestrator.sync_once()
-    while more := await orchestrator.drain_once():
-        processed += more
-    return processed
-
-
 # ── sync ─────────────────────────────────────────────────────────────────
 
 
@@ -306,7 +293,7 @@ def sync(
                     raise typer.Exit(code=1)
                 await md_change_state_repo.force_enqueue(rel, spec.name)
                 typer.echo(f"force-enqueued {rel} (kind={spec.name})")
-            processed = await _drain_fully(orchestrator)
+            processed = await orchestrator.drain_fully()
             typer.echo(f"sync complete — processed {processed} row(s)")
 
     asyncio.run(_run())
@@ -585,7 +572,7 @@ def rebuild(
             await ensure_business_indexes()
             # Re-scan + drain: re-embed and re-insert every md entry.
             orchestrator = _build_orchestrator()
-            processed = await _drain_fully(orchestrator)
+            processed = await orchestrator.drain_fully()
             typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
 
     try:

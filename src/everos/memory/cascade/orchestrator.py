@@ -311,6 +311,20 @@ class CascadeOrchestrator:
         """Drain the queue exactly once without scanning first."""
         return await self._worker.drain_until_empty()
 
+    async def drain_fully(self) -> int:
+        """One scan, then drain until a pass processes nothing.
+
+        The worker bounds a single drain (``max_passes`` x batch size); the
+        ledger the one-time reconcile queues after an upgrade can exceed it,
+        and a caller that stops at the bound -- ``cascade sync`` / ``rebuild``
+        or ``POST /cascade/quiesce`` -- would report success with rows still
+        pending.
+        """
+        processed = await self.sync_once()
+        while more := await self.drain_once():
+            processed += more
+        return processed
+
     async def queue_summary(self) -> QueueSummary:
         """Forward to the repo so callers don't reach past this class."""
         return await md_change_state_repo.queue_summary()

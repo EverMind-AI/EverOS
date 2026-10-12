@@ -296,3 +296,30 @@ async def test_watcher_can_be_disabled_without_losing_the_worker(
         assert orch._worker is not None
         assert orch._scanner is not None
         await orch.stop()
+
+
+async def test_drain_fully_keeps_draining_past_the_worker_bound(
+    runtime: MemoryRoot,
+) -> None:
+    """The worker bounds one drain (``max_passes`` x batch size). The ledger
+    the one-time reconcile queues after an upgrade can exceed that bound, and
+    a caller that stops there reports success with rows still pending.
+    """
+    orch = _make_orchestrator(runtime)
+    queue = {"rows": 5003}
+    drains: list[int] = []
+
+    async def bounded_drain(**_: object) -> int:
+        took = min(queue["rows"], 5000)
+        queue["rows"] -= took
+        drains.append(took)
+        return took
+
+    with (
+        patch.object(orch, "sync_once", side_effect=bounded_drain),
+        patch.object(orch, "drain_once", side_effect=bounded_drain),
+    ):
+        assert await orch.drain_fully() == 5003
+
+    assert queue["rows"] == 0
+    assert drains == [5000, 3, 0]  # the scan's drain, the rest, the empty pass

@@ -91,11 +91,13 @@ async def quiesce(request: Request) -> QuiesceResponse:
         )
 
     before = await orch.queue_summary()
-    # Drain BEFORE stopping. `sync_once` is a full scan + drain, so it also picks
-    # up markdown the watcher never saw -- which matters here because the watcher
-    # is the half most likely to be off (inotify watches are a per-user kernel
-    # resource a shared host can exhaust).
-    drained = await orch.sync_once()
+    # Drain BEFORE stopping. `drain_fully` is a full scan + drain to empty, so it
+    # also picks up markdown the watcher never saw -- which matters here because
+    # the watcher is the half most likely to be off (inotify watches are a
+    # per-user kernel resource a shared host can exhaust) -- and it does not stop
+    # at the worker's per-drain bound, which the ledger an upgrade re-queues can
+    # exceed.
+    drained = await orch.drain_fully()
     await orch.stop()
     after = await orch.queue_summary()
 

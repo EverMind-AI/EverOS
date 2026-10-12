@@ -372,12 +372,8 @@ def test_sync_holds_the_lock_while_it_drains(
     seen: list[bool] = []
 
     class _Orchestrator:
-        async def sync_once(self) -> int:
-            seen.append(cascade_mod.ome_lock_is_free())
-            return 0
-
-        async def drain_once(self) -> int:
-            # the CLI keeps draining until a pass processes nothing
+        async def drain_fully(self) -> int:
+            # scan + every drain pass happen inside this one call
             seen.append(cascade_mod.ome_lock_is_free())
             return 0
 
@@ -385,7 +381,7 @@ def test_sync_holds_the_lock_while_it_drains(
     result = CliRunner().invoke(cascade_mod.app, ["sync"])
 
     assert result.exit_code == 0, result.output + result.stderr
-    assert seen == [False, False]  # the lock was ours for the scan and every drain
+    assert seen == [False]  # the lock was ours for the whole drain
     assert cascade_mod.ome_lock_is_free()  # and released afterwards
 
 

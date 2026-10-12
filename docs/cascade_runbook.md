@@ -133,7 +133,13 @@ upgrading from a release before 1.4.2 (a server start, or an unscoped
 `everos cascade sync`) force-enqueues every ledger row and writes
 `.index/.index_reconcile_version`, so no upgrade step is needed and later
 starts are ordinary. Delete the marker to make the next start repeat it,
-or run `--force-all` for an explicit pass.
+or run `--force-all` for an explicit pass. Two roots need the explicit
+pass: a server started with `EVEROS_DISABLE_CASCADE=1` never runs it
+(stop the server, run `--force-all` once), and a multi-project root where
+reflection ran before 1.4.2 needs `cascade rebuild` once -- the pass does
+not clear the `deprecated_by` stamps one project's reflection left on
+another project's rows, so those rows stay hidden from search until the
+index is rebuilt from markdown.
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.

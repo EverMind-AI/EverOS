@@ -181,6 +181,9 @@ async def test_force_enqueue_all_requeues_every_row_and_keeps_its_mtime(
         assert row.change_type == "modified"
         assert row.mtime == mtime
         assert row.retry_count == 0
+    after = {r.md_path: r for r in await repo.list_all()}
+    assert after[done].lsn > max(r.lsn for r in before)
+    assert after[failed].lsn == after[done].lsn + 1  # oldest first, one LSN each
 
 
 async def test_list_all_returns_every_status_in_lsn_order(

@@ -28,6 +28,8 @@ Status values:
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -129,49 +131,17 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         now = get_utc_now()
         async with session_scope(self._factory) as s:
             new_lsn = await _next_lsn(s)
-            stmt = (
-                sqlite_insert(MdChangeState)
-                .values(
-                    md_path=md_path,
+            await s.execute(
+                _enqueue_stmt(
+                    md_path,
                     kind=kind,
                     change_type=change_type,
                     mtime=mtime,
-                    first_seen_at=now,
-                    last_changed_at=now,
                     lsn=new_lsn,
-                    status="pending",
-                    retryable=None,
-                    last_attempt_at=None,
-                    retry_count=0,
-                    error=None,
-                )
-                .on_conflict_do_update(
-                    index_elements=["md_path"],
-                    set_={
-                        "kind": kind,
-                        "change_type": change_type,
-                        "mtime": mtime,
-                        "last_changed_at": now,
-                        "lsn": new_lsn,
-                        "status": "pending",
-                        "retryable": None,
-                        "last_attempt_at": None,
-                        "error": None,
-                        "retry_count": 0
-                        if reset_retry_count
-                        else text(
-                            "CASE"
-                            " WHEN md_change_state.status = 'failed'"
-                            " AND ABS(md_change_state.mtime - :new_mtime)"
-                            f" < {MTIME_TOLERANCE_SECONDS}"
-                            " THEN md_change_state.retry_count"
-                            " ELSE 0"
-                            " END"
-                        ).bindparams(new_mtime=mtime),
-                    },
+                    now=now,
+                    reset_retry_count=reset_retry_count,
                 )
             )
-            await s.execute(stmt)
             await s.commit()
             return new_lsn
 
@@ -207,10 +177,30 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         status filter on purpose — ``failed`` rows must come back too.
         """
         rows = await self.list_all()
-        # ponytail: one upsert (one commit) per file; batch into a single
-        # session if a root with tens of thousands of md files makes startup wait.
-        for row in rows:
-            await self.force_enqueue(row.md_path, row.kind, mtime=row.mtime)
+        now = get_utc_now()
+        # One session, one commit: a commit per row cost ~0.9 ms each and held
+        # a server's startup for the whole pass on a root with tens of
+        # thousands of md files; one round trip per row is ~0.3 ms. Each row
+        # keeps its mtime (the scanner does not re-pick it) and gets a fresh
+        # LSN in ledger order.
+        # ponytail: still one execute per row; a chunked multi-row INSERT on
+        # `excluded` if a 100k-file root makes startup wait.
+        async with session_scope(self._factory) as s:
+            lsn = await _next_lsn(s)
+            for row in rows:
+                await s.execute(
+                    _enqueue_stmt(
+                        row.md_path,
+                        kind=row.kind,
+                        change_type="modified",
+                        mtime=row.mtime,
+                        lsn=lsn,
+                        now=now,
+                        reset_retry_count=True,
+                    )
+                )
+                lsn += 1
+            await s.commit()
         return rows
 
     # ── Worker claim ───────────────────────────────────────────────────────
@@ -515,6 +505,65 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             max_lsn=max_lsn,
             last_processed_lsn=last_processed_lsn,
         )
+
+
+def _enqueue_stmt(
+    md_path: str,
+    *,
+    kind: str,
+    change_type: str,
+    mtime: float,
+    lsn: int,
+    now: datetime,
+    reset_retry_count: bool,
+) -> Any:
+    """The INSERT ... ON CONFLICT that :meth:`upsert` documents.
+
+    Shared with :meth:`force_enqueue_all`, which issues one per ledger row
+    inside a single session.
+    """
+    return (
+        sqlite_insert(MdChangeState)
+        .values(
+            md_path=md_path,
+            kind=kind,
+            change_type=change_type,
+            mtime=mtime,
+            first_seen_at=now,
+            last_changed_at=now,
+            lsn=lsn,
+            status="pending",
+            retryable=None,
+            last_attempt_at=None,
+            retry_count=0,
+            error=None,
+        )
+        .on_conflict_do_update(
+            index_elements=["md_path"],
+            set_={
+                "kind": kind,
+                "change_type": change_type,
+                "mtime": mtime,
+                "last_changed_at": now,
+                "lsn": lsn,
+                "status": "pending",
+                "retryable": None,
+                "last_attempt_at": None,
+                "error": None,
+                "retry_count": 0
+                if reset_retry_count
+                else text(
+                    "CASE"
+                    " WHEN md_change_state.status = 'failed'"
+                    " AND ABS(md_change_state.mtime - :new_mtime)"
+                    f" < {MTIME_TOLERANCE_SECONDS}"
+                    " THEN md_change_state.retry_count"
+                    " ELSE 0"
+                    " END"
+                ).bindparams(new_mtime=mtime),
+            },
+        )
+    )
 
 
 async def _next_lsn(session: AsyncSession) -> int:
