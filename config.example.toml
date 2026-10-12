@@ -20,6 +20,9 @@
 
 # ── LLM ───────────────────────────────────────────────
 # OpenAI-protocol chat-completions endpoint used by the algo extractors.
+# Alternatives, same protocol — swap all three fields together:
+#   aimlapi.com  model = "openai/gpt-4.1-mini", base_url = "https://api.aimlapi.com/v1"
+#   OpenRouter   model = "openai/gpt-4.1-mini", base_url = "https://openrouter.ai/api/v1"
 [llm]
 model    = "gpt-4.1-mini"
 api_key  = "sk-..."

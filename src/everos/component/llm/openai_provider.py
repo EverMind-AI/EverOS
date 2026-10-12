@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 import openai
 
+from everos.component.utils.attribution import aimlapi_headers
+
 from .protocol import ChatMessage, ChatResponse, LLMError, Usage
 
 
@@ -75,6 +77,10 @@ class OpenAIProvider:
         }
         if max_retries is not None:
             client_kwargs["max_retries"] = max_retries
+        # Partner attribution, merged into (not over) the SDK's own
+        # defaults and absent unless ``base_url`` is an aimlapi.com host.
+        if attribution := aimlapi_headers(base_url):
+            client_kwargs["default_headers"] = attribution
         self._client = openai.AsyncOpenAI(**client_kwargs)  # type: ignore[arg-type]
 
     async def chat(

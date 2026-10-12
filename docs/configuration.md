@@ -130,6 +130,27 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
 
+#### Provider endpoints
+
+Any OpenAI-protocol chat-completions endpoint works. Two aggregators cover
+the shipped model slugs without rewriting them:
+
+| Provider | `base_url` | Notes |
+|---|---|---|
+| aimlapi.com | `https://api.aimlapi.com/v1` | Same `vendor/model` slug convention, so the shipped `[llm]` default works unchanged. |
+| OpenRouter | `https://openrouter.ai/api/v1` | Historical default. |
+
+The shipped `[llm]` default `openai/gpt-4.1-mini` was called live against
+aimlapi.com and answered, including the structured-output
+(`response_format`) path the extractors use.
+
+> **Known limitation — multimodal against aimlapi.com.** The image content
+> parts EverOS sends carry `image_url.detail = null`, which aimlapi.com
+> rejects with HTTP 400 (`messages.0.content` / `invalid_union`) where
+> OpenAI and OpenRouter accept it. Text-only calls to `[multimodal]` are
+> fine; keep `[multimodal]` on a provider that tolerates the null field
+> until either side changes.
+
 ### `[multimodal]`
 
 | Field | Type | Default | Required | Description |
