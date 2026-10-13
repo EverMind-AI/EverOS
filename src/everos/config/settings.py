@@ -534,21 +534,34 @@ class LanceDBSettings(BaseModel):
       descriptors of its ``_indices/<uuid>/`` files, which POSIX will not
       release on unlink.
 
-      Measured over 60 optimize rounds on 7 tables (one descriptor counted
-      per numeric ``lsof`` row), index cache held at 16 MB:
+      **This setting chooses where the descriptor count converges.** It is
+      not a capacity knob. Descriptors track surviving cache entries, not
+      bytes, so the plateau lands at roughly
+      ``cap / bytes-per-entry x handles-per-entry``: quadruple the cap and
+      the plateau quadruples with it, it just takes proportionally longer
+      to get there. Measured on 7 tables with the index cache at 16 MB,
+      counting one descriptor per numeric ``lsof`` row:
 
-      ===============  ====================================================
-      metadata cap     descriptors
-      ===============  ====================================================
-      ``1 MB``         converges: 204-219 from round 31 on   ← default
-      ``4 MB``         417 and still climbing
-      ``16 MB``        417 and still climbing
-      unbounded        607 after 80 rounds, strictly linear, no plateau
-      ===============  ====================================================
+      ===============  =============  ==========================
+      metadata cap     converges at   reached by
+      ===============  =============  ==========================
+      ``1 MB``         ~216           round 31          ← default
+      ``4 MB``         814            round 125
+      unbounded        never          607 and climbing at 80
+      ===============  =============  ==========================
 
-      Query latency was flat across all four (BM25 2.0-2.9 ms, vector
-      3.9-4.5 ms), so the tight cap costs nothing measurable — the thrash
-      this note used to predict did not appear.
+      So size it from the descriptor ceiling you can afford, not from how
+      much room the cache "needs". 1 MB leaves roughly 4x headroom under
+      Linux's default ``ulimit -n`` of 1024. Raising it for a deployment
+      whose manifests genuinely do not fit means raising ``ulimit -n`` by
+      the same factor.
+
+      Query latency was flat across every cap tried (BM25 2.0-2.9 ms,
+      vector 3.9-4.5 ms at equal data volume), so the tight cap costs
+      nothing measurable — the thrash this note used to predict did not
+      appear. Not measured: a corpus of tens of GB per table, or object
+      storage, where a miss is a network round trip rather than a local
+      read.
     """
 
     read_consistency_seconds: float | None = None
