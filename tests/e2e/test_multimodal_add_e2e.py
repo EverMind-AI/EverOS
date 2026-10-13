@@ -105,7 +105,19 @@ async def test_add_html_https_uri_parsed_into_buffer(
     assert resp.status_code == 200, resp.text
 
     buffered = await _buffer_text(sid)
-    assert "example domain" in buffered.lower()
+    # example.com's markup is not a stable fixture: the <h1>Example Domain</h1>
+    # that used to sit in its body is gone (2026-10), leaving that string only
+    # in <title>, which the body-text parser does not emit. Assert what this
+    # test is actually for -- the page was fetched, dispatched to the HTML
+    # parser, and its text reached the buffer -- not one sentence of someone
+    # else's copy.
+    assert buffered.strip(), "nothing landed in the buffer"
+    assert "[HTML]" in buffered, (
+        f"payload not dispatched to the HTML parser: {buffered!r}"
+    )
+    assert "documentation" in buffered.lower(), (
+        f"fetched text does not look like example.com: {buffered!r}"
+    )
 
 
 async def test_add_html_file_uri_parsed_into_buffer(

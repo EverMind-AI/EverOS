@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A long-running server no longer leaks file descriptors on LanceDB index
+  readers.** Every `optimize()` mints a new index version whose reader is
+  kept in a session cache, and that reader holds the descriptors of its
+  `_indices/<uuid>/` files. Lance keys those cache entries by dataset
+  version and never evicts them when cleanup deletes the files underneath
+  (`lance-format/lance#7718`), so the count grew for the life of the
+  process: a 65-minute soak went from 74 to 558 index descriptors with no
+  plateau, and a deployment on a 1024-descriptor limit exhausts it in
+  hours. EverOS capped only one of the session's two caches and left the
+  metadata cache unbounded, which is the one that decides whether the count
+  converges. Both are now capped (`[lancedb].metadata_cache_size_bytes`,
+  default 1 MB): the same soak holds between 6 and 82 descriptors, falling
+  as often as it rises. Reported upstream as `lance-format/lance#9934`.
+
+- **An interactive search no longer queues behind the cascade's embedding
+  work.** Query embeddings and background write embeddings shared one
+  process-wide semaphore, so a burst of writes put the query a user was
+  waiting on at the back of the queue. Under three concurrent writers,
+  vector search p50 measured 46 s and p95 112 s, while the keyword leg —
+  which needs no embedding — answered in 0.35 s. Queries now draw on their
+  own budget (`[embedding].query_max_concurrent`, default 4): vector p50
+  drops to 0.60 s and p95 to 3.70 s under the identical load. Total
+  in-flight requests to the endpoint become `max_concurrent +
+  query_max_concurrent` rather than a silently shared bound. (#473)
+
 ### Changed
 
 - **`[embedding].max_concurrent` defaults to 10 instead of 5.** The

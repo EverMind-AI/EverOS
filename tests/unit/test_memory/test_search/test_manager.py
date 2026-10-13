@@ -223,6 +223,9 @@ class _StubEmbedding:
     async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         return [[0.0] * self.dim for _ in texts]
 
+    async def embed_query(self, text: str) -> list[float]:
+        return await self.embed(text)
+
 
 # ── Fixtures ────────────────────────────────────────────────────────────
 

@@ -375,7 +375,7 @@ class SearchManager:
                 project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -390,7 +390,7 @@ class SearchManager:
                 project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 llm=self._decider_llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
                 reranker=self._reranker,  # type: ignore[arg-type]
@@ -495,7 +495,7 @@ class SearchManager:
                 req.query,
                 where=where,
                 case_recaller=self._case,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -557,7 +557,7 @@ class SearchManager:
                 req.query,
                 where=where,
                 skill_recaller=self._skill,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
@@ -770,7 +770,7 @@ class SearchManager:
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
-        vector = await self._embedding.embed(query)
+        vector = await self._embedding.embed_query(query)
         expected = getattr(self._embedding, "dim", None)
         if expected and len(vector) != expected:
             # Fail here, not inside LanceDB. A mismatched query vector reaches

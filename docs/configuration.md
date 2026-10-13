@@ -151,7 +151,8 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `timeout_seconds` | float | `30.0` | No | Request timeout. |
 | `max_retries` | int | `3` | No | Retry count on failure. |
 | `batch_size` | int | `10` | No | Texts per batch request. |
-| `max_concurrent` | int | `10` | No | Max parallel batch requests. |
+| `max_concurrent` | int | `10` | No | Max parallel batch requests from write paths. |
+| `query_max_concurrent` | int | `4` | No | Separate budget for interactive query embeds, so a search is not queued behind cascade writes. |
 
 `timeout_seconds` bounds one request, and one request carries up to
 `batch_size` texts (the cascade embeds a file's changed entries in one

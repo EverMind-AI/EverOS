@@ -35,6 +35,7 @@ timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10
 max_concurrent  = 10
+query_max_concurrent = 4
 
 # ── Rerank ────────────────────────────────────────────
 [rerank]

@@ -43,3 +43,20 @@ class EmbeddingProvider(Protocol):
         retryable / unrecoverable case per HTTP-status mapping.
         """
         ...
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed one interactive query.
+
+        Semantically identical to :meth:`embed`; what differs is the
+        concurrency budget it draws on. A search cannot answer until this
+        returns, while a cascade embed is background work nobody waits on,
+        so the two must not queue behind one another — with a single shared
+        budget a burst of writes puts the user's query behind every one of
+        them (issue #473: measured 48 s on a vector search while three
+        writers were active, against 0.49 s for the keyword leg that needs
+        no embedding at all).
+
+        The default implementation falls back to :meth:`embed`, so a
+        provider that does not separate the two still works.
+        """
+        return await self.embed(text)
