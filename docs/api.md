@@ -956,6 +956,12 @@ require `user_id`; `"agent_case"` / `"agent_skill"` require
 [GetMemoryType](#getmemorytype). The route populates exactly one of
 the four arrays in `data` based on this value.
 
+> `"profile"` is a single-row lookup, not a list: an owner has at most
+> one profile. `page`, `page_size`, `filters`, `sort_by` and
+> `sort_order` are accepted for it but have no effect — the response
+> carries that one profile (or an empty array), with `total_count` in
+> `{0, 1}` whatever page was requested.
+
 **`page`** — 1-indexed page number. Together with `page_size`
 determines the window. The response's `total_count` reports how many
 items match the request before paging.
