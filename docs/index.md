@@ -63,6 +63,7 @@ not for using it.
 | Doc | Purpose |
 |---|---|
 | [engineering.md](engineering.md) | Engineering & dev-efficiency infrastructure (CI / tooling / Claude Code) |
+| [testing.md](testing.md) | Test layers, the `slow` / `live_llm` markers, and what a release must establish |
 
 ## See also
 

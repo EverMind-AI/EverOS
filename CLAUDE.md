@@ -86,6 +86,7 @@ Algorithm assets (prompts, extractors) live in the separate [`everalgo`](https:/
 | Understand architecture | [docs/architecture.md](docs/architecture.md) |
 | Understand storage choice | [docs/architecture.md](docs/architecture.md) (storage section) |
 | Build, test, CI & conventions | [docs/engineering.md](docs/engineering.md) |
+| Know which tests to run, and when | [docs/testing.md](docs/testing.md) |
 | Add a new module | [.claude/rules/init-py-and-reexport.md](.claude/rules/init-py-and-reexport.md) |
 | Make a commit | use `/commit` |
 | Open a branch / PR | use `/new-branch` / `/pr` |

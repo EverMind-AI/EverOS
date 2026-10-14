@@ -1,6 +1,7 @@
 # Engineering Reference
 
-> Companion docs: system design lives in [architecture.md](architecture.md);
+> Companion docs: test layers and release verification live in
+> [testing.md](testing.md); system design lives in [architecture.md](architecture.md);
 > coding rules live in [../.claude/rules/](../.claude/rules/). This document
 > is the contributor-facing reference for **building, testing, and shipping**
 > a change — the toolchain, the CI gates, and the branch / commit conventions
