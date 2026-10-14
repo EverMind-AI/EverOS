@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-10-14
+
+**A server that stays healthy for days, not hours.** Three faults in this
+release compounded on exactly the deployments that ran longest: a long-lived
+index leaked file descriptors until searches took seconds, interactive searches
+queued behind the cascade's background embedding, and a memory root holding more
+than one project had each project's index rows overwrite the other's. All three
+are fixed, and a LanceDB root that the last fault already damaged repairs itself
+on the first start after upgrading.
+
+### Changed
+
+- **`[embedding].max_concurrent` defaults to 10 instead of 5.** The
+  `EmbeddingSettings` class default (50) is aligned to the same value; the
+  shipped `default.toml` always overrode it, so the effective default moves
+  from 5 to 10. (#486)
+
+- **Milvus collections must be rebuilt once after upgrading.** They gain the
+  `__pk` primary-key column; the server refuses to start on an old
+  collection and names `everos cascade rebuild`, which recreates them from
+  markdown.
+
+- Response `id`s are unique within `(app_id, project_id)`, not globally; the
+  shape of `id` is unchanged.
+
+- **The cascade optimizes a LanceDB table at most once a minute, not once
+  every ten seconds.** Each optimize pass leaves an `_indices/<uuid>/`
+  directory behind until cleanup reclaims it, so the old 10 s floor set the
+  ceiling on how many could pile up: about 126k directories a day and ~1.8M
+  at the retention horizon. The 60 s default costs a sixth of that (~21k a
+  day, ~300k at the horizon, roughly 1.2 GB) and keeps a full index sweep
+  inside its 60 s deadline. The interval is a built-in floor on how often a
+  table may be optimized, not a setting; a write-heavy deployment sees an
+  index that trails its markdown by up to a minute longer than before.
+
 ### Fixed
 
 - **A long-running server no longer leaks file descriptors on LanceDB index
@@ -33,15 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drops to 0.60 s and p95 to 3.70 s under the identical load. Total
   in-flight requests to the endpoint become `max_concurrent +
   query_max_concurrent` rather than a silently shared bound. (#473)
-
-### Changed
-
-- **`[embedding].max_concurrent` defaults to 10 instead of 5.** The
-  `EmbeddingSettings` class default (50) is aligned to the same value; the
-  shipped `default.toml` always overrode it, so the effective default moves
-  from 5 to 10. (#486)
-
-### Fixed
 
 - **The same owner's memories in two projects no longer overwrite each other
   in the derived index.** Index rows were merged on `id` alone, and `id` is
@@ -101,15 +127,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left outside is moved back on its next category change. Reported by
   White0xdi3.
 
-### Changed
+### Upgrade
 
-- **Milvus collections must be rebuilt once after upgrading.** They gain the
-  `__pk` primary-key column; the server refuses to start on an old
-  collection and names `everos cascade rebuild`, which recreates them from
-  markdown.
-- Response `id`s are unique within `(app_id, project_id)`, not globally; the
-  shape of `id` is unchanged.
+`pip install --upgrade everos` is enough for most roots: the first full pass
+after the upgrade (server start, or `everos cascade sync`) re-reconciles every
+indexed markdown file against the index once, re-embeds only the rows that were
+lost, and records that it ran in `.index/.index_reconcile_version`. A healthy
+root pays one read pass and no embedding.
 
+Three roots need a command instead:
+
+- **A root where reflection already ran across projects** — `everos cascade
+  rebuild` once. The automatic pass does not clear the `deprecated_by` stamps
+  one project's reflection left on another project's rows.
+- **A server started with `EVEROS_DISABLE_CASCADE=1`** — it never runs the
+  pass. Stop it and run `everos cascade sync --force-all` once.
+- **A Milvus derived index** — `everos cascade rebuild` once. Collections gain
+  the `__pk` primary-key column and the server refuses to start on an old
+  collection.
 ## [1.4.1] - 2026-09-24
 
 **A fresh install works again.** The `openai` SDK released its 3.x line on
@@ -371,7 +406,6 @@ described under Changed.
 - **Milvus queries stay inside the engine's result window.** Row scans and
   search `topK` are bounded by the 16,384-row ceiling instead of requesting
   more and failing.
-
 
 ## [1.2.3] - 2026-08-07
 
