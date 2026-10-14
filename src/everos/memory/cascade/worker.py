@@ -76,7 +76,7 @@ DEFAULT_BATCH_SIZE = 50
 DEFAULT_MAX_RETRY = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
-DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 10.0
+DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS = 60.0
 """Throttle between ``optimize()`` runs on one kind.
 
 Not a visibility delay. A row is searchable the moment its upsert commits —
@@ -92,11 +92,18 @@ think twice before lowering it. Every beat leaves new ``_indices/<uuid>/``
 dirs behind, and lance never removes the empty ones, so the accrual rate is
 capped by this interval rather than by write volume: past roughly one write per
 table per interval the beats coalesce and writing harder adds nothing. Measured
-at that ceiling: ~127k dirs/day across three active tables, ~1.8M at the
+at a 10s ceiling: ~127k dirs/day across three active tables, ~1.8M at the
 ~14-day reclaim horizon (~7GB of empty dirs — the horizon is the file wait
 plus the 7-day age gate, see ``_HUSK_MIN_AGE_SECONDS`` in the lancedb
-repository module). Raising this interval lowers that proportionally — 60s
-would cut it to a sixth — at the cost of a longer flat-scanned tail.
+repository module). The rate scales with the interval, so the 60s default
+costs a sixth of that: ~21k dirs/day, ~300k at the horizon (~1.2GB).
+
+Why 60s rather than 10s: a 10h soak at sustained load showed the index file
+count falling the whole way (631 -> 489 across quarters) with search p50 flat
+or improving, so the shorter cooldown was buying speed the workload never
+needed while paying six times the directory accrual. The cost of raising it is
+a longer flat-scanned tail between beats, which that same soak bounds: keyword
+p50 stayed at 0.02s and vector at 0.6s with the tail one beat deep.
 """
 DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS = 60.0
 _OPTIMIZE_FAILURE_ALERT_THRESHOLD = 5

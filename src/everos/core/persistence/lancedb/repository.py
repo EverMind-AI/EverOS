@@ -103,10 +103,12 @@ restarts the moment lance's cleanup empties the husk, not when the dir was
 created. Under a short retention window the index *files* themselves first
 wait out lance's 7-day unverified window (see :meth:`LanceRepoBase.prune`),
 so a husk is reclaimed up to file-wait + 7 days after it appeared. Each one
-costs an inode plus one 4KB block. Measured on a soak at ceiling load (see
-``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``): ~127k dirs/day, so the ~14-day
-steady state is ~1.8M dirs = **~7GB of empty directories and ~28% of a
-default 98GB ext4's inodes**. That is the worst case, not the expected one —
+costs an inode plus one 4KB block. Measured on a soak at ceiling load with a
+10s optimize cooldown: ~127k dirs/day, so the ~14-day steady state would be
+~1.8M dirs = ~7GB and ~28% of a default 98GB ext4's inodes. The cooldown now
+defaults to 60s (see ``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``), which divides
+that by six: ~21k dirs/day, ~300k at the horizon = **~1.2GB of empty
+directories and ~5% of those inodes**. That is the worst case, not the expected one —
 it needs
 sustained saturation, and a single-user deployment writing a few hundred times
 a day sits four orders of magnitude below it (tens of MB). Platform-wise only
@@ -130,9 +132,11 @@ _HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
 :data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
 task is in flight, so a sweep that never returns would park that kind's
 maintenance forever. Measured at ~460ms over 13061 dirs in the soak (~35us
-per dir), which puts the ceiling-load steady state (~1.8M dirs, see
-:data:`_HUSK_MIN_AGE_SECONDS`) right at this budget. That is tolerated rather
-than sized around: a timeout is swallowed inside :meth:`LanceRepoBase.prune`
+per dir). At the 60s optimize cooldown the ceiling-load steady state is ~300k
+dirs (see :data:`_HUSK_MIN_AGE_SECONDS`), i.e. ~10s — well inside this budget;
+a 10s cooldown would have put it at ~1.8M dirs and ~63s, right at the edge.
+Overrunning is tolerated rather than sized around: a timeout is swallowed
+inside :meth:`LanceRepoBase.prune`
 (the cleanup commit already succeeded, and billing the sweep to the prune
 ledger is exactly the signal corruption this module works to avoid), and the
 orphaned worker thread — a cancelled ``to_thread`` future does not stop the
