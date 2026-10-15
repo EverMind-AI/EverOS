@@ -281,7 +281,6 @@ async def test_repository_port_crud_count_and_uncapped_scan(
     assert await episode_repo.count_where(owner) == 100
 
 
-@pytest.mark.parametrize("index_backend", ["lancedb"], indirect=True)
 async def test_find_by_owner_entries_projects_requested_columns(
     index_backend: str,
 ) -> None:
@@ -438,6 +437,72 @@ async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
     for r in [*lean, *by_owner]:
         assert r.vector is None and r.subject_vector is None
         assert r.content_sha256 == rows[int(r.entry_id[-4:])].content_sha256
+
+
+async def test_writing_back_a_projected_row_destroys_the_stored_vector(
+    index_backend: str,
+) -> None:
+    """A row read with ``skip_vectors`` is not a row you may upsert.
+
+    Its vector columns are ``None`` because they were never read, not
+    because the record has none -- so writing one back replaces a stored
+    embedding with nothing, and the only symptom is that the row quietly
+    stops being reachable by vector search. Nothing logs it.
+
+    No production caller does this today: the cascade diff reads two
+    scalars and upserts freshly built rows, and neither the reflection
+    orchestrator nor agent-skill hydration upserts at all. This pins the
+    hazard so that a future caller cannot introduce it in silence -- if
+    this assertion ever fails because a guard was added, that is an
+    improvement, and this test should become the guard's test.
+    """
+    row = _episode(0)
+    row.vector = [0.5] * 1024
+    row.subject_vector = [0.25] * 1024
+    await episode_repo.upsert([row])
+
+    lean = await episode_repo.find_where(eq("entry_id", "ep_0000"), skip_vectors=True)
+    assert lean[0].vector is None
+
+    await episode_repo.upsert(lean)
+
+    after = await episode_repo.find_where(eq("entry_id", "ep_0000"))
+    assert after[0].vector is None
+    assert after[0].subject_vector is None
+
+
+async def test_milvus_columns_projection_narrows_the_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Milvus charges for the vector payload on the fetch, not on the trim.
+
+    ``columns`` is trimmed in Python there, so a projection that names no
+    vector column has to turn into ``skip_vectors`` on the way down --
+    otherwise a caller asking for two scalars still materialises every
+    1024-D vector in the result set and drops it one line later.
+    """
+    from everos.config import load_settings
+    from everos.infra.persistence import milvus
+
+    spy = AsyncMock(return_value=[_episode(0)])
+    monkeypatch.setattr(milvus.episode_repo, "find_where", spy)
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
+    load_settings.cache_clear()
+    try:
+        await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
+        )
+        scalars_only = spy.call_args.kwargs["skip_vectors"]
+
+        await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000"], columns=["entry_id", "vector"]
+        )
+        vector_named = spy.call_args.kwargs["skip_vectors"]
+    finally:
+        load_settings.cache_clear()
+
+    assert scalars_only is True
+    assert vector_named is False
 
 
 async def test_repository_maintenance_contract_is_executable(

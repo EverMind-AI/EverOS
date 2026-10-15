@@ -322,13 +322,8 @@ class LanceIndexContract[T]:
                 predicate, limit=len(entry_ids), skip_vectors=skip_vectors
             )
         # Column projection keeps the vector payload out of the read.
-        table = await self._table()
-        return await (
-            table.query()
-            .where(render_predicate(predicate))
-            .select(list(columns))
-            .limit(len(entry_ids))
-            .to_list()
+        return await self.project_rows(
+            render_predicate(predicate), columns, limit=len(entry_ids)
         )
 
     async def find_by_session(

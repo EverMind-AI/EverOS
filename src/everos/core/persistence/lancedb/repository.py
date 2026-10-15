@@ -987,9 +987,8 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         *,
         app_id: str = "default",
         project_id: str = "default",
-        columns: Sequence[str] | None = None,
         skip_vectors: bool = False,
-    ) -> list[T] | list[dict[str, Any]]:
+    ) -> list[T]:
         """Bulk point-query by ``(app, project, owner_id, entry_id IN ...)``.
 
         Empty ``entry_ids`` short-circuits to ``[]`` rather than emit a
@@ -998,10 +997,11 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         because at most one row per id can exist under one (app, project,
         owner) scope.
 
-        ``columns``: when set, returns raw dicts holding only
-        those columns instead of typed rows, so callers resolving thousands
-        of ids skip the vector payload. ``skip_vectors`` keeps typed rows
-        but leaves the vectors out (see :meth:`find_where`).
+        ``skip_vectors`` leaves the vector columns out of the read (see
+        :meth:`find_where`). A free-form ``columns`` projection is the
+        index contract's concern, not the chassis': it returns raw dicts
+        rather than ``T``, so it lives on ``LanceIndexContract``, which
+        overrides this method and calls :meth:`project_rows` for it.
         """
         if not entry_ids:
             return []
@@ -1010,17 +1010,32 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
             f"owner_id = '{_q(owner_id)}' AND entry_id IN ({quoted}) "
             f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'"
         )
-        if columns is None:
-            return await self.find_where(
-                where, limit=len(entry_ids), skip_vectors=skip_vectors
-            )
+        return await self.find_where(
+            where, limit=len(entry_ids), skip_vectors=skip_vectors
+        )
+
+    async def project_rows(
+        self, where: str, columns: Sequence[str], *, limit: int
+    ) -> list[dict[str, Any]]:
+        """Read ``columns`` only, as raw dicts, under the read deadline.
+
+        The projection is pushed into ``select()`` so the unread columns --
+        a 1024-D vector is the one that matters -- are never read off disk.
+        Returns dicts rather than ``T`` because a projected row cannot
+        satisfy the schema's required fields.
+
+        Callers that already hold a :class:`Predicate` render it first. This
+        lives here rather than beside those callers so that every read in
+        this class is covered by :data:`_READ_TIMEOUT_SECONDS`; the
+        docstring there explains what an uncovered hung read costs.
+        """
         async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
             table = await self._table()
             return (
                 await table.query()
                 .where(where)
                 .select(list(columns))
-                .limit(len(entry_ids))
+                .limit(limit)
                 .to_list()
             )
 
