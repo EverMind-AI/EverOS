@@ -141,6 +141,17 @@ not clear the `deprecated_by` stamps one project's reflection left on
 another project's rows, so those rows stay hidden from search until the
 index is rebuilt from markdown.
 
+A second marker sits beside it: `.index/.index_rebuild_state`, holding the
+wall clock of the last successful index rebuild per kind. The worker's
+startup sweep reads it and rebuilds only the kinds that are actually due,
+so restarting no longer resets the rebuild cadence -- a daemon that
+restarts often used to pay a full rebuild per kind per restart. Delete the
+file (or a `kind=` line in it) to make the next start sweep those kinds
+again; that is the replacement for "restart the server to force a rebuild",
+which the clock deliberately stops doing. A missing or unreadable file
+reads as "everything is due", so losing it costs one extra sweep and never
+skips one.
+
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
 It holds the OME lock for the whole run and **refuses to start (exit code
