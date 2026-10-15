@@ -33,6 +33,7 @@ from .registry import build_handlers
 from .scanner import CascadeScanner
 from .watcher import CascadeWatcher
 from .worker import (
+    DEFAULT_HANDLER_CONCURRENCY,
     DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
@@ -153,6 +154,7 @@ class CascadeConfig:
 
     scan_interval_seconds: float = 30.0
     worker_batch_size: int = 50
+    worker_handler_concurrency: int = DEFAULT_HANDLER_CONCURRENCY
     worker_max_retry: int = 3
     worker_poll_interval_seconds: float = 1.0
     worker_retry_backoff_seconds: float = 2.0
@@ -200,6 +202,7 @@ class CascadeOrchestrator:
         self._worker = CascadeWorker(
             self._handlers,
             batch_size=self._config.worker_batch_size,
+            handler_concurrency=self._config.worker_handler_concurrency,
             max_retry=self._config.worker_max_retry,
             poll_interval_seconds=self._config.worker_poll_interval_seconds,
             retry_backoff_seconds=self._config.worker_retry_backoff_seconds,

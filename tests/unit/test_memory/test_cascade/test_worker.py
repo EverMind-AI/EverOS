@@ -166,7 +166,49 @@ async def test_large_batch_limits_concurrent_handler_execution(
 
     assert processed == 50
     assert len(patched_repo.done) == 50
-    assert handler.peak <= 4
+    # ``==``, not ``<=``: a bound accidentally set to 1 would serialize the
+    # whole batch and still satisfy ``<=``.
+    assert handler.peak == 4
+
+
+class _PerCallFakeRepo(_FakeRepo):
+    """Serves one prepared batch per claim, so two drains can overlap."""
+
+    def __init__(self, batches: list[list[_Row]]) -> None:
+        super().__init__(batch=[])
+        self._batches = list(batches)
+
+    async def claim_pending_batch(
+        self, _limit: int, *, kinds: set[str] | None = None
+    ) -> list[_Row]:
+        return self._batches.pop(0) if self._batches else []
+
+
+async def test_concurrent_drains_share_one_handler_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bound is per worker, so two overlapping drains do not double it.
+
+    ``POST /cascade/quiesce`` calls ``drain_fully`` before ``stop``, while the
+    background loop is still draining -- two ``drain_once`` calls on one
+    worker. A semaphore built per call would let that reach 8.
+    """
+    from everos.memory.cascade import worker as worker_mod
+
+    repo = _PerCallFakeRepo(
+        [
+            [_Row(md_path=f"a{i}.md") for i in range(50)],
+            [_Row(md_path=f"b{i}.md") for i in range(50)],
+        ]
+    )
+    monkeypatch.setattr(worker_mod, "md_change_state_repo", repo)
+    handler = _ConcurrencyTrackingHandler()
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    processed = await asyncio.gather(w.drain_once(), w.drain_once())
+
+    assert processed == [50, 50]
+    assert handler.peak == 4
 
 
 async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:

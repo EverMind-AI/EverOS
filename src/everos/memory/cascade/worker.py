@@ -75,7 +75,13 @@ logger = get_logger(__name__)
 # Conservative defaults — surface in settings if tuning is needed.
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_HANDLER_CONCURRENCY = 4
-"""Maximum handler executions in flight inside one claimed batch.
+"""Maximum handler executions in flight on one worker.
+
+The bound is per worker, not per :meth:`CascadeWorker.drain_once` call: a
+server drains from two places at once -- the background loop and whatever
+calls ``drain_fully`` (``POST /cascade/quiesce`` does, before ``stop``) --
+and a semaphore built per call would let those two overlap at twice this
+number, in exactly the backlog-plus-quiesce case the bound exists for.
 
 A daily-log handler first resolves existing rows by ``md_path``. On fragmented
 Lance tables that lookup is a native flat scan: 50 simultaneous handlers grew
@@ -84,6 +90,13 @@ while 1/2/4/8-way peaks were about 0.26/0.61/0.98/1.73 GiB. Keeping the claim
 batch at 50 preserves queue semantics; bounding only execution prevents native
 queries that outlive Python cancellation from multiplying memory and file
 handles after a timeout.
+
+A slot is held across :meth:`_process_one`, inline retry backoff included, so
+a row failing against a down provider parks one slot for
+``retry_backoff * max_retry * (max_retry + 1) / 2`` seconds (12s at the
+defaults) with no native query in flight. That is deliberate -- backing off
+harder against a provider that is already failing is the behaviour we want --
+but it is why a fully-failing batch drains slower than it did unbounded.
 """
 DEFAULT_MAX_RETRY = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
@@ -483,6 +496,7 @@ class CascadeWorker:
         self._handlers = handlers
         self._batch_size = batch_size
         self._handler_concurrency = handler_concurrency
+        self._handler_semaphore = asyncio.Semaphore(handler_concurrency)
         self._max_retry = max_retry
         self._poll_interval = poll_interval_seconds
         self._retry_backoff = retry_backoff_seconds
@@ -675,10 +689,9 @@ class CascadeWorker:
         )
         if not batch:
             return 0
-        semaphore = asyncio.Semaphore(self._handler_concurrency)
 
         async def process_bounded(row: MdChangeState) -> str | None:
-            async with semaphore:
+            async with self._handler_semaphore:
                 return await self._process_one(row)
 
         results = await asyncio.gather(*(process_bounded(row) for row in batch))
