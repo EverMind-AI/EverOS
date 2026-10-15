@@ -38,7 +38,7 @@ def _default_range() -> str:
     pr_base = os.getenv("GITHUB_PR_BASE_SHA", "")
 
     if event_name.startswith("pull_request") and pr_base:
-        return f"{pr_base}..HEAD"
+        return _pull_request_range(pr_base)
 
     if before and before != ZERO_SHA:
         return f"{before}..{after}"
@@ -48,6 +48,29 @@ def _default_range() -> str:
     except subprocess.CalledProcessError:
         return after
     return f"{after}^..{after}"
+
+
+def _pull_request_range(pr_base: str) -> str:
+    """The commits this PR adds, and nothing the base branch already had.
+
+    ``actions/checkout`` resolves a ``pull_request`` event to
+    ``refs/pull/N/merge``: the PR head merged into the *current* base tip.
+    ``pull_request.base.sha`` is a different commit -- the base tip from when
+    the PR was last synced. Everything the base branch gained in between
+    therefore falls inside ``base.sha..HEAD``, so one bad subject merged to
+    ``main`` fails every open PR until each of them rebases, blaming authors
+    for a commit they did not write.
+
+    The merge commit already names both sides, so ask it: first parent is the
+    base tip that was merged in, second is the PR head. A checkout that is not
+    a merge (a workflow taking ``head.sha`` directly) has one parent, and
+    there the reported base is the best answer available.
+    """
+    parents = _run_git(["rev-list", "--parents", "-n", "1", "HEAD"]).split()[1:]
+    if len(parents) == 2:
+        base_tip, pr_head = parents
+        return f"{base_tip}..{pr_head}"
+    return f"{pr_base}..HEAD"
 
 
 def _commit_rows(commit_range: str) -> list[tuple[str, str, str]]:
