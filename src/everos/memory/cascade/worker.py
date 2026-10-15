@@ -64,8 +64,10 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
+from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import MdChangeState, md_change_state_repo
 
 from .handlers import Handler
@@ -234,6 +236,29 @@ escalation ladder's total (5+15+45 = 65s of *backoff*, but each attempt's
 run time counts from body start): a deterministic crash-on-startup fails in
 milliseconds and cannot reach it, while a loop that did an hour of honest
 work before hitting a transient obviously should not inherit stale strikes."""
+
+_REBUILD_STATE_FILE = ".index_rebuild_state"
+"""Per-kind wall clock of the last successful rebuild, kept under ``index_dir``.
+
+Without it, restart frequency *is* rebuild frequency. The loop swept every
+kind on worker start, so a daemon that restarts hourly paid a full rebuild per
+kind per hour -- on production-sized tables several GiB of native Arrow/Lance
+allocation before the server answered its first request, which is the worst
+moment to spend it.
+
+Removing the sweep instead would have been wrong for the opposite reason: a
+daemon that keeps restarting never lives long enough to reach the periodic
+sweep, and that sweep is the only lever bounding index UUID growth (see
+:data:`DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS`). Neither "always sweep" nor
+"never sweep" is right -- the bug was that the clock restarted with the
+process.
+
+Persisting it settles both: a restart no longer resets the cadence, and the
+startup sweep touches only kinds genuinely due. Wall clock rather than
+``time.monotonic()`` because the span being measured crosses process
+lifetimes. Unreadable or corrupt state degrades to "due", i.e. the previous
+behaviour, so a lost file costs one extra rebuild and never skips one.
+"""
 
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
@@ -474,6 +499,7 @@ class CascadeWorker:
         self,
         handlers: dict[str, Handler],
         *,
+        memory_root: MemoryRoot | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         handler_concurrency: int = DEFAULT_HANDLER_CONCURRENCY,
         max_retry: int = DEFAULT_MAX_RETRY,
@@ -494,6 +520,7 @@ class CascadeWorker:
         if handler_concurrency <= 0:
             raise ValueError("handler_concurrency must be positive")
         self._handlers = handlers
+        self._memory_root = memory_root
         self._batch_size = batch_size
         self._handler_concurrency = handler_concurrency
         self._handler_semaphore = asyncio.Semaphore(handler_concurrency)
@@ -1186,6 +1213,51 @@ class CascadeWorker:
             for kind in self._handlers:
                 self._schedule_optimize(kind)
 
+    def _read_rebuild_state(self) -> dict[str, float]:
+        """Last successful rebuild per kind, as unix seconds.
+
+        Any unreadable or malformed entry is simply absent, which reads as
+        "due" -- see :data:`_REBUILD_STATE_FILE` for why that is the safe
+        direction to fail in.
+        """
+        if self._memory_root is None:
+            return {}
+        try:
+            raw = (self._memory_root.index_dir / _REBUILD_STATE_FILE).read_text(
+                encoding="utf-8"
+            )
+        except OSError:
+            return {}
+        state: dict[str, float] = {}
+        for line in raw.splitlines():
+            kind, _, stamp = line.partition("=")
+            try:
+                state[kind.strip()] = float(stamp)
+            except ValueError:
+                continue
+        return state
+
+    def _record_rebuild(self, kind: str) -> None:
+        """Stamp ``kind`` as rebuilt now. Never raises -- a failed write only
+        costs an extra rebuild on the next start."""
+        if self._memory_root is None:
+            return
+        path = self._memory_root.index_dir / _REBUILD_STATE_FILE
+        state = self._read_rebuild_state()
+        state[kind] = get_utc_now().timestamp()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "".join(f"{k}={v}\n" for k, v in sorted(state.items())),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.warning(
+                "cascade_rebuild_state_write_failed",
+                path=str(path),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
     async def _rebuild_loop(self) -> None:
         """Slow per-kind ``drop_index + create_index`` loop.
 
@@ -1208,13 +1280,26 @@ class CascadeWorker:
         is harmless for correctness (queries / writes keep working
         against the existing indices).
         """
-        # First sweep: catch up from any prior session before honouring the
-        # interval. Rebuild is cheap (~0.3s per 50k rows × indexed columns
-        # in local benchmarks); deferring it 12h after startup risks long
-        # accumulation if the daemon restarts often.
+        # First sweep: catch up from a prior session, but only for kinds the
+        # persisted clock says are actually due. Sweeping all of them
+        # unconditionally made restart frequency the rebuild frequency; see
+        # :data:`_REBUILD_STATE_FILE`.
+        last_rebuilt = self._read_rebuild_state()
+        now = get_utc_now().timestamp()
         for kind in self._handlers:
             if self._stop.is_set():
                 return
+            previous = last_rebuilt.get(kind)
+            if (
+                previous is not None
+                and 0.0 <= now - previous < self._optimize_rebuild_interval
+            ):
+                logger.debug(
+                    "cascade_lancedb_rebuild_not_due",
+                    kind=kind,
+                    age_seconds=round(now - previous, 1),
+                )
+                continue
             await self._run_rebuild_once(kind)
         last_sweep = time.monotonic()
         # Never coarser than the configured cadence: the tick exists to give
@@ -1304,6 +1389,7 @@ class CascadeWorker:
         try:
             await rebuild_task
             logger.info("cascade_lancedb_rebuilt", kind=kind)
+            self._record_rebuild(kind)
             state.rebuild_attempt = 0
             state.rebuild_retry_at = 0.0
         except Exception as exc:

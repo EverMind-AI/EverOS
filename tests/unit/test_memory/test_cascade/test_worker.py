@@ -22,14 +22,18 @@ test stays in-memory.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import time
 import unittest.mock as mock
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
+from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import EmbeddingServiceError
+from everos.core.persistence import MemoryRoot
 from everos.memory.cascade.handlers import Handler, HandlerDeps
 from everos.memory.cascade.types import HandlerOutcome
 from everos.memory.cascade.worker import CascadeWorker
@@ -1561,3 +1565,125 @@ async def test_optimize_does_not_park_forever_on_a_rebuild(
         "the runner must skip the beat, not compact under a live rebuild — "
         "both commit on the same manifest"
     )
+
+
+# ── persisted rebuild clock ───────────────────────────────────────────────
+
+
+async def _run_startup_sweep(w: CascadeWorker) -> None:
+    """Drive only the startup half of ``_rebuild_loop``, then stop it.
+
+    The sweep is the first thing the loop does; the interval that follows is
+    long, so cancelling after it settles leaves exactly the startup
+    behaviour under test.
+    """
+    task = asyncio.create_task(w._rebuild_loop())
+    for _ in range(50):
+        await asyncio.sleep(0)
+    w._stop.set()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+def _worker_with_root(fake: _FakeLanceRepo, root: MemoryRoot) -> CascadeWorker:
+    return CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        memory_root=root,
+        retry_backoff_seconds=0,
+        optimize_rebuild_interval_seconds=3600.0,
+    )
+
+
+async def test_startup_rebuild_skipped_when_the_clock_says_not_due(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """A restart must not re-pay a rebuild the previous process just did.
+
+    Sweeping every kind on start made restart frequency the rebuild
+    frequency -- a crashlooping or frequently-redeployed server paid a full
+    drop+create per kind per restart, before serving its first request.
+    """
+    root = MemoryRoot(tmp_path)
+    root.index_dir.mkdir(parents=True, exist_ok=True)
+    (root.index_dir / ".index_rebuild_state").write_text(
+        f"episode={get_utc_now().timestamp()}\n", encoding="utf-8"
+    )
+    fake = _FakeLanceRepo()
+
+    await _run_startup_sweep(_worker_with_root(fake, root))
+
+    assert fake.rebuild_calls == []
+
+
+async def test_startup_rebuild_runs_when_the_clock_is_stale(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """The clock defers a rebuild; it must never cancel one."""
+    root = MemoryRoot(tmp_path)
+    root.index_dir.mkdir(parents=True, exist_ok=True)
+    (root.index_dir / ".index_rebuild_state").write_text(
+        f"episode={get_utc_now().timestamp() - 7200.0}\n", encoding="utf-8"
+    )
+    fake = _FakeLanceRepo()
+
+    await _run_startup_sweep(_worker_with_root(fake, root))
+
+    assert len(fake.rebuild_calls) == 1
+
+
+async def test_startup_rebuild_runs_when_there_is_no_clock_yet(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """Missing or corrupt state reads as due -- the pre-existing behaviour."""
+    root = MemoryRoot(tmp_path)
+    root.index_dir.mkdir(parents=True, exist_ok=True)
+    (root.index_dir / ".index_rebuild_state").write_text(
+        "episode=not-a-number\n", encoding="utf-8"
+    )
+    fake = _FakeLanceRepo()
+
+    await _run_startup_sweep(_worker_with_root(fake, root))
+
+    assert len(fake.rebuild_calls) == 1
+
+
+async def test_rebuild_records_the_clock(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """A successful rebuild is what advances the clock -- a failed one is not."""
+    root = MemoryRoot(tmp_path)
+    fake = _FakeLanceRepo()
+    w = _worker_with_root(fake, root)
+
+    await w._run_rebuild_once("episode")
+
+    assert w._read_rebuild_state()["episode"] > 0
+    assert "episode=" in (root.index_dir / ".index_rebuild_state").read_text()
+
+
+async def test_failed_rebuild_leaves_the_clock_alone(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    root = MemoryRoot(tmp_path)
+    w = _worker_with_root(_FakeLanceRepo(rebuild_raises=True), root)
+
+    await w._run_rebuild_once("episode")
+
+    assert w._read_rebuild_state() == {}
+
+
+async def test_worker_without_a_memory_root_keeps_sweeping(
+    patched_repo: _FakeRepo,
+) -> None:
+    """No root (direct construction, tests) must not change existing behaviour."""
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_rebuild_interval_seconds=3600.0,
+    )
+
+    await _run_startup_sweep(w)
+
+    assert len(fake.rebuild_calls) == 1

@@ -201,6 +201,7 @@ class CascadeOrchestrator:
         )
         self._worker = CascadeWorker(
             self._handlers,
+            memory_root=memory_root,
             batch_size=self._config.worker_batch_size,
             handler_concurrency=self._config.worker_handler_concurrency,
             max_retry=self._config.worker_max_retry,
