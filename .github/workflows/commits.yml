@@ -23,6 +23,9 @@ jobs:
       - name: Validate Conventional Commit PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          # The squash subject is "<title> (#<number>)", so the title budget
+          # depends on how long the number is.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: make check-pr-title
 
   messages:
