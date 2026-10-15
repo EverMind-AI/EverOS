@@ -241,14 +241,14 @@ _REBUILD_STATE_FILE = ".index_rebuild_state"
 """Per-kind wall clock of the last successful rebuild, kept under ``index_dir``.
 
 Without it, restart frequency *is* rebuild frequency. The loop swept every
-kind on worker start, so a daemon that restarts hourly paid a full rebuild per
-kind per hour -- on production-sized tables several GiB of native Arrow/Lance
-allocation before the server answered its first request, which is the worst
-moment to spend it.
+kind on worker start, so a daemon that restarts hourly did a full
+:meth:`LanceRepoBase.rebuild_indexes` per kind per hour -- O(rows x indexed
+columns) of index work that the configured cadence never asked for, competing
+with the requests the freshly started process is there to serve.
 
-Removing the sweep instead would have been wrong for the opposite reason: a
-daemon that keeps restarting never lives long enough to reach the periodic
-sweep, and that sweep is the only lever bounding index UUID growth (see
+Removing the sweep instead would be wrong for the opposite reason: a daemon
+that keeps restarting never lives long enough to reach the periodic sweep,
+and that sweep is the only lever bounding index UUID growth (see
 :data:`DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS`). Neither "always sweep" nor
 "never sweep" is right -- the bug was that the clock restarted with the
 process.
@@ -256,9 +256,20 @@ process.
 Persisting it settles both: a restart no longer resets the cadence, and the
 startup sweep touches only kinds genuinely due. Wall clock rather than
 ``time.monotonic()`` because the span being measured crosses process
-lifetimes. Unreadable or corrupt state degrades to "due", i.e. the previous
-behaviour, so a lost file costs one extra rebuild and never skips one.
+lifetimes. Unreadable or malformed state reads as "due", i.e. the previous
+behaviour, so a lost file costs one extra rebuild and never skips one -- and
+the skipped age is credited to the periodic timer, so a skip defers the next
+sweep rather than extending the interval past its configured value.
+
+On cost, for whoever tunes this next: ``rebuild_indexes`` has replaced in
+place rather than dropped and recreated since #392, and the only measured
+figure in this repo is a 3-6 MB resident steady state (see
+``LanceSettings.index_cache_size_bytes``). The case for this change is the
+per-restart *work*, not a memory spike -- no GiB-scale measurement has been
+reproduced here, and ``LanceRepoBase.rebuild_indexes`` states that rebuild
+frequency is bounded by cost rather than correctness.
 """
+
 
 DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS = 12 * 60 * 60.0
 """How often (per kind) to do a full ``drop_index + create_index`` rebuild.
@@ -1226,7 +1237,13 @@ class CascadeWorker:
             raw = (self._memory_root.index_dir / _REBUILD_STATE_FILE).read_text(
                 encoding="utf-8"
             )
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers UnicodeDecodeError: a single non-UTF-8 byte in
+            # this file would otherwise raise out of the first statement of
+            # ``_rebuild_loop``, which :meth:`_supervise` escalates to a process
+            # exit -- turning a corrupt dotfile into a restart loop that each
+            # restart reproduces. Nothing read this file before it existed, so
+            # the crash vector is this feature's own.
             return {}
         state: dict[str, float] = {}
         for line in raw.splitlines():
@@ -1243,9 +1260,9 @@ class CascadeWorker:
         if self._memory_root is None:
             return
         path = self._memory_root.index_dir / _REBUILD_STATE_FILE
-        state = self._read_rebuild_state()
-        state[kind] = get_utc_now().timestamp()
         try:
+            state = self._read_rebuild_state()
+            state[kind] = get_utc_now().timestamp()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 "".join(f"{k}={v}\n" for k, v in sorted(state.items())),
@@ -1286,6 +1303,12 @@ class CascadeWorker:
         # :data:`_REBUILD_STATE_FILE`.
         last_rebuilt = self._read_rebuild_state()
         now = get_utc_now().timestamp()
+        # How much of the interval the skipped kinds have already served.
+        # Without crediting it, a restart at 0.95x the interval skips the sweep
+        # *and* restarts the periodic timer from zero, so the worst-case gap
+        # between real rebuilds becomes 1.95x -- a silent deferral of the one
+        # mechanism bounding index growth.
+        oldest_skipped = 0.0
         for kind in self._handlers:
             if self._stop.is_set():
                 return
@@ -1294,14 +1317,16 @@ class CascadeWorker:
                 previous is not None
                 and 0.0 <= now - previous < self._optimize_rebuild_interval
             ):
-                logger.debug(
+                oldest_skipped = max(oldest_skipped, now - previous)
+                logger.info(
                     "cascade_lancedb_rebuild_not_due",
                     kind=kind,
                     age_seconds=round(now - previous, 1),
+                    interval_seconds=self._optimize_rebuild_interval,
                 )
                 continue
             await self._run_rebuild_once(kind)
-        last_sweep = time.monotonic()
+        last_sweep = time.monotonic() - oldest_skipped
         # Never coarser than the configured cadence: the tick exists to give
         # conflict retries a 60s granularity against a 12h sweep, and must not
         # quantise a deployment (or a test) that sets a shorter interval.

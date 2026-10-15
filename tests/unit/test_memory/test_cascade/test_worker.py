@@ -1687,3 +1687,126 @@ async def test_worker_without_a_memory_root_keeps_sweeping(
     await _run_startup_sweep(w)
 
     assert len(fake.rebuild_calls) == 1
+
+
+async def test_corrupt_state_file_does_not_take_the_loop_down(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """A bad byte must read as "due", not raise.
+
+    ``_read_rebuild_state`` runs as the first statement of ``_rebuild_loop``,
+    and ``_supervise`` escalates an unrecoverable loop to a process exit. A
+    corrupt dotfile reproduces on every restart, so an uncaught decode error
+    here is a crashloop, not a degraded sweep.
+    """
+    root = MemoryRoot(tmp_path)
+    root.index_dir.mkdir(parents=True, exist_ok=True)
+    (root.index_dir / ".index_rebuild_state").write_bytes(b"episode=1\xff\n")
+    fake = _FakeLanceRepo()
+
+    await _run_startup_sweep(_worker_with_root(fake, root))
+
+    assert len(fake.rebuild_calls) == 1
+
+
+async def test_a_skipped_kind_does_not_restart_the_periodic_timer(
+    patched_repo: _FakeRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping defers the sweep; it must not extend the interval.
+
+    Setting ``last_sweep`` to "now" after a skip makes the worst-case gap
+    between real rebuilds ~2x the configured interval -- a silent deferral of
+    the only mechanism bounding index growth. Here the clock is 3/4 through
+    the interval at start, so a correct loop rebuilds at ~1/4 of it and a
+    timer-restarting one waits a full one.
+
+    The loop's poll tick is normally coarser than any interval a test can
+    afford, so it is shortened here -- otherwise tick granularity, not the
+    credit under test, decides when the rebuild lands.
+    """
+    from everos.memory.cascade import worker as worker_mod
+
+    interval, age = 0.8, 0.6
+    monkeypatch.setattr(worker_mod, "_REBUILD_LOOP_TICK_SECONDS", 0.02)
+    root = MemoryRoot(tmp_path)
+    root.index_dir.mkdir(parents=True, exist_ok=True)
+    (root.index_dir / ".index_rebuild_state").write_text(
+        f"episode={get_utc_now().timestamp() - age}\n", encoding="utf-8"
+    )
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        memory_root=root,
+        retry_backoff_seconds=0,
+        optimize_rebuild_interval_seconds=interval,
+    )
+    task = asyncio.create_task(w._rebuild_loop())
+    started = time.monotonic()
+    try:
+        for _ in range(400):
+            if fake.rebuild_calls:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        w._stop.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert fake.rebuild_calls, "the deferred rebuild never ran"
+    waited = fake.rebuild_calls[0] - started
+    assert waited < interval * 0.75, (
+        f"waited {waited:.2f}s; the credited due time was "
+        f"{interval - age:.2f}s and a restarted timer would be {interval}s"
+    )
+
+
+async def test_clock_round_trips_between_two_workers(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """What one worker records is what the next worker reads.
+
+    Without this, stamping with ``time.monotonic()`` instead of wall clock
+    passes every other test while disabling the feature entirely.
+    """
+    root = MemoryRoot(tmp_path)
+    first = _FakeLanceRepo()
+    await _run_startup_sweep(_worker_with_root(first, root))
+    assert len(first.rebuild_calls) == 1, "first worker should rebuild"
+
+    second = _FakeLanceRepo()
+    await _run_startup_sweep(_worker_with_root(second, root))
+
+    assert second.rebuild_calls == [], "second worker should skip"
+
+
+async def test_recorded_stamp_is_wall_clock(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """Pins the unit. ``time.monotonic()`` is ~1.7e9 off on a booted host."""
+    root = MemoryRoot(tmp_path)
+    w = _worker_with_root(_FakeLanceRepo(), root)
+
+    await w._run_rebuild_once("episode")
+
+    assert abs(w._read_rebuild_state()["episode"] - get_utc_now().timestamp()) < 60
+
+
+async def test_one_kind_does_not_stamp_the_others(
+    patched_repo: _FakeRepo, tmp_path: Path
+) -> None:
+    """Stamping every kind would suppress their startup sweeps for an interval."""
+    root = MemoryRoot(tmp_path)
+    w = CascadeWorker(
+        {
+            "episode": _OkHandlerWithRepo(_FakeLanceRepo()),
+            "atomic_fact": _OkHandlerWithRepo(_FakeLanceRepo()),
+        },
+        memory_root=root,
+        retry_backoff_seconds=0,
+        optimize_rebuild_interval_seconds=3600.0,
+    )
+
+    await w._run_rebuild_once("episode")
+
+    assert set(w._read_rebuild_state()) == {"episode"}
