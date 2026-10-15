@@ -757,6 +757,14 @@ class MilvusRepoBase[T: BaseModel]:
     ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
+        if columns is not None and not skip_vectors:
+            # A ``columns`` list that names no vector column cannot need the
+            # vector payload. Milvus charges for that payload on the fetch,
+            # not on the trim below, so decide it here -- otherwise a caller
+            # projecting two scalars still materialises every 1024-D vector
+            # in the result set and discards it one line later.
+            vector_names = {field.name for field in self.index_schema.vector_fields}
+            skip_vectors = not (set(columns) & vector_names)
         rows = await self.find_where(
             all_of(
                 eq("owner_id", owner_id),
@@ -769,12 +777,9 @@ class MilvusRepoBase[T: BaseModel]:
         )
         if columns is None:
             return rows
-        # Return-shape compatibility with LanceDB only: the columns
-        # parameter itself does not make this read cheaper -- the matched
-        # rows above are loaded in full and only trimmed here. Passing
-        # ``skip_vectors`` is what drops the vector payload from the
-        # Milvus query; without it the fetch cost is identical to
-        # omitting `columns` entirely.
+        # Milvus has no column projection on the result shape, so the trim to
+        # ``columns`` happens in Python for LanceDB return-shape parity; the
+        # fetch itself was already narrowed above.
         return [{name: getattr(row, name) for name in columns} for row in rows]
 
     async def find_by_session(

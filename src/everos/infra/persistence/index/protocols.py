@@ -92,6 +92,7 @@ class IndexRepository(Protocol[T]):
         app_id: str = "default",
         project_id: str = "default",
         columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
     ) -> list[T] | list[dict[str, Any]]: ...
 
     async def find_by_session(
