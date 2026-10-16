@@ -148,6 +148,8 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `model` | string | — | **Yes** | Embedding model identifier. |
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | **Yes** | Embedding endpoint URL. |
+| `dim` | int | `1024` | No | Width of the `vector` column in every index table. See below. |
+| `dimensions` | int | — | No | Server-side truncation width, passed through to the embedding API for models that support it (Matryoshka). Independent of `dim`. |
 | `timeout_seconds` | float | `30.0` | No | Request timeout. |
 | `max_retries` | int | `3` | No | Retry count on failure. |
 | `batch_size` | int | `10` | No | Texts per batch request. |
@@ -159,6 +161,40 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 batched call). On a slow or serialized local endpoint (CPU Ollama, a single
 GPU) queued batch requests can exceed the timeout: lower `batch_size` and
 `max_concurrent` together, or raise `timeout_seconds`.
+
+#### Vector width (`dim`)
+
+Every index table stores vectors in a fixed-width column, and `dim` is that
+width. The model has to agree with it:
+
+- **Model returns fewer dimensions than `dim`** — startup stops. Nothing could
+  ever be stored, so there is no useful degraded mode. Set `dim` to what the
+  model returns, then run `everos cascade rebuild`: the tables were already
+  created at the old width.
+- **Model returns more than `dim`** — the extra dimensions are **truncated on
+  every write**, and startup warns once. This is lossless only for models
+  trained for it (Matryoshka representation learning); with any other model
+  recall degrades, because a plain prefix of an embedding is not a valid
+  embedding. Either match `dim` to the model or use a Matryoshka model.
+- **Changing `dim` on an existing index** — startup stops. Vectors of
+  different lengths have no distance between them, so there is nothing to
+  migrate: `everos cascade rebuild` re-embeds from markdown.
+
+`dimensions` is a different knob: it asks the *server* to truncate (with
+re-normalisation, which is why it is preferable when the model supports it).
+Tables are still built at `dim`. If both are set and they disagree, startup
+warns and names both values.
+
+#### Changing the embedding model
+
+An index remembers which model built it, and startup refuses to open one
+built by a different model -- distances between vectors from two models are
+meaningless, and the failure is otherwise silent: searches simply return
+nothing useful. The recovery is `everos cascade rebuild`, which re-embeds
+every entry from markdown and records the new model.
+
+Deployments with no embedding configured (no `api_key`, for instance) are
+unaffected: nothing is probed, compared, or recorded.
 
 ### `[rerank]`
 

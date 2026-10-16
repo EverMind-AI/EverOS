@@ -53,7 +53,11 @@ reference — they are runtime probes and shutdown hooks for deployment, not
 part of the application contract. `quiesce` drains the md → index queue and
 stops the watcher; calling it twice is safe, and it returns a bare status body
 (`quiesced`, `drained`, `pending_before`, `pending_after`,
-`failed_permanent`), see `docs/openapi.json`.
+`failed_permanent`), see `docs/openapi.json`. One note for anyone keying off
+`/health`: `capabilities.embed` reports whether the embedding service
+answered a dimension probe **when the process started**, not whether it is
+reachable now -- a service that recovers later keeps reading `false` until
+the next restart.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy

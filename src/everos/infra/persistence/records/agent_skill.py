@@ -14,7 +14,9 @@ from typing import ClassVar
 
 from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
-_DIM = 1024
+from ._dim import configured_dim
+
+_DIM = configured_dim()
 
 
 class AgentSkill(BaseLanceTable):

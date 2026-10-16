@@ -13,9 +13,10 @@ from typing import ClassVar
 
 from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
+from ._dim import configured_dim
 from ._parent_type import ParentType
 
-_DIM = 1024
+_DIM = configured_dim()
 
 
 class Foresight(BaseLanceTable):

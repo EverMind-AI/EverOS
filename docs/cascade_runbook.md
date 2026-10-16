@@ -204,6 +204,45 @@ Upgrading a Milvus root to 1.4.2 needs one rebuild: the collections gain the
 the server stopped (`--root` is an option of the `cascade` group:
 `everos cascade --root <root> rebuild --yes`).
 
+## The embedding model an index was built with
+
+Every index records which embedding model produced its vectors, and startup
+refuses to open one built by a different model. Distances between vectors
+from two models are meaningless, and the failure is otherwise silent -- the
+store stays healthy by every other measure and searches simply stop finding
+things.
+
+Where the record lives is the backend's business, because it has to travel
+with the data it describes:
+
+| Backend | Where |
+|---|---|
+| LanceDB | Arrow field metadata on the `episode` table's `vector` column, key `everos.embedding_model` |
+| Milvus | A property of the `episode` collection, same key |
+
+So `rm -rf .index/lancedb` takes the record with it (the index comes back
+unattested and is re-attested on the next start), and several machines
+pointing at one Milvus cluster cannot disagree about which model built it.
+
+**Re-attesting is `everos cascade rebuild` and nothing else.** It drops the
+tables, re-embeds every entry from markdown, and records the model that just
+produced them. There is deliberately no "just change the record" switch: the
+record is a claim about the stored vectors, and changing it without changing
+them is how a store ends up silently mixing two models' output.
+
+An index with **no** record -- one built before this field existed -- is
+attested with the current configuration on the next start, in place: no
+rebuild, no data rewritten, row counts and column types untouched. The log
+line says so, and names `cascade rebuild` in case the index really was built
+by a different model (there is no way to tell after the fact, so the current
+configuration is taken at its word from that point on).
+
+Deployments with no embedding configured are untouched: nothing is probed,
+compared, or recorded. Note that the marker discussed under
+[One-shot replay](#one-shot-replay-everos-cascade-sync-path) --
+`.index/.index_reconcile_version` -- is a different thing entirely, and
+deleting it does not clear this record.
+
 ## Recovery paths
 
 ### LanceDB schema drift on startup
