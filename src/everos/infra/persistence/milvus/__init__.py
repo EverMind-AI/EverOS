@@ -29,6 +29,15 @@ from .repository import MilvusValueLimitError as MilvusValueLimitError
 
 logger = get_logger(__name__)
 
+EMBEDDING_MODEL_KEY = "everos.embedding_model"
+"""Collection property holding the model this index was built with.
+
+Deliberately the same string the LanceDB backend uses for its Arrow field
+metadata, declared separately rather than imported: the ``index`` facade
+imports both backends, so a backend importing the facade would be a cycle.
+``tests/unit/test_infra`` pins the two spellings together.
+"""
+
 
 async def ensure_business_indexes() -> None:
     """Create or verify every EverOS Milvus collection."""
@@ -99,6 +108,31 @@ class MilvusIndexBackend:
 
     async def drop_business_tables(self) -> list[str]:
         return await drop_business_tables()
+
+    async def read_embedding_model(self) -> str | None:
+        """Model this index's vectors were built with, or ``None`` if unattested.
+
+        Lives on the episode collection as a property, mirroring what the
+        LanceDB backend hangs on its vector column's Arrow metadata: the
+        attestation belongs with the thing it describes, so a remote cluster
+        shared by several machines cannot disagree with itself about which
+        model built it.
+        """
+        client = await get_client()
+        described = await asyncio.to_thread(
+            client.describe_collection, episode_repo.collection_name
+        )
+        return (described.get("properties") or {}).get(EMBEDDING_MODEL_KEY)
+
+    async def write_embedding_model(self, model: str) -> None:
+        """Record ``model`` as a property of the episode collection."""
+        client = await get_client()
+        await asyncio.to_thread(
+            client.alter_collection_properties,
+            episode_repo.collection_name,
+            {EMBEDDING_MODEL_KEY: model},
+        )
+        logger.info("milvus_embedding_model_recorded", model=model)
 
 
 index_backend = MilvusIndexBackend()

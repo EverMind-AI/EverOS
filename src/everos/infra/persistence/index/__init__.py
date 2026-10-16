@@ -142,6 +142,16 @@ async def drop_business_tables() -> list[str]:
     return await _backend().drop_business_tables()
 
 
+async def read_embedding_model() -> str | None:
+    """Model the active backend says this index was built with."""
+    return await _backend().read_embedding_model()
+
+
+async def write_embedding_model(model: str) -> None:
+    """Attest ``model`` as the producer of this index's vectors."""
+    await _backend().write_embedding_model(model)
+
+
 def repo_for_schema(schema: type[Any]) -> IndexRepository[Any]:
     """Resolve a registered repository by its logical record model."""
     for repo in ALL_REPOS:
@@ -199,10 +209,12 @@ __all__ = [
     "ne",
     "one_of",
     "primary_key",
+    "read_embedding_model",
     "repo_for_schema",
     "schema_for",
     "shutdown",
     "startup",
     "user_profile_repo",
     "verify_business_schemas",
+    "write_embedding_model",
 ]

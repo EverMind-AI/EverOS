@@ -222,6 +222,29 @@ class IndexBackend(Protocol):
 
     async def drop_business_tables(self) -> list[str]: ...
 
+    async def read_embedding_model(self) -> str | None:
+        """Model this index's vectors were built with, ``None`` if unattested.
+
+        Vectors from two different models are not comparable, so an index has
+        to remember which one produced it. *Where* that is kept is the
+        backend's business -- field metadata, a collection property, whatever
+        travels with the data -- the port only says it travels.
+
+        ``None`` means "not attested yet" (a fresh index, or one from before
+        this field existed), not "failed to read": a backend that cannot read
+        raises, so the caller can tell the two apart and refuse to overwrite
+        what it could not see.
+        """
+        ...
+
+    async def write_embedding_model(self, model: str) -> None:
+        """Attest ``model`` as the producer of this index's vectors.
+
+        Must not rewrite stored data: an existing deployment adopting this
+        field keeps its rows and column types untouched.
+        """
+        ...
+
 
 __all__ = [
     "AgentSkillIndexRepository",

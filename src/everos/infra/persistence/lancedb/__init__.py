@@ -149,6 +149,26 @@ async def migrate_fts_indexes() -> None:
         logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
 
 
+EMBEDDING_MODEL_KEY = "everos.embedding_model"
+"""Arrow field-metadata key holding the model this index was built with.
+
+Each backend owns where and under what key the attestation lives, so the
+Milvus backend declares the same string for its collection property rather
+than importing this one -- the ``index`` facade already imports this module,
+so the reverse edge would be a cycle. ``tests/unit/test_infra`` pins the two
+spellings together.
+"""
+
+_PROVENANCE_COLUMN = "vector"
+"""Column the attestation hangs on.
+
+Six tables carry a vector column and ``Episode`` carries two, so writing all
+of them would raise "how many agreeing copies count as agreement" on the next
+schema change. ``episode.vector`` is the one column that exists in every
+deployment and is written first; ``subject_vector`` comes from the same model
+and is not recorded separately.
+"""
+
 _TABLE_SCHEMA_VERSION = 2
 """Bump when column nullability or presence changes on business tables.
 v2 = ``vector: Vector(_DIM) | None`` on the 6 business tables that carry
@@ -430,6 +450,36 @@ class LanceIndexBackend:
 
     async def drop_business_tables(self) -> list[str]:
         return await drop_business_tables()
+
+    async def read_embedding_model(self) -> str | None:
+        """Model this index's vectors were built with, or ``None`` if unattested.
+
+        ``None`` is not an error: an index built before this field existed, or
+        one just recreated by ``cascade rebuild``, simply has not been
+        attested yet. The caller writes the current configuration in that
+        case; see :func:`write_embedding_model`.
+        """
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        metadata = (await table.schema()).field(_PROVENANCE_COLUMN).metadata or {}
+        raw = metadata.get(EMBEDDING_MODEL_KEY.encode())
+        return raw.decode() if raw else None
+
+    async def write_embedding_model(self, model: str) -> None:
+        """Record ``model`` on the episode table's vector column, in place.
+
+        Arrow field metadata is updated without rewriting data: the table
+        gains a version, its row count and column types are untouched. The
+        create path cannot carry this (``pydantic_to_schema`` builds fields
+        with no metadata), so every attestation goes through here.
+        """
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        await table.update_field_metadata(
+            {
+                "path": _PROVENANCE_COLUMN,
+                "metadata": {EMBEDDING_MODEL_KEY: model},
+            }
+        )
+        get_logger(__name__).info("lancedb_embedding_model_recorded", model=model)
 
 
 index_backend = LanceIndexBackend()
