@@ -48,6 +48,7 @@ from everos.infra.persistence.sqlite import (
     UnprocessedBuffer,
     conversation_status_repo,
     memcell_repo,
+    memorized_message_repo,
     unprocessed_buffer_repo,
 )
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
@@ -110,6 +111,9 @@ async def buffer_messages(ingested: IngestResult, *, mode: Mode) -> BoundaryOutc
         ingested.session_id, _TRACK, app_id=app_id, project_id=project_id
     )
     buffered = [_row_to_canonical(row) for row in buffer_rows]
+    fresh = await _drop_already_seen(ingested, fresh, buffered)
+    if not fresh:
+        return _empty_outcome(status="skipped", message_count=0)
     merged = _merge_dedupe_sort(buffered, fresh)
     await _replace_buffer(ingested.session_id, merged, app_id, project_id)
     await _touch_last_message_ts(ingested.session_id, merged, app_id, project_id)
@@ -137,6 +141,9 @@ async def prepare_cells(
         ingested.session_id, _TRACK, app_id=app_id, project_id=project_id
     )
     buffered = [_row_to_canonical(r) for r in buffer_rows]
+    fresh = await _drop_already_seen(ingested, fresh, buffered)
+    if not fresh and not is_final:
+        return _empty_outcome(status="skipped", message_count=0)
     merged = _merge_dedupe_sort(buffered, fresh)
     if not merged:
         return _empty_outcome(status="accumulated", message_count=0)
@@ -197,6 +204,12 @@ async def prepare_cells(
         for i, (cell, memcell_id) in enumerate(zip(cells, memcell_ids, strict=True))
     ]
     await memcell_repo.insert_many(rows)
+    await memorized_message_repo.record(
+        ingested.session_id,
+        (item.timestamp for cell in cells for item in cell.items),
+        app_id=app_id,
+        project_id=project_id,
+    )
 
     last_cell_ts = max((cell.timestamp for cell in cells), default=0)
     if last_cell_ts:
@@ -437,6 +450,41 @@ def _row_to_canonical(r: UnprocessedBuffer) -> CanonicalMessage:
 
 
 # ── Merge / split / sender helpers ────────────────────────────────────────
+
+
+async def _drop_already_seen(
+    ingested: IngestResult,
+    fresh: list[CanonicalMessage],
+    buffered: list[CanonicalMessage],
+) -> list[CanonicalMessage]:
+    """Local patch: drop re-posted messages before they reach a memcell again.
+
+    A message counts as seen when its timestamp is already in the buffer or
+    recorded in ``memorized_message``. Matching is by timestamp, not
+    ``message_id``: the id embeds the message's position in the request, which
+    shifts when a client re-posts a different slice of the same transcript.
+    Late messages carrying an old timestamp (e.g. routed inter-session
+    messages) are kept, because their timestamp was never memorized.
+    """
+    seen = {to_timestamp_ms(m.timestamp) for m in buffered}
+    candidates = {to_timestamp_ms(m.timestamp) for m in fresh} - seen
+    seen |= await memorized_message_repo.find_memorized(
+        ingested.session_id,
+        candidates,
+        app_id=ingested.app_id,
+        project_id=ingested.project_id,
+    )
+    kept = [m for m in fresh if to_timestamp_ms(m.timestamp) not in seen]
+    if len(kept) < len(fresh):
+        logger.info(
+            "memorize_resent_messages_dropped",
+            extra={
+                "session_id": ingested.session_id,
+                "dropped": len(fresh) - len(kept),
+                "kept": len(kept),
+            },
+        )
+    return kept
 
 
 def _merge_dedupe_sort(

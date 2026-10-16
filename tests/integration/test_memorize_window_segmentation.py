@@ -432,3 +432,62 @@ async def test_three_sequential_adds_conservation_no_loss(
     )
     # Disjoint
     assert not (in_cells & in_buffer)
+
+
+# ---------------------------------------------------------------------------
+# Local patch: re-sent history must not be memorized twice
+# ---------------------------------------------------------------------------
+
+
+def _ts_of(message_id: str) -> int:
+    return int(message_id.rsplit("_", 2)[1])
+
+
+async def test_resent_history_is_not_memorized_again(
+    memorize_env_scripted: Callable[..., AsyncMock],
+) -> None:
+    """The OpenClaw plugin re-posts the whole visible transcript on every
+    agent_end. Messages already in a memcell left the buffer, so the buffer's
+    message_id PK no longer dedupes them; on 2026-10-13 each message landed in
+    ~35 memcells. Round 2 here re-sends from m1 instead of m0, so the
+    positional ``_idx`` shifts and the same messages get NEW message_ids."""
+    # Round 1: [m0,m1,m2], cut after 2 → cell=[m0,m1], buffer=[m2]
+    # Round 2: re-send [m1,m2] + new [m3,m4]; only m3,m4 are fresh →
+    #          merged=[m2,m3,m4], cut after 2 → cell=[m2,m3], buffer=[m4]
+    await memorize_env_scripted(fake_llm=_make_scripted_llm([[2], [2]]))
+
+    session = "s_resend"
+    await memorize({"session_id": session, "messages": [_msg(i) for i in range(3)]})
+    await memorize({"session_id": session, "messages": [_msg(i) for i in range(1, 5)]})
+
+    cells = await _memcell_rows(session)
+    buffer = await _buffer_rows(session)
+
+    cell_ts = [_ts_of(mid) for _, ids in cells for mid in ids]
+    assert len(cell_ts) == len(set(cell_ts)), f"a message was memorized twice: {cells}"
+    assert len(cells) == 2, cells
+    assert {_ts_of(mid) for mid in cells[1][1]} == {
+        _BASE_TS + 2000,
+        _BASE_TS + 3000,
+    }
+    assert [ts for _, ts in buffer] == [_BASE_TS + 4000]
+
+
+async def test_late_message_with_old_timestamp_is_kept(
+    memorize_env_scripted: Callable[..., AsyncMock],
+) -> None:
+    """Routed inter-session messages arrive after later turns were memorized
+    but carry their original (older) timestamp. A high-water mark would drop
+    them; the per-timestamp record keeps them."""
+    # Round 1: [m0,m2,m3], cut after 2 → cell=[m0,m2], buffer=[m3]
+    # Round 2: re-send all plus the late m1 → only m1 is fresh;
+    #          no cut → buffer=[m1,m3]
+    await memorize_env_scripted(fake_llm=_make_scripted_llm([[2], []]))
+
+    session = "s_late"
+    await memorize({"session_id": session, "messages": [_msg(i) for i in (0, 2, 3)]})
+    await memorize({"session_id": session, "messages": [_msg(i) for i in range(4)]})
+
+    buffer = await _buffer_rows(session)
+    assert [ts for _, ts in buffer] == [_BASE_TS + 1000, _BASE_TS + 3000]
+    assert len(await _memcell_rows(session)) == 1
