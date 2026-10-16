@@ -11,9 +11,41 @@ sibling surfaces over the same service layer.
 
 from __future__ import annotations
 
+import os
+import sys
+
 import typer
 
-from .commands import cascade, config_cmd, demo, init_cmd, server
+
+def _bootstrap_root_from_argv() -> None:
+    """Seed ``EVEROS_ROOT`` from ``--root`` before the record models are imported.
+
+    ``Vector(dim)`` freezes the vector width when the record classes are
+    created, and that happens on the first import of :mod:`.commands` below —
+    long before typer parses ``argv``. So a ``--root`` pointing at a memory
+    root whose ``everos.toml`` sets a different ``dim`` would be read too late
+    and the tables would be built at the wrong width.
+
+    Both spellings (``--root X`` and ``--root=X``) and both positions (the
+    group-level ``everos cascade --root X status`` and the command-level
+    ``everos server start --root X``) are accepted, because ``cascade
+    rebuild`` only takes the group-level one. typer stays authoritative: it
+    overwrites this value when it parses the flag for real, and
+    ``_apply_root_env`` is where the two are reconciled.
+    """
+    argv = sys.argv[1:]
+    for index, arg in enumerate(argv):
+        if arg == "--root" and index + 1 < len(argv):
+            os.environ["EVEROS_ROOT"] = argv[index + 1]
+            return
+        if arg.startswith("--root="):
+            os.environ["EVEROS_ROOT"] = arg.split("=", 1)[1]
+            return
+
+
+_bootstrap_root_from_argv()
+
+from .commands import cascade, config_cmd, demo, init_cmd, server  # noqa: E402
 
 app = typer.Typer(
     name="everos",
