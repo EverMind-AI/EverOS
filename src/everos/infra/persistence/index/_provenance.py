@@ -95,12 +95,20 @@ async def probe_embedding_dimension() -> int | None:
         return None
 
 
-async def verify_embedding_provenance(store: ProvenanceStore) -> None:
+async def verify_embedding_provenance(store: ProvenanceStore) -> list[str]:
     """Compare configuration against what the model and the index actually say.
 
     Collects every mismatch before reporting, so an operator who got two
     things wrong sees both at once instead of fixing one, restarting, and
     being told about the next.
+
+    Returns:
+        The findings that did **not** stop startup, in the order they were
+        logged. Returned as well as logged because what counts as "warned"
+        is this function's own answer: whether a structlog event is
+        interceptable depends on how logging happens to be configured, so a
+        caller (or a test) asserting through the log is reading the wrong
+        layer.
 
     Raises:
         EmbeddingProvenanceError: on a too-narrow model or a changed model.
@@ -116,7 +124,7 @@ async def verify_embedding_provenance(store: ProvenanceStore) -> None:
     # once a real one was configured.
     if not get_embedding_capability().available:
         logger.info("embedding_provenance_skipped", reason="embedding_not_configured")
-        return
+        return []
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -178,3 +186,4 @@ async def verify_embedding_provenance(store: ProvenanceStore) -> None:
             "embedding configuration does not match this index:\n"
             + "\n".join(f"  - {error}" for error in errors)
         )
+    return warnings

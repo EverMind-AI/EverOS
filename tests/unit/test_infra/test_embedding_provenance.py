@@ -17,7 +17,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import structlog
 
 from everos.core.errors import EmbeddingProvenanceError
 from everos.infra.persistence.index import _provenance
@@ -124,9 +123,8 @@ async def test_wider_model_warns_and_starts(
     """Truncation is a supported arrangement, so warn rather than refuse."""
     _set_dim(monkeypatch, 1024)
     probe.returns = 1536
-    with structlog.testing.capture_logs() as captured:
-        await _provenance.verify_embedding_provenance(_Store())
-    assert any("truncated" in str(event) for event in captured)
+    warnings = await _provenance.verify_embedding_provenance(_Store())
+    assert any("truncated" in warning for warning in warnings)
 
 
 async def test_changed_model_aborts_naming_both(
@@ -159,7 +157,7 @@ async def test_matching_model_writes_nothing(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(recorded="fake-768")
-    await _provenance.verify_embedding_provenance(store)
+    assert await _provenance.verify_embedding_provenance(store) == []
     assert store.writes == []
 
 
@@ -211,10 +209,9 @@ async def test_unreadable_record_is_not_overwritten(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(read_raises=True)
-    with structlog.testing.capture_logs() as captured:
-        await _provenance.verify_embedding_provenance(store)
+    warnings = await _provenance.verify_embedding_provenance(store)
     assert store.writes == []
-    assert any("could not read" in str(event) for event in captured)
+    assert any("could not read" in warning for warning in warnings)
 
 
 async def test_both_mismatches_are_reported_together(
@@ -238,9 +235,9 @@ async def test_dimensions_mismatch_only_warns(
     _set_dim(monkeypatch, 768)
     monkeypatch.setenv("EVEROS_EMBEDDING__DIMENSIONS", "512")
     probe.returns = 768
-    with structlog.testing.capture_logs() as captured:
-        await _provenance.verify_embedding_provenance(_Store(recorded="fake-768"))
-    assert any("dimensions=512" in str(event) for event in captured)
+    store = _Store(recorded="fake-768")
+    warnings = await _provenance.verify_embedding_provenance(store)
+    assert any("dimensions=512" in warning for warning in warnings)
 
 
 async def test_last_probe_reports_the_measured_width(
