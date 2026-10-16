@@ -164,7 +164,7 @@ GPU) queued batch requests can exceed the timeout: lower `batch_size` and
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra` or `vllm`. |
+| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra`, `vllm`, or `dashscope`. |
 | `model` | string | — | **Yes** | Reranker model identifier. |
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | **Yes** | Rerank endpoint URL. |
