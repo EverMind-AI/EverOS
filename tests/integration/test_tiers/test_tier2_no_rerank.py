@@ -39,8 +39,8 @@ async def test_user_search_methods_succeed(
     tier2_runtime: AsyncClient, method: str
 ) -> None:
     await add_and_flush(tier2_runtime, session_id=f"s_tier2_{method}")
-    # VECTOR recalls via atomic_fact MaxSim, not a direct episode ANN scan
-    # -- see seed_atomic_fact_for_episode's docstring.
+    # Seed a fact so VECTOR takes the atomic_fact MaxSim path rather than
+    # the episode-vector fallback -- see seed_atomic_fact_for_episode.
     episode_row = (await episode_rows("u_alice"))[0]
     await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
 

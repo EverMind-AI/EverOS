@@ -191,9 +191,11 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
         )
 
         # Proof the backfilled rows are semantically searchable: VECTOR
-        # recalls via atomic_fact MaxSim (see seed_atomic_fact_for_episode
-        # in conftest.py), so this only succeeds if the backfill actually
-        # embedded the pre-upgrade rows rather than just the schema.
+        # recalls via atomic_fact MaxSim, or the episode vector when no fact
+        # is embedded (see seed_atomic_fact_for_episode in conftest.py), so
+        # this only succeeds if the backfill actually embedded the
+        # pre-upgrade rows rather than just the schema. Fact vectors are
+        # asserted directly above.
         search_resp = await client.post(
             "/api/v1/memory/search",
             json={"user_id": "u_alice", "query": "hiking", "method": "vector"},
