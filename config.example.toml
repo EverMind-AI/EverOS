@@ -21,9 +21,16 @@
 # ── LLM ───────────────────────────────────────────────
 # OpenAI-protocol chat-completions endpoint used by the algo extractors.
 [llm]
+provider = "openai"
 model    = "gpt-4.1-mini"
 api_key  = "sk-..."
 base_url = "https://api.openai.com/v1"
+
+# Atlas Cloud is also supported through its OpenAI-compatible endpoint:
+# provider = "atlascloud"
+# model    = "qwen/qwen3.5-flash"
+# api_key  = "..."
+# base_url = "https://api.atlascloud.ai/v1"
 
 # ── Embedding ─────────────────────────────────────────
 [embedding]
