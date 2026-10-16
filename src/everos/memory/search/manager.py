@@ -701,6 +701,10 @@ class SearchManager:
         episodes whose single mean-pooled vector dilutes a specific topic
         recover via the matching atomic fact's own embedding. Mirrors
         EverOS/EverAlgo's MaxSim retrieval pattern.
+
+        When no fact in scope points at an episode (extraction disabled,
+        not caught up, or failing), falls back to ANN over the episode's
+        own vector instead of returning nothing.
         """
         vector = await self._embed_query(req.query)
         if not vector:
@@ -716,7 +720,11 @@ class SearchManager:
             if fc.score > ep_score.get(pid, -1.0):
                 ep_score[pid] = fc.score
         if not ep_score:
-            return []
+            logger.warning("vector_recall_fact_pool_empty", owner_id=req.owner_id)
+            cands = await self._ep.dense_recall(
+                vector, where, limit=self._recall_limit(req.top_k)
+            )
+            return self._apply_radius(cands, _effective_radius(req))
         ranked = sorted(ep_score.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
         top_entry_ids = [eid for eid, _ in ranked]
         score_by_entry = dict(ranked)

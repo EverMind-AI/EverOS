@@ -418,13 +418,13 @@ async def seed_atomic_fact_for_episode(
 ) -> None:
     """Seed one real ``AtomicFact`` row linked to an already-cascaded episode.
 
-    The manager's VECTOR method (``_maxsim_atomic_recall``) does not ANN
-    -search the episode table directly -- it scans ``atomic_fact``
-    (denser, finer-grained) and max-pools back to the parent episode via
-    ``AtomicFact.parent_id == Episode.entry_id`` (see
-    ``extract_atomic_facts.py``: ``parent_id=event.episode_entry_id``).
-    A Tier 2/3 test that adds one episode and expects ``method="vector"``
-    to find it therefore also needs at least one embedded atomic fact --
+    The manager's VECTOR method (``_maxsim_atomic_recall``) scans
+    ``atomic_fact`` (denser, finer-grained) and max-pools back to the
+    parent episode via ``AtomicFact.parent_id == Episode.entry_id`` (see
+    ``extract_atomic_facts.py``: ``parent_id=event.episode_entry_id``);
+    it only ANN-searches the episode table when no fact is in scope.
+    A Tier 2/3 test that wants ``method="vector"`` to exercise the MaxSim
+    path therefore needs at least one embedded atomic fact --
     normally produced by the ``extract_atomic_facts`` OME strategy, which
     this suite's fake LLM does not attempt to satisfy (its canned
     response only matches the boundary/episode JSON contract). Seeding

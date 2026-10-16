@@ -6,8 +6,9 @@ candidate list; the manager's job is to:
 
 * honour the ``owner_type`` hard partition,
 * run KEYWORD as sparse-only and leave ``atomic_facts`` empty,
-* run VECTOR via MaxSim (ANN atomic_facts -> max-pool -> resolve episodes)
-  and refuse when no embedding is wired,
+* run VECTOR via MaxSim (ANN atomic_facts -> max-pool -> resolve episodes),
+  fall back to the episode vector when no fact is in scope, and refuse
+  when no embedding is wired,
 * let HYBRID run without an LLM by default; require LLM only when the
   caller sets ``enable_llm_rerank=True``,
 * refuse AGENTIC when reranker / LLM prerequisites are missing,
@@ -577,15 +578,22 @@ async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
     assert eps[1].score == pytest.approx(0.75)
 
 
-async def test_vector_returns_empty_when_no_facts() -> None:
-    """No fact recall -> no episodes to score -> empty episode list."""
+async def test_vector_falls_back_to_episode_vector_when_no_facts() -> None:
+    """No fact in scope -> ANN over the episode's own vector, radius still applied.
+
+    Used to return an empty list (issue #502): a store with no atomic facts
+    in scope lost vector search silently while keyword kept working.
+    """
     mgr = _build_manager(
-        episode_dense=[_episode_row("ep_A", memcell_id="mc_A")],
+        episode_dense=[
+            _episode_row("ep_high", score=0.9),
+            _episode_row("ep_low", score=0.3),
+        ],
         atomic_fact_dense=[],
         embedding=_StubEmbedding(),
     )
-    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=5))
-    assert resp.data.episodes == []
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=5, radius=0.5))
+    assert [e.id for e in resp.data.episodes] == ["ep_high"]
 
 
 # ── HYBRID / AGENTIC: prerequisite errors ──────────────────────────────
