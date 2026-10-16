@@ -2824,7 +2824,8 @@
           },
           "embed": {
             "type": "boolean",
-            "title": "Embed"
+            "title": "Embed",
+            "description": "Whether the embedding service answered the startup dimension probe. A snapshot taken when the process started, not a liveness check: a service that recovers later still reads false until the next restart."
           },
           "rerank": {
             "type": "boolean",

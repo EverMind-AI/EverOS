@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from everos import __version__
 from everos.component.capabilities import compute_disabled_features
@@ -27,7 +27,14 @@ class HealthCapabilities(BaseModel):
     """
 
     llm: bool
-    embed: bool
+    embed: bool = Field(
+        description=(
+            "Whether the embedding service answered the startup dimension "
+            "probe. A snapshot taken when the process started, not a "
+            "liveness check: a service that recovers later still reads false "
+            "until the next restart."
+        )
+    )
     """Whether the embedding service answered the dimension probe **at startup**.
 
     A snapshot, not a liveness check: a service that recovers after the

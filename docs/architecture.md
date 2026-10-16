@@ -42,6 +42,7 @@ entrypoints → service → memory → infra
 | infra → memory | ❌ |
 | infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
 | any → component / core / config | ✅ (cross-cutting) |
+| `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` uses `component` only for `utils.datetime`. |
 
 Enforced via `import-linter` in CI:
 
