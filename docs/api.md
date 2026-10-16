@@ -716,19 +716,42 @@ Default `"hybrid"` is the recommended starting point.
 Values of `0` or outside `-1` / `1..100` are rejected with `422`.
 
 **`radius`** — Optional **cosine-similarity threshold** in `[0.0, 1.0]`.
-Candidates whose score is below this value are dropped — use it to cut
-a long tail of weak matches. Three-level fallback for the effective
-radius:
+Dense candidates whose cosine similarity is below this value are dropped
+**before fusion** in `vector`, `hybrid`, `agentic`, and `llm_multiround`.
+Iterative methods apply it to every sub-query using that sub-query's embedding;
+user `agentic` applies it to both atomic-fact and episode-subject dense hits
+before MaxSim pooling. It does not filter keyword matches, profiles, cluster
+expansions, or case-to-skill linkage candidates, so it is not a floor on final
+result scores or a guarantee that increasing it reduces the result count.
+`keyword` ignores it. Three-level fallback for the effective radius:
 
 1. Caller-supplied `radius` (including the literal `0.0`) always wins.
-2. With `top_k=-1` and no caller-supplied `radius`, a server-side
-   default radius kicks in.
-3. With `top_k>0` and no caller-supplied `radius`, no threshold is
+2. With `top_k=-1` and omitted or `null` `radius`, a server-side
+   default radius of `0.5` kicks in.
+3. With `top_k>0` and omitted or `null` `radius`, no threshold is
    applied (`null`).
 
+Explicit `radius=0` accepts every **recalled dense hit**, including zero-score
+hits: recallers clamp cosine scores to `[0, 1]`. Recall-pool limits and `top_k`
+still apply; this does not retrieve every indexed record. A score exactly equal
+to the radius is retained.
+
+| Request parameters | Effective dense floor |
+|---|---|
+| `top_k=-1`, `radius` omitted or `null` | `0.5` |
+| `top_k=10`, `radius` omitted or `null` | None |
+| `top_k=-1`, `radius=0` | `0.0`, including zero-score hits |
+| `top_k=10`, `radius=0.8` | `0.8`, inclusive |
+
+Clients and SDKs must preserve an explicit zero during serialization. Do not
+replace it with `null` or omit it using a truthiness check: with `top_k=-1`,
+that silently changes the effective floor from `0.0` to `0.5`.
+
 **`min_score`** — Optional **post-fusion relevance floor** in
-`[0.0, 1.0]`. Results below this score are evicted after fusion,
-independent of `radius` (which is a per-recall cosine threshold).
+`[0.0, 1.0]`, consumed only by the episode `hybrid` hierarchy path.
+Results below this LR-calibrated score are evicted after heap expansion;
+other methods ignore it. It is independent of `radius` and must not be used
+to pass a cosine threshold to RRF, whose scores have a different scale.
 
 **`include_profile`** — When `user_id` is set, also fetch the user's
 profile and include it in `data.profiles`. The profile is not

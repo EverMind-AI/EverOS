@@ -58,6 +58,7 @@ from everalgo.types import Candidate
 from everos.config.settings import DeciderSettings, load_settings
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import Predicate
+from everos.memory.search.radius import apply_radius
 
 from .dto import SearchEpisodeItem
 from .shaper import shape_episode_from_candidate
@@ -483,6 +484,7 @@ async def search_episodes_llm_multiround(
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
     reranker: RerankProvider | None = None,
     decider: RoundDecider | None = None,
 ) -> list[SearchEpisodeItem]:
@@ -506,6 +508,7 @@ async def search_episodes_llm_multiround(
             episode level and does not drill facts.
         embed_query_fn: Async ``(str) -> vector`` query embedder.
         llm: LLM client for the decider.
+        radius: Resolved cosine floor for dense recall, before fusion.
         top_k: Maximum episodes to return.
         reranker: Accepted for parity but UNUSED — no cross-encoder stage.
         decider: Round-control hook. When given, it REPLACES the built-in
@@ -526,6 +529,7 @@ async def search_episodes_llm_multiround(
         embed_query_fn=embed_query_fn,
         llm=llm,
         top_k=top_k,
+        radius=radius,
         reranker=reranker,
         decider=decider,
     )
@@ -688,6 +692,7 @@ async def _search_episodes_subq(
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
+    radius: float | None = None,
     reranker: RerankProvider | None,
     decider: RoundDecider | None,
 ) -> list[SearchEpisodeItem]:
@@ -764,6 +769,7 @@ async def _search_episodes_subq(
             # question is already displayed above it and the few-shot uses this
             # label; later rounds label each block with its own sub-query text.
             label = "original question" if round_idx == 0 else q
+            r_dense = apply_radius(r_dense, radius)
             fused = rrf(r_sparse, r_dense, k=tune.rrf_k)  # ranked by RRF score
             block = fused[:block_topk]
             blocks.append((label, block))

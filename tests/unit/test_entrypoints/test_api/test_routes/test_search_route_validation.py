@@ -120,6 +120,37 @@ async def test_radius_above_one_returns_422(client: AsyncClient) -> None:
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize("top_k", [-1, 10])
+@pytest.mark.parametrize("radius_fields", [{}, {"radius": None}, {"radius": 0}])
+async def test_radius_wire_value_reaches_manager_unchanged(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    top_k: int,
+    radius_fields: dict,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from everos.memory.search import SearchData, SearchResponse
+
+    search = AsyncMock(
+        return_value=SearchResponse(request_id="test", data=SearchData())
+    )
+    monkeypatch.setattr(
+        search_service_mod, "_get_manager", lambda: SimpleNamespace(search=search)
+    )
+    response = await client.post(
+        "/api/v1/memory/search",
+        json=_body(method="agentic", top_k=top_k, **radius_fields),
+    )
+    assert response.status_code == 200, response.text
+    search.assert_awaited_once()
+    req = search.await_args.args[0]
+    assert req.radius == radius_fields.get("radius")
+    assert req.top_k == top_k
+    assert ("radius" in req.model_fields_set) == ("radius" in radius_fields)
+
+
 # ── service.compile_filters 422 ───────────────────────────────────────
 
 

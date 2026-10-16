@@ -598,3 +598,95 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
     (kw,) = llm.kwargs
     assert kw["max_tokens"] == 256
     assert kw["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+@pytest.mark.parametrize("radius", [None, 0.0, 0.5, 1.0])
+async def test_radius_filters_each_round_before_rrf(radius: float | None) -> None:
+    from unittest.mock import AsyncMock
+
+    dense = [_ep("high", 0.9), _ep("edge", 0.5), _ep("low", 0.1), _ep("zero", 0.0)]
+    recaller = _Recaller(seed=dense)
+    recaller.sparse_recall = AsyncMock(return_value=[_ep("keyword", 0.1)])
+    llm = _ScriptLLM([_reply([], ["facet one", "facet two"]), _reply([], [])])
+    result = await search_episodes_llm_multiround(
+        "q",
+        owner_id="alice",
+        where=_WHERE,
+        episode_recaller=recaller,
+        atomic_fact_recaller=_FactRecaller(),
+        embed_query_fn=_embed,
+        llm=llm,
+        top_k=10,
+        radius=radius,
+    )
+    expected = {c.id for c in dense if radius is None or c.score >= radius} | {
+        "alice__keyword"
+    }
+    assert {c.id for c in result} == expected
+    assert len(recaller.dense_vectors) == 3
+    assert len(llm.calls) == 2
+    if radius == 0.5:
+        assert all(c.score < radius for c in result)
+
+
+async def test_radius_checks_query_specific_pools_at_rrf_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from everalgo.rank.fusion import rrf
+
+    queries = ["original", "refined", "facet"]
+    vectors = {q: [float(i), 1.0] for i, q in enumerate(queries)}
+    pools = {
+        tuple(vectors[q]): [_ep("crossing", score), _ep(q, 0.5)]
+        for q, score in zip(queries, [0.9, 0.2, 0.8], strict=True)
+    }
+    recaller = _Recaller(seed=[])
+
+    async def recall(vector: Sequence[float], *_: Any, **__: Any):
+        return pools[tuple(vector)]
+
+    sparse = _ep("crossing", 0.1).model_copy(update={"source": "keyword"})
+    recaller.dense_recall = AsyncMock(side_effect=recall)
+    recaller.sparse_recall = AsyncMock(return_value=[sparse])
+    embed = AsyncMock(side_effect=lambda q: vectors[q])
+    dense_inputs: list[list[tuple[str, float]]] = []
+
+    def inspect_rrf(keyword: list[Candidate], dense: list[Candidate], *, k: int):
+        dense_inputs.append([(c.id, c.score) for c in dense])
+        assert [(c.id, c.score) for c in keyword] == [("alice__crossing", 0.1)]
+        hits = rrf(keyword, dense, k=k)
+        if len(dense_inputs) == 2:
+            assert next(
+                c.score for c in hits if c.id == "alice__crossing"
+            ) == pytest.approx(1 / (k + 1))
+        return hits
+
+    monkeypatch.setattr(llm_multiround, "rrf", inspect_rrf)
+    llm = _ScriptLLM([_reply([], queries[1:]), _reply([], [])])
+    result = await search_episodes_llm_multiround(
+        queries[0],
+        owner_id="alice",
+        where=_WHERE,
+        episode_recaller=recaller,
+        atomic_fact_recaller=_FactRecaller(),
+        embed_query_fn=embed,
+        llm=llm,
+        top_k=10,
+        radius=0.5,
+    )
+    assert dense_inputs == [
+        [("alice__crossing", 0.9), ("alice__original", 0.5)],
+        [("alice__refined", 0.5)],
+        [("alice__crossing", 0.8), ("alice__facet", 0.5)],
+    ]
+    assert {c.id for c in result} == {f"alice__{q}" for q in queries} | {
+        "alice__crossing"
+    }
+    assert all(c.score < 0.5 for c in result)
+    assert [call.args[0] for call in embed.await_args_list] == queries
+    assert [call.args[0] for call in recaller.dense_recall.await_args_list] == list(
+        vectors.values()
+    )
+    assert len(llm.calls) == 2
