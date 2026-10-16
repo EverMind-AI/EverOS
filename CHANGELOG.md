@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`method="vector"` finds episodes when no atomic fact is in scope.**
+  Vector search over episodes recalls through atomic facts, and it returned
+  an empty list (HTTP 200, no log line) whenever none were in scope — fact
+  extraction disabled, not caught up yet, or failing — while keyword search
+  kept answering. It now falls back to each episode's own vector, with
+  `radius` applied, and logs `vector_recall_fact_pool_empty` at info.
+  (#502, #509)
+
 ## [1.4.2] - 2026-10-14
 
 **A server that stays healthy for days, not hours.** Three faults in this
