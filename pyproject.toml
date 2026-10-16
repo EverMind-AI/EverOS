@@ -299,6 +299,7 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
+    "everos.infra.persistence.index -> everos.infra.persistence.index._provenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
     "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
     "everos.infra.persistence.index -> everos.infra.persistence.index.router",

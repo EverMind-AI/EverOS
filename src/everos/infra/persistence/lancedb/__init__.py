@@ -28,6 +28,7 @@ import contextlib
 import datetime as dt
 from typing import Any, ClassVar
 
+from everos.core.errors import IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
@@ -65,7 +66,7 @@ _BUSINESS_SCHEMAS = (
 )
 
 
-class LanceDBSchemaMismatchError(RuntimeError):
+class LanceDBSchemaMismatchError(IndexSchemaMismatchError):
     """Raised at startup when an on-disk LanceDB table's columns drift
     from the corresponding Pydantic schema.
 
@@ -432,12 +433,6 @@ class LanceIndexBackend:
 
     async def connect(self) -> Any:
         return await get_connection()
-
-    async def startup(self) -> Any:
-        connection = await self.connect()
-        await self.verify_business_schemas()
-        await self.ensure_business_indexes()
-        return connection
 
     async def shutdown(self) -> None:
         await dispose_connection()

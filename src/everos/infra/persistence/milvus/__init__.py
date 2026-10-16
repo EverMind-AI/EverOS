@@ -86,14 +86,6 @@ class MilvusIndexBackend:
     async def connect(self) -> Any:
         return await get_client()
 
-    async def startup(self) -> Any:
-        client = await self.connect()
-        # ensure_collection creates a missing collection and drift-checks an
-        # existing one in a single round trip, so unlike the LanceDB backend
-        # there is no separate verify step to run first.
-        await self.ensure_business_indexes()
-        return client
-
     async def shutdown(self) -> None:
         await dispose_connection()
 

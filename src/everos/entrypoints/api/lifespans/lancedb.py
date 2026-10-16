@@ -91,15 +91,22 @@ async def _log_unbackfilled_hint() -> None:
 class LanceDBLifespanProvider(LifespanProvider):
     """Manage the LanceDB connection + table cache for the app lifecycle.
 
-    Startup runs four steps:
+    Startup runs five steps:
 
-    1. ``get_connection`` — lazy-open the async connection.
+    1. ``connect`` — lazy-open the async connection.
     2. ``verify_business_schemas`` — fail loud if an on-disk table's
        columns drift from the current Pydantic schema. LanceDB has no
        online migration; cascade is rebuildable from md so the recovery
        is ``everos cascade rebuild`` (see ``docs/cascade_runbook.md``).
-    3. ``ensure_business_indexes`` — idempotent FTS index creation.
-    4. ``_log_unbackfilled_hint`` — warn if unbackfilled rows exist.
+    3. ``verify_embedding_provenance`` — fail loud if the configured
+       embedding cannot have produced the stored vectors: a model
+       narrower than the vector column, or a different model than the
+       one recorded when the index was built.
+    4. ``ensure_business_indexes`` — idempotent FTS index creation.
+    5. ``_log_unbackfilled_hint`` — warn if unbackfilled rows exist.
+
+    Steps 1–4 are ordered by the ``index`` facade, not here, so the CLI
+    phases get the same sequence.
     """
 
     def __init__(self, order: int = 11) -> None:

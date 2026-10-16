@@ -12,8 +12,18 @@ from collections.abc import Iterable
 from typing import Any
 
 from everos.config import load_settings
+from everos.core.errors import EmbeddingProvenanceError
 from everos.infra.persistence import lancedb as _lancedb
 
+from ._provenance import (
+    last_probe as last_probe,
+)
+from ._provenance import (
+    probe_embedding_dimension as probe_embedding_dimension,
+)
+from ._provenance import (
+    verify_embedding_provenance as verify_embedding_provenance,
+)
 from .predicate import (
     All,
     AnyOf,
@@ -120,9 +130,48 @@ def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
         schema_for(schema)
 
 
+def _assert_record_dim_matches_settings() -> None:
+    """Fail loud if the record classes and ``Settings`` disagree on the width.
+
+    The record classes resolve ``[embedding] dim`` with a narrow reader of
+    their own, because the width has to be known while they are being
+    imported (``Vector(dim)`` bakes it into the pydantic core schema) and
+    building ``Settings`` on that path would make a malformed config break
+    every CLI command. Two readers means they can diverge -- a different
+    memory root, a key one of them cannot parse -- and the symptom would
+    otherwise be tables quietly built at the wrong width.
+
+    Reads the width off ``Episode``, which this module already imports, so no
+    import edge into ``records`` is added.
+    """
+    baked = Episode.to_arrow_schema().field("vector").type.list_size
+    configured = load_settings().embedding.dim
+    if baked != configured:
+        raise EmbeddingProvenanceError(
+            f"the index record classes were built for dim={baked} but "
+            f"configuration reports dim={configured}.\n"
+            f"  The two readers disagree -- check EVEROS_ROOT and "
+            f"<root>/everos.toml, then start again."
+        )
+
+
 async def startup() -> Any:
+    """Open the index and refuse to use one the configuration does not match.
+
+    Order is load-bearing. Schema verification goes first because it is the
+    most specific complaint (a column of the wrong type names both widths),
+    and because it is also what creates missing tables -- so provenance runs
+    against tables that exist. Index creation goes last: there is no point
+    building indexes on a store that is about to be rejected.
+    """
     check_primary_keys(repo.schema for repo in ALL_REPOS)
-    return await _backend().startup()
+    backend = _backend()
+    connection = await backend.connect()
+    _assert_record_dim_matches_settings()
+    await backend.verify_business_schemas()
+    await verify_embedding_provenance(backend)
+    await backend.ensure_business_indexes()
+    return connection
 
 
 async def shutdown() -> None:
@@ -204,11 +253,13 @@ __all__ = [
     "gte",
     "is_null",
     "knowledge_topic_repo",
+    "last_probe",
     "lt",
     "lte",
     "ne",
     "one_of",
     "primary_key",
+    "probe_embedding_dimension",
     "read_embedding_model",
     "repo_for_schema",
     "schema_for",
@@ -216,5 +267,6 @@ __all__ = [
     "startup",
     "user_profile_repo",
     "verify_business_schemas",
+    "verify_embedding_provenance",
     "write_embedding_model",
 ]
