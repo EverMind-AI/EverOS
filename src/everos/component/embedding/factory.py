@@ -8,22 +8,25 @@ from everos.config import EmbeddingSettings
 from .openai_provider import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
-# Vector dim for the LanceDB index column.
-_DEFAULT_DIM = 1024
-
 
 def build_embedding_provider(
     settings: EmbeddingSettings,
     *,
-    dim: int = _DEFAULT_DIM,
+    dim: int | None = None,
 ) -> EmbeddingProvider:
     """Build an OpenAI-compatible embedding provider from settings.
 
     Args:
         settings: The :class:`EmbeddingSettings` slice from
             :func:`everos.config.load_settings`.
-        dim: Target vector dimension; defaults to 1024 to match the
-            LanceDB ``vector`` column shape.
+        dim: Target vector dimension. ``None`` (the default) follows
+            ``settings.dim``, which is what the index columns are built
+            from. Pass a deliberately large value to defeat the
+            client-side truncation in
+            :class:`~.openai_provider.OpenAIEmbeddingProvider` and observe
+            the model's real output length — the startup probe does
+            exactly that, since the truncation makes a longer-than-``dim``
+            vector impossible to see through ``embed``.
 
     Returns:
         An :class:`EmbeddingProvider` ready to call ``embed`` /
@@ -42,7 +45,7 @@ def build_embedding_provider(
         model=settings.model,
         api_key=settings.api_key.get_secret_value(),
         base_url=settings.base_url,
-        dim=dim,
+        dim=settings.dim if dim is None else dim,
         dimensions=settings.dimensions,
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
