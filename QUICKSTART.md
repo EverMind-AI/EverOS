@@ -257,6 +257,28 @@ degrading to a different search method.
 You can replace OpenRouter with another OpenAI-compatible LLM endpoint by
 changing the `[llm]` model, base URL, and key.
 
+## Use another OpenAI-compatible endpoint
+
+The walkthrough above uses OpenRouter, but the same `[llm]` settings work
+with any OpenAI-compatible endpoint. For example, to use the official
+DeepSeek API, set these three values in `~/.everos/everos.toml`:
+
+```toml
+[llm]
+model = "deepseek-flash"
+api_key = "<DEEPSEEK_API_KEY>"
+base_url = "https://api.deepseek.com"
+```
+
+Then start the server with `everos server start`. This is a config-only
+change: no EverOS code changes are required. To switch models, update
+`model` to another identifier offered by your endpoint and restart the
+server.
+
+The same pattern applies to any OpenAI-compatible provider: point
+`base_url` at the provider's endpoint, set `model` to the provider's model
+identifier, and put the provider's key in `api_key`.
+
 ## Stop the server
 
 Press `Ctrl+C` in the server terminal.
