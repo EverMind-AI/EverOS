@@ -155,6 +155,26 @@ def _assert_record_dim_matches_settings() -> None:
         )
 
 
+async def verify_configuration() -> None:
+    """Every "does this index match the configuration" check, in order.
+
+    Exported as one call so the server and the CLI phases cannot run
+    different subsets: ``startup`` uses it, and so does the CLI's own
+    connect / verify / ensure sequence, which exists separately because
+    ``cascade rebuild`` has to skip the middle step.
+
+    Raises:
+        EmbeddingProvenanceError: the record classes and ``Settings``
+            disagree on the vector width, or the configured embedding
+            cannot have produced the stored vectors.
+        IndexSchemaMismatchError: a stored table's columns drifted from the
+            current schema.
+    """
+    _assert_record_dim_matches_settings()
+    await _backend().verify_business_schemas()
+    await verify_embedding_provenance(_backend())
+
+
 async def startup() -> Any:
     """Open the index and refuse to use one the configuration does not match.
 
@@ -165,12 +185,9 @@ async def startup() -> Any:
     building indexes on a store that is about to be rejected.
     """
     check_primary_keys(repo.schema for repo in ALL_REPOS)
-    backend = _backend()
-    connection = await backend.connect()
-    _assert_record_dim_matches_settings()
-    await backend.verify_business_schemas()
-    await verify_embedding_provenance(backend)
-    await backend.ensure_business_indexes()
+    connection = await connect()
+    await verify_configuration()
+    await ensure_business_indexes()
     return connection
 
 
@@ -267,6 +284,7 @@ __all__ = [
     "startup",
     "user_profile_repo",
     "verify_business_schemas",
+    "verify_configuration",
     "verify_embedding_provenance",
     "write_embedding_model",
 ]
