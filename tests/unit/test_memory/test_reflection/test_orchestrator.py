@@ -615,6 +615,43 @@ async def test_deprecate_failure_reverts_applied_writes(monkeypatch) -> None:
         assert call.args[0] == {"deprecated_by": None}
 
 
+async def test_deprecation_revert_is_scoped_to_the_project(monkeypatch) -> None:
+    """Entry ids restart per (app, project, day), so the compensating revert
+    must not clear another project's rows that point at the same merged id."""
+    episode_store = MagicMock()
+    episode_store.update = AsyncMock(
+        side_effect=[None, VectorStoreBusyError("write lock deadline"), None, None]
+    )
+    atomic_fact_store = MagicMock()
+    atomic_fact_store.update = AsyncMock()
+    orch = _build_orchestrator(
+        episode_store=episode_store,
+        atomic_fact_store=atomic_fact_store,
+        episode_writer=MagicMock(),
+    )
+    monkeypatch.setattr(orchestrator_module, "_DEPRECATE_BATCH_SIZE", 1)
+    entry_ids = {"ep_20260601_0001", "ep_20260601_0002"}
+
+    with pytest.raises(VectorStoreBusyError):
+        await orch._apply_deprecation_writes(
+            episodes=[_make_episode_row(entry_id=eid) for eid in sorted(entry_ids)],
+            to_deprecate=entry_ids,
+            owner_id="u_alice",
+            app_id="claude-code",
+            project_id="alpha",
+            merged_entry_id="ep_20260614_0001",
+        )
+
+    reverts = episode_store.update.await_args_list[2:]
+    reverts += atomic_fact_store.update.await_args_list
+    assert reverts
+    for call in reverts:
+        assert call.args[0] == {"deprecated_by": None}
+        where = call.kwargs["where"]
+        assert _eq_value(where, "app_id") == "claude-code"
+        assert _eq_value(where, "project_id") == "alpha"
+
+
 async def test_run_caps_sources_per_merge_and_keeps_the_rest(monkeypatch) -> None:
     """A cluster above the cap merges only its oldest sources; the deferred
     members stay in the cluster and the count reflects them."""

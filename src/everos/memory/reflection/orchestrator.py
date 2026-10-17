@@ -943,15 +943,15 @@ class ReflectionOrchestrator:
             (self._atomic_fact_store, "parent_id", "atomic_fact"),
         ):
             for batch in _batched(sorted(entry_ids), _DEPRECATE_BATCH_SIZE):
+                # Entry ids restart per (app, project, day), so another
+                # project's rows can point at the same merged entry id.
                 where = all_of(
                     one_of(field_name, batch),
                     eq("owner_id", owner_id),
+                    eq("app_id", app_id),
+                    eq("project_id", project_id),
                     eq("deprecated_by", merged_entry_id),
                 )
-                if label == "episode":
-                    where = all_of(
-                        where, eq("app_id", app_id), eq("project_id", project_id)
-                    )
                 try:
                     await store.update({"deprecated_by": None}, where=where)
                 except Exception:
