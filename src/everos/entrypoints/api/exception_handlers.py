@@ -39,6 +39,7 @@ from everos.core.errors import (
     CapabilityError,
     ConfigurationError,
     ConflictError,
+    DatabaseBusyError,
     ErrorCode,
     ExtractionEmptyError,
     InfrastructureError,
@@ -57,6 +58,14 @@ from .utils import extract_request_id
 logger = get_logger(__name__)
 
 _INTERNAL_ERROR_MESSAGE = "Internal server error"
+
+_DATABASE_BUSY_RETRY_AFTER_SECONDS = "1"
+"""``Retry-After`` sent with a database-lock 503.
+
+Lock contention is a sub-second-to-few-second condition under normal write
+load; one second is a floor that tells a well-behaved client to back off
+without inventing a precise estimate the server cannot keep.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +99,8 @@ def _error_response(
     status_code: int,
     code: ErrorCode,
     message: str,
+    *,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     """Build a JSONResponse with the canonical error envelope."""
     body = ErrorResponse(
@@ -104,6 +115,7 @@ def _error_response(
     return JSONResponse(
         status_code=status_code,
         content=body.model_dump(),
+        headers=headers,
     )
 
 
@@ -213,6 +225,32 @@ async def queue_saturated_handler(
         HTTP_429_TOO_MANY_REQUESTS,
         ErrorCode.QUEUE_SATURATED,
         str(exc),
+    )
+
+
+async def database_busy_handler(
+    request: Request,
+    exc: DatabaseBusyError,
+) -> JSONResponse:
+    """DatabaseBusyError -> 503 with ``Retry-After``.
+
+    SQLite lock contention is transient and the caller can retry; the
+    generic ``InfrastructureError`` path would return 503 without telling it
+    when, and the unhandled path would return 500 (issue #498). A dedicated
+    code lets a client distinguish "the store is momentarily busy" from "the
+    server is broken" without parsing the message.
+    """
+    logger.warning(
+        "database_busy",
+        path=str(request.url.path),
+        message=str(exc),
+    )
+    return _error_response(
+        request,
+        HTTP_503_SERVICE_UNAVAILABLE,
+        ErrorCode.DATABASE_BUSY,
+        str(exc),
+        headers={"Retry-After": _DATABASE_BUSY_RETRY_AFTER_SECONDS},
     )
 
 
@@ -405,6 +443,9 @@ def register_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ExtractionEmptyError, extraction_empty_handler)
     app.add_exception_handler(InvalidInputError, invalid_input_handler)
     # Infrastructure errors (transient, retryable)
+    # Specific before parent: DatabaseBusyError is a StorageError, so it must
+    # be registered ahead of InfrastructureError for MRO dispatch to pick it.
+    app.add_exception_handler(DatabaseBusyError, database_busy_handler)
     app.add_exception_handler(InfrastructureError, infrastructure_handler)
     # Capability errors (permanent, not retryable)
     app.add_exception_handler(CapabilityError, capability_handler)
