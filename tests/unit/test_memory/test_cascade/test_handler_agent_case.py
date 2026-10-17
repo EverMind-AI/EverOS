@@ -62,7 +62,7 @@ class _FakeAgentCaseRepo:
         self.rows: list[AgentCase] = []
 
     async def find_where(
-        self, where: Predicate, *, limit: int = 100
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
     ) -> list[AgentCase]:
         if isinstance(where, Comparison) and where.field == "md_path":
             md_path = str(where.value)

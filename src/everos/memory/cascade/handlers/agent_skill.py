@@ -48,6 +48,7 @@ from everos.infra.persistence.index import (
     all_of,
     eq,
     ne,
+    primary_key,
 )
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
 
@@ -119,7 +120,9 @@ class AgentSkillHandler(Handler):
 
         # Skip when an existing row has the same digest.
         skill_id = f"{owner_id}_{name}"
-        prior = await agent_skill_repo.get_by_id(skill_id)
+        prior = await agent_skill_repo.find_one_where(
+            primary_key(app_id, project_id, skill_id)
+        )
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(
                 md_path=md_path,

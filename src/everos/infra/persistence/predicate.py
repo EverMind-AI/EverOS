@@ -176,4 +176,14 @@ __all__ = [
     "lte",
     "ne",
     "one_of",
+    "primary_key",
 ]
+
+
+def primary_key(app_id: str, project_id: str, row_id: str) -> Predicate:
+    """One row's ``(app_id, project_id, id)`` key as a predicate.
+
+    ``id`` is unique only within an ``(app_id, project_id)`` space, so a row
+    is addressed by all three — never by ``id`` alone.
+    """
+    return all_of(eq("app_id", app_id), eq("project_id", project_id), eq("id", row_id))

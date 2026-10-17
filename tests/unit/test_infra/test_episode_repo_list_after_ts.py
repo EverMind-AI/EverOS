@@ -18,7 +18,7 @@ from everos.core.persistence import (
     open_lancedb_connection,
 )
 from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
-from everos.infra.persistence.lancedb.tables.episode import Episode
+from everos.infra.persistence.records.episode import Episode
 
 
 @pytest.fixture(autouse=True)

@@ -379,7 +379,7 @@ async def _select_supporting_cases(
 
     # 2. Bulk-fetch those cases from LanceDB (scoped to space).
     hydrated = await agent_case_repo.find_by_owner_entries(
-        agent_id, entry_ids, app_id=app_id, project_id=project_id
+        agent_id, entry_ids, app_id=app_id, project_id=project_id, skip_vectors=True
     )
 
     # 3. Sort by (quality, timestamp) desc, then cap.

@@ -228,7 +228,7 @@ async def test_atomic_fact_writer_output_feeds_handler(
 
     # AtomicFactHandler fetches the embedder lazily via
     # ``get_embedding_capability()`` — patch the process-wide singleton
-    # so ``_build_row`` returns a real (stub) vector.
+    # so the batch embed path returns a real (stub) vector.
     monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=_E()))
 
     today = _dt.date(2026, 5, 15)
@@ -253,9 +253,7 @@ async def test_atomic_fact_writer_output_feeds_handler(
     handler = AtomicFactHandler(HandlerDeps(memory_root=memory_root, tokenizer=_T()))
     structured = entry.as_structured()
     pe = ParsedEntry(entry.id, structured, handler._content_sha256(structured))
-    row = await handler._build_row(
-        owner_id="u1", owner_type="user", md_path=rel, entry=pe
-    )
+    [row] = await handler._embed_entries([pe], "u1", "user", "default", "default", rel)
     assert row.id == f"u1_{eid.format()}"
     assert row.fact == "Alice prefers Italian."
     assert row.parent_id == "mc_1"

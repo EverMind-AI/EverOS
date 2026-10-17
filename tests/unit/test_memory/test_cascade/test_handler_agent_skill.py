@@ -12,6 +12,7 @@ row + the delete path.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -68,8 +69,15 @@ class _FakeSkillRepo:
         self.deletes: list[str] = []
         self.predicate_deletes: list[str] = []
 
-    async def get_by_id(self, row_id: str) -> AgentSkill | None:
-        return self.rows.get(row_id)
+    async def find_one_where(self, where: Any) -> AgentSkill | None:
+        wanted = {c.field: c.value for c in where.children}
+        row = self.rows.get(wanted["id"])
+        if row is None or (row.app_id, row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
+        return row
 
     async def upsert(self, rows: list[AgentSkill]) -> None:
         self.upserts.append(list(rows))
@@ -351,3 +359,41 @@ async def test_missing_name_raises(
     )
     with pytest.raises(ValueError, match="name"):
         await handler.handle_added_or_modified("agents/a1/skills/skill_broken/SKILL.md")
+
+
+async def test_same_name_in_two_projects_is_a_new_row(
+    memory_root: MemoryRoot, fake_repo: _FakeSkillRepo
+) -> None:
+    """The same skill name under another project is its own row.
+
+    Identical content on purpose: a lookup by ``id`` alone would find the
+    first project's row with the same digest and report ``skipped``.
+    The orphan sweep is keyed by ``md_path`` and must not touch it either.
+    """
+    from everos.infra.persistence.markdown import AgentSkillFrontmatter
+
+    handler = AgentSkillHandler(
+        HandlerDeps(memory_root=memory_root, tokenizer=_StubTokenizer())
+    )
+    first = await _write_skill(memory_root, "agent", "run_the_linter", body="Run it.")
+    assert (await handler.handle_added_or_modified(first)).upserted == 1
+
+    writer = AgentSkillWriter(memory_root)
+    fm = AgentSkillFrontmatter(
+        id="skill_run_the_linter",
+        agent_id="agent",
+        name="run_the_linter",
+        description="Scan a contract draft for risk clauses.",
+        confidence=0.8,
+        maturity_score=0.6,
+        source_case_ids=["ac_1", "ac_2"],
+    )
+    await writer.write_main(
+        "agent", "run_the_linter", frontmatter=fm, body="Run it.", project_id="beta"
+    )
+    second = "default_app/beta/agents/agent/skills/skill_run_the_linter/SKILL.md"
+    assert (memory_root.root / second).exists()
+
+    outcome = await handler.handle_added_or_modified(second)
+    assert (outcome.upserted, outcome.skipped, outcome.deleted) == (1, 0, 0)
+    assert fake_repo.upserts[-1][0].project_id == "beta"

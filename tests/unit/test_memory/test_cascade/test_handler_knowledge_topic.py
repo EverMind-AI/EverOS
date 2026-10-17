@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -58,8 +59,15 @@ class _FakeLanceRepo:
         self.upserts: list[list[KnowledgeTopic]] = []
         self.deletes: list[str] = []
 
-    async def get_by_id(self, row_id: str) -> KnowledgeTopic | None:
-        return self.rows.get(row_id)
+    async def find_one_where(self, where: Any) -> KnowledgeTopic | None:
+        wanted = {c.field: c.value for c in where.children}
+        row = self.rows.get(wanted["id"])
+        if row is None or (row.app_id, row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
+        return row
 
     async def upsert(self, rows: list[KnowledgeTopic]) -> None:
         self.upserts.append(list(rows))

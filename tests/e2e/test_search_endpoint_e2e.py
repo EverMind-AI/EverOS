@@ -764,6 +764,9 @@ async def test_search_radius_filters_low_similarity(
 
     n_loose = len(loose.json()["data"]["episodes"])
     n_strict = len(strict.json()["data"]["episodes"])
+    # Only episodes are seeded, no atomic facts: VECTOR must still find them
+    # through the episode vector (issue #502).
+    assert n_loose > 0
     assert n_strict <= n_loose
 
 

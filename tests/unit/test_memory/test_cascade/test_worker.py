@@ -95,6 +95,23 @@ class _OkHandler(Handler):
         )
 
 
+class _ConcurrencyTrackingHandler(_OkHandler):
+    """Records peak in-flight handler calls for the batch bound regression."""
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.peak = 0
+
+    async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            await asyncio.sleep(0.01)
+            return await super().handle_added_or_modified(md_path)
+        finally:
+            self.active -= 1
+
+
 class _BareExceptionHandler(_OkHandler):
     async def handle_added_or_modified(self, md_path: str) -> HandlerOutcome:
         raise RuntimeError("unexpected boom")
@@ -135,6 +152,63 @@ async def test_ok_handler_marks_done(patched_repo: _FakeRepo) -> None:
     await w.drain_once()
     assert patched_repo.done == ["a.md"]
     assert patched_repo.failed == []
+
+
+async def test_large_batch_limits_concurrent_handler_execution(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Claim 50 rows, but never execute more than four handlers at once."""
+    patched_repo.batch = [_Row(md_path=f"{i}.md") for i in range(50)]
+    handler = _ConcurrencyTrackingHandler()
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    processed = await w.drain_once()
+
+    assert processed == 50
+    assert len(patched_repo.done) == 50
+    # ``==``, not ``<=``: a bound accidentally set to 1 would serialize the
+    # whole batch and still satisfy ``<=``.
+    assert handler.peak == 4
+
+
+class _PerCallFakeRepo(_FakeRepo):
+    """Serves one prepared batch per claim, so two drains can overlap."""
+
+    def __init__(self, batches: list[list[_Row]]) -> None:
+        super().__init__(batch=[])
+        self._batches = list(batches)
+
+    async def claim_pending_batch(
+        self, _limit: int, *, kinds: set[str] | None = None
+    ) -> list[_Row]:
+        return self._batches.pop(0) if self._batches else []
+
+
+async def test_concurrent_drains_share_one_handler_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bound is per worker, so two overlapping drains do not double it.
+
+    ``POST /cascade/quiesce`` calls ``drain_fully`` before ``stop``, while the
+    background loop is still draining -- two ``drain_once`` calls on one
+    worker. A semaphore built per call would let that reach 8.
+    """
+    from everos.memory.cascade import worker as worker_mod
+
+    repo = _PerCallFakeRepo(
+        [
+            [_Row(md_path=f"a{i}.md") for i in range(50)],
+            [_Row(md_path=f"b{i}.md") for i in range(50)],
+        ]
+    )
+    monkeypatch.setattr(worker_mod, "md_change_state_repo", repo)
+    handler = _ConcurrencyTrackingHandler()
+    w = CascadeWorker({"episode": handler}, retry_backoff_seconds=0)
+
+    processed = await asyncio.gather(w.drain_once(), w.drain_once())
+
+    assert processed == [50, 50]
+    assert handler.peak == 4
 
 
 async def test_bare_exception_marked_permanent(patched_repo: _FakeRepo) -> None:
@@ -301,14 +375,17 @@ class _FakeLanceRepo:
         optimize_delay: float = 0.0,
         rebuild_delay: float = 0.0,
         rebuild_raises: bool = False,
+        ensure_raises: bool = False,
     ) -> None:
         self.optimize_calls: list[float] = []
         self.prune_calls: list[float] = []
         self.prune_args: list[dt.timedelta] = []
         self.rebuild_calls: list[float] = []
+        self.ensure_calls: list[float] = []
         self.optimize_delay = optimize_delay
         self.rebuild_delay = rebuild_delay
         self.rebuild_raises = rebuild_raises
+        self.ensure_raises = ensure_raises
 
     @property
     def beats(self) -> list[float]:
@@ -332,6 +409,11 @@ class _FakeLanceRepo:
         if self.rebuild_raises:
             raise RuntimeError("rebuild boom")
         self.rebuild_calls.append(time.monotonic())
+
+    async def ensure_vector_indexes(self) -> None:
+        self.ensure_calls.append(time.monotonic())
+        if self.ensure_raises:
+            raise RuntimeError("KMeans cannot train: simulated create_index failure")
 
 
 class _OkHandlerWithRepo(_OkHandler):
@@ -593,6 +675,54 @@ async def test_optimize_prunes_on_first_call_then_throttles(
     assert len(fake.optimize_calls) == 1, "second beat is the light path"
 
 
+async def test_heavy_beat_ensures_vector_indexes(patched_repo: _FakeRepo) -> None:
+    """Vector index build / delta retrain rides the heavy beat only, so a
+    table crossing the row threshold mid-run gets its index on the next
+    prune cadence, not at the 12 h rebuild; light beats leave indexes alone."""
+    fake = _FakeLanceRepo()
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_prune_interval_seconds=10.0,
+        optimize_prune_retention_seconds=45.0,
+    )
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.ensure_calls) == 1, "heavy beat must ensure vector indexes"
+    await asyncio.sleep(0.02)
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.ensure_calls) == 1, "light beat must not touch indexes"
+
+
+async def test_vector_index_failure_on_the_heavy_beat_is_contained(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A failing index build / retrain must not escape the maintenance beat
+    or stop maintenance: it is counted like any other optimize failure
+    (visible in the health signal), the prune that ran before it stays
+    credited, and the next beats keep coming."""
+    fake = _FakeLanceRepo(ensure_raises=True)
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.01,
+        optimize_prune_interval_seconds=10.0,
+        optimize_prune_retention_seconds=45.0,
+    )
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()  # raises nothing
+    state = w._optimizer_states["episode"]
+    assert len(fake.ensure_calls) == 1
+    assert state.optimize_failures == 1, "counted, so /health can see a streak"
+    assert state.last_prune_at > 0, "the prune before it stays credited"
+    await asyncio.sleep(0.02)
+    w._schedule_optimize("episode")
+    await w._flush_optimizers()
+    assert len(fake.optimize_calls) == 1, "the next (light) beat still runs"
+
+
 async def test_failed_prune_backs_off_a_cadence_and_keeps_health_signal(
     patched_repo: _FakeRepo,
 ) -> None:
@@ -724,7 +854,9 @@ async def test_rebuild_runs_periodically(
         optimize_rebuild_interval_seconds=0.05,  # ~tick every 50ms in this test
     )
     await w.start()
-    await asyncio.sleep(0.2)  # ~4 ticks plus startup sweep
+    # Windows' ~15ms timer granularity stretches a 50ms interval to ~110ms,
+    # so size the window off the observed tick, not the requested one.
+    await asyncio.sleep(0.6)
     await w.stop()
     # Startup sweep + at least 2 interval-driven sweeps.
     assert len(fake.rebuild_calls) >= 3, (

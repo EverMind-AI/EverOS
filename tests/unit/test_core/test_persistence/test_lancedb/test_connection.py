@@ -86,7 +86,9 @@ async def test_index_cache_cap_is_plumbed_into_session(
     """
     import lancedb
 
-    settings = LanceDBSettings(index_cache_size_bytes=1024)
+    settings = LanceDBSettings(
+        index_cache_size_bytes=1024, metadata_cache_size_bytes=2048
+    )
     captured: dict[str, object] = {}
 
     real_connect = lancedb.connect_async
@@ -102,3 +104,54 @@ async def test_index_cache_cap_is_plumbed_into_session(
         assert isinstance(captured.get("session"), lancedb.Session)
     finally:
         conn.close()
+
+
+async def test_metadata_cache_is_bounded(memory_root, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The metadata cache must be capped, not left at lancedb's unbounded
+    default.
+
+    Lance keys metadata entries by dataset version and does not evict them
+    when cleanup deletes the underlying files (lance-format/lance#7718), so
+    each surviving entry pins its index reader's descriptors for the life of
+    the process. Measured: unbounded grows linearly past 600 descriptors over
+    80 optimize rounds with no plateau, while a 1 MB cap converges by round 31.
+    A regression that reinstates ``None`` here is the one that brings the leak
+    back, so pin the argument rather than only the Session's presence.
+    """
+    import lancedb
+
+    settings = LanceDBSettings(metadata_cache_size_bytes=4096)
+    captured: dict[str, object] = {}
+    real_connect = lancedb.connect_async
+
+    async def spy(*args, **kwargs):  # type: ignore[no-untyped-def]
+        session = kwargs.get("session")
+        captured["metadata_cap"] = getattr(session, "_everos_metadata_cap", "unknown")
+        captured["session"] = session
+        return await real_connect(*args, **kwargs)
+
+    real_session = lancedb.Session
+
+    def session_spy(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured["metadata_cache_size_bytes"] = kwargs.get(
+            "metadata_cache_size_bytes", "absent"
+        )
+        return real_session(*args, **kwargs)
+
+    monkeypatch.setattr(lancedb, "connect_async", spy)
+    monkeypatch.setattr(lancedb, "Session", session_spy)
+
+    conn = await open_lancedb_connection(memory_root.lancedb_dir, settings)
+    try:
+        assert captured["metadata_cache_size_bytes"] == 4096, (
+            "metadata cache was not capped from settings: "
+            f"{captured['metadata_cache_size_bytes']!r}"
+        )
+    finally:
+        conn.close()
+
+
+def test_metadata_cache_default_is_bounded() -> None:
+    """The shipped default must be a real cap, not ``None``."""
+    cap = LanceDBSettings().metadata_cache_size_bytes
+    assert isinstance(cap, int) and cap > 0, f"metadata cache default is {cap!r}"

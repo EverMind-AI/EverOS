@@ -527,11 +527,11 @@ def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
     """
     import pyarrow as pa
 
-    from everos.infra.persistence.lancedb.tables.agent_case import AgentCase
-    from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
-    from everos.infra.persistence.lancedb.tables.episode import Episode
-    from everos.infra.persistence.lancedb.tables.foresight import Foresight
-    from everos.infra.persistence.lancedb.tables.user_profile import UserProfile
+    from everos.infra.persistence.records.agent_case import AgentCase
+    from everos.infra.persistence.records.atomic_fact import AtomicFact
+    from everos.infra.persistence.records.episode import Episode
+    from everos.infra.persistence.records.foresight import Foresight
+    from everos.infra.persistence.records.user_profile import UserProfile
 
     for cls in (Episode, AtomicFact, AgentCase, Foresight, UserProfile):
         schema = cls.to_arrow_schema()
@@ -1400,7 +1400,7 @@ def test_lance_table_add_normalises_aware_non_utc() -> None:
 
     import lancedb
 
-    from everos.infra.persistence.lancedb.tables.episode import Episode
+    from everos.infra.persistence.records.episode import Episode
 
     aware_sh = dt.datetime(2026, 5, 29, 14, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -1439,7 +1439,7 @@ def test_lance_table_naive_input_is_assumed_utc() -> None:
 
     import lancedb
 
-    from everos.infra.persistence.lancedb.tables.episode import Episode
+    from everos.infra.persistence.records.episode import Episode
 
     naive = dt.datetime(2026, 5, 29, 14)  # naive — no tz
 

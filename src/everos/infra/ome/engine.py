@@ -618,7 +618,9 @@ class OfflineEngine:
     ) -> tuple[BaseEvent, list[tuple[StrategyMeta, str]]]:
         """Manually trigger one strategy.
 
-        - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``
+        - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``;
+          a strategy that does not list ``ManualTick`` in its trigger is not
+          dispatched (``routes`` comes back empty)
         - ``force=True`` → bypass the ``enabled`` gate (``applies_to`` and
           ``Counter`` still apply)
 

@@ -25,9 +25,10 @@ layering rule (import-linter does not check third-party imports).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -60,10 +61,10 @@ from everos.infra.persistence.index import (
     any_of,
     atomic_fact_repo,
     episode_repo,
-    eq,
     foresight_repo,
     is_null,
     knowledge_topic_repo,
+    primary_key,
     repo_for_schema,
     schema_for,
 )
@@ -314,6 +315,14 @@ class _NullVectorRow:
     tokens: int
     needs_primary: bool = True
     needs_subject: bool = True
+    app_id: str = "default"
+    project_id: str = "default"
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """The row's identity: the table's declared PRIMARY_KEY. ``id`` alone
+        repeats across projects, so every per-batch map is keyed by this."""
+        return (self.app_id, self.project_id, self.id)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -430,6 +439,8 @@ def _extract_row(
         tokens=len(tokenizer.tokenize(token_source)),
         needs_primary=needs_primary,
         needs_subject=needs_subject,
+        app_id=str(raw.get("app_id", "default")),
+        project_id=str(raw.get("project_id", "default")),
     )
 
 
@@ -534,7 +545,7 @@ async def _embed_primary_batch(
 
 async def _embed_subject_batch(
     provider: EmbeddingProvider, batch: list[_NullVectorRow], table_name: str
-) -> dict[str, list[float]]:
+) -> dict[tuple[str, str, str], list[float]]:
     """Embed the batch's ``subject_text`` with per-row fallback (episode's
     second, independent embed — see ``EpisodeHandler._build_row``).
 
@@ -542,7 +553,7 @@ async def _embed_subject_batch(
     it into the primary call would either skip absent subjects (index
     mismatch) or force a dense-but-wrong text list.
 
-    Returns an ``{id: vector}`` map. Rows whose per-row retry also failed
+    Returns a ``{row.key: vector}`` map. Rows whose per-row retry also failed
     are absent from the map, and their ``subject_vector`` stays NULL —
     the widened ``vector IS NULL OR subject_vector IS NULL`` scan filter
     (M1) picks them up on the next backfill run.
@@ -554,7 +565,7 @@ async def _embed_subject_batch(
         vectors = await provider.embed_batch(
             [row.subject_text for row in subject_rows]  # type: ignore[misc]
         )
-        return {row.id: vec for row, vec in zip(subject_rows, vectors, strict=True)}
+        return {row.key: vec for row, vec in zip(subject_rows, vectors, strict=True)}
     except Exception as exc:
         logger.warning(
             "cascade_backfill_subject_batch_embed_failed_falling_back_per_row",
@@ -562,7 +573,7 @@ async def _embed_subject_batch(
             batch_size=len(subject_rows),
             error=repr(exc),
         )
-    results: dict[str, list[float]] = {}
+    results: dict[tuple[str, str, str], list[float]] = {}
     for row in subject_rows:
         text = row.subject_text
         assert text is not None  # guarded by the filter above
@@ -577,7 +588,7 @@ async def _embed_subject_batch(
                 error=repr(exc),
             )
             continue
-        results[row.id] = vec
+        results[row.key] = vec
     return results
 
 
@@ -627,7 +638,7 @@ async def _backfill_table(
         # round-1 wall-clock invariant; one-sided batches skip the
         # gather to avoid a wasted ``embed_batch({})`` round-trip.
         primary_vectors: list[list[float] | None]
-        subject_vectors: dict[str, list[float]]
+        subject_vectors: dict[tuple[str, str, str], list[float]]
         if primary_rows and subject_rows:
             primary_vectors, subject_vectors = await asyncio.gather(
                 _embed_primary_batch(provider, primary_rows, backlog.table_name),
@@ -657,23 +668,23 @@ async def _backfill_table(
         # rows (whose per-row retry also failed) carry ``None``. Count
         # the poison rows as ``rows_failed`` — they keep ``vector IS
         # NULL`` on disk and re-enter the next scan.
-        primary_map: dict[str, list[float]] = {}
+        primary_map: dict[tuple[str, str, str], list[float]] = {}
         for r, v in zip(primary_rows, primary_vectors, strict=True):
             if v is None:
                 result.rows_failed += 1
             else:
-                primary_map[r.id] = v
-        # ``subject_vectors`` is already an ``{id: vec}`` dict; ids
+                primary_map[r.key] = v
+        # ``subject_vectors`` is already a ``{row.key: vec}`` dict; keys
         # absent mean the per-row subject retry also failed and the
         # row keeps ``subject_vector IS NULL``, re-entering the backlog
         # via the widened NULL scan next run.
 
         for row in batch:
             updates: dict[str, Any] = {}
-            if row.id in primary_map:
-                updates["vector"] = primary_map[row.id]
-            if row.id in subject_vectors:
-                updates["subject_vector"] = subject_vectors[row.id]
+            if row.key in primary_map:
+                updates["vector"] = primary_map[row.key]
+            if row.key in subject_vectors:
+                updates["subject_vector"] = subject_vectors[row.key]
             if not updates:
                 continue
             # A row is only "fully processed" if every side it needed
@@ -694,14 +705,16 @@ async def _backfill_table(
             # from ``subject_vectors`` and must not be flagged.
             spec_has_subject = backlog.spec.subject_of is not None
             row_has_subject = row.subject_text is not None
-            side_gap = (row.needs_primary and row.id not in primary_map) or (
+            side_gap = (row.needs_primary and row.key not in primary_map) or (
                 spec_has_subject
                 and row.needs_subject
                 and row_has_subject
-                and row.id not in subject_vectors
+                and row.key not in subject_vectors
             )
             try:
-                await backlog.spec.repo.update(updates, where=eq("id", row.id))
+                await backlog.spec.repo.update(
+                    updates, where=primary_key(row.app_id, row.project_id, row.id)
+                )
             except Exception:
                 result.rows_failed += 1
                 logger.warning(
@@ -722,7 +735,7 @@ async def _backfill_table(
                     table=backlog.table_name,
                     row_id=row.id,
                     missing_side=(
-                        "primary" if row.id not in primary_map else "subject"
+                        "primary" if row.key not in primary_map else "subject"
                     ),
                 )
                 continue
@@ -1091,6 +1104,32 @@ def _probe_ome_lock_available() -> bool:
             return False
         portalocker.unlock(handle)
         return True
+    finally:
+        handle.close()
+
+
+@contextlib.contextmanager
+def hold_ome_lock() -> Iterator[None]:
+    """Hold the OME jobstore lock for the duration of a CLI write phase.
+
+    Same file and flags as :meth:`OfflineEngine._acquire_lock`, so a server
+    that starts meanwhile fails at startup with :class:`EngineLockHeldError`
+    instead of becoming a second index writer. Raises
+    :class:`EngineLockHeldError` when another process already holds it.
+    """
+    root = MemoryRoot.resolve()
+    lock_path = Path(str(root.ome_db) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+")  # noqa: SIM115
+    try:
+        try:
+            portalocker.lock(handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        except portalocker.LockException as exc:
+            raise EngineLockHeldError(f"another process holds {lock_path}") from exc
+        try:
+            yield
+        finally:
+            portalocker.unlock(handle)
     finally:
         handle.close()
 

@@ -75,6 +75,14 @@ async def test_orchestrator_sync_once_default_scans_all(
     monkeypatch.setattr(CascadeScanner, "scan_once", _spy_scan_once)
     monkeypatch.setattr(CascadeWorker, "drain_until_empty", _spy_drain)
 
+    async def _spy_reconcile(memory_root) -> int:  # type: ignore[no-untyped-def]
+        captured["reconciled"] = True
+        return 0
+
+    import everos.memory.cascade.orchestrator as orchestrator_mod
+
+    monkeypatch.setattr(orchestrator_mod, "reconcile_index_once", _spy_reconcile)
+
     from everos.component.tokenizer import build_tokenizer
     from everos.core.persistence import MemoryRoot
     from everos.memory.cascade.orchestrator import CascadeOrchestrator
@@ -86,6 +94,8 @@ async def test_orchestrator_sync_once_default_scans_all(
 
     assert captured["scan_kinds"] is None
     assert captured["drain_kinds"] is None
+    # A full pass is where the one-time index reconcile runs.
+    assert captured["reconciled"] is True
 
 
 async def test_orchestrator_sync_once_forwards_kinds_to_worker_drain(
@@ -114,6 +124,14 @@ async def test_orchestrator_sync_once_forwards_kinds_to_worker_drain(
     monkeypatch.setattr(CascadeScanner, "scan_once", _spy_scan_once)
     monkeypatch.setattr(CascadeWorker, "drain_until_empty", _spy_drain)
 
+    async def _spy_reconcile(memory_root) -> int:  # type: ignore[no-untyped-def]
+        captured["reconciled"] = True
+        return 0
+
+    import everos.memory.cascade.orchestrator as orchestrator_mod
+
+    monkeypatch.setattr(orchestrator_mod, "reconcile_index_once", _spy_reconcile)
+
     from everos.component.tokenizer import build_tokenizer
     from everos.core.persistence import MemoryRoot
     from everos.memory.cascade.orchestrator import CascadeOrchestrator
@@ -125,3 +143,5 @@ async def test_orchestrator_sync_once_forwards_kinds_to_worker_drain(
 
     assert captured["scan_kinds"] == {"agent_skill"}
     assert captured["drain_kinds"] == {"agent_skill"}
+    # A scoped pass drains only its kinds, so it must not queue the rest.
+    assert "reconciled" not in captured

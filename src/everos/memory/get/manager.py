@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from everos.component.utils.datetime import to_display_tz
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
+from everos.infra.persistence.index import primary_key
 
 from .dto import (
     GetAgentCaseItem,
@@ -94,7 +95,7 @@ class GetManager:
                     count=len(items),
                 )
             case GetMemoryType.PROFILE:
-                profiles = await self._fetch_profile(req.owner_id)
+                profiles = await self._fetch_profile(req)
                 data = GetData(
                     profiles=profiles,
                     total_count=len(profiles),
@@ -185,7 +186,7 @@ class GetManager:
 
     # ── Profile ──────────────────────────────────────────────────────
 
-    async def _fetch_profile(self, owner_id: str) -> list[GetProfileItem]:
+    async def _fetch_profile(self, req: GetRequest) -> list[GetProfileItem]:
         """Fetch the owner's single profile row from the ``user_profile``
         LanceDB table (kept in sync with ``users/<id>/user.md`` by cascade).
 
@@ -195,11 +196,13 @@ class GetManager:
         Empty list (not 404) keeps the response valid during the cold-start
         window before a profile has been synthesised.
         """
-        if not owner_id:
+        if not req.owner_id:
             return []
-        row = await self._profile.get_by_id(owner_id)
+        row = await self._profile.find_one_where(
+            primary_key(req.app_id, req.project_id, req.owner_id)
+        )
         if row is None:
-            logger.debug("get_profile_miss", owner_id=owner_id)
+            logger.debug("get_profile_miss", owner_id=req.owner_id)
             return []
         profile_data: dict[str, object] = {
             "summary": row.summary,

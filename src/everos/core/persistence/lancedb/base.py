@@ -30,45 +30,42 @@ Note:
 from __future__ import annotations
 
 import datetime as dt
-from typing import ClassVar
 
 import pyarrow as pa
 from lancedb import AsyncTable
-from lancedb.index import FTS
+from lancedb.index import FTS, IvfFlat
 from lancedb.pydantic import LanceModel
 from pydantic import Field
 
 from everos.component.utils.datetime import get_utc_now
 
+from ..index_record import IndexRecordMeta
 
-class BaseLanceTable(LanceModel):
-    """Pydantic / LanceDB base with ``created_at`` / ``updated_at`` and
-    schema-level LanceDB metadata (``TABLE_NAME`` / ``BM25_FIELDS``).
+VECTOR_INDEX_ROWS_PER_PARTITION = 4096
+"""IVF partition size at build time. Pinned so :data:`VECTOR_QUERY_NPROBES`
+means something: lance's default partition count has changed across releases."""
 
-    The schema is the single source of truth for everything LanceDB
-    needs to materialise the table: column shape, table name, vector
-    dim (declared per-subclass), and which columns carry an FTS index.
-    Repos read these ClassVars; they do not duplicate them.
+VECTOR_INDEX_MAX_DELTAS = 16
+"""Delta indices a vector column may accumulate before the heavy beat retrains
+it. Each light beat with new rows adds one; probing 16 of them cost ~1-3 ms extra
+at 27k-100k rows, while a retrain rewrites the whole index (107 MB at 27k x 1024,
+391 MB at 100k), so a trickle writer must not pay that every 300 s."""
+
+VECTOR_QUERY_NPROBES = 32
+"""Partitions probed per vector query. 32 partitions of 4096 rows cover the whole
+column, i.e. exact search, up to ~130k rows; past that the unprobed partitions
+are skipped and recall degrades gradually. Every ``nearest_to`` in the tree sets
+it, so the index and the query agree on what "exact" costs."""
+
+
+class BaseLanceTable(IndexRecordMeta, LanceModel):
+    """LanceDB mechanics only: Arrow schema, FTS / vector index upkeep.
+
+    The declarations every backend reads (``TABLE_NAME`` / ``BM25_FIELDS`` /
+    ``PRIMARY_KEY``) live on :class:`IndexRecordMeta`; this class adds the
+    ``created_at`` / ``updated_at`` columns and the LanceDB-specific
+    materialisation. Repos read the ClassVars; they do not duplicate them.
     """
-
-    TABLE_NAME: ClassVar[str] = ""
-    """LanceDB table name. Business schemas must override (e.g.
-    ``"episode"``). Left empty on chassis / test schemas that construct
-    their table inline."""
-
-    BM25_FIELDS: ClassVar[list[str]] = []
-    """Columns to build LanceDB FTS (BM25) indexes on.
-
-    Each declared column must already exist as a ``str`` (or
-    ``str | None``) field on the schema. Tokens are assumed to be
-    **app-layer pre-tokenised** (space-joined); the FTS index uses
-    ``base_tokenizer="whitespace"`` so segmentation is owned by the
-    app layer (:class:`JiebaTokenizer`). The same boundary owns stop-
-    word filtering (English + Chinese); FTS-side ``remove_stop_words``
-    is OFF. FTS *does* keep lightweight English-aware normalisation
-    (``lower_case`` / ``stem`` / ``ascii_folding``) as a belt-and-
-    braces layer on the same English tokens that survive jieba.
-    See :meth:`ensure_fts_indexes` below for the exact knobs."""
 
     created_at: dt.datetime = Field(default_factory=get_utc_now)
     updated_at: dt.datetime = Field(default_factory=get_utc_now)
@@ -176,6 +173,84 @@ class BaseLanceTable(LanceModel):
                     ascii_folding=True,
                 ),
             )
+
+    @classmethod
+    def vector_columns(cls) -> list[str]:
+        """Names of the schema's vector columns (Arrow fixed-size lists)."""
+        return [
+            field.name
+            for field in cls.to_arrow_schema()
+            if pa.types.is_fixed_size_list(field.type)
+        ]
+
+    @classmethod
+    async def ensure_vector_indexes(
+        cls, table: AsyncTable, *, min_rows: int
+    ) -> list[str]:
+        """Keep one IVF_FLAT (cosine) index per vector column that holds at
+        least ``min_rows`` non-null vectors; return the columns touched.
+
+        Without an index LanceDB answers ``nearest_to`` with a brute-force
+        scan of the whole column — linear in rows and in bytes (27k rows of
+        1024-dim float32 is 112 MB and ~0.6 s per query on a laptop SSD),
+        and a hybrid search issues two or three of them. IVF_FLAT keeps
+        exact distances inside the probed partitions; with
+        :data:`VECTOR_INDEX_ROWS_PER_PARTITION` rows per partition and
+        :data:`VECTOR_QUERY_NPROBES` probes the search stays exact up to
+        ~130k rows. ``cosine`` matches the query side. Columns that are
+        still all-null (a Tier 1 store has no embeddings) are skipped:
+        there is nothing to train on.
+
+        Two cases do work; everything else is a no-op:
+
+        * no index yet and the column crossed ``min_rows`` -> build one;
+        * the index has grown more than :data:`VECTOR_INDEX_MAX_DELTAS` delta
+          indices -> retrain it in place. Every
+          ``optimize()`` on a table with new rows appends one *delta* index
+          instead of merging (``num_indices`` +1 per light beat, never
+          collapsing on its own), and a query probes every delta, so latency
+          climbs with the beats since the last rebuild: 27k x 1024 rows
+          measured 5.9 ms at 0 deltas, 25.7 ms at 100, 303 ms at 400 —
+          worse than the 24 ms scan the index replaces. The cascade's heavy
+          beat (300 s) calls this, so at most ~30 deltas accumulate under
+          sustained writes. The retrain is one atomic index swap (searches
+          never see the column unindexed); a concurrent ``optimize()`` from
+          another process can preempt it with a benign commit conflict, in
+          which case the next heavy beat retries — the same exposure prune has.
+
+        ponytail: retraining (``create_index(replace=True)``) rewrites the
+        whole index once per heavy beat under load; merging the deltas
+        instead needs pylance's ``optimize_indices``, which is not a
+        dependency. Revisit when a table passes ~500k rows.
+        """
+        columns = cls.vector_columns()
+        if not columns:
+            return []
+        indices = {
+            col: idx
+            for idx in await table.list_indices()
+            for col in (idx.columns or [])
+        }
+        touched: list[str] = []
+        for column in columns:
+            existing = indices.get(column)
+            if existing is not None:
+                stats = await table.index_stats(existing.name)
+                if stats is None or stats.num_indices <= VECTOR_INDEX_MAX_DELTAS:
+                    continue
+            rows = await table.count_rows(f"{column} IS NOT NULL")
+            if rows < min_rows:
+                continue
+            await table.create_index(
+                column,
+                replace=existing is not None,
+                config=IvfFlat(
+                    distance_type="cosine",
+                    num_partitions=max(1, rows // VECTOR_INDEX_ROWS_PER_PARTITION),
+                ),
+            )
+            touched.append(column)
+        return touched
 
 
 def touch(record: BaseLanceTable) -> BaseLanceTable:

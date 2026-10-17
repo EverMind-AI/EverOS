@@ -24,6 +24,7 @@ already know what you want to do and need to know exactly how.
 | [knowledge.md](knowledge.md) | Knowledge base module — upload, search, taxonomy, storage layout |
 | [reflection.md](reflection.md) | Reflection — offline memory consolidation: enable, schedule, storage, triggering |
 | [cli.md](cli.md) | `everos` CLI subcommands + env var conventions |
+| [mcp.md](mcp.md) | Connect MCP clients (Claude Code, Codex, Cursor, Claude Desktop) through the official `everos-mcp` server |
 | [storage_layout.md](storage_layout.md) | Memory-root tree + frontmatter chassis + EntryId encoding |
 | [prompt_slots.md](prompt_slots.md) | PromptSlot loader — bundled default prompts (Layer 1 live; app/runtime overlays planned) |
 | [configuration.md](configuration.md) | TOML / env-var configuration reference |
@@ -49,6 +50,8 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | Doc | Purpose |
 |---|---|
 | [cascade_runbook.md](cascade_runbook.md) | Cascade subsystem ops — drain queue, recover stuck rows |
+| [windows.md](windows.md) | Install and run EverOS on Windows — natively or via WSL2 |
+| [windows.zh.md](windows.zh.md) | Chinese mirror of the Windows / WSL2 guide |
 | [github-sync.md](github-sync.md) | Guardrails for refreshing GitHub from internal exports without overwriting GitHub-only workflow files |
 | [benchmarks/README.md](../benchmarks/README.md) | LoCoMo benchmark — run and evaluate |
 

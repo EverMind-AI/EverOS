@@ -40,11 +40,11 @@ from everos.core.persistence import (
 )
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
 from everos.infra.ome.testing import FakeStrategyContext
-from everos.infra.persistence.backends.lancedb import LanceIndexRepository
-from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
-from everos.infra.persistence.lancedb.tables.episode import Episode as LanceEpisode
+from everos.infra.persistence.lancedb import LanceIndexContract
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
 from everos.infra.persistence.predicate import Predicate
+from everos.infra.persistence.records.atomic_fact import AtomicFact
+from everos.infra.persistence.records.episode import Episode as LanceEpisode
 from everos.infra.persistence.sqlite import cluster_repo, reflection_report_repo
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.reflection.orchestrator import ReflectionOrchestrator
@@ -74,11 +74,15 @@ class _StubEmbedder:
 # ---------------------------------------------------------------------------
 
 
-class _EpisodeRepo(LanceDailyLogRepoBase[LanceEpisode]):
+class _EpisodeRepo(
+    LanceIndexContract[LanceEpisode], LanceDailyLogRepoBase[LanceEpisode]
+):
     schema = LanceEpisode
 
 
-class _AtomicFactRepo(LanceDailyLogRepoBase[AtomicFact]):
+class _AtomicFactRepo(
+    LanceIndexContract[AtomicFact], LanceDailyLogRepoBase[AtomicFact]
+):
     schema = AtomicFact
 
 
@@ -365,8 +369,8 @@ async def test_reflection_init_merges_cluster_episodes(
         # -- Build the orchestrator with real repos.
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -571,8 +575,8 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
 
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -617,8 +621,8 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         # Fresh orchestrator, same FakeLLM (next pop = update_response).
         orchestrator2 = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -806,8 +810,8 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
 
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
-            atomic_fact_store=LanceIndexRepository(af_repo, AtomicFact),
+            episode_store=ep_repo,
+            atomic_fact_store=af_repo,
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,
             reflector=reflector,
@@ -935,14 +939,14 @@ class _IndexingEpisodeWriter(EpisodeWriter):
         await super().patch_frontmatter(path, updates)
 
 
-class _LockedFactStore(LanceIndexRepository):
+class _LockedFactStore(_AtomicFactRepo):
     """Atomic fact index whose first deprecation write misses the lock deadline."""
 
-    def __init__(self, repo: _AtomicFactRepo) -> None:
-        super().__init__(repo, AtomicFact)
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
         self._armed = True
 
-    async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
+    async def update(self, updates: dict[str, Any], *, where: Predicate | str) -> None:
         if self._armed and updates.get("deprecated_by") is not None:
             self._armed = False
             raise VectorStoreBusyError("write lock deadline")
@@ -1055,11 +1059,9 @@ async def test_retry_after_failed_deprecation_leaves_one_merged_episode(
         )
         orchestrator = ReflectionOrchestrator(
             cluster_repo=cluster_repo,
-            episode_store=LanceIndexRepository(ep_repo, LanceEpisode),
+            episode_store=ep_repo,
             atomic_fact_store=(
-                _LockedFactStore(af_repo)
-                if failing_step == "lance"
-                else LanceIndexRepository(af_repo, AtomicFact)
+                _LockedFactStore(table=af_table) if failing_step == "lance" else af_repo
             ),
             episode_writer=episode_writer,
             report_repo=reflection_report_repo,

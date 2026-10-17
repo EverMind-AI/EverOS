@@ -156,7 +156,7 @@ async def test_enrich_file_uri_hydrates_and_parses(
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     f = tmp_path / "doc.html"
     f.write_bytes(b"<html>hello</html>")
-    items = [{"type": "html", "uri": f"file://{f}"}]
+    items = [{"type": "html", "uri": f.as_uri()}]
     await enrich_content_items(items)
 
     assert items[0]["parsed_content"] == "FILE PARSED"

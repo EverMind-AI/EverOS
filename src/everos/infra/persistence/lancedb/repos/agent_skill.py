@@ -7,12 +7,14 @@ from collections.abc import Sequence
 from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceRepoBase
+from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
 
+from ...records.agent_skill import AgentSkill
 from ..lancedb_manager import get_table
-from ..tables.agent_skill import AgentSkill
+from ._contract import LanceIndexContract
 
 
-class _AgentSkillRepo(LanceRepoBase[AgentSkill]):
+class _AgentSkillRepo(LanceIndexContract[AgentSkill], LanceRepoBase[AgentSkill]):
     schema = AgentSkill
 
     async def _table_lookup(self) -> AsyncTable:
@@ -59,6 +61,7 @@ class _AgentSkillRepo(LanceRepoBase[AgentSkill]):
             table.query()
             .nearest_to(list(query_vector))
             .distance_type("cosine")
+            .nprobes(VECTOR_QUERY_NPROBES)
             .where(_in_cluster(owner_id, cluster_id))
             .limit(top_k)
             .to_list()

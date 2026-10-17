@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pyarrow as pa
 from lancedb import AsyncTable
 
 from everos.component.utils.datetime import get_utc_now
@@ -52,6 +53,16 @@ sized in the hundreds of seconds: the budget doubles as the detection latency
 for a wedged table."""
 
 _REBUILD_TIMEOUT_SECONDS = 300.0
+
+
+def _vector_index_min_rows() -> int:
+    """``[lancedb] vector_index_min_rows`` — imported lazily so this module
+    stays free of the settings import at load time (same as MemoryRoot)."""
+    from everos.config.settings import load_settings
+
+    return load_settings().lancedb.vector_index_min_rows
+
+
 """Index rebuild (drop + recreate every index) — the one genuinely slow
 critical section, measured at ~0.3s per 50k rows per indexed column, so 5
 minutes covers a multi-million-row table with wide headroom."""
@@ -93,10 +104,12 @@ restarts the moment lance's cleanup empties the husk, not when the dir was
 created. Under a short retention window the index *files* themselves first
 wait out lance's 7-day unverified window (see :meth:`LanceRepoBase.prune`),
 so a husk is reclaimed up to file-wait + 7 days after it appeared. Each one
-costs an inode plus one 4KB block. Measured on a soak at ceiling load (see
-``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``): ~127k dirs/day, so the ~14-day
-steady state is ~1.8M dirs = **~7GB of empty directories and ~28% of a
-default 98GB ext4's inodes**. That is the worst case, not the expected one —
+costs an inode plus one 4KB block. Measured on a soak at ceiling load with a
+10s optimize cooldown: ~127k dirs/day, so the ~14-day steady state would be
+~1.8M dirs = ~7GB and ~28% of a default 98GB ext4's inodes. The cooldown now
+defaults to 60s (see ``DEFAULT_OPTIMIZE_MIN_INTERVAL_SECONDS``), which divides
+that by six: ~21k dirs/day, ~300k at the horizon = **~1.2GB of empty
+directories and ~5% of those inodes**. That is the worst case, not the expected one —
 it needs
 sustained saturation, and a single-user deployment writing a few hundred times
 a day sits four orders of magnitude below it (tens of MB). Platform-wise only
@@ -120,9 +133,11 @@ _HUSK_SWEEP_TIMEOUT_SECONDS = 60.0
 :data:`_COMPACT_TIMEOUT_SECONDS`: the maintenance scheduler skips a kind whose
 task is in flight, so a sweep that never returns would park that kind's
 maintenance forever. Measured at ~460ms over 13061 dirs in the soak (~35us
-per dir), which puts the ceiling-load steady state (~1.8M dirs, see
-:data:`_HUSK_MIN_AGE_SECONDS`) right at this budget. That is tolerated rather
-than sized around: a timeout is swallowed inside :meth:`LanceRepoBase.prune`
+per dir). At the 60s optimize cooldown the ceiling-load steady state is ~300k
+dirs (see :data:`_HUSK_MIN_AGE_SECONDS`), i.e. ~10s — well inside this budget;
+a 10s cooldown would have put it at ~1.8M dirs and ~63s, right at the edge.
+Overrunning is tolerated rather than sized around: a timeout is swallowed
+inside :meth:`LanceRepoBase.prune`
 (the cleanup commit already succeeded, and billing the sweep to the prune
 ledger is exactly the signal corruption this module works to avoid), and the
 orphaned worker thread — a cancelled ``to_thread`` future does not stop the
@@ -136,8 +151,9 @@ therefore stops the whole md -> LanceDB projection, leaving claimed rows in
 ``processing`` forever with nothing logged (a hang raises nothing, so the
 drain-failure counter stays at zero and ``/health`` keeps reporting healthy).
 Same last-resort shape as :data:`_COMPACT_TIMEOUT_SECONDS`, and generous by
-design: everos builds no vector ANN index, so reads are flat scans — measured
-~62ms over 117k rows, i.e. 60s is ~1000x headroom and never fires normally. On
+design: a vector read is an IVF probe, or a flat scan below the index
+threshold — measured ~62ms over 117k unindexed rows, i.e. 60s is ~1000x
+headroom and never fires normally. On
 expiry the caller gets a retryable :class:`VectorStoreBusyError`, so a drain row
 is retried and a search request fails with a structured error rather than
 hanging the request."""
@@ -208,6 +224,24 @@ def _remove_empty_index_dirs(
     return removed
 
 
+_TRANSIENT_EXECUTION_MARKERS = ("Spill has sent an error",)
+"""Substrings of lance error messages that name a query-execution failure a
+retry clears. ``LanceError(IO): Execution error: Spill has sent an error`` is
+DataFusion's sort / merge spill to the OS temp dir failing mid-query; lancedb
+raises it as a bare ``RuntimeError``. Seen only on the Windows soak box under
+nine concurrent clients (187 / 180 / 34 / 42 times over four runs), never on an
+idle box, and the same row projected fine on the next attempt — yet the worker
+filed every one as unrecoverable, so ~200 md files per run needed a manual
+``cascade fix``. The traceback frames put it in ``merge_insert`` (the write
+path, under :meth:`_locked`); the read path is covered as well. Match the
+exact phrase: a generic IO error (disk full, file gone) must stay permanent."""
+
+
+def _is_transient_execution_error(exc: BaseException) -> bool:
+    text = str(exc)
+    return any(marker in text for marker in _TRANSIENT_EXECUTION_MARKERS)
+
+
 class LanceRepoBase[T: BaseLanceTable]:
     """Generic CRUD repository for one LanceDB table.
 
@@ -231,7 +265,9 @@ class LanceRepoBase[T: BaseLanceTable]:
                    return await get_table(self.schema.TABLE_NAME, self.schema)
 
            episode_repo = _EpisodeRepo()
-           await episode_repo.add([Episode(text=..., vector=[...])])
+           # business tables are written through ``upsert`` (merge on the
+           # declared PRIMARY_KEY); ``add`` is the chassis insert primitive
+           await episode_repo.upsert([Episode(text=..., vector=[...])])
 
     The LanceDB table name lives on the schema (``BaseLanceTable.TABLE_NAME``)
     so every LanceDB-side metadatum — column shape, table name,
@@ -296,6 +332,19 @@ class LanceRepoBase[T: BaseLanceTable]:
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its {budget:g}s deadline"
             ) from exc
+        except RuntimeError as exc:
+            if not _is_transient_execution_error(exc):
+                raise
+            logger.warning(
+                "lancedb_transient_execution_error",
+                table=self.table_name,
+                op=op,
+                error=str(exc)[:200],
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} hit a transient lance "
+                f"execution error: {exc}"
+            ) from exc
 
     @asynccontextmanager
     async def _locked(self, budget: float, op: str) -> AsyncIterator[None]:
@@ -348,6 +397,22 @@ class LanceRepoBase[T: BaseLanceTable]:
             raise VectorStoreBusyError(
                 f"{op} on table {self.table_name!r} exceeded its "
                 f"{budget:g}s write-lock deadline"
+            ) from exc
+        except RuntimeError as exc:
+            # The soak's spill failures came out of ``merge_insert`` (this
+            # path), not the reads: worker -> upsert -> execute_merge_insert.
+            # The write is idempotent by id, so a retry is the right answer.
+            if not _is_transient_execution_error(exc):
+                raise
+            logger.warning(
+                "lancedb_transient_execution_error",
+                table=self.table_name,
+                op=op,
+                error=str(exc)[:200],
+            )
+            raise VectorStoreBusyError(
+                f"{op} on table {self.table_name!r} hit a transient lance "
+                f"execution error: {exc}"
             ) from exc
         else:
             held = time.monotonic() - (acquired_at or started)
@@ -404,26 +469,30 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     # ── Upsert ─────────────────────────────────────────────────────────────
 
-    async def upsert(
-        self,
-        records: Sequence[T],
-        *,
-        by: str = "id",
-    ) -> None:
-        """Upsert records keyed by ``by`` (PK column, default ``"id"``).
+    async def upsert(self, records: Sequence[T]) -> None:
+        """Merge ``records`` into the table on ``schema.PRIMARY_KEY``.
 
-        Wraps LanceDB's ``merge_insert(on=...)`` fluent builder with the
-        equivalent of ``INSERT ... ON CONFLICT(by) DO UPDATE`` — matching
-        rows are replaced wholesale, non-matching rows inserted.
+        Invariant: every write to a business table is a merge on its
+        declared primary key. ``merge_insert(on=...)`` is the only
+        uniqueness LanceDB offers — a key match replaces the row wholesale,
+        no match inserts — so as long as this is the sole write path, two
+        rows with one key cannot come into existence. There is no ``by``
+        parameter on purpose: the key is the table's declaration, not the
+        caller's choice.
 
         Cascade uses this when reconciling md → LanceDB: an entry seen
         for the first time inserts; an entry that was edited in md
         updates its existing row.
         """
+        key = getattr(self.schema, "PRIMARY_KEY", None)
+        if not key:
+            raise ValueError(
+                f"derived-index model {self.schema.__name__} has no PRIMARY_KEY"
+            )
         async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
             table = await self._table()
             await (
-                table.merge_insert(by)
+                table.merge_insert(list(key))
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
                 .execute(list(records))
@@ -639,13 +708,29 @@ class LanceRepoBase[T: BaseLanceTable]:
             # ``return_exceptions``, so the whole search request 500s. Only
             # indexes on columns that are no longer indexed at all get dropped;
             # nothing queries those, so their drop opens no window.
-            wanted = set(self.schema.BM25_FIELDS or ())
+            wanted = set(self.schema.BM25_FIELDS or ()) | set(
+                self.schema.vector_columns()
+            )
             for idx in await table.list_indices():
                 if not wanted.intersection(idx.columns or ()):
                     await table.drop_index(idx.name)
             await self.schema.ensure_fts_indexes(table, replace=True)
+            await self.schema.ensure_vector_indexes(
+                table, min_rows=_vector_index_min_rows()
+            )
 
     # ── Read ───────────────────────────────────────────────────────────────
+
+    async def ensure_vector_indexes(self) -> list[str]:
+        """Build the ANN index on vector columns that crossed the row
+        threshold since startup, and retrain one whose delta indices piled
+        up — the cascade's heavy beat calls this; the cases are spelled out
+        on :meth:`BaseLanceTable.ensure_vector_indexes`."""
+        async with self._locked(_REBUILD_TIMEOUT_SECONDS, "ensure_vector_indexes"):
+            table = await self._table()
+            return await self.schema.ensure_vector_indexes(
+                table, min_rows=_vector_index_min_rows()
+            )
 
     async def count(self) -> int:
         """Total row count."""
@@ -683,6 +768,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         where: str,
         *,
         limit: int = 100,
+        skip_vectors: bool = False,
     ) -> list[T]:
         """Scalar query returning *typed* schema instances.
 
@@ -690,10 +776,24 @@ class LanceRepoBase[T: BaseLanceTable]:
         LanceDB row dicts. No vector ANN; pure scalar filter only.
         Use :meth:`search` when you need ``_distance`` or want to mix
         ANN with filters.
+
+        ``skip_vectors``: leave the vector columns out of the
+        read; they come back as ``None``. Each 1024-D vector becomes 1024
+        Python floats in ``to_list``, so bulk readers that never use them
+        should set this.
         """
         async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
             table = await self._table()
-            rows = await table.query().where(where).limit(limit).to_list()
+            query = table.query().where(where)
+            if skip_vectors:
+                query = query.select(
+                    [
+                        f.name
+                        for f in self.schema.to_arrow_schema()
+                        if not pa.types.is_fixed_size_list(f.type)
+                    ]
+                )
+            rows = await query.limit(limit).to_list()
         return [self.schema.model_validate(r) for r in rows]
 
     async def find_one_where(self, where: str) -> T | None:
@@ -887,6 +987,7 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         *,
         app_id: str = "default",
         project_id: str = "default",
+        skip_vectors: bool = False,
     ) -> list[T]:
         """Bulk point-query by ``(app, project, owner_id, entry_id IN ...)``.
 
@@ -895,15 +996,48 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         tuples). The query's ``limit`` is bound to ``len(entry_ids)``
         because at most one row per id can exist under one (app, project,
         owner) scope.
+
+        ``skip_vectors`` leaves the vector columns out of the read (see
+        :meth:`find_where`). A free-form ``columns`` projection is the
+        index contract's concern, not the chassis': it returns raw dicts
+        rather than ``T``, so it lives on ``LanceIndexContract``, which
+        overrides this method and calls :meth:`project_rows` for it.
         """
         if not entry_ids:
             return []
         quoted = ", ".join(f"'{_q(eid)}'" for eid in entry_ids)
-        return await self.find_where(
+        where = (
             f"owner_id = '{_q(owner_id)}' AND entry_id IN ({quoted}) "
-            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'",
-            limit=len(entry_ids),
+            f"AND app_id = '{_q(app_id)}' AND project_id = '{_q(project_id)}'"
         )
+        return await self.find_where(
+            where, limit=len(entry_ids), skip_vectors=skip_vectors
+        )
+
+    async def project_rows(
+        self, where: str, columns: Sequence[str], *, limit: int
+    ) -> list[dict[str, Any]]:
+        """Read ``columns`` only, as raw dicts, under the read deadline.
+
+        The projection is pushed into ``select()`` so the unread columns --
+        a 1024-D vector is the one that matters -- are never read off disk.
+        Returns dicts rather than ``T`` because a projected row cannot
+        satisfy the schema's required fields.
+
+        Callers that already hold a :class:`Predicate` render it first. This
+        lives here rather than beside those callers so that every read in
+        this class is covered by :data:`_READ_TIMEOUT_SECONDS`; the
+        docstring there explains what an uncovered hung read costs.
+        """
+        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
+            table = await self._table()
+            return (
+                await table.query()
+                .where(where)
+                .select(list(columns))
+                .limit(limit)
+                .to_list()
+            )
 
     async def find_by_session(
         self,

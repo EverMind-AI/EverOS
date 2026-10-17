@@ -15,6 +15,7 @@ class KnowledgeTopic(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "knowledge_topic"
     BM25_FIELDS: ClassVar[list[str]] = ["summary_tokens", "content_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
     doc_id: str

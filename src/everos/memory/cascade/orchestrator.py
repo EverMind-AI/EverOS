@@ -22,13 +22,18 @@ from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.sqlite import QueueSummary, md_change_state_repo
+from everos.infra.persistence.sqlite import (
+    MdChangeState,
+    QueueSummary,
+    md_change_state_repo,
+)
 
 from .handlers import HandlerDeps
 from .registry import build_handlers
 from .scanner import CascadeScanner
 from .watcher import CascadeWatcher
 from .worker import (
+    DEFAULT_HANDLER_CONCURRENCY,
     DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
@@ -37,6 +42,66 @@ from .worker import (
 )
 
 logger = get_logger(__name__)
+
+INDEX_RECONCILE_VERSION = 1
+"""Bump when the index's row identity changes and every indexed md must be
+reconciled against the index once. v1 (1.4.2): rows are keyed on
+``(app_id, project_id, id)`` instead of ``id`` alone — a multi-project root
+indexed by an earlier release lost rows to the overwrite, and the handlers'
+per-entry diff brings them back.
+
+The pass recovers rows that are missing or whose content digest changed;
+it does not rewrite rows whose other columns changed. A change to a
+column, a scope field or a derived value needs ``cascade rebuild``, not a
+bump here."""
+
+_RECONCILE_MARKER = ".index_reconcile_version"
+_DRAIN_IDLE_LIMIT_SECONDS = 120.0
+"""How long :meth:`CascadeOrchestrator.drain_fully` keeps polling a ledger
+that holds rows nobody is landing (a handler hung mid-batch) before it
+returns and lets the caller report what is left."""
+
+
+async def reconcile_index_once(
+    memory_root: MemoryRoot, *, force: bool = False
+) -> list[MdChangeState]:
+    """Force-enqueue every indexed md the first time a root is opened at
+    :data:`INDEX_RECONCILE_VERSION`, or whenever ``force`` is set; return
+    the rows enqueued (empty when the marker is already current).
+
+    ``<index_dir>/.index_reconcile_version`` records the version the root
+    was last reconciled for, so every later start is a no-op. A forced pass
+    (``cascade sync --force-all``) settles the marker too, so the unscoped
+    :meth:`CascadeOrchestrator.sync_once` that follows it does not queue
+    the ledger a second time. The handlers skip entries whose rows are
+    present and unchanged by digest, so a healthy root pays one read pass
+    and no embedding; only rows that were actually lost are re-embedded.
+    This takes no lock of its own. The exclusive CLI commands hold the OME
+    lock for their whole run; the server acquires it only at lifespan
+    order 50, after the cascade lifespan (order 12) has started the worker,
+    so a server starting while ``cascade sync --force-all`` runs writes the
+    index alongside it until its own lock attempt fails — a window that
+    predates this pass, which now fills it with the whole ledger instead of
+    the pending backlog.
+    """
+    marker = memory_root.index_dir / _RECONCILE_MARKER
+    try:
+        current = int(marker.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        current = 0
+    if not force and current >= INDEX_RECONCILE_VERSION:
+        return []
+    rows = await md_change_state_repo.force_enqueue_all()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    # max(): an older binary's forced pass must not roll a newer root back.
+    marker.write_text(str(max(current, INDEX_RECONCILE_VERSION)), encoding="utf-8")
+    logger.info(
+        "cascade_index_reconcile_enqueued",
+        version=INDEX_RECONCILE_VERSION,
+        count=len(rows),
+        forced=force,
+    )
+    return rows
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,6 +154,7 @@ class CascadeConfig:
 
     scan_interval_seconds: float = 30.0
     worker_batch_size: int = 50
+    worker_handler_concurrency: int = DEFAULT_HANDLER_CONCURRENCY
     worker_max_retry: int = 3
     worker_poll_interval_seconds: float = 1.0
     worker_retry_backoff_seconds: float = 2.0
@@ -108,6 +174,7 @@ class CascadeConfig:
             optimize_rebuild_interval_seconds=(
                 cascade.optimize_rebuild_interval_seconds
             ),
+            scan_interval_seconds=cascade.scan_interval_seconds,
         )
 
 
@@ -135,6 +202,7 @@ class CascadeOrchestrator:
         self._worker = CascadeWorker(
             self._handlers,
             batch_size=self._config.worker_batch_size,
+            handler_concurrency=self._config.worker_handler_concurrency,
             max_retry=self._config.worker_max_retry,
             poll_interval_seconds=self._config.worker_poll_interval_seconds,
             retry_backoff_seconds=self._config.worker_retry_backoff_seconds,
@@ -177,6 +245,7 @@ class CascadeOrchestrator:
         orphans = await md_change_state_repo.recover_orphan_processing()
         if orphans:
             logger.info("cascade_recovered_orphan_processing", count=orphans)
+        await reconcile_index_once(self._memory_root)
         if os.getenv("EVEROS_DISABLE_CASCADE_WATCHER", "").strip().lower() in (
             "1",
             "true",
@@ -217,8 +286,13 @@ class CascadeOrchestrator:
                 which the current process may not have handlers for)
                 as permanently failed.
 
-        Returns the number of rows processed in this drain. The CLI
-        loops on the returned count to know when to stop.
+        Returns the number of rows processed in this drain; the worker
+        bounds one drain, so the CLI keeps calling :meth:`drain_once` until
+        a pass processes nothing.
+
+        An unscoped pass is a full pass over the root, so it first runs
+        :func:`reconcile_index_once`; a ``kinds``-scoped pass drains only
+        those kinds and must not leave the rest queued behind it.
 
         The ``kinds`` filter is threaded through **both** the scanner
         AND the worker drain: the scanner scopes what gets enqueued,
@@ -227,12 +301,58 @@ class CascadeOrchestrator:
         knowledge md queued in a prior tick and mark it permanently
         failed — round-2 closes that end.
         """
+        if kinds is None:
+            await reconcile_index_once(self._memory_root)
         await self._scanner.scan_once(kinds=kinds)
         return await self._worker.drain_until_empty(kinds=kinds)
+
+    async def force_enqueue_all(self) -> list[MdChangeState]:
+        """``cascade sync --force-all``: the reconcile pass on demand.
+
+        Settles the marker as well, so the :meth:`sync_once` that follows
+        does not queue the whole ledger a second time.
+        """
+        return await reconcile_index_once(self._memory_root, force=True)
 
     async def drain_once(self) -> int:
         """Drain the queue exactly once without scanning first."""
         return await self._worker.drain_until_empty()
+
+    async def drain_fully(self) -> int:
+        """One scan, then drain until the ledger holds nothing pending.
+
+        Two things end a single drain early. The worker bounds one
+        ``drain_until_empty`` (``max_passes`` x batch size), and the ledger
+        the one-time reconcile queues after an upgrade can exceed it. Inside
+        a server the background worker claims batches too, so a pass of ours
+        can find nothing pending while the worker still holds the last
+        batch; ``POST /cascade/quiesce`` cancels the worker right after,
+        which would orphan that batch in ``processing`` and freeze a partial
+        index (seen on a real host: 50 rows left of 12000). So the ledger,
+        not our own pass, says when the drain is done -- ``pending`` counts
+        ``processing`` rows -- and a pass that finds nothing waits one poll
+        interval for the other drainer. A ledger that stops moving for
+        :data:`_DRAIN_IDLE_LIMIT_SECONDS` ends the wait; the caller reports
+        the rows left.
+        """
+        processed = await self.sync_once()
+        idle_seconds = 0.0
+        while (await self.queue_summary()).pending:
+            more = await self.drain_once()
+            processed += more
+            if more:
+                idle_seconds = 0.0
+                continue
+            if idle_seconds >= _DRAIN_IDLE_LIMIT_SECONDS:
+                logger.warning(
+                    "cascade_drain_fully_gave_up",
+                    idle_seconds=idle_seconds,
+                    reason="rows stayed pending or processing with nothing landing",
+                )
+                break
+            await asyncio.sleep(self._config.worker_poll_interval_seconds)
+            idle_seconds += self._config.worker_poll_interval_seconds
+        return processed
 
     async def queue_summary(self) -> QueueSummary:
         """Forward to the repo so callers don't reach past this class."""

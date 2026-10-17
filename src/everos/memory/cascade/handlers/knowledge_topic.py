@@ -38,7 +38,11 @@ from everos.component.embedding import get_embedding_capability
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MarkdownReader, ParsedMarkdown
-from everos.infra.persistence.index import KnowledgeTopic, knowledge_topic_repo
+from everos.infra.persistence.index import (
+    KnowledgeTopic,
+    knowledge_topic_repo,
+    primary_key,
+)
 from everos.infra.persistence.sqlite import (
     TopicUpsertPayload,
     knowledge_topic_sqlite_repo,
@@ -97,7 +101,9 @@ class KnowledgeTopicHandler(Handler):
             }
         )
 
-        prior = await knowledge_topic_repo.get_by_id(fields["node_id"])
+        prior = await knowledge_topic_repo.find_one_where(
+            primary_key(fields["app_id"], fields["project_id"], fields["node_id"])
+        )
         if prior is not None and prior.content_sha256 == digest:
             return HandlerOutcome(
                 md_path=md_path,

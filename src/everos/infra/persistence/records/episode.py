@@ -24,9 +24,11 @@ class Episode(BaseLanceTable):
 
     TABLE_NAME: ClassVar[str] = "episode"
     BM25_FIELDS: ClassVar[list[str]] = ["episode_tokens"]
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
 
     id: str
-    """PK = ``<owner_id>_<entry_id>`` (scalar PK)."""
+    """``<owner_id>_<entry_id>``; unique within ``(app_id, project_id)`` — the
+    row key is the declared ``PRIMARY_KEY``."""
 
     entry_id: str
     """md-side seq id ``ep_<YYYYMMDD>_<NNNN>`` (cascade reverse-lookup)."""

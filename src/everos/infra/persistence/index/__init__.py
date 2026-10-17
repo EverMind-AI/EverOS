@@ -8,36 +8,12 @@ do not branch on physical storage.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from everos.config import load_settings
 from everos.infra.persistence import lancedb as _lancedb
 
-from ..backends.lancedb import (
-    agent_case_repo as _lance_agent_case_repo,
-)
-from ..backends.lancedb import (
-    agent_skill_repo as _lance_agent_skill_repo,
-)
-from ..backends.lancedb import (
-    atomic_fact_repo as _lance_atomic_fact_repo,
-)
-from ..backends.lancedb import (
-    episode_repo as _lance_episode_repo,
-)
-from ..backends.lancedb import (
-    foresight_repo as _lance_foresight_repo,
-)
-from ..backends.lancedb import (
-    knowledge_topic_repo as _lance_knowledge_topic_repo,
-)
-from ..backends.lancedb import (
-    lance_index_backend,
-)
-from ..backends.lancedb import (
-    user_profile_repo as _lance_user_profile_repo,
-)
-from ..backends.milvus import milvus_index_backend
 from .predicate import (
     All,
     AnyOf,
@@ -59,6 +35,7 @@ from .predicate import (
     lte,
     ne,
     one_of,
+    primary_key,
 )
 from .protocols import (
     AgentSkillIndexRepository,
@@ -72,6 +49,14 @@ from .router import (
     RoutedIndexRepository,
 )
 from .schema import IndexField, IndexFieldKind, IndexSchema, schema_for
+
+_lance_episode_repo = _lancedb.episode_repo
+_lance_atomic_fact_repo = _lancedb.atomic_fact_repo
+_lance_foresight_repo = _lancedb.foresight_repo
+_lance_agent_case_repo = _lancedb.agent_case_repo
+_lance_agent_skill_repo = _lancedb.agent_skill_repo
+_lance_user_profile_repo = _lancedb.user_profile_repo
+_lance_knowledge_topic_repo = _lancedb.knowledge_topic_repo
 
 AgentCase = _lancedb.AgentCase
 AgentSkill = _lancedb.AgentSkill
@@ -112,15 +97,31 @@ def active_backend() -> str:
 
 def _backend() -> IndexBackend:
     if active_backend() == "milvus":
-        return milvus_index_backend
-    return lance_index_backend
+        # pymilvus is an optional extra: import the engine only when selected.
+        from everos.infra.persistence import milvus
+
+        return milvus.index_backend
+    return _lancedb.index_backend
 
 
 async def connect() -> Any:
     return await _backend().connect()
 
 
+def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
+    """Fail at startup, not at first write, when a table has no PRIMARY_KEY.
+
+    For an undeclared table ``schema_for`` raises the same "has no
+    PRIMARY_KEY" message the LanceDB write path raises, so it is caught by
+    whichever runs first, on either backend; the write-path check stays as
+    the last line of defence for repositories built outside this facade.
+    """
+    for schema in schemas:
+        schema_for(schema)
+
+
 async def startup() -> Any:
+    check_primary_keys(repo.schema for repo in ALL_REPOS)
     return await _backend().startup()
 
 
@@ -129,6 +130,7 @@ async def shutdown() -> None:
 
 
 async def ensure_business_indexes() -> None:
+    check_primary_keys(repo.schema for repo in ALL_REPOS)
     await _backend().ensure_business_indexes()
 
 
@@ -179,6 +181,7 @@ __all__ = [
     "all_of",
     "any_of",
     "atomic_fact_repo",
+    "check_primary_keys",
     "compare",
     "connect",
     "contains",
@@ -195,6 +198,7 @@ __all__ = [
     "lte",
     "ne",
     "one_of",
+    "primary_key",
     "repo_for_schema",
     "schema_for",
     "shutdown",

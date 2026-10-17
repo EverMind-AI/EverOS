@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import os
 import re
 import subprocess
@@ -10,14 +11,11 @@ import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import get_overloads
+from unittest.mock import AsyncMock
 
 import pytest
 
-from everos.infra.persistence.backends.lancedb import (
-    lance_index_backend,
-    render_predicate,
-)
-from everos.infra.persistence.backends.milvus import milvus_index_backend
 from everos.infra.persistence.index import (
     ALL_REPOS,
     All,
@@ -31,10 +29,19 @@ from everos.infra.persistence.index import (
     drop_business_tables,
     episode_repo,
     eq,
+    primary_key,
     shutdown,
 )
+from everos.infra.persistence.index.router import RoutedIndexRepository
 from everos.infra.persistence.index.schema import IndexFieldKind, schema_for
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
+    lancedb_manager,
+    render_predicate,
+)
+from everos.infra.persistence.lancedb import index_backend as lance_index_backend
+from everos.infra.persistence.milvus import MilvusRepoBase
+from everos.infra.persistence.milvus import index_backend as milvus_index_backend
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 
@@ -202,15 +209,15 @@ def test_lance_predicate_renderer_owns_escaping() -> None:
 @pytest.mark.parametrize(
     "module",
     [
-        "everos.infra.persistence.backends.lancedb",
-        "everos.infra.persistence.backends.milvus",
+        "everos.infra.persistence.lancedb",
+        "everos.infra.persistence.milvus",
         "everos.infra.persistence.index",
     ],
 )
 def test_adapter_and_port_modules_import_in_any_order(module: str) -> None:
     """Each module must import as the process's first everos import.
 
-    The port facade wires the concrete backends at import time, so an adapter
+    The port facade wires the engine packages at import time, so an engine
     reaching back into the ``index`` package closes a cycle: whichever side is
     imported first fails on a partially initialised module. A subprocess is the
     only honest check — inside this process the package is already imported, so
@@ -265,11 +272,237 @@ async def test_repository_port_crud_count_and_uncapped_scan(
         {"subject": "updated"},
         where=eq("id", rows[0].id),
     )
-    updated = await episode_repo.get_by_id(rows[0].id)
+    updated = await episode_repo.find_one_where(
+        primary_key(rows[0].app_id, rows[0].project_id, rows[0].id)
+    )
     assert updated is not None and updated.subject == "updated"
 
     await episode_repo.delete(eq("id", rows[0].id))
     assert await episode_repo.count_where(owner) == 100
+
+
+async def test_find_by_owner_entries_projects_requested_columns(
+    index_backend: str,
+) -> None:
+    """A ``columns`` projection returns raw dicts holding only those columns."""
+    await episode_repo.upsert([_episode(number) for number in range(3)])
+
+    rows = await episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
+    )
+
+    assert sorted(rows, key=lambda r: r["entry_id"]) == [
+        {"entry_id": "ep_0000", "parent_id": "memcell"},
+        {"entry_id": "ep_0002", "parent_id": "memcell"},
+    ]
+
+
+async def test_find_by_owner_entries_columns_select_before_materializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LanceDB pushes ``columns`` into ``.select()`` ahead of ``.to_list()``.
+
+    Guards against the projection regressing into a full ``find_where()``
+    load trimmed down in Python afterwards -- the point of a storage-level
+    projection is that the untrimmed columns never get fetched at all.
+    """
+    from everos.infra.persistence.lancedb import episode_repo as lance_episode_repo
+
+    calls: list[tuple[str, object]] = []
+    fake_rows = [{"entry_id": "ep_0000", "parent_id": "memcell"}]
+
+    class _RecordingQuery:
+        def where(self, expr: str) -> _RecordingQuery:
+            calls.append(("where", expr))
+            return self
+
+        def select(self, columns: list[str]) -> _RecordingQuery:
+            calls.append(("select", columns))
+            return self
+
+        def limit(self, n: int) -> _RecordingQuery:
+            calls.append(("limit", n))
+            return self
+
+        async def to_list(self) -> list[dict[str, object]]:
+            calls.append(("to_list", None))
+            return fake_rows
+
+    class _RecordingTable:
+        def query(self) -> _RecordingQuery:
+            calls.append(("query", None))
+            return _RecordingQuery()
+
+    find_where_spy = AsyncMock(
+        side_effect=AssertionError("columns projection must not fetch full rows")
+    )
+    monkeypatch.setattr(
+        lance_episode_repo, "_table", AsyncMock(return_value=_RecordingTable())
+    )
+    monkeypatch.setattr(lance_episode_repo, "find_where", find_where_spy)
+
+    rows = await lance_episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
+    )
+
+    assert rows == fake_rows
+    find_where_spy.assert_not_called()
+    assert [name for name, _ in calls] == [
+        "query",
+        "where",
+        "select",
+        "limit",
+        "to_list",
+    ]
+    assert dict(calls)["select"] == ["entry_id", "parent_id"]
+
+
+async def test_router_forwards_columns_to_milvus_without_type_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Routing to Milvus with ``columns`` set must not raise ``TypeError``.
+
+    Regression test: a prior change dropped the ``columns`` parameter from
+    ``MilvusRepoBase.find_by_owner_entries`` while the router kept forwarding
+    it unconditionally, so selecting the Milvus backend and requesting a
+    projection raised ``TypeError: find_by_owner_entries() got an unexpected
+    keyword argument 'columns'``.
+    """
+    from everos.config import load_settings
+    from everos.infra.persistence import milvus
+
+    rows = [_episode(0), _episode(2)]
+    monkeypatch.setattr(milvus.episode_repo, "find_where", AsyncMock(return_value=rows))
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
+    load_settings.cache_clear()
+    try:
+        projected = await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000", "ep_0002"], columns=["entry_id", "parent_id"]
+        )
+        typed = await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000", "ep_0002"]
+        )
+    finally:
+        load_settings.cache_clear()
+
+    assert sorted(projected, key=lambda r: r["entry_id"]) == [
+        {"entry_id": "ep_0000", "parent_id": "memcell"},
+        {"entry_id": "ep_0002", "parent_id": "memcell"},
+    ]
+    assert typed == rows
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [IndexRepository, RoutedIndexRepository, LanceIndexContract, MilvusRepoBase],
+)
+def test_find_by_owner_entries_overloads_keep_typed_rows(owner: type) -> None:
+    """Omitting ``columns`` is typed ``list[T]``; a projection is typed dicts."""
+    overloads = get_overloads(owner.find_by_owner_entries)
+
+    contract = {
+        inspect.signature(fn).parameters["columns"].annotation: (
+            inspect.signature(fn).return_annotation
+        )
+        for fn in overloads
+    }
+
+    assert contract == {
+        "None": "list[T]",
+        "Sequence[str]": "list[dict[str, Any]]",
+    }
+
+
+async def test_bulk_reads_can_skip_vector_columns(index_backend: str) -> None:
+    """Cascade diffs and agent-skill / reflection hydration read
+    thousands of rows but never touch the vectors; materialising them as
+    Python floats cost ~1.2 GB per pass on a 25k-row daily atomic_fact log.
+    """
+    rows = [_episode(number) for number in range(3)]
+    for row in rows:
+        row.vector = [0.5] * 1024
+        row.subject_vector = [0.25] * 1024
+    await episode_repo.upsert(rows)
+
+    full = await episode_repo.find_where(eq("owner_id", "owner"))
+    assert all(r.vector is not None for r in full)
+
+    lean = await episode_repo.find_where(eq("owner_id", "owner"), skip_vectors=True)
+    by_owner = await episode_repo.find_by_owner_entries(
+        "owner", ["ep_0000", "ep_0002"], skip_vectors=True
+    )
+
+    assert sorted(r.entry_id for r in lean) == ["ep_0000", "ep_0001", "ep_0002"]
+    assert sorted(r.entry_id for r in by_owner) == ["ep_0000", "ep_0002"]
+    for r in [*lean, *by_owner]:
+        assert r.vector is None and r.subject_vector is None
+        assert r.content_sha256 == rows[int(r.entry_id[-4:])].content_sha256
+
+
+async def test_writing_back_a_projected_row_destroys_the_stored_vector(
+    index_backend: str,
+) -> None:
+    """A row read with ``skip_vectors`` is not a row you may upsert.
+
+    Its vector columns are ``None`` because they were never read, not
+    because the record has none -- so writing one back replaces a stored
+    embedding with nothing, and the only symptom is that the row quietly
+    stops being reachable by vector search. Nothing logs it.
+
+    No production caller does this today: the cascade diff reads two
+    scalars and upserts freshly built rows, and neither the reflection
+    orchestrator nor agent-skill hydration upserts at all. This pins the
+    hazard so that a future caller cannot introduce it in silence -- if
+    this assertion ever fails because a guard was added, that is an
+    improvement, and this test should become the guard's test.
+    """
+    row = _episode(0)
+    row.vector = [0.5] * 1024
+    row.subject_vector = [0.25] * 1024
+    await episode_repo.upsert([row])
+
+    lean = await episode_repo.find_where(eq("entry_id", "ep_0000"), skip_vectors=True)
+    assert lean[0].vector is None
+
+    await episode_repo.upsert(lean)
+
+    after = await episode_repo.find_where(eq("entry_id", "ep_0000"))
+    assert after[0].vector is None
+    assert after[0].subject_vector is None
+
+
+async def test_milvus_columns_projection_narrows_the_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Milvus charges for the vector payload on the fetch, not on the trim.
+
+    ``columns`` is trimmed in Python there, so a projection that names no
+    vector column has to turn into ``skip_vectors`` on the way down --
+    otherwise a caller asking for two scalars still materialises every
+    1024-D vector in the result set and drops it one line later.
+    """
+    from everos.config import load_settings
+    from everos.infra.persistence import milvus
+
+    spy = AsyncMock(return_value=[_episode(0)])
+    monkeypatch.setattr(milvus.episode_repo, "find_where", spy)
+    monkeypatch.setenv("EVEROS_INDEX__BACKEND", "milvus")
+    load_settings.cache_clear()
+    try:
+        await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000"], columns=["entry_id", "parent_id"]
+        )
+        scalars_only = spy.call_args.kwargs["skip_vectors"]
+
+        await episode_repo.find_by_owner_entries(
+            "owner", ["ep_0000"], columns=["entry_id", "vector"]
+        )
+        vector_named = spy.call_args.kwargs["skip_vectors"]
+    finally:
+        load_settings.cache_clear()
+
+    assert scalars_only is True
+    assert vector_named is False
 
 
 async def test_repository_maintenance_contract_is_executable(
@@ -279,3 +512,20 @@ async def test_repository_maintenance_contract_is_executable(
     await episode_repo.optimize()
     await episode_repo.prune(dt.timedelta(days=7))
     await episode_repo.rebuild_indexes()
+
+
+def test_contract_has_no_way_around_the_primary_key() -> None:
+    """The only write is a merge on the declared key: no `by`, no plain insert."""
+    assert "by" not in inspect.signature(IndexRepository.upsert).parameters
+    assert not hasattr(IndexRepository, "add")
+    assert not hasattr(IndexRepository, "get_by_id")
+    for repo in ALL_REPOS:
+        assert not hasattr(repo, "add"), repo.table_name
+        assert not hasattr(repo, "get_by_id"), repo.table_name
+
+
+def test_primary_key_predicate_renders_three_equalities() -> None:
+    rendered = render_predicate(primary_key("claude-code", "alpha", "u1_ep_1"))
+    assert rendered == (
+        "((app_id = 'claude-code') AND (project_id = 'alpha') AND (id = 'u1_ep_1'))"
+    )

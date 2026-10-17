@@ -375,7 +375,7 @@ class SearchManager:
                 project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -390,7 +390,7 @@ class SearchManager:
                 project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 llm=self._decider_llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
                 reranker=self._reranker,  # type: ignore[arg-type]
@@ -495,7 +495,7 @@ class SearchManager:
                 req.query,
                 where=where,
                 case_recaller=self._case,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -557,7 +557,7 @@ class SearchManager:
                 req.query,
                 where=where,
                 skill_recaller=self._skill,
-                embed_query_fn=self._embedding.embed,  # type: ignore[union-attr]
+                embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
@@ -628,7 +628,9 @@ class SearchManager:
     async def _fetch_profile(self, req: SearchRequest) -> list[SearchProfileItem]:
         if not req.include_profile or req.owner_type != "user":
             return []
-        return await self._profile.fetch(req.owner_id)
+        return await self._profile.fetch(
+            req.owner_id, app_id=req.app_id, project_id=req.project_id
+        )
 
     # ── Recall helpers ──────────────────────────────────────────────
 
@@ -692,13 +694,18 @@ class SearchManager:
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: Predicate, top_k: int
     ) -> list[Candidate]:
-        """MaxSim-style: ANN atomic_facts → max-pool by memcell → batch fetch episodes.
+        """MaxSim-style: ANN atomic_facts → max-pool by episode → batch fetch episodes.
 
         Trades one extra LanceDB ANN scan (over the ~28× denser
         ``atomic_fact`` table) for finer-grained semantic match — long
         episodes whose single mean-pooled vector dilutes a specific topic
         recover via the matching atomic fact's own embedding. Mirrors
         EverOS/EverAlgo's MaxSim retrieval pattern.
+
+        When fact recall yields no parent episode id — no facts in scope
+        because extraction is disabled, not caught up, or failing — falls
+        back to ANN over the episode's own vector instead of returning
+        nothing.
         """
         vector = await self._embed_query(req.query)
         if not vector:
@@ -714,7 +721,16 @@ class SearchManager:
             if fc.score > ep_score.get(pid, -1.0):
                 ep_score[pid] = fc.score
         if not ep_score:
-            return []
+            cands = await self._ep.dense_recall(
+                vector, where, limit=self._recall_limit(req.top_k)
+            )
+            cands = self._apply_radius(cands, _effective_radius(req))
+            logger.info(
+                "vector_recall_fact_pool_empty",
+                owner_id=req.owner_id,
+                hits=len(cands),
+            )
+            return cands
         ranked = sorted(ep_score.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
         top_entry_ids = [eid for eid, _ in ranked]
         score_by_entry = dict(ranked)
@@ -768,7 +784,7 @@ class SearchManager:
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
-        vector = await self._embedding.embed(query)
+        vector = await self._embedding.embed_query(query)
         expected = getattr(self._embedding, "dim", None)
         if expected and len(vector) != expected:
             # Fail here, not inside LanceDB. A mismatched query vector reaches

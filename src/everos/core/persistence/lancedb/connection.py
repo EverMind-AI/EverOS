@@ -7,10 +7,10 @@ is a thin wrapper that:
     1. ensures the lancedb root directory exists
     2. converts ``LanceDBSettings.read_consistency_seconds`` into the
        :class:`datetime.timedelta` value LanceDB expects
-    3. installs a capped :class:`lancedb.Session` so the global index
-       cache cannot grow unbounded and exhaust file descriptors
-       (see :attr:`LanceDBSettings.index_cache_size_bytes` for the
-       full rationale)
+    3. installs a :class:`lancedb.Session` with **both** caches capped, so
+       index readers cannot pin file descriptors for the life of the process
+       (see :attr:`LanceDBSettings.metadata_cache_size_bytes` for the
+       measurement that shows the metadata cap is the decisive one)
 """
 
 from __future__ import annotations
@@ -35,7 +35,8 @@ async def open_lancedb_connection(
             ``MemoryRoot.lancedb_dir``). Created if missing.
         lancedb_settings: Tunables; the ``read_consistency_seconds`` field
             is converted to a :class:`~datetime.timedelta`, and
-            ``index_cache_size_bytes`` caps the global index cache.
+            ``index_cache_size_bytes`` / ``metadata_cache_size_bytes`` cap
+            the session's two caches.
 
     Returns:
         An :class:`AsyncConnection` ready for table operations.
@@ -48,17 +49,17 @@ async def open_lancedb_connection(
     if lancedb_settings.read_consistency_seconds is not None:
         interval = dt.timedelta(seconds=lancedb_settings.read_consistency_seconds)
 
-    # Bound the index cache so its readers (each one holds the FDs of
-    # an opened ``_indices/<uuid>/...`` directory) get LRU-evicted
-    # rather than leaking. Without this, a long-running daemon's FD
-    # count grows monotonically until ``EMFILE``. The metadata cache
-    # is intentionally left at the lancedb default (unbounded): it
-    # holds parsed in-memory manifests with zero FD pressure, and a
-    # cap there would just thrash. See ``LanceDBSettings`` for the
-    # measurement that picked the default size.
+    # Both caches must be bounded. Each cached index reader holds the FDs of
+    # an opened ``_indices/<uuid>/...`` directory, and POSIX does not release
+    # those on unlink, so an entry that outlives its files pins descriptors
+    # for the life of the process. Lance keys metadata entries by dataset
+    # version and does not evict them when cleanup deletes the files
+    # (lance-format/lance#7718), which is why leaving *that* cache unbounded
+    # — as this module used to — is what made the count grow without end.
+    # See ``LanceDBSettings`` for the measurement behind both sizes.
     session = lancedb.Session(
         index_cache_size_bytes=lancedb_settings.index_cache_size_bytes,
-        metadata_cache_size_bytes=None,
+        metadata_cache_size_bytes=lancedb_settings.metadata_cache_size_bytes,
     )
 
     return await lancedb.connect_async(

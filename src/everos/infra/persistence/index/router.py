@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, overload
 
 from pydantic import BaseModel
 
@@ -41,11 +41,8 @@ class RoutedIndexRepository[T: BaseModel]:
             return getattr(milvus, self._milvus_repo_name)
         return self._lance_repo
 
-    async def add(self, records: Sequence[T]) -> None:
-        await self._repo().add(records)
-
-    async def upsert(self, records: Sequence[T], *, by: str = "id") -> None:
-        await self._repo().upsert(records, by=by)
+    async def upsert(self, records: Sequence[T]) -> None:
+        await self._repo().upsert(records)
 
     async def count(self) -> int:
         return await self._repo().count()
@@ -53,11 +50,12 @@ class RoutedIndexRepository[T: BaseModel]:
     async def count_where(self, where: Predicate | None = None) -> int:
         return await self._repo().count_where(where)
 
-    async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
-        return await self._repo().get_by_id(id_value, id_field=id_field)
-
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
-        return await self._repo().find_where(where, limit=limit)
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]:
+        return await self._repo().find_where(
+            where, limit=limit, skip_vectors=skip_vectors
+        )
 
     async def find_one_where(self, where: Predicate) -> T | None:
         return await self._repo().find_one_where(where)
@@ -83,6 +81,7 @@ class RoutedIndexRepository[T: BaseModel]:
             project_id=project_id,
         )
 
+    @overload
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -90,12 +89,39 @@ class RoutedIndexRepository[T: BaseModel]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: None = None,
+        skip_vectors: bool = False,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+        skip_vectors: bool = False,
+    ) -> list[dict[str, Any]]: ...
+
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
+    ) -> list[T] | list[dict[str, Any]]:
         return await self._repo().find_by_owner_entries(
             owner_id,
             entry_ids,
             app_id=app_id,
             project_id=project_id,
+            columns=columns,
+            skip_vectors=skip_vectors,
         )
 
     async def find_by_session(
@@ -194,6 +220,9 @@ class RoutedIndexRepository[T: BaseModel]:
 
     async def rebuild_indexes(self) -> None:
         await self._repo().rebuild_indexes()
+
+    async def ensure_vector_indexes(self) -> None:
+        await self._repo().ensure_vector_indexes()
 
 
 class RoutedEpisodeRepository(RoutedIndexRepository[Any]):

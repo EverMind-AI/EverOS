@@ -585,10 +585,11 @@ async def test_profile_chain_e2e(
         }
     )
 
-    fake_episode_row = MagicMock()
-    fake_episode_row.parent_type = "memcell"
-    fake_episode_row.parent_id = "mc_aaaaaaaaaaa1"
-    fake_episode_row.entry_id = "ep_20260517_0001"
+    fake_episode_row = {
+        "entry_id": "ep_20260517_0001",
+        "parent_type": "memcell",
+        "parent_id": "mc_aaaaaaaaaaa1",
+    }
 
     # ``trigger_profile_clustering`` body-guards on
     # ``get_embedding_capability().available`` and then resolves the concrete

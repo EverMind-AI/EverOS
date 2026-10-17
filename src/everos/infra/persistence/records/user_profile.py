@@ -25,10 +25,12 @@ class UserProfile(BaseLanceTable):
     """One ``users/<user_id>/user.md`` indexed in LanceDB."""
 
     TABLE_NAME: ClassVar[str] = "user_profile"
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("app_id", "project_id", "id")
     # No BM25 columns: profile recall is KV-by-owner today.
 
     id: str
-    """PK = ``owner_id`` (one row per user)."""
+    """``owner_id`` (one row per user per ``(app_id, project_id)``) — the row
+    key is the declared ``PRIMARY_KEY``."""
 
     owner_id: str
     owner_type: str

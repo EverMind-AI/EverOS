@@ -109,21 +109,50 @@ naturally.
 
 ## One-shot replay: `everos cascade sync [PATH]`
 
-Use this when the watcher missed an event (WSL mount, network share,
-external editor with no inotify) or when you want a deterministic
-flush before, say, a smoke test:
+Use this when no server is running and you want the index caught up
+with the markdown — after batch edits, before a smoke test, or on a
+mount where the watcher misses events (WSL mount, network share,
+external editor with no inotify) while the daemon is down:
 
 ```bash
 everos cascade sync                           # drain everything pending
 everos cascade sync users/u1/episodes/X.md    # re-enqueue + drain
+everos cascade sync --force-all               # re-enqueue EVERY indexed md, then drain
 ```
+
+`--force-all` re-queues every markdown file the ledger knows about (done,
+failed and pending alike) and lets the handlers reconcile each one against
+the index. A healthy root is a no-op for the embedder — unchanged entries
+are skipped by digest — so it is the recovery for an index that lost rows
+without a full rebuild: a multi-project root upgraded from a release before
+1.4.2 gets back the rows one project overwrote in another. Its summary
+line lists how many files were in each ledger state before the drain.
+
+That pass also runs by itself, once per root: the first full pass after
+upgrading from a release before 1.4.2 (a server start, or an unscoped
+`everos cascade sync`) force-enqueues every ledger row and writes
+`.index/.index_reconcile_version`, so no upgrade step is needed and later
+starts are ordinary. Delete the marker to make the next start repeat it,
+or run `--force-all` for an explicit pass. Two roots need the explicit
+pass: a server started with `EVEROS_DISABLE_CASCADE=1` never runs it
+(stop the server, run `--force-all` once), and a multi-project root where
+reflection ran before 1.4.2 needs `cascade rebuild` once -- the pass does
+not clear the `deprecated_by` stamps one project's reflection left on
+another project's rows, so those rows stay hidden from search until the
+index is rebuilt from markdown.
 
 The CLI builds the same `CascadeOrchestrator` as the daemon but only
 calls `sync_once` / `drain_once` — no watcher / scanner background task.
-Its drain still runs the same compaction + version-cleanup (`prune`) as
-the daemon, but `prune` uses `delete_unverified=False`, so it never
-deletes a file another process may be mid-commit on. Safe to run in
-parallel with a live `everos server`.
+It holds the OME lock for the whole run and **refuses to start (exit code
+3) while a server holds it**: two processes writing the same LanceDB
+tables cannot see each other's snapshot and both insert the row (4–5 %
+duplicate rows after a 10-hour soak with two concurrent `sync` processes
+next to a server). The same rule applies to `cascade fix --apply` and
+`cascade rebuild`; `cascade status` and `cascade fix` (listing) are
+read-only and work alongside a server. A running server projects every
+markdown change itself, so nothing is lost by waiting for it — unless it
+was started with `EVEROS_DISABLE_CASCADE=1` or has been quiesced, in
+which case stop it before syncing.
 
 ## Rebuild the index: `everos cascade rebuild`
 
@@ -135,12 +164,12 @@ everos cascade rebuild          # prompts for confirmation
 everos cascade rebuild --yes    # non-interactive
 ```
 
-> **Stop the `everos server` first.** Unlike `cascade sync`, rebuild
-> **drops and recreates** the active backend's tables or collections. A running
-> daemon holds
-> cached table handles that would keep pointing at (and writing to) the
-> dropped dataset, corrupting the rebuild. This is the one cascade
-> command that is **not** safe to run alongside a live server.
+> **Stop the `everos server` first.** Like every index-writing cascade
+> command, rebuild refuses to run while a server holds the memory root
+> (exit code 3) — and it has the strongest reason: it **drops and
+> recreates** the active backend's tables or collections. A running daemon
+> holds cached table handles that would keep pointing at (and writing to)
+> the dropped dataset, corrupting the rebuild.
 
 What it does, in order:
 
@@ -168,6 +197,12 @@ Why not a bare `rm`:
 For a remote Milvus backend, rebuild acts only on collections whose names use
 the configured `collection_prefix`. Use a unique prefix or dedicated database
 before running it on a shared Milvus Server or Zilliz Cloud deployment.
+
+Upgrading a Milvus root to 1.4.2 needs one rebuild: the collections gain the
+`__pk` primary-key column, so the first start refuses with
+`schema drift: missing=['__pk'] …` and names this command. Run it once with
+the server stopped (`--root` is an option of the `cascade` group:
+`everos cascade --root <root> rebuild --yes`).
 
 ## Recovery paths
 
@@ -228,10 +263,16 @@ error and silently see nothing.
 
 Workarounds:
 
-- Rely on the scanner — at default 30 s interval, throughput is
+- Rely on the scanner — at the default 30 s interval, throughput is
   bounded but eventually-consistent.
-- Drop the scan interval to ~5 s if the memory root is small.
-- Run `everos cascade sync` explicitly after batch edits.
+- Shorten the interval if the memory root is small:
+  `scan_interval_seconds = 5.0` under `[cascade]` in `everos.toml`, or
+  `EVEROS_CASCADE__SCAN_INTERVAL_SECONDS=5`. Every sweep stats every md
+  file, so over a slow mount a short interval is a steady I/O cost.
+- With no server running, run `everos cascade sync` explicitly after batch
+  edits. A running server picks them up itself, and `sync` refuses to run
+  next to it (exit code 3): two processes writing the same index insert
+  rows twice.
 
 ### Daemon process crash mid-batch
 
@@ -293,7 +334,7 @@ and `everos.memory.cascade.worker.CascadeWorker`:
 
 | Knob | Default | Effect |
 |---|---|---|
-| `scan_interval_seconds` | 30 | Scanner sweep cadence |
+| `scan_interval_seconds` | 30 | Scanner sweep cadence — also settable under `[cascade]` |
 | `worker_batch_size` | 50 | Rows claimed per worker cycle |
 | `worker_max_retry` | 3 | Inline retries before `mark_failed(retryable=TRUE)` |
 | `worker_poll_interval_seconds` | 1 | Idle wait between empty drain attempts |
@@ -373,6 +414,7 @@ is a deployment-side change with no schema work.
   in the entry inline. Tracked separately.
 - **Reference-file change detection (agent_skill)**: edits to
   `references/*.md` siblings won't trigger a re-index — only changes
-  to `SKILL.md` itself fire the watcher. Workaround: run
-  `everos cascade sync agents/<a>/skills/skill_<n>/SKILL.md` after
-  editing references.
+  to `SKILL.md` itself fire the watcher. Workaround: touch or re-save
+  `SKILL.md` so the watcher fires; with the server stopped,
+  `everos cascade sync agents/<a>/skills/skill_<n>/SKILL.md` re-enqueues
+  it directly.

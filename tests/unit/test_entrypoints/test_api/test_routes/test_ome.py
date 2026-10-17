@@ -27,8 +27,8 @@ from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.context import StrategyContext
 from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.engine import OfflineEngine
-from everos.infra.ome.events import ManualTick
-from everos.infra.ome.triggers import Immediate
+from everos.infra.ome.events import CronTick, ManualTick
+from everos.infra.ome.triggers import Cron, Immediate
 
 
 async def _client_for(
@@ -53,6 +53,29 @@ async def gated_off_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
         enabled=False,
     )
     async def _s(event: ManualTick, ctx: StrategyContext) -> None:
+        return None
+
+    engine = OfflineEngine(
+        config=OMEConfig(jobstore_path=tmp_path / "ome.db", config_watch=False)
+    )
+    engine.register(_s)
+    await engine.start()
+    try:
+        yield engine
+    finally:
+        await engine.stop()
+
+
+@pytest.fixture
+async def cron_engine(tmp_path: Path) -> AsyncIterator[OfflineEngine]:
+    """Engine with one Cron strategy — the ``reflect_episodes`` shape."""
+
+    @offline_strategy(
+        name="weekly_job",
+        trigger=Cron(expr="0 2 * * 1"),
+        emits=[],
+    )
+    async def _s(event: CronTick, ctx: StrategyContext) -> None:
         return None
 
     engine = OfflineEngine(
@@ -129,3 +152,19 @@ async def test_trigger_returns_runs_including_dead_letter(
     assert len(body["runs"]) == 1
     assert body["runs"][0]["status"] == "dead_letter"
     assert body["runs"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_runs_a_cron_strategy_manually(
+    cron_engine: OfflineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manual trigger is how a scheduled job is run on demand
+    (docs/reflection.md); it must dispatch, not report ``not_dispatched``."""
+    async with await _client_for(cron_engine, monkeypatch) as client:
+        resp = await client.post(
+            "/api/v1/ome/trigger", json={"name": "weekly_job", "force": True}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["dispatched"] == 1

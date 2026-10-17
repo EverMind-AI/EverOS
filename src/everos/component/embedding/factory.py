@@ -48,4 +48,5 @@ def build_embedding_provider(
         max_retries=settings.max_retries,
         batch_size=settings.batch_size,
         max_concurrent=settings.max_concurrent,
+        query_max_concurrent=settings.query_max_concurrent,
     )

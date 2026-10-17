@@ -27,6 +27,12 @@ async def test_lock_acquire_release_acquire(tmp_path: Path) -> None:
         pass
 
 
+# A spawned child re-imports this module and, through everos.core.persistence,
+# lancedb: 1-2 s on macOS, 15 s+ on Windows with Defender scanning each file.
+# Only readiness is bounded by this; the timing assertions start after ready.set().
+_SPAWN_TIMEOUT_S = 60.0
+
+
 def _hold_lock(memory_root_path: str, ready: object, release: object) -> None:
     """Subprocess helper: acquire blocking lock, signal, wait, release.
 
@@ -53,13 +59,13 @@ async def test_nonblocking_raises_when_held_by_other_process(tmp_path: Path) -> 
     proc = ctx.Process(target=_hold_lock, args=(str(mr.root), ready, release))
     proc.start()
     try:
-        assert ready.wait(timeout=5), "subprocess failed to acquire lock"
+        assert ready.wait(timeout=_SPAWN_TIMEOUT_S), "subprocess failed to acquire lock"
         with pytest.raises(LockError):
             async with memory_root_lock(mr, blocking=False):
                 pass
     finally:
         release.set()
-        proc.join(timeout=5)
+        proc.join(timeout=_SPAWN_TIMEOUT_S)
         if proc.is_alive():
             proc.terminate()
 
@@ -73,7 +79,7 @@ async def test_blocking_waits_for_release(tmp_path: Path) -> None:
     proc = ctx.Process(target=_hold_lock, args=(str(mr.root), ready, release))
     proc.start()
     try:
-        assert ready.wait(timeout=5)
+        assert ready.wait(timeout=_SPAWN_TIMEOUT_S)
         # Schedule the subprocess to release shortly; main process should
         # acquire the lock after that.
         release_started = time.monotonic()
@@ -91,7 +97,7 @@ async def test_blocking_waits_for_release(tmp_path: Path) -> None:
             assert elapsed >= 0.1
     finally:
         release.set()
-        proc.join(timeout=5)
+        proc.join(timeout=_SPAWN_TIMEOUT_S)
         if proc.is_alive():
             proc.terminate()
 
@@ -128,7 +134,7 @@ async def test_blocking_wait_is_bounded_and_logged(
     proc = ctx.Process(target=_hold_lock, args=(str(mr.root), ready, release))
     proc.start()
     try:
-        assert ready.wait(timeout=5)
+        assert ready.wait(timeout=_SPAWN_TIMEOUT_S)
         started = time.monotonic()
         with pytest.raises(LockError, match="timed out"):
             async with memory_root_lock(mr, timeout_seconds=0.2):
@@ -141,7 +147,7 @@ async def test_blocking_wait_is_bounded_and_logged(
         )
     finally:
         release.set()
-        proc.join(timeout=5)
+        proc.join(timeout=_SPAWN_TIMEOUT_S)
         if proc.is_alive():
             proc.terminate()
 
@@ -180,7 +186,7 @@ async def test_successful_wait_logs_how_long_it_waited(
     proc = ctx.Process(target=_hold_lock, args=(str(mr.root), ready, release))
     proc.start()
     try:
-        assert ready.wait(timeout=5)
+        assert ready.wait(timeout=_SPAWN_TIMEOUT_S)
         threading.Timer(0.2, release.set).start()
         async with memory_root_lock(mr, timeout_seconds=5.0):
             pass
@@ -190,7 +196,7 @@ async def test_successful_wait_logs_how_long_it_waited(
         ]
     finally:
         release.set()
-        proc.join(timeout=5)
+        proc.join(timeout=_SPAWN_TIMEOUT_S)
         if proc.is_alive():
             proc.terminate()
 

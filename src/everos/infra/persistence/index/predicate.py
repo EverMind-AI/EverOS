@@ -20,6 +20,7 @@ from everos.infra.persistence.predicate import lt as lt
 from everos.infra.persistence.predicate import lte as lte
 from everos.infra.persistence.predicate import ne as ne
 from everos.infra.persistence.predicate import one_of as one_of
+from everos.infra.persistence.predicate import primary_key as primary_key
 
 __all__ = [
     "All",
@@ -42,4 +43,5 @@ __all__ = [
     "lte",
     "ne",
     "one_of",
+    "primary_key",
 ]

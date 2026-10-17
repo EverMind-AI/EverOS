@@ -168,7 +168,7 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
 
 > **File-level seq, not global**: the same `ep_20260601_00000001` may
 > appear across two different `user_id`s (each user has its own daily file).
-> Cross-table joins must therefore key on **`(scope_id, entry_id)`**
+> Cross-table joins must therefore key on **`(app_id, project_id, owner_id, entry_id)`**
 > rather than `entry_id` alone — see the derived index tables that follow.
 
 ## 5. SQLite + derived indexes
@@ -190,8 +190,11 @@ Implementation: [`core/persistence/markdown/entries.py`](../src/everos/core/pers
   per-kind business rows. `reflection_report` is the audit trail for
   Reflection merges (cluster_id, mode, source_members, merged_entry_id,
   status).
-- The **derived index backend** holds the per-kind business rows, keyed
-  `<owner_id>_<entry_id>` (so cross-table joins use `(owner_id, entry_id)`).
+- The **derived index backend** holds the per-kind business rows, keyed by
+  each table's declared `PRIMARY_KEY` — `(app_id, project_id, id)` for every
+  business table, where `id` is `<owner_id>_<entry_id>` for the daily-log kinds
+  (so cross-table joins use `(app_id, project_id, owner_id, entry_id)`; `id`
+  alone is unique only within one project).
   LanceDB is the default backend under `.index/lancedb/`; Milvus can be enabled
   as the same rebuildable index backend and lives outside the memory root in a
   configured Milvus Server or Zilliz Cloud deployment.

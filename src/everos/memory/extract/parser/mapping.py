@@ -15,7 +15,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import anyio
 from everalgo.types import RawFile
@@ -62,6 +63,10 @@ def _is_file_uri(uri: str) -> bool:
 def _resolve_file_uri(uri: str) -> Path:
     """Parse a ``file://`` uri into a canonical local path (symlinks resolved).
 
+    ``url2pathname`` does the percent-decoding and, on Windows, turns the
+    URI's leading-slash drive form (``/C:/x``) into a real path — a plain
+    ``unquote`` leaves ``/C:/x``, which is not the same file.
+
     Raises ``ValueError`` for a remote host component or a path that does not
     exist (``resolve(strict=True)``).
     """
@@ -69,7 +74,7 @@ def _resolve_file_uri(uri: str) -> Path:
     if parsed.netloc and parsed.netloc not in ("", "localhost"):
         raise ValueError(f"file uri with remote host not supported: {parsed.netloc!r}")
     try:
-        return Path(unquote(parsed.path)).expanduser().resolve(strict=True)
+        return Path(url2pathname(parsed.path)).expanduser().resolve(strict=True)
     except OSError as exc:
         raise ValueError(f"cannot resolve file uri {uri!r}: {exc}") from exc
 

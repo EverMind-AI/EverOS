@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, overload
 
 from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
@@ -46,10 +46,43 @@ expects the engine to clamp. Clamping here keeps that expectation true on
 both backends instead of making every caller learn one engine's limit."""
 _SPARSE_SUFFIX = "__sparse"
 _PRESENT_SUFFIX = "__present"
+_PK_FIELD = "__pk"
+_PK_SEPARATOR = "/"
+_PK_MAX_LENGTH = 65_535
+"""Milvus has one scalar primary key per collection, so the declared
+PRIMARY_KEY columns are joined into the private ``__pk`` column. No key
+column can contain the separator: app_id / project_id / owner_id / skill
+name are directory segments on disk and entry_id is ``<prefix>_<date>_<seq>``;
+``_compose_pk`` rejects a value that does."""
 
 
 class MilvusValueLimitError(ValueError):
     """A row exceeds a documented Milvus VARCHAR, array, or vector limit."""
+
+
+def _compose_pk(schema: IndexSchema, row: Mapping[str, Any]) -> str:
+    """Join the row's PRIMARY_KEY values into the ``__pk`` scalar.
+
+    Milvus keys a collection on exactly one field, so the declared key
+    columns are concatenated in declaration order. Rejects a component
+    containing the separator (the join would stop being injective) and a
+    result over the VARCHAR limit (``_validate_raw_record`` only covers
+    logical fields, not this physical one).
+    """
+    parts = [str(row[column]) for column in schema.primary_key]
+    for column, part in zip(schema.primary_key, parts, strict=True):
+        if _PK_SEPARATOR in part:
+            raise MilvusValueLimitError(
+                f"{schema.table_name}.{column} contains {_PK_SEPARATOR!r}: {part!r}"
+            )
+    pk = _PK_SEPARATOR.join(parts)
+    size = len(pk.encode("utf-8"))
+    if size > _PK_MAX_LENGTH:
+        raise MilvusValueLimitError(
+            f"{schema.table_name}.{_PK_FIELD} is {size} UTF-8 bytes; "
+            f"Milvus limit is {_PK_MAX_LENGTH}"
+        )
+    return pk
 
 
 @dataclass(frozen=True)
@@ -406,18 +439,7 @@ class MilvusRepoBase[T: BaseModel]:
                 "`everos cascade rebuild`."
             )
 
-    async def add(self, records: Sequence[T]) -> None:
-        if not records:
-            return
-        await self.ensure_collection()
-        payload = [self._to_milvus_record(record) for record in records]
-        client = await get_client()
-        async with self._write_lock(self.collection_name):
-            await _run(client.insert, self.collection_name, payload)
-
-    async def upsert(self, records: Sequence[T], *, by: str = "id") -> None:
-        if by != "id":
-            raise ValueError("MilvusRepoBase only supports upsert by id")
+    async def upsert(self, records: Sequence[T]) -> None:
         if not records:
             return
         await self.ensure_collection()
@@ -434,7 +456,16 @@ class MilvusRepoBase[T: BaseModel]:
         outside it, two concurrent updates to one row (backfill writing
         ``vector`` while reflection writes ``deprecated_by``) each overwrite
         the other's column with the value they read before it landed.
+
+        A primary-key column in ``updates`` is refused: the re-upsert would
+        land under a new ``__pk`` and leave the old row behind.
         """
+        clash = sorted(set(updates) & set(self.index_schema.primary_key))
+        if clash:
+            raise ValueError(
+                f"update() cannot change primary-key column(s) {clash} of "
+                f"{self.collection_name}; delete the row and upsert it instead"
+            )
         client = await get_client()
         async with self._write_lock(self.collection_name):
             rows = await self._scan_raw(where, include_vectors=True)
@@ -445,6 +476,7 @@ class MilvusRepoBase[T: BaseModel]:
                 merged = dict(row)
                 for key, value in updates.items():
                     self._write_field_value(merged, key, value)
+                merged[_PK_FIELD] = _compose_pk(self.index_schema, merged)
                 self._validate_raw_record(merged)
                 patched.append(merged)
             await _run(client.upsert, self.collection_name, patched)
@@ -457,6 +489,9 @@ class MilvusRepoBase[T: BaseModel]:
 
     async def rebuild_indexes(self) -> None:
         """Milvus AUTOINDEX maintenance is service-managed."""
+
+    async def ensure_vector_indexes(self) -> None:
+        """Milvus builds its vector index at collection creation."""
 
     async def count(self) -> int:
         return await self._count_where(None)
@@ -475,22 +510,12 @@ class MilvusRepoBase[T: BaseModel]:
         )
         return int(rows[0].get("count(*)", 0)) if rows else 0
 
-    async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None:
-        if id_field != "id":
-            rows = await self.find_where(eq(id_field, id_value), limit=1)
-            return rows[0] if rows else None
-        await self.ensure_collection()
-        client = await get_client()
-        rows = await _run(
-            client.get,
-            self.collection_name,
-            ids=[id_value],
-            output_fields=self._output_fields(include_vectors=True),
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]:
+        rows = await self._query_raw(
+            where, limit=limit, include_vectors=not skip_vectors
         )
-        return self._model_from_milvus(rows[0]) if rows else None
-
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]:
-        rows = await self._query_raw(where, limit=limit, include_vectors=True)
         return [self._model_from_milvus(row) for row in rows]
 
     async def find_one_where(self, where: Predicate) -> T | None:
@@ -696,6 +721,7 @@ class MilvusRepoBase[T: BaseModel]:
             )
         )
 
+    @overload
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -703,10 +729,43 @@ class MilvusRepoBase[T: BaseModel]:
         *,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> list[T]:
+        columns: None = None,
+        skip_vectors: bool = False,
+    ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+        skip_vectors: bool = False,
+    ) -> list[dict[str, Any]]: ...
+
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
+    ) -> list[T] | list[dict[str, Any]]:
         if not entry_ids:
             return []
-        return await self.find_where(
+        if columns is not None and not skip_vectors:
+            # A ``columns`` list that names no vector column cannot need the
+            # vector payload. Milvus charges for that payload on the fetch,
+            # not on the trim below, so decide it here -- otherwise a caller
+            # projecting two scalars still materialises every 1024-D vector
+            # in the result set and discards it one line later.
+            vector_names = {field.name for field in self.index_schema.vector_fields}
+            skip_vectors = not (set(columns) & vector_names)
+        rows = await self.find_where(
             all_of(
                 eq("owner_id", owner_id),
                 one_of("entry_id", list(entry_ids)),
@@ -714,7 +773,14 @@ class MilvusRepoBase[T: BaseModel]:
                 eq("project_id", project_id),
             ),
             limit=len(entry_ids),
+            skip_vectors=skip_vectors,
         )
+        if columns is None:
+            return rows
+        # Milvus has no column projection on the result shape, so the trim to
+        # ``columns`` happens in Python for LanceDB return-shape parity; the
+        # fetch itself was already narrowed above.
+        return [{name: getattr(row, name) for name in columns} for row in rows]
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100
@@ -750,7 +816,14 @@ class MilvusRepoBase[T: BaseModel]:
 
     def _physical_fields(self) -> tuple[_PhysicalField, ...]:
         """Every Milvus column this table declares, in creation order."""
-        out: list[_PhysicalField] = []
+        out: list[_PhysicalField] = [
+            _PhysicalField(
+                name=_PK_FIELD,
+                datatype=DataType.VARCHAR,
+                is_primary=True,
+                max_length=_PK_MAX_LENGTH,
+            )
+        ]
         for field in self.index_schema.fields:
             out.extend(self._physical_for(field))
         if not self.index_schema.vector_fields:
@@ -777,10 +850,9 @@ class MilvusRepoBase[T: BaseModel]:
                 _PhysicalField(
                     name=field.name,
                     datatype=DataType.VARCHAR,
-                    is_primary=field.primary,
                     # A BM25 input is written as "" rather than null so the
                     # analyzer always has something to tokenize.
-                    nullable=field.nullable and not field.primary and not is_bm25,
+                    nullable=field.nullable and not is_bm25,
                     max_length=field.max_length,
                     enable_analyzer=is_bm25,
                 )
@@ -879,6 +951,7 @@ class MilvusRepoBase[T: BaseModel]:
                 out[field.name] = value
         if not self.index_schema.vector_fields:
             out[_DUMMY_VECTOR_FIELD] = [0.0] * _DUMMY_VECTOR_DIMENSION
+        out[_PK_FIELD] = _compose_pk(self.index_schema, out)
         self._validate_raw_record(out)
         return out
 

@@ -28,6 +28,8 @@ Status values:
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -99,6 +101,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         kind: str,
         change_type: str,
         mtime: float,
+        reset_retry_count: bool = False,
     ) -> int:
         """Enqueue or re-enqueue ``md_path``; return the assigned LSN.
 
@@ -115,6 +118,9 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
           mtime is unchanged (scanner auto-retry), ``retry_count``
           carries over so the worker can enforce a total retry budget;
           otherwise it resets to 0 (new content deserves a fresh start).
+          ``reset_retry_count=True`` resets it regardless — a forced
+          re-enqueue must reach the handler even when the budget was
+          spent.
 
         The fresh LSN on re-enqueue is the property that lets the worker
         rely on ``ORDER BY lsn`` for ordering without losing fairness
@@ -125,63 +131,77 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         now = get_utc_now()
         async with session_scope(self._factory) as s:
             new_lsn = await _next_lsn(s)
-            stmt = (
-                sqlite_insert(MdChangeState)
-                .values(
-                    md_path=md_path,
+            await s.execute(
+                _enqueue_stmt(
+                    md_path,
                     kind=kind,
                     change_type=change_type,
                     mtime=mtime,
-                    first_seen_at=now,
-                    last_changed_at=now,
                     lsn=new_lsn,
-                    status="pending",
-                    retryable=None,
-                    last_attempt_at=None,
-                    retry_count=0,
-                    error=None,
-                )
-                .on_conflict_do_update(
-                    index_elements=["md_path"],
-                    set_={
-                        "kind": kind,
-                        "change_type": change_type,
-                        "mtime": mtime,
-                        "last_changed_at": now,
-                        "lsn": new_lsn,
-                        "status": "pending",
-                        "retryable": None,
-                        "last_attempt_at": None,
-                        "error": None,
-                        "retry_count": text(
-                            "CASE"
-                            " WHEN md_change_state.status = 'failed'"
-                            " AND ABS(md_change_state.mtime - :new_mtime)"
-                            f" < {MTIME_TOLERANCE_SECONDS}"
-                            " THEN md_change_state.retry_count"
-                            " ELSE 0"
-                            " END"
-                        ).bindparams(new_mtime=mtime),
-                    },
+                    now=now,
+                    reset_retry_count=reset_retry_count,
                 )
             )
-            await s.execute(stmt)
             await s.commit()
             return new_lsn
 
-    async def force_enqueue(self, md_path: str, kind: str) -> int:
+    async def force_enqueue(
+        self, md_path: str, kind: str, *, mtime: float = 0.0
+    ) -> int:
         """`cascade sync --path` entry: re-enqueue regardless of status.
 
         Semantically the same as :meth:`upsert` with ``change_type
         ='modified'``; named separately because the CLI flow has no
-        watcher / scanner event to attribute the row to.
+        watcher / scanner event to attribute the row to. A caller that
+        has the row's recorded ``mtime`` passes it on, so the scanner does
+        not see a changed mtime and queue the file a second time. The
+        retry budget always restarts: the point of forcing is that the
+        handler runs, including on a row whose budget was spent.
         """
         return await self.upsert(
             md_path,
             kind=kind,
             change_type="modified",
-            mtime=0.0,
+            mtime=mtime,
+            reset_retry_count=True,
         )
+
+    async def force_enqueue_all(self) -> list[MdChangeState]:
+        """Re-enqueue every row the ledger knows about; return the rows as
+        they were before, oldest LSN first.
+
+        Drives ``cascade sync --force-all`` and the one-time index
+        reconcile at startup: the handlers re-reconcile each md against
+        the index, so a file whose rows are present and unchanged costs
+        no embedding while a file whose rows were lost comes back. No
+        status filter on purpose — ``failed`` rows must come back too.
+        """
+        rows = await self.list_all()
+        now = get_utc_now()
+        # One session, one commit: a commit per row cost ~0.9 ms each and held
+        # a server's startup for the whole pass on a root with tens of
+        # thousands of md files; one round trip per row is ~0.3 ms. Each row
+        # keeps its mtime (the scanner does not re-pick it) and gets a fresh
+        # LSN in ledger order.
+        # ponytail: still one execute per row; a chunked multi-row INSERT on
+        # `excluded` if a 100k-file root makes startup wait.
+        async with session_scope(self._factory) as s:
+            lsn = await _next_lsn(s)
+            for row in rows:
+                await s.execute(
+                    _enqueue_stmt(
+                        row.md_path,
+                        kind=row.kind,
+                        change_type="modified",
+                        mtime=row.mtime,
+                        lsn=lsn,
+                        now=now,
+                        reset_retry_count=True,
+                    )
+                )
+                lsn += 1
+            await s.commit()
+        return rows
 
     # ── Worker claim ───────────────────────────────────────────────────────
 
@@ -391,6 +411,19 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             )
             return list(rows)
 
+    async def list_all(self) -> list[MdChangeState]:
+        """Return every row regardless of status, oldest LSN first.
+
+        Backs :meth:`force_enqueue_all`; no status filter on purpose.
+        """
+        async with session_scope(self._factory) as s:
+            rows = (
+                (await s.execute(select(MdChangeState).order_by(MdChangeState.lsn)))
+                .scalars()
+                .all()
+            )
+            return list(rows)
+
     async def reset_retryable_to_pending(self) -> int:
         """`cascade fix --apply` engine: re-enqueue every retryable row.
 
@@ -472,6 +505,65 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             max_lsn=max_lsn,
             last_processed_lsn=last_processed_lsn,
         )
+
+
+def _enqueue_stmt(
+    md_path: str,
+    *,
+    kind: str,
+    change_type: str,
+    mtime: float,
+    lsn: int,
+    now: datetime,
+    reset_retry_count: bool,
+) -> Any:
+    """The INSERT ... ON CONFLICT that :meth:`upsert` documents.
+
+    Shared with :meth:`force_enqueue_all`, which issues one per ledger row
+    inside a single session.
+    """
+    return (
+        sqlite_insert(MdChangeState)
+        .values(
+            md_path=md_path,
+            kind=kind,
+            change_type=change_type,
+            mtime=mtime,
+            first_seen_at=now,
+            last_changed_at=now,
+            lsn=lsn,
+            status="pending",
+            retryable=None,
+            last_attempt_at=None,
+            retry_count=0,
+            error=None,
+        )
+        .on_conflict_do_update(
+            index_elements=["md_path"],
+            set_={
+                "kind": kind,
+                "change_type": change_type,
+                "mtime": mtime,
+                "last_changed_at": now,
+                "lsn": lsn,
+                "status": "pending",
+                "retryable": None,
+                "last_attempt_at": None,
+                "error": None,
+                "retry_count": 0
+                if reset_retry_count
+                else text(
+                    "CASE"
+                    " WHEN md_change_state.status = 'failed'"
+                    " AND ABS(md_change_state.mtime - :new_mtime)"
+                    f" < {MTIME_TOLERANCE_SECONDS}"
+                    " THEN md_change_state.retry_count"
+                    " ELSE 0"
+                    " END"
+                ).bindparams(new_mtime=mtime),
+            },
+        )
+    )
 
 
 async def _next_lsn(session: AsyncSession) -> int:

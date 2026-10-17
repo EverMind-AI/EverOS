@@ -21,14 +21,12 @@ md contract (md writer + cascade share this shape):
 
 from __future__ import annotations
 
-from everos.component.embedding import get_embedding_capability
-from everos.core.observability.logging import get_logger
+from collections.abc import Sequence
+
 from everos.infra.persistence.index import AtomicFact, ParentType, atomic_fact_repo
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
-
-logger = get_logger(__name__)
 
 
 class AtomicFactHandler(BaseDailyLogHandler):
@@ -40,6 +38,9 @@ class AtomicFactHandler(BaseDailyLogHandler):
     """Only ``Fact`` matters — it's both the embedded text AND the
     BM25 source. Audit inline is excluded."""
 
+    def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
+        return (entry.structured.sections.get("Fact", "").strip(),)
+
     async def _build_row(
         self,
         *,
@@ -49,18 +50,11 @@ class AtomicFactHandler(BaseDailyLogHandler):
         project_id: str = "default",
         md_path: str,
         entry: ParsedEntry,
+        vectors: Sequence[list[float] | None] = (),
     ) -> AtomicFact:
         s = entry.structured
         text = s.sections.get("Fact", "").strip()
         tokens = self._deps.tokenizer.tokenize(text)
-        vector = await get_embedding_capability().embed_or_none(text)
-        if vector is None:
-            logger.debug(
-                "cascade_handler_embed_skipped",
-                kind=self.kind,
-                entry_id=entry.entry_id,
-                reason="embedding_capability_unavailable",
-            )
         return AtomicFact(
             id=f"{owner_id}_{entry.entry_id}",
             entry_id=entry.entry_id,
@@ -77,5 +71,5 @@ class AtomicFactHandler(BaseDailyLogHandler):
             fact_tokens=" ".join(tokens),
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vector,
+            vector=vectors[0] if vectors else None,
         )

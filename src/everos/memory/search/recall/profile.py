@@ -1,4 +1,4 @@
-"""Profile recall — KV-by-owner LanceDB fetch (no ranking).
+"""Profile recall — KV fetch by (app_id, project_id, owner_id), no ranking.
 
 Profile is the only owner-scoped kind that ships as **one row per
 user** (no per-day fan-out, no entry markers). The recaller is a
@@ -19,7 +19,7 @@ import json
 from typing import Any
 
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index import user_profile_repo
+from everos.infra.persistence.index import primary_key, user_profile_repo
 
 from ..dto import SearchProfileItem
 
@@ -29,7 +29,9 @@ logger = get_logger(__name__)
 class ProfileRecaller:
     """Fetch the owner's profile row from LanceDB, return at most one item."""
 
-    async def fetch(self, owner_id: str) -> list[SearchProfileItem]:
+    async def fetch(
+        self, owner_id: str, *, app_id: str, project_id: str
+    ) -> list[SearchProfileItem]:
         """Return ``[item]`` if a profile row exists, otherwise ``[]``.
 
         Empty list (rather than 404) lets the caller emit a normal
@@ -38,7 +40,9 @@ class ProfileRecaller:
         """
         if not owner_id:
             return []
-        row = await user_profile_repo.get_by_id(owner_id)
+        row = await user_profile_repo.find_one_where(
+            primary_key(app_id, project_id, owner_id)
+        )
         if row is None:
             logger.debug("profile_fetch_miss", owner_id=owner_id)
             return []

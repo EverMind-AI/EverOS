@@ -19,6 +19,8 @@ import typer
 from everos.config.settings import resolve_root
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 
+from .server import MCP_GUIDE_URL
+
 _EVEROS_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default.toml"
 _OME_TEMPLATE = Path(__file__).resolve().parents[3] / "config" / "default_ome.toml"
 
@@ -97,3 +99,6 @@ def register(parent: typer.Typer) -> None:
         typer.echo(f"  1. Edit {everos_toml} — fill in API keys (see comments inside)")
         root_flag = f" --root {resolved}" if root else ""
         typer.echo(f"  2. Run: everos server start{root_flag}")
+        typer.echo(
+            f"  3. Connect an MCP client (Claude Code, Codex, Cursor): {MCP_GUIDE_URL}"
+        )

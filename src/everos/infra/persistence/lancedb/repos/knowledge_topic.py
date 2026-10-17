@@ -6,11 +6,14 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceRepoBase
 
+from ...records.knowledge_topic import KnowledgeTopic
 from ..lancedb_manager import get_table
-from ..tables.knowledge_topic import KnowledgeTopic
+from ._contract import LanceIndexContract
 
 
-class _KnowledgeTopicRepo(LanceRepoBase[KnowledgeTopic]):
+class _KnowledgeTopicRepo(
+    LanceIndexContract[KnowledgeTopic], LanceRepoBase[KnowledgeTopic]
+):
     """LanceDB repository for the ``knowledge_topic`` table."""
 
     schema = KnowledgeTopic

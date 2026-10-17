@@ -79,10 +79,16 @@ class _ProfileStubRepo:
     """Stub ``user_profile_repo`` — returns its configured row by id."""
 
     row: Any = None
-    last_id: str | None = None
+    last_key: tuple[str, str, str] | None = None
 
-    async def get_by_id(self, id_: str) -> Any:
-        self.last_id = id_
+    async def find_one_where(self, where: Any) -> Any:
+        wanted = {c.field: c.value for c in where.children}
+        self.last_key = (wanted["app_id"], wanted["project_id"], wanted["id"])
+        if self.row is None or (self.row.app_id, self.row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
         return self.row
 
 
@@ -254,7 +260,7 @@ async def test_episodic_memory_passes_where_and_sort_to_repo(
         filters=FilterNode.model_validate({"session_id": "sess_a"}),
     )
     await mgr.get(req)
-    from everos.infra.persistence.backends.lancedb import render_predicate
+    from everos.infra.persistence.lancedb import render_predicate
 
     rendered = render_predicate(ep.last.where)
     assert "owner_id = 'u1'" in rendered
@@ -305,7 +311,7 @@ async def test_profile_hit_shapes_row_into_item(
     assert item.id == "u1"
     assert item.user_id == "u1"
     # KV fetch keys on owner_id.
-    assert profile_repo.last_id == "u1"
+    assert profile_repo.last_key == ("default", "default", "u1")
     # json buckets are decoded back into structured profile_data.
     assert item.profile_data["summary"] == "u1 loves climbing in Yosemite"
     assert item.profile_data["explicit_info"] == [
@@ -370,3 +376,13 @@ async def test_agent_skill_explicit_updated_at_is_respected(
     )
     await mgr.get(req)
     assert sk.last.sort_by == "updated_at"
+
+
+async def test_profile_missing_in_scope_is_empty(manager, profile_repo) -> None:  # type: ignore[no-untyped-def]
+    """A profile row in another project does not answer this project's get."""
+    mgr, *_ = manager
+    profile_repo.row = _user_profile_row("u1")  # lives in default/default
+    req = GetRequest(user_id="u1", memory_type=GetMemoryType.PROFILE, project_id="beta")
+    resp = await mgr.get(req)
+    assert resp.data.profiles == []
+    assert profile_repo.last_key == ("default", "beta", "u1")

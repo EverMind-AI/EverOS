@@ -201,12 +201,14 @@ async def test_embed_subject_batch_isolates_poison_row(
         result = await _embed_subject_batch(provider, batch, "episode")  # type: ignore[arg-type]
 
     # Only rows with a subject and a successful per-row retry appear.
-    assert set(result) == {"r0", "r3"}
-    assert result["r0"] == [7.0, 7.0, 7.0]
-    assert result["r3"] == [7.0, 7.0, 7.0]
+    # The map is keyed by the row's full key, (app_id, project_id, id).
+    key = lambda rid: ("default", "default", rid)  # noqa: E731
+    assert set(result) == {key("r0"), key("r3")}
+    assert result[key("r0")] == [7.0, 7.0, 7.0]
+    assert result[key("r3")] == [7.0, 7.0, 7.0]
     # r1 has no subject, r2 is the poison — neither in the map.
-    assert "r1" not in result
-    assert "r2" not in result
+    assert key("r1") not in result
+    assert key("r2") not in result
 
     # The subject-specific per-row event carries r2's id + prefix.
     assert "cascade_backfill_row_subject_embed_failed" in caplog.text
@@ -221,7 +223,7 @@ async def test_embed_subject_batch_happy_path_skips_fallback() -> None:
 
     result = await _embed_subject_batch(provider, batch, "episode")  # type: ignore[arg-type]
 
-    assert set(result) == {"r0"}
+    assert set(result) == {("default", "default", "r0")}
     assert provider.batch_calls == 1
     assert provider.per_row_calls == 0
 

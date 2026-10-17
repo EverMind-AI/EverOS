@@ -102,7 +102,7 @@ async def test_export_frame_freezes_animation_before_rendering_requested_state(
 
     await _export_frame(path, FramePlan(state="booting", phase=0.0))
 
-    svg = html.unescape(path.read_text()).replace("\xa0", " ")
+    svg = html.unescape(path.read_text(encoding="utf-8")).replace("\xa0", " ")
     assert "working..." in svg
     assert "ingesting conversation dots" not in svg
 
@@ -112,6 +112,6 @@ async def test_export_frame_preserves_poster_palette(tmp_path) -> None:
 
     await _export_frame(path, FramePlan(state="remembered", phase=0.5))
 
-    svg = path.read_text().lower()
+    svg = path.read_text(encoding="utf-8").lower()
     assert "#f9b91c" in svg
     assert "#f5eddc" in svg

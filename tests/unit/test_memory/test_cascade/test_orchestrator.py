@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import patch
@@ -70,6 +71,22 @@ async def test_double_start_is_idempotent(runtime: MemoryRoot) -> None:
         assert orch._watcher is first_watcher
         assert watcher_cls.call_count == 1
         await orch.stop()
+
+
+async def test_start_settles_the_reconcile_marker(runtime: MemoryRoot) -> None:
+    """The server path: the first ``start()`` on a root runs the one-time
+    reconcile and records it, so the next start does not queue the ledger."""
+    from everos.memory.cascade.orchestrator import reconcile_index_once
+
+    with patch("everos.memory.cascade.orchestrator.CascadeWatcher"):
+        orch = _make_orchestrator(runtime)
+        await orch.start()
+        try:
+            marker = runtime.index_dir / ".index_reconcile_version"
+            assert marker.read_text(encoding="utf-8") == "1"
+            assert await reconcile_index_once(runtime) == []
+        finally:
+            await orch.stop()
 
 
 async def test_stop_before_start_is_noop(runtime: MemoryRoot) -> None:
@@ -147,6 +164,30 @@ async def test_permanent_failures_are_informational_not_unhealthy(
     assert health.reasons == []
 
 
+async def test_forced_reconcile_settles_the_marker(runtime: MemoryRoot) -> None:
+    """``cascade sync --force-all`` runs the reconcile pass on demand and
+    records it, so the unscoped ``sync_once`` right after it does not queue
+    the whole ledger a second time."""
+    from everos.infra.persistence.sqlite import md_change_state_repo
+    from everos.memory.cascade.orchestrator import reconcile_index_once
+
+    path = "users/u1/episodes/ep_1.md"
+    orch = _make_orchestrator(runtime)
+    await md_change_state_repo.upsert(
+        path, kind="episode", change_type="added", mtime=1.0
+    )
+    await md_change_state_repo.claim_pending_batch(10)
+    await md_change_state_repo.mark_done(path)
+
+    forced = await orch.force_enqueue_all()
+
+    assert [r.md_path for r in forced] == [path]
+    row = await md_change_state_repo.get_by_id(path)
+    assert row is not None and row.status == "pending" and row.mtime == 1.0
+    assert (runtime.index_dir / ".index_reconcile_version").read_text() == "1"
+    assert await reconcile_index_once(runtime) == []
+
+
 async def test_operational_signal_flips_healthy(
     runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -186,6 +227,7 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_INTERVAL_SECONDS", "22")
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_PRUNE_RETENTION_SECONDS", "33")
     monkeypatch.setenv("EVEROS_CASCADE__OPTIMIZE_REBUILD_INTERVAL_SECONDS", "44")
+    monkeypatch.setenv("EVEROS_CASCADE__SCAN_INTERVAL_SECONDS", "55")
     load_settings.cache_clear()  # type: ignore[attr-defined]
     try:
         cfg = CascadeConfig.from_settings()
@@ -194,7 +236,8 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
             cfg.optimize_prune_interval_seconds,
             cfg.optimize_prune_retention_seconds,
             cfg.optimize_rebuild_interval_seconds,
-        ) == (11.0, 22.0, 33.0, 44.0)
+            cfg.scan_interval_seconds,
+        ) == (11.0, 22.0, 33.0, 44.0, 55.0)
 
         orch = CascadeOrchestrator(
             memory_root=MemoryRoot.resolve(), tokenizer=build_tokenizer(), config=cfg
@@ -204,6 +247,9 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
         assert worker._optimize_prune_interval == 22.0
         assert worker._optimize_prune_retention == 33.0
         assert worker._optimize_rebuild_interval == 44.0
+        # The scanner is the other consumer; on an event-less mount it is the
+        # only one, so it must see the value too, not just CascadeConfig.
+        assert orch._scanner._interval == 55.0
     finally:
         load_settings.cache_clear()  # type: ignore[attr-defined]
 
@@ -225,6 +271,7 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
         "optimize_prune_interval_seconds",
         "optimize_prune_retention_seconds",
         "optimize_rebuild_interval_seconds",
+        "scan_interval_seconds",
     }
     assert not any("timeout" in f or "deadline" in f for f in exposed)
 
@@ -250,3 +297,115 @@ async def test_watcher_can_be_disabled_without_losing_the_worker(
         assert orch._worker is not None
         assert orch._scanner is not None
         await orch.stop()
+
+
+class _SharedQueue:
+    """A ledger two drainers claim from: this orchestrator's passes and, inside
+    a server, the background worker. ``held`` is the batch the worker has
+    claimed (``processing``), which ``pending`` counts too."""
+
+    def __init__(self, rows: int, bound: int = 5000) -> None:
+        self.rows, self.bound, self.held = rows, bound, 0
+        self.drains: list[int] = []
+        self.summaries: list[int] = []
+
+    async def drain(self, **_: object) -> int:
+        took = min(self.rows, self.bound)
+        self.rows -= took
+        self.drains.append(took)
+        return took
+
+    async def summary(self) -> object:
+        pending = self.rows + self.held
+        self.summaries.append(pending)
+        return type("S", (), {"pending": pending})()
+
+
+def _patched(orch: CascadeOrchestrator, q: _SharedQueue) -> tuple:
+    return (
+        patch.object(orch, "sync_once", side_effect=q.drain),
+        patch.object(orch, "drain_once", side_effect=q.drain),
+        patch.object(orch, "queue_summary", side_effect=q.summary),
+    )
+
+
+async def test_drain_fully_keeps_draining_past_the_worker_bound(
+    runtime: MemoryRoot,
+) -> None:
+    """The worker bounds one drain (``max_passes`` x batch size). The ledger
+    the one-time reconcile queues after an upgrade can exceed that bound, and
+    a caller that stops there reports success with rows still pending.
+    """
+    orch = _make_orchestrator(runtime)
+    q = _SharedQueue(rows=5003)
+    a, b, c = _patched(orch, q)
+    with a, b, c:
+        assert await orch.drain_fully() == 5003
+    assert q.rows == 0
+    assert q.drains == [
+        5000,
+        3,
+    ]  # the scan's drain, then the rest; the ledger says when to stop
+
+
+async def test_drain_fully_waits_for_a_batch_another_drainer_holds(
+    runtime: MemoryRoot,
+) -> None:
+    """Inside a server the background worker claims batches too. A pass of
+    ours can find nothing pending while the worker still holds the last
+    batch; ``POST /cascade/quiesce`` cancels the worker right after, which
+    would orphan that batch in ``processing`` and freeze a partial index
+    (real host, 12000-row ledger: 50 rows left behind). So the ledger, not
+    our own pass, says when the drain is done.
+    """
+    orch = _make_orchestrator(runtime)
+    q = _SharedQueue(rows=5050)
+    a, b, c = _patched(orch, q)
+    with a, b, c:
+
+        async def first_pass(**_: object) -> int:
+            took = await q.drain()  # 5000 by us; the worker claims the last 50
+            q.rows, q.held = 0, 50
+            return took
+
+        async def worker_finishes_later(**_: object) -> int:
+            # our pass finds nothing pending; the worker's batch lands two polls later
+            if len(q.drains) >= 3:
+                q.held = 0
+            q.drains.append(0)
+            return 0
+
+        orch.sync_once.side_effect = first_pass
+        orch.drain_once.side_effect = worker_finishes_later
+        orch._config = dataclasses.replace(
+            orch._config, worker_poll_interval_seconds=0.01
+        )
+        processed = await orch.drain_fully()
+
+    assert q.summaries and q.summaries[-1] == 0, (
+        "returned while the worker held a batch"
+    )
+    assert processed == 5000
+
+
+async def test_drain_fully_gives_up_when_the_ledger_stops_moving(
+    runtime: MemoryRoot,
+) -> None:
+    """A row stuck in ``processing`` (a hung handler) must not hang the caller
+    forever; after the idle limit the drain returns and the caller reports
+    what is left."""
+    orch = _make_orchestrator(runtime)
+    q = _SharedQueue(rows=0)
+    q.held = 1
+    a, b, c = _patched(orch, q)
+    with (
+        a,
+        b,
+        c,
+        patch("everos.memory.cascade.orchestrator._DRAIN_IDLE_LIMIT_SECONDS", 0.05),
+    ):
+        orch._config = dataclasses.replace(
+            orch._config, worker_poll_interval_seconds=0.01
+        )
+        assert await orch.drain_fully() == 0
+    assert q.summaries[-1] == 1  # gave up with the row still held, and said so

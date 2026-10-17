@@ -125,12 +125,10 @@ async def _build_row_from_md(
         structured=structured,
         content_sha256=handler._content_sha256(structured),
     )
-    return await handler._build_row(
-        owner_id=owner_id,
-        owner_type=owner_type,
-        md_path=rel,
-        entry=pe,
+    [row] = await handler._embed_entries(
+        [pe], owner_id, owner_type, "default", "default", rel
     )
+    return row
 
 
 async def test_atomic_fact_strategy_md_feeds_handler_with_content(

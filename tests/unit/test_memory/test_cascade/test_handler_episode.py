@@ -35,7 +35,8 @@ class _StubTokenizer(Tokenizer):
 
 
 class _StubEmbedder(EmbeddingProvider):
-    """Returns a fixed 1024-dim vector; records call count."""
+    """Returns a fixed 1024-dim vector; counts the texts embedded (the
+    batch path reaches ``embed`` once per text via ``embed_batch``)."""
 
     dim = 1024
 
@@ -57,8 +58,12 @@ class _FakeEpisodeRepo:
         self.upserts: list[list[Episode]] = []
         self.deletes: list[str] = []
         self.rows: list[Episode] = []
+        self.find_where_skip_vectors: list[bool] = []
 
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[Episode]:
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[Episode]:
+        self.find_where_skip_vectors.append(skip_vectors)
         if isinstance(where, Comparison) and where.field == "md_path":
             md_path = str(where.value)
             return [r for r in self.rows if r.md_path == md_path]
@@ -162,7 +167,7 @@ async def test_added_entry_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     assert outcome.skipped == 0
-    # Subject "Test" is present → two embed calls (content + subject).
+    # Subject "Test" is present → two texts embedded (content + subject).
     assert embedder.calls == 2
     assert len(fake_repo.upserts) == 1
     row = fake_repo.upserts[0][0]
@@ -184,6 +189,26 @@ async def test_added_entry_upserts_typed_row(
     assert len(row.vector) == 1024
     assert row.subject_vector is not None
     assert len(row.subject_vector) == 1024
+
+
+async def test_existing_row_lookup_projects_vectors_away(
+    memory_root: MemoryRoot,
+    fake_repo: _FakeEpisodeRepo,
+    stub_embedder: _StubEmbedder,
+) -> None:
+    """The per-file diff reads ``entry_id`` + ``content_sha256`` and nothing else.
+
+    Dropping the two 1024-D vector columns from that lookup is the whole point
+    of the projection; without this assertion the kwarg can be removed and
+    every other cascade test still passes.
+    """
+    writer = EpisodeWriter(memory_root)
+    rel = await _write_one_entry(writer, "u1", "hello world")
+
+    handler = _build_handler(memory_root)
+    await handler.handle_added_or_modified(rel)
+
+    assert fake_repo.find_where_skip_vectors == [True]
 
 
 async def test_unchanged_entry_is_skipped_no_embed_call(
@@ -230,7 +255,7 @@ async def test_modified_entry_reembeds(
     outcome = await handler.handle_added_or_modified(rel)
     assert outcome.upserted == 1
     assert outcome.skipped == 0
-    # Subject "Test" is present → two embed calls (content + subject).
+    # Subject "Test" is present → two texts embedded (content + subject).
     assert embedder.calls == 2
 
 
@@ -239,7 +264,7 @@ async def test_no_subject_skips_subject_embed(
     fake_repo: _FakeEpisodeRepo,
     stub_embedder: _StubEmbedder,
 ) -> None:
-    """When Subject is absent, subject_vector is None; only one embed call is made."""
+    """When Subject is absent, subject_vector is None; only content is embedded."""
     today = _dt.date(2026, 5, 14)
     writer = EpisodeWriter(memory_root)
     await writer.append_entry(
@@ -262,7 +287,7 @@ async def test_no_subject_skips_subject_embed(
     outcome = await handler.handle_added_or_modified(rel)
 
     assert outcome.upserted == 1
-    # No Subject → single embed call for content only.
+    # No Subject → only the content text is embedded.
     assert embedder.calls == 1
     row = fake_repo.upserts[0][0]
     assert row.subject_vector is None

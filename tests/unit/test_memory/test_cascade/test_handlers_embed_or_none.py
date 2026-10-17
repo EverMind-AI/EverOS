@@ -1,11 +1,12 @@
 """Contract: every memory handler writes ``vector=None`` when embedding is
 unavailable.
 
-Handlers fetch the embedder lazily via
+The base handler fetches the embedder lazily via
 ``everos.component.embedding.get_embedding_capability()`` rather than
-receiving it through :class:`HandlerDeps`. When the process-wide
-capability wraps ``provider=None`` (embedding not configured), each
-handler must still upsert its row — BM25 tokenization and scalar
+receiving it through :class:`HandlerDeps`, and embeds every changed entry
+of a file in one batch. When the process-wide capability wraps
+``provider=None`` (embedding not configured), each kind must still build
+its row — BM25 tokenization and scalar
 columns are populated as usual — but with ``vector`` (and, for Episode,
 ``subject_vector`` too) left as ``None`` rather than raising.
 """
@@ -13,6 +14,7 @@ columns are populated as usual — but with ``vector`` (and, for Episode,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -82,11 +84,25 @@ def _entry(
     )
 
 
+async def _embed_one(handler, **kw):  # type: ignore[no-untyped-def]
+    """Run one entry through the batch embed path (the production route)."""
+    [row] = await handler._embed_entries(
+        [kw["entry"]],
+        kw["owner_id"],
+        kw["owner_type"],
+        kw.get("app_id", "default"),
+        kw.get("project_id", "default"),
+        kw["md_path"],
+    )
+    return row
+
+
 async def test_atomic_fact_handler_writes_null_vector_when_embed_unavailable(
     memory_root: MemoryRoot,
 ) -> None:
     handler = AtomicFactHandler(_deps(memory_root))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="x.md",
@@ -110,7 +126,8 @@ async def test_foresight_handler_writes_null_vector_when_embed_unavailable(
     memory_root: MemoryRoot,
 ) -> None:
     handler = ForesightHandler(_deps(memory_root))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="x.md",
@@ -133,7 +150,8 @@ async def test_agent_case_handler_writes_null_vector_when_embed_unavailable(
     memory_root: MemoryRoot,
 ) -> None:
     handler = AgentCaseHandler(_deps(memory_root))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="a1",
         owner_type="agent",
         md_path="x.md",
@@ -158,7 +176,8 @@ async def test_episode_handler_writes_null_vectors_when_embed_unavailable(
 ) -> None:
     """Episode has two vector columns — both must degrade to ``None``."""
     handler = EpisodeHandler(_deps(memory_root))
-    row = await handler._build_row(
+    row = await _embed_one(
+        handler,
         owner_id="u1",
         owner_type="user",
         md_path="x.md",
@@ -183,15 +202,24 @@ class _FakeSkillRepo:
         self.rows: dict = {}
         self.upserts: list = []
 
-    async def get_by_id(self, row_id: str):  # type: ignore[no-untyped-def]
-        return self.rows.get(row_id)
+    async def find_one_where(self, where: Any) -> Any | None:
+        wanted = {c.field: c.value for c in where.children}
+        row = self.rows.get(wanted["id"])
+        if row is None or (row.app_id, row.project_id) != (
+            wanted["app_id"],
+            wanted["project_id"],
+        ):
+            return None
+        return row
 
     async def upsert(self, rows) -> None:  # type: ignore[no-untyped-def]
         self.upserts.append(list(rows))
         for row in rows:
             self.rows[row.id] = row
 
-    async def find_where(self, predicate: str, *, limit: int):  # type: ignore[no-untyped-def]
+    async def find_where(
+        self, predicate: str, *, limit: int, skip_vectors: bool = False
+    ):  # type: ignore[no-untyped-def]
         return []
 
     async def delete(self, predicate: str) -> None:  # type: ignore[no-untyped-def]

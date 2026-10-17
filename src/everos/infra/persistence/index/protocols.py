@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Any, Protocol, TypeVar, overload, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -29,17 +29,21 @@ class IndexRepository(Protocol[T]):
     @property
     def table_name(self) -> str: ...
 
-    async def add(self, records: Sequence[T]) -> None: ...
+    async def upsert(self, records: Sequence[T]) -> None:
+        """Merge ``records`` on the table's declared ``PRIMARY_KEY``.
 
-    async def upsert(self, records: Sequence[T], *, by: str = "id") -> None: ...
+        The only write on the contract: no plain insert and no caller-chosen
+        key, so two rows with one key cannot be created through it.
+        """
+        ...
 
     async def count(self) -> int: ...
 
     async def count_where(self, where: Predicate | None = None) -> int: ...
 
-    async def get_by_id(self, id_value: str, *, id_field: str = "id") -> T | None: ...
-
-    async def find_where(self, where: Predicate, *, limit: int = 100) -> list[T]: ...
+    async def find_where(
+        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+    ) -> list[T]: ...
 
     async def find_one_where(self, where: Predicate) -> T | None: ...
 
@@ -56,6 +60,7 @@ class IndexRepository(Protocol[T]):
         project_id: str = "default",
     ) -> T | None: ...
 
+    @overload
     async def find_by_owner_entries(
         self,
         owner_id: str,
@@ -63,7 +68,32 @@ class IndexRepository(Protocol[T]):
         *,
         app_id: str = "default",
         project_id: str = "default",
+        columns: None = None,
+        skip_vectors: bool = False,
     ) -> list[T]: ...
+
+    @overload
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str],
+        skip_vectors: bool = False,
+    ) -> list[dict[str, Any]]: ...
+
+    async def find_by_owner_entries(
+        self,
+        owner_id: str,
+        entry_ids: Sequence[str],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+        columns: Sequence[str] | None = None,
+        skip_vectors: bool = False,
+    ) -> list[T] | list[dict[str, Any]]: ...
 
     async def find_by_session(
         self, owner_id: str, session_id: str, *, limit: int = 100
@@ -123,6 +153,8 @@ class IndexRepository(Protocol[T]):
     async def prune(self, older_than: dt.timedelta) -> None: ...
 
     async def rebuild_indexes(self) -> None: ...
+
+    async def ensure_vector_indexes(self) -> None: ...
 
 
 @runtime_checkable

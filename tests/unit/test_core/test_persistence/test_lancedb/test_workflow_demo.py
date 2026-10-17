@@ -19,6 +19,7 @@ End-to-end story for how to author + use a LanceDB-backed table in everos:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 from everos.config import LanceDBSettings
 from everos.core.persistence import (
@@ -31,6 +32,8 @@ from everos.core.persistence import (
 
 class _DemoNote(BaseLanceTable):
     """Demo table — used only by this test module."""
+
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
 
     text: str
     vector: Vector(4)  # 4-dim for the test fixture

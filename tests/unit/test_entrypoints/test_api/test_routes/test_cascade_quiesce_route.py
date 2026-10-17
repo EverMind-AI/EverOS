@@ -48,7 +48,7 @@ def _orch(*, before: int, after: int, drained: int) -> mock.MagicMock:
         _Summary(pending=before),
         _Summary(pending=after, failed_permanent=2),
     ]
-    orch.sync_once.return_value = drained
+    orch.drain_fully.return_value = drained
     return orch
 
 
@@ -64,7 +64,7 @@ async def test_drains_before_stopping() -> None:
     then reads as a healthy store that quietly under-recalls."""
     orch = _orch(before=7, after=0, drained=7)
     order: list[str] = []
-    orch.sync_once.side_effect = lambda **_: order.append("drain") or 7
+    orch.drain_fully.side_effect = lambda: order.append("drain") or 7
     orch.stop.side_effect = lambda: order.append("stop")
 
     async with _client(orch) as c:
@@ -72,6 +72,20 @@ async def test_drains_before_stopping() -> None:
 
     assert resp.status_code == 200, resp.text
     assert order == ["drain", "stop"], "stopped before draining"
+
+
+async def test_drains_past_the_worker_bound() -> None:
+    """One ``sync_once`` stops at the worker's bound (``max_passes`` x batch
+    size). The ledger the one-time reconcile queues after an upgrade can exceed
+    it, and a quiesce that stopped there would freeze a partial index while
+    reporting ``quiesced=true``."""
+    orch = _orch(before=5003, after=0, drained=5003)
+    async with _client(orch) as c:
+        resp = await c.post("/api/v1/cascade/quiesce")
+
+    assert resp.json()["drained"] == 5003
+    assert orch.drain_fully.await_count == 1
+    assert orch.sync_once.await_count == 0
 
 
 async def test_reports_the_queue_on_both_sides() -> None:

@@ -13,6 +13,11 @@ Concurrency model:
 - ``embed_batch`` splits the inputs into chunks of ``batch_size``.
 - An :class:`asyncio.Semaphore` capped at ``max_concurrent`` bounds
   in-flight requests; remaining chunks queue and start as slots free.
+- ``embed_query`` draws on a **separate** semaphore of its own
+  (``query_max_concurrent``) so an interactive search never waits behind
+  the cascade's background writes. Total in-flight requests against the
+  endpoint are therefore ``max_concurrent + query_max_concurrent``; the
+  split is explicit rather than a silently doubled bound.
 - Retries / timeouts come from the openai SDK (``max_retries``,
   ``timeout`` constructor args).
 """
@@ -66,7 +71,9 @@ class OpenAIEmbeddingProvider:
         timeout: Per-request timeout, seconds.
         max_retries: Retry budget exposed via the openai SDK.
         batch_size: How many inputs per ``/embeddings`` call.
-        max_concurrent: Cap on in-flight chunked requests.
+        max_concurrent: Cap on in-flight chunked requests from write paths.
+        query_max_concurrent: Separate cap for interactive query embeds, so
+            a search is not queued behind the cascade (issue #473).
     """
 
     def __init__(
@@ -81,12 +88,14 @@ class OpenAIEmbeddingProvider:
         max_retries: int = 3,
         batch_size: int = 10,
         max_concurrent: int = 5,
+        query_max_concurrent: int = 4,
     ) -> None:
         self.dim = dim
         self._dimensions = dimensions
         self._model = model
         self._batch_size = batch_size
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._query_semaphore = asyncio.Semaphore(query_max_concurrent)
         self._client = openai.AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -95,8 +104,16 @@ class OpenAIEmbeddingProvider:
         )
 
     async def embed(self, text: str) -> list[float]:
-        """Embed a single string."""
+        """Embed a single string on the shared write budget."""
         vectors = await self._embed_chunk([text])
+        return vectors[0]
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed one interactive query on its own budget.
+
+        See :meth:`EmbeddingProvider.embed_query` for why this is separate.
+        """
+        vectors = await self._embed_chunk([text], semaphore=self._query_semaphore)
         return vectors[0]
 
     async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
@@ -112,8 +129,14 @@ class OpenAIEmbeddingProvider:
         # its internal order — so flattening yields the input order back.
         return [vec for chunk in results for vec in chunk]
 
-    async def _embed_chunk(self, chunk: list[str]) -> list[list[float]]:
-        """One ``/embeddings`` call, semaphore-guarded."""
+    async def _embed_chunk(
+        self, chunk: list[str], *, semaphore: asyncio.Semaphore | None = None
+    ) -> list[list[float]]:
+        """One ``/embeddings`` call, semaphore-guarded.
+
+        ``semaphore`` selects the budget: the write path's by default, the
+        query path's when :meth:`embed_query` passes its own.
+        """
         # Wrap in an EMBEDDING-typed span so token usage lands on an embedding
         # observation (which Langfuse can price) rather than the enclosing
         # retriever span. nested_only: skip when there is no active trace (e.g.
@@ -121,7 +144,7 @@ class OpenAIEmbeddingProvider:
         with memory_span(
             "everos.embedding", observation_type="embedding", nested_only=True
         ):
-            async with self._semaphore:
+            async with semaphore or self._semaphore:
                 try:
                     response = await self._client.embeddings.create(
                         model=self._model,
@@ -132,9 +155,12 @@ class OpenAIEmbeddingProvider:
                     )
                 except openai.OpenAIError as exc:
                     raise _classify(exc) from exc
-            if not response.data:
+            # Callers slice the batch back per input, so a short (or empty)
+            # list would silently shift every later vector onto the wrong text.
+            if len(response.data) != len(chunk):
                 raise EmbeddingServiceError(
-                    f"Embedding API returned empty data for {len(chunk)} inputs"
+                    f"Embedding API returned {len(response.data)} vectors "
+                    f"for {len(chunk)} inputs"
                 )
             # Embeddings report only input (prompt) tokens.
             usage = getattr(response, "usage", None)

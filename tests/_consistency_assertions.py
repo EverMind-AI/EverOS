@@ -48,9 +48,9 @@ import anyio
 
 from everos.core.persistence import MarkdownReader
 from everos.core.persistence.markdown.entries import StructuredEntry
-from everos.infra.persistence.index import eq
+from everos.infra.persistence.index import eq, primary_key
 from everos.infra.persistence.markdown import AgentSkillFrontmatter
-from everos.memory.cascade.handlers._common import content_sha256
+from everos.memory.cascade.handlers._common import content_sha256, resolve_scope
 from everos.memory.cascade.handlers._daily_log_base import BaseDailyLogHandler
 from everos.memory.cascade.handlers.agent_skill import AgentSkillHandler
 from everos.memory.cascade.handlers.user_profile import UserProfileHandler
@@ -247,7 +247,10 @@ async def _check_user_profile(
                 ),
             }
         )
-        lance_row = await spec.index_repo.get_by_id(owner_id)
+        app_id, project_id = resolve_scope(md_path)
+        lance_row = await spec.index_repo.find_one_where(
+            primary_key(app_id, project_id, owner_id)
+        )
         if lance_row is None:
             raise AssertionError(
                 f"user_profile row missing for owner {owner_id!r} @ {md_path}"
@@ -307,7 +310,10 @@ async def _check_agent_skill(
                 "references_content": references_content,
             }
         )
-        lance_row = await spec.index_repo.get_by_id(skill_id)
+        app_id, project_id = resolve_scope(md_path)
+        lance_row = await spec.index_repo.find_one_where(
+            primary_key(app_id, project_id, skill_id)
+        )
         if lance_row is None:
             raise AssertionError(
                 f"agent_skill row missing for skill {skill_id!r} @ {md_path}"

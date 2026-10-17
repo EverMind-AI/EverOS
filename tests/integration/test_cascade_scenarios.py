@@ -40,8 +40,8 @@ from everos.infra.persistence.lancedb import (
     ensure_business_indexes,
 )
 from everos.infra.persistence.lancedb.lancedb_manager import get_table
-from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
 from everos.infra.persistence.markdown import AtomicFactWriter
+from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.sqlite import (
     dispose_engine,
     get_engine,

@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from everos.component.utils.datetime import get_utc_now
+from everos.core.errors import PathTraversalError
+from everos.core.persistence import MemoryRoot
 from everos.infra.persistence.sqlite.repos.knowledge import DocumentListPage
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
@@ -220,8 +222,11 @@ async def test_delete_document_success(tmp_path: Path) -> None:
     mock_anyio.to_thread.run_sync.assert_awaited_once()
 
 
-async def test_delete_document_idempotent() -> None:
+async def test_delete_document_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Returns deleted_topics=0 without error when document does not exist."""
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
         mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
 
@@ -230,6 +235,58 @@ async def test_delete_document_idempotent() -> None:
     assert isinstance(result, DeleteResult)
     assert result.doc_id == "d_missing"
     assert result.deleted_topics == 0
+
+
+async def test_delete_document_removes_dir_before_the_index_has_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document created a moment ago has a directory but no SQLite row yet
+    (the cascade trails the markdown by seconds). Delete must still remove the
+    directory — and only that directory — and report the topic files it held.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    kdir = tmp_path / "app1" / "proj1" / "knowledge"
+    doc_dir = kdir / "Technology" / "Release_checklist_d_lagging00001"
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "index.md").write_text("---\ndoc_id: d_lagging00001\n---\n")
+    (doc_dir / "1_before.md").write_text("# before\n")
+    (doc_dir / "2_after.md").write_text("# after\n")
+    sibling = kdir / "Technology" / "Other_notes_d_sibling000001"
+    sibling.mkdir()
+    (sibling / "index.md").write_text("---\ndoc_id: d_sibling000001\n---\n")
+    (kdir / ".taxonomy.md").write_text("# taxonomy\n")
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
+        result = await delete_document("d_lagging00001", "app1", "proj1")
+
+    assert result.deleted_topics == 2
+    assert not doc_dir.exists()
+    assert sibling.is_dir()
+    assert (kdir / ".taxonomy.md").exists()
+
+
+@pytest.mark.parametrize("doc_id", ["d_absent0000001", "*", "*/_original"])
+async def test_delete_document_unindexed_id_not_on_disk_removes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, doc_id: str
+) -> None:
+    """No row and no directory for the id → nothing is touched, including
+    when the id looks like a glob pattern or a path: the name match is literal.
+    """
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    kdir = tmp_path / "app1" / "proj1" / "knowledge"
+    sibling = kdir / "Technology" / "Other_notes_d_sibling000001"
+    sibling.mkdir(parents=True)
+    (sibling / "index.md").write_text("---\ndoc_id: d_sibling000001\n---\n")
+    (sibling / "_original").mkdir()
+
+    with patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo:
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
+        result = await delete_document(doc_id, "app1", "proj1")
+
+    assert result.deleted_topics == 0
+    assert (sibling / "index.md").exists()
+    assert (sibling / "_original").is_dir()
 
 
 # ── list_documents ────────────────────────────────────────────────────────────
@@ -343,3 +400,86 @@ async def test_patch_document_not_found_raises() -> None:
 
         with pytest.raises(DocumentNotFoundError):
             await patch_document("d_missing", "app1", "proj1", title="New")
+
+
+# ── patch_document: category move containment ────────────────────────────────
+
+
+def _lay_out_doc(root: MemoryRoot, category: str) -> Path:
+    """Create ``knowledge/<category>/Doc_<id>/`` on disk; return the doc dir."""
+    doc_dir = root.knowledge_dir("app1", "proj1") / category / "Doc_d_testdoc00001"
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "index.md").write_text("---\ntitle: Test Doc\n---\n")
+    (doc_dir / "1_intro.md").write_text("---\ncategory_id: Technology\n---\n")
+    return doc_dir
+
+
+async def _patch_category(root: MemoryRoot, md_path: str, category_id: str) -> None:
+    doc = _doc_row(md_path=md_path)
+    with (
+        patch(f"{_MOD}.MemoryRoot.resolve", return_value=root),
+        patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo,
+    ):
+        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=doc)
+        mock_doc_repo.upsert_from_handler = AsyncMock(return_value=None)
+        await patch_document("d_testdoc00001", "app1", "proj1", category_id=category_id)
+
+
+@pytest.mark.parametrize(
+    ("category_id", "expected_dir"),
+    [("Research Notes", "Research_Notes"), ("..", "Others"), (".", "Others")],
+)
+async def test_patch_document_category_move_stays_in_knowledge(
+    tmp_path: Path, category_id: str, expected_dir: str
+) -> None:
+    """``.``/``..`` fall back to ``Others`` like the create path does."""
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    md_path = str((doc_dir / "index.md").relative_to(root.root))
+
+    await _patch_category(root, md_path, category_id)
+
+    knowledge_dir = root.knowledge_dir("app1", "proj1")
+    moved = knowledge_dir / expected_dir / "Doc_d_testdoc00001"
+    assert (moved / "index.md").is_file()
+    assert (moved / "1_intro.md").is_file()
+    assert not doc_dir.exists()
+    assert not (knowledge_dir.parent / "Doc_d_testdoc00001").exists()
+
+
+async def test_patch_document_category_move_repairs_escaped_doc(
+    tmp_path: Path,
+) -> None:
+    """A doc an earlier ``..`` move left outside ``knowledge/`` is moved back."""
+    root = MemoryRoot(tmp_path)
+    knowledge_dir = root.knowledge_dir("app1", "proj1")
+    knowledge_dir.mkdir(parents=True)
+    escaped = knowledge_dir.parent / "Doc_d_testdoc00001"
+    escaped.mkdir()
+    (escaped / "index.md").write_text("---\ntitle: Test Doc\n---\n")
+    md_path = str(
+        knowledge_dir.relative_to(root.root) / ".." / escaped.name / "index.md"
+    )
+
+    await _patch_category(root, md_path, "Science")
+
+    assert (knowledge_dir / "Science" / escaped.name / "index.md").is_file()
+    assert not escaped.exists()
+
+
+async def test_patch_document_category_move_rejects_escaping_target(
+    tmp_path: Path,
+) -> None:
+    """A category dir symlinked out of ``knowledge/`` trips the backstop."""
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root.knowledge_dir("app1", "proj1") / "Others").symlink_to(outside)
+    md_path = str((doc_dir / "index.md").relative_to(root.root))
+
+    with pytest.raises(PathTraversalError):
+        await _patch_category(root, md_path, "..")
+
+    assert doc_dir.is_dir()
+    assert not any(outside.iterdir())

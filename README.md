@@ -359,13 +359,13 @@ Browser-native hive-mind for CLI coding agents - Claude Code, Codex, Gemini, and
 </td>
 <td width="50%" valign="top">
 
-[![banner-gif](https://github.com/user-attachments/assets/867d9329-ce9a-496f-ab1e-15c77974e5fa)](https://github.com/tt-a1i/evermemos-mcp)
+[![banner-gif](https://github.com/user-attachments/assets/8e217d39-5d15-4c6c-9b54-3e83add4e0f2)](https://github.com/EverMind-AI/EverOS-MCP)
 
-#### AI Coding Assistants With EverOS
+#### MCP Server for AI Coding Assistants
 
-Universal long-term memory layer for AI coding assistants, powered by EverOS.
+Plug EverOS memory into Claude Code, Codex, Claude Desktop or Cursor with `uvx everos-mcp`. Works with EverOS Cloud and with this self-hosted server.
 
-[Code](https://github.com/tt-a1i/evermemos-mcp)
+[Code](https://github.com/EverMind-AI/EverOS-MCP) · [Setup guide](docs/mcp.md)
 
 </td>
 </tr>
@@ -772,7 +772,7 @@ Contributions are welcome across the whole repository: memory methods, benchmark
 >
 > Help make EverOS better. Code, documentation, benchmark reports, use-case write-ups, and integration examples are all valuable. Share your projects on social media to inspire others.
 >
-> Connect with one of the EverOS maintainers [@elliotchen100](https://x.com/elliotchen100) on 𝕏 or [@cyfyifanchen](https://github.com/cyfyifanchen) on GitHub for project updates, discussions, and collaboration opportunities.
+> Connect with one of the EverOS maintainers [@ElliotChen](https://x.com/ElliotChen) on 𝕏 or [@cyfyifanchen](https://github.com/cyfyifanchen) on GitHub for project updates, discussions, and collaboration opportunities.
 
 ![divider](https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only)
 ![divider](https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only)

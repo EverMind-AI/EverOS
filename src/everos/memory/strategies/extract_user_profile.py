@@ -153,15 +153,20 @@ async def _select_via_cluster(
     # payloads we look up each episode's parent_id (= memcell_id)
     # in LanceDB, skipping merged episodes (parent_type=cluster)
     # whose source memcells were already processed before Reflection.
+    # Only the parent refs are needed: fresh clusters can hold thousands of
+    # members, and full rows would carry both embedding vectors per episode.
     entry_ids = [m for c in target_clusters for m in c.members]
     episodes = await episode_repo.find_by_owner_entries(
         event.owner_id,
         entry_ids,
         app_id=event.app_id,
         project_id=event.project_id,
+        columns=["parent_type", "parent_id"],
     )
     return [
-        ep.parent_id for ep in episodes if ep.parent_type == "memcell" and ep.parent_id
+        ep["parent_id"]
+        for ep in episodes
+        if ep["parent_type"] == "memcell" and ep["parent_id"]
     ]
 
 

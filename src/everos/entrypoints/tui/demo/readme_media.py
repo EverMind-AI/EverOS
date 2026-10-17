@@ -129,7 +129,7 @@ async def render_media(out_dir: Path) -> tuple[Path, Path]:
         frame_paths.append(frame_path)
 
     animation = out_dir / "everos-demo-tui-animation.svg"
-    animation.write_text(_build_animation_svg(frame_paths, plan))
+    animation.write_text(_build_animation_svg(frame_paths, plan), encoding="utf-8")
     return screenshot, animation
 
 
@@ -169,7 +169,9 @@ async def _export_frame(
     finally:
         if no_color is not None:
             os.environ["NO_COLOR"] = no_color
-    await anyio.Path(path).write_text(normalize_svg_terminal_ids(screenshot))
+    await anyio.Path(path).write_text(
+        normalize_svg_terminal_ids(screenshot), encoding="utf-8"
+    )
 
 
 def _export_screenshot_svg(app) -> str:
@@ -229,7 +231,7 @@ def _build_animation_svg(frame_paths: Sequence[Path], plan: Sequence[FramePlan])
 
 
 def _read_svg_dimensions(path: Path) -> tuple[str, str, str]:
-    svg_open = re.search(r"<svg\s+([^>]+)>", path.read_text())
+    svg_open = re.search(r"<svg\s+([^>]+)>", path.read_text(encoding="utf-8"))
     if svg_open is None:
         raise ValueError(f"could not find SVG root in {path}")
     view_box_match = re.search(r'viewBox="([^"]+)"', svg_open.group(0))

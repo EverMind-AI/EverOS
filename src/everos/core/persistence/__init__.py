@@ -27,6 +27,7 @@ External usage:
     )
 """
 
+from .index_record import IndexRecordMeta as IndexRecordMeta
 from .lancedb import BaseLanceTable as BaseLanceTable
 from .lancedb import LanceModel as LanceModel
 from .lancedb import LanceRepoBase as LanceRepoBase
@@ -76,6 +77,7 @@ __all__ = [
     "Entry",
     "EntryId",
     "Field",
+    "IndexRecordMeta",
     "LanceModel",
     "LanceRepoBase",
     "LockError",

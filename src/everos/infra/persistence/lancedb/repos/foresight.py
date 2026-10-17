@@ -6,11 +6,12 @@ from lancedb import AsyncTable
 
 from everos.core.persistence.lancedb import LanceDailyLogRepoBase
 
+from ...records.foresight import Foresight
 from ..lancedb_manager import get_table
-from ..tables.foresight import Foresight
+from ._contract import LanceIndexContract
 
 
-class _ForesightRepo(LanceDailyLogRepoBase[Foresight]):
+class _ForesightRepo(LanceIndexContract[Foresight], LanceDailyLogRepoBase[Foresight]):
     schema = Foresight
 
     async def _table_lookup(self) -> AsyncTable:

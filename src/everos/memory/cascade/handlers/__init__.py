@@ -2,8 +2,9 @@
 
 Four daily-log handlers (episode / atomic_fact / foresight /
 agent_case) inherit :class:`BaseDailyLogHandler` for the shared
-read / diff / upsert / delete loop; the per-kind subclass only
-declares its repo binding and ``_build_row`` mapping. ``agent_skill``,
+read / diff / embed / upsert / delete loop; the per-kind subclass only
+declares its repo binding, the texts to embed (``_embed_texts``) and
+the ``_build_row`` mapping. ``agent_skill``,
 ``user_profile``, and ``knowledge_topic`` stand alone — they're
 single-file kinds (no entries, no per-entry diff), so they implement
 :class:`Handler` directly and own their reconcile loop.

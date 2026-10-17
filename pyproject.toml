@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.3.1"
+version = "1.4.2"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -34,13 +34,20 @@ dependencies = [
     # docs/cascade_runbook.md. Never widen this floor back below 0.34 (older lance
     # cannot read v8 data).
     "lancedb>=0.34.0,<0.35.0",    # Vector + BM25 + scalar filter (Arrow-based)
+    # Floor, not a new package: lancedb pulls pyarrow in anyway. 25.0.1 stops
+    # the per-value `import pytz` attempt in to_pylist() (24 walked sys.path
+    # for every tz-aware timestamp) and materialises rows without a Scalar
+    # per element; 25.0.0 lacks the latter and has a mimalloc exit crash.
+    "pyarrow>=25.0.1",
     "aiosqlite>=0.20.0",          # Async SQLite driver (used by SA async engine)
     "sqlmodel>=0.0.22",           # ORM (Pydantic + SQLAlchemy 2.0 async)
     "alembic>=1.13.0",            # SQLite schema migrations
     "greenlet>=3.0",              # Required by SQLAlchemy async
 
     # LLM & embedding (one provider per file pattern)
-    "openai>=1.0.0",
+    # <3: openai 3.x (2026-09-24) moved to the httpx 1.0 pre-release line and its
+    # client raises AttributeError on every request; 2.x is what the lock tests.
+    "openai>=1.0.0,<3",
 
     # Markdown / file system
     "PyYAML>=6.0",                # YAML frontmatter parsing
@@ -73,6 +80,10 @@ dependencies = [
     # OME (Offline Memory Evolution) async scheduler & file I/O
     "apscheduler>=3.10.4,<4.0",   # async strategy scheduler chassis
     "portalocker>=2.8.2",          # cross-platform file lock for single-engine guard
+    # Windows only: the MSVC C++ runtime (msvcp140.dll et al.) that greenlet's
+    # wheel links against and a stock Windows does not ship. It lands in
+    # sys.prefix; everos/__init__.py registers that dir with the DLL loader.
+    "msvc-runtime>=14.44; sys_platform == 'win32'",
     "watchfiles>=0.21.0",          # native fs watcher for config hot reload
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
@@ -255,8 +266,8 @@ forbidden_modules = [
     "everos.infra.persistence.lancedb.**",
     "everos.infra.persistence.sqlite.**",
     "everos.infra.persistence.index.**",
+    "everos.infra.persistence.records.**",
     "everos.infra.persistence.milvus.**",
-    "everos.infra.persistence.backends.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -273,11 +284,16 @@ forbidden_modules = [
 # (e.g. ``from everos.infra.persistence.sqlite.tables import X`` written
 # in ``service`` or ``entrypoints``) remain blocked — that edge is not
 # in this whitelist.
+#
+# One edge below is *not* intra-subpackage wiring: ``lancedb -> records``.
+# ``records/`` holds the table declarations every index backend reads
+# (TABLE_NAME / BM25_FIELDS / PRIMARY_KEY); it is the one shared schema
+# module inside ``persistence/`` (docs/architecture.md, dependency table).
 ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.tables",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.repos",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.sqlite_manager",
-    "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.tables",
+    "everos.infra.persistence.lancedb -> everos.infra.persistence.records",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.repos",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.lancedb_manager",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.mds",
@@ -287,13 +303,16 @@ ignore_imports = [
     "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
     "everos.infra.persistence.index -> everos.infra.persistence.index.router",
     "everos.infra.persistence.index -> everos.infra.persistence.index.schema",
-    "everos.infra.persistence.index -> everos.infra.persistence.backends.lancedb",
-    "everos.infra.persistence.index -> everos.infra.persistence.backends.milvus",
+    # The facade and the router select the engine at call time; the Milvus
+    # import is function-level so pymilvus stays an optional extra, but the
+    # transitive scan still walks it.
+    "everos.infra.persistence.index -> everos.infra.persistence.milvus",
+    "everos.infra.persistence.index.router -> everos.infra.persistence.milvus",
 ]
 
 [[tool.importlinter.contracts]]
 # The facade and the router resolve a configured backend, so they import the
-# adapters by design. The port definitions must not: the moment protocols or
+# engine packages by design. The port definitions must not: the moment protocols or
 # schema knows a concrete engine, "portable" stops being checkable and the
 # next adapter inherits whatever leaked in. This is the rule that keeps the
 # split from eroding -- moving files alone does not stop anyone moving them
@@ -306,7 +325,6 @@ source_modules = [
     "everos.infra.persistence.predicate",
 ]
 forbidden_modules = [
-    "everos.infra.persistence.backends",
     "everos.infra.persistence.lancedb",
     "everos.infra.persistence.milvus",
     "everos.core.persistence.lancedb",

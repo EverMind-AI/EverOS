@@ -29,8 +29,9 @@ from everos.core.observability.logging import get_logger
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome.decorator import StrategyMeta
-from everos.infra.ome.events import BaseEvent
+from everos.infra.ome.events import BaseEvent, ManualTick
 from everos.infra.ome.records import CounterProgress, StrategyRouteInfo
+from everos.infra.ome.triggers import Cron
 
 logger = get_logger(__name__)
 
@@ -61,10 +62,15 @@ class EventDispatcher:
             force_enabled: Bypass the ``meta.enabled`` gate. ``applies_to``
                 and the counter still apply. Used by manual triggers
                 with ``force=True``.
-            strategy_filter: Restrict to one strategy name regardless of
-                whether it subscribes to ``type(event)``. Manual triggers
-                use this when targeting a strategy with a caller-supplied
-                event. Raises ``KeyError`` if the name is not registered.
+            strategy_filter: Restrict to one strategy name. The strategy
+                must still subscribe to ``type(event)`` — a handler is never
+                handed an event class it did not declare (a bare
+                ``ManualTick`` aimed at ``Immediate(on=[AgentCaseExtracted])``
+                would crash reading fields the tick does not carry). The one
+                exception is a ``ManualTick`` at a ``Cron`` strategy: that is
+                the manual run of a scheduled job, and the tick carries every
+                field a ``CronTick`` does. Raises ``KeyError`` if the name is
+                not registered.
 
         ``applies_to`` callables raised by a single strategy are caught,
         logged, and treated as ``False`` for that strategy alone — sibling
@@ -72,7 +78,19 @@ class EventDispatcher:
         I/O) propagate.
         """
         if strategy_filter is not None:
-            metas: list[StrategyMeta] = [self._registry.get(strategy_filter)]
+            target = self._registry.get(strategy_filter)
+            subscribed = {m.name for m in self._registry.lookup_by_event(type(event))}
+            # A manual run of a scheduled job is what the manual trigger is for
+            # (docs/reflection.md: reflect_episodes + force). CronTick and
+            # ManualTick carry the same single field, so a Cron handler cannot
+            # read anything the tick lacks; Idle handlers can (bucket_key,
+            # idle_seconds) and therefore still have to subscribe.
+            manual_cron = isinstance(event, ManualTick) and isinstance(
+                target.trigger, Cron
+            )
+            metas: list[StrategyMeta] = (
+                [target] if target.name in subscribed or manual_cron else []
+            )
         else:
             metas = list(self._registry.lookup_by_event(type(event)))
         out: list[tuple[StrategyMeta, str]] = []

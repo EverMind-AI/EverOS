@@ -132,3 +132,44 @@ def test_start_with_root_option(
     result = CliRunner().invoke(root_app, ["server", "start", "--root", str(tmp_path)])
     assert result.exit_code == 0, result.stdout
     assert "kwargs" in captured
+
+
+@pytest.mark.parametrize(
+    ("host", "port", "expected"),
+    [
+        ("127.0.0.1", 8000, "http://127.0.0.1:8000"),
+        ("0.0.0.0", 8000, "http://127.0.0.1:8000"),
+        ("::", 9000, "http://127.0.0.1:9000"),
+        ("::1", 8000, "http://[::1]:8000"),
+        ("10.0.0.5", 8765, "http://10.0.0.5:8765"),
+    ],
+)
+def test_mcp_base_url_is_something_a_client_can_dial(
+    host: str, port: int, expected: str
+) -> None:
+    assert server_mod.mcp_base_url(host, port) == expected
+
+
+def test_start_logs_mcp_hint_with_client_url(captured: dict[str, object]) -> None:
+    import logging
+
+    records: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = _Collect()
+    logger = logging.getLogger("everos.cli.server")
+    logger.addHandler(handler)
+    try:
+        result = CliRunner().invoke(
+            root_app, ["server", "start", "--host", "0.0.0.0", "--port", "9000"]
+        )
+    finally:
+        logger.removeHandler(handler)
+    assert result.exit_code == 0, result.stdout
+    hint = [r for r in records if "uvx everos-mcp" in r]
+    assert hint, records
+    assert "EVEROS_BASE_URL=http://127.0.0.1:9000" in hint[0]
+    assert server_mod.MCP_GUIDE_URL in hint[0]

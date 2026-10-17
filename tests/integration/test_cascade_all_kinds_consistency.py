@@ -41,16 +41,16 @@ from everos.infra.persistence.lancedb import (
     foresight_repo,
 )
 from everos.infra.persistence.lancedb.lancedb_manager import get_table
-from everos.infra.persistence.lancedb.tables.agent_case import AgentCase
-from everos.infra.persistence.lancedb.tables.atomic_fact import AtomicFact
-from everos.infra.persistence.lancedb.tables.episode import Episode
-from everos.infra.persistence.lancedb.tables.foresight import Foresight
 from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactWriter,
     EpisodeWriter,
     ForesightWriter,
 )
+from everos.infra.persistence.records.agent_case import AgentCase
+from everos.infra.persistence.records.atomic_fact import AtomicFact
+from everos.infra.persistence.records.episode import Episode
+from everos.infra.persistence.records.foresight import Foresight
 from everos.infra.persistence.sqlite import (
     dispose_engine,
     get_engine,

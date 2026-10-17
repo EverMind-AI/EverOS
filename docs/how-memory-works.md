@@ -263,8 +263,8 @@ Two paths, two guarantees:
 
 So a `/search` immediately after the `/flush` that produced a record may
 miss it. The markdown is durable regardless; index lag never loses data. If
-you need read-your-write, retry with backoff, or force the queue with
-`everos cascade sync`.
+you need read-your-write, retry with backoff (the running server is the
+only index writer; `everos cascade sync` is for when no server is running).
 
 Integrity is anchored by a few invariants (details in
 [storage_layout.md](storage_layout.md)): the frontmatter `id` /
