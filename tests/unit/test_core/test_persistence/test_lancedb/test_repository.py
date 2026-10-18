@@ -1,7 +1,7 @@
 """Tests for :class:`LanceRepoBase` + :class:`LanceDailyLogRepoBase`.
 
 Exercises the chassis-level query helpers shared by every business
-LanceDB repo: ``find_where`` / ``find_one_where`` / ``find_by_owner`` /
+LanceDB repo: ``find_where`` / ``find_one_where`` /
 ``find_by_md_path`` (on :class:`LanceRepoBase`), and the daily-log
 slice ``find_by_owner_entry`` / ``find_by_session`` /
 ``find_by_parent`` (on :class:`LanceDailyLogRepoBase`). Also covers
@@ -310,19 +310,7 @@ async def test_find_where_paginated_truncates_above_max_fetch(
     assert "find_where_paginated truncated" in caplog.text
 
 
-# ── 5-table shared: find_by_owner / find_by_md_path ─────────────────────
-
-
-async def test_find_by_owner(repo: _NoteRepo) -> None:
-    await repo.add(
-        [
-            _row(owner="u1", entry="ep_1"),
-            _row(owner="u1", entry="ep_2"),
-            _row(owner="u2", entry="ep_3"),
-        ]
-    )
-    rows = await repo.find_by_owner("u1")
-    assert {r.entry_id for r in rows} == {"ep_1", "ep_2"}
+# ── 5-table shared: find_by_md_path ──────────────────────────────────────
 
 
 async def test_find_by_md_path_round_trip(repo: _NoteRepo) -> None:

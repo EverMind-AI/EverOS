@@ -593,9 +593,6 @@ class MilvusRepoBase[T: BaseModel]:
         offset = (page - 1) * page_size
         return rows[offset : offset + page_size], total
 
-    async def find_by_owner(self, owner_id: str, *, limit: int = 100) -> list[T]:
-        return await self.find_where(eq("owner_id", owner_id), limit=limit)
-
     async def find_by_md_path(self, md_path: str) -> T | None:
         return await self.find_one_where(eq("md_path", md_path))
 

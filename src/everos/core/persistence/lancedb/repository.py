@@ -863,18 +863,6 @@ class LanceRepoBase[T: BaseLanceTable]:
             total,
         )
 
-    async def find_by_owner(
-        self,
-        owner_id: str,
-        *,
-        limit: int = 100,
-    ) -> list[T]:
-        """Fetch rows by ``owner_id`` (5 business tables share this column)."""
-        return await self.find_where(
-            f"owner_id = '{_q(owner_id)}'",
-            limit=limit,
-        )
-
     async def find_by_md_path(self, md_path: str) -> T | None:
         """Reverse-lookup from md path (cascade maps md edit → row)."""
         return await self.find_one_where(f"md_path = '{_q(md_path)}'")
