@@ -56,6 +56,7 @@ def _agent_case_candidate() -> Candidate:
             "approach": "1. summarise...",
             "quality_score": 0.92,
             "key_insight": "User prefers brief tone",
+            "entry_id": "case_1",
         },
     )
 
@@ -131,6 +132,10 @@ def test_shape_agent_case_basic() -> None:
     assert item.task_intent == "Draft a follow-up email"
     assert item.quality_score == 0.92
     assert item.key_insight == "User prefers brief tone"
+    # The internal case→skill bridge needs the md entry id; it must not
+    # leak into the public ``id`` (which stays the index row id).
+    assert item.id == "agent_a_case_1"
+    assert item._entry_id == "case_1"
 
 
 def test_shape_agent_case_drops_when_owner_type_wrong() -> None:

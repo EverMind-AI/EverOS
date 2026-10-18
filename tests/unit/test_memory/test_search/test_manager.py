@@ -29,7 +29,7 @@ import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
-from everos.memory.search.dto import SearchMethod, SearchRequest
+from everos.memory.search.dto import SearchAgentCaseItem, SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 
 # ── Stubs ───────────────────────────────────────────────────────────────
@@ -939,6 +939,47 @@ async def test_case_bridged_skills_max_pools_score_across_source_cases() -> None
     assert bridged[0].metadata["source_case_ids"] == ["c1", "c2", "c3"]
 
 
+async def test_agent_case_bridge_uses_md_entry_id_not_index_row_id() -> None:
+    """The reverse skill bridge keys on md entry ids, matching
+    ``source_case_ids`` in SKILL.md — not the public DTO's index row id.
+    """
+    case = SearchAgentCaseItem(
+        id="agent_a_ac_20260101_0001",
+        agent_id="agent_a",
+        session_id="sess_b",
+        task_intent="intent",
+        approach="approach",
+        quality_score=0.8,
+        timestamp=_ts(),
+        score=0.7,
+    )
+    case._entry_id = "ac_20260101_0001"
+    mgr = _build_manager()
+    seen: dict[str, list[str]] = {}
+
+    async def fake_cases(
+        req: SearchRequest, where: object
+    ) -> list[SearchAgentCaseItem]:
+        return [case]
+
+    async def fake_skills(
+        req: SearchRequest,
+        where: object,
+        *,
+        bridge_cases: list[Candidate] | None = None,
+    ) -> list[object]:
+        seen["ids"] = [c.id for c in (bridge_cases or [])]
+        return []
+
+    mgr._search_agent_cases = fake_cases  # type: ignore[method-assign]
+    mgr._search_agent_skills = fake_skills  # type: ignore[method-assign]
+    await mgr._search_cases_and_skills(
+        _agent_req(method=SearchMethod.HYBRID, enable_llm_rerank=True),
+        where="",  # type: ignore[arg-type]
+    )
+    assert seen["ids"] == ["ac_20260101_0001"]
+
+
 async def test_case_bridged_skills_returns_empty_for_none_or_empty_input() -> None:
     """No bridge cases ⇒ no bridge recall (skip the reverse fetch entirely).
     This is the cross-encoder lane / KEYWORD / VECTOR contract.
@@ -1028,11 +1069,13 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     from everalgo.types import RankOutput, ScoredItem
 
     case_result = ScoredItem(
-        id="agent_a_c1",
+        id="agent_a_ac_20260101_0001",
         score=0.85,
         item_type="case",
         # Shaper requires owner_type="agent" + timestamp + intent/approach;
         # otherwise the case is dropped and bridge_cases comes back empty.
+        # ``entry_id`` is the md-side id the skill's ``source_case_ids``
+        # stores; the public row ``id`` is not what the bridge matches on.
         metadata={
             "owner_id": "agent_a",
             "owner_type": "agent",
@@ -1041,6 +1084,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
             "task_intent": "intent c1",
             "approach": "approach c1",
             "quality_score": 0.8,
+            "entry_id": "ac_20260101_0001",
         },
     )
     skill_direct = _skill_row("s_direct")
@@ -1048,7 +1092,10 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
         id="s_bridged",
         score=0.0,
         source="vector",
-        metadata={"source_case_ids": ["agent_a_c1"], "name": "s_bridged"},
+        metadata={
+            "source_case_ids": ["ac_20260101_0001"],
+            "name": "s_bridged",
+        },
     )
 
     seen_skill_dense: dict[str, list[Candidate]] = {}

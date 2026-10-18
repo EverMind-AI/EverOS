@@ -139,7 +139,7 @@ def shape_agent_case_from_candidate(candidate: Candidate) -> SearchAgentCaseItem
     ):
         logger.warning("shape_case_missing_required_field", id=candidate.id)
         return None
-    return SearchAgentCaseItem(
+    item = SearchAgentCaseItem(
         id=candidate.id,
         agent_id=owner_id,
         app_id=_as_str(md.get("app_id")) or "default",
@@ -152,6 +152,11 @@ def shape_agent_case_from_candidate(candidate: Candidate) -> SearchAgentCaseItem
         timestamp=timestamp,
         score=float(candidate.score),
     )
+    # Internal only: the case→skill bridge matches source_case_ids, which
+    # stores the md-side entry id rather than the index row id.
+    entry_id = md.get("entry_id")
+    item._entry_id = entry_id if isinstance(entry_id, str) and entry_id else None
+    return item
 
 
 # ── AgentSkill shaping ──────────────────────────────────────────────────

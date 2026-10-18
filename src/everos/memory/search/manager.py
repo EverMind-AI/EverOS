@@ -317,10 +317,22 @@ class SearchManager:
         """
         if _effective_llm_rerank(req):
             cases = await self._search_agent_cases(req, where)
-            bridge_cases = [
-                Candidate(id=c.id, score=c.score, source="vector", metadata={})
-                for c in cases
-            ]
+            # The bridge matches SKILL.md's ``source_case_ids``, which are
+            # md-side entry ids (``ac_...``), not the index row ids
+            # (``<owner>_ac_...``) that the public case DTO exposes.
+            bridge_cases: list[Candidate] = []
+            for case in cases:
+                entry_id = case._entry_id
+                if entry_id is None:
+                    continue
+                bridge_cases.append(
+                    Candidate(
+                        id=entry_id,
+                        score=case.score,
+                        source="vector",
+                        metadata={},
+                    )
+                )
             skills = await self._search_agent_skills(
                 req, where, bridge_cases=bridge_cases
             )
