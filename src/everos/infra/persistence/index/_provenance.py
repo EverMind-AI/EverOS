@@ -164,11 +164,19 @@ async def verify_embedding_provenance(
             f"(tables were already created at {settings.dim})"
         )
     elif length is not None and length > settings.dim:
+        # This fires on the shipped default (a 2560-dim Matryoshka model
+        # against dim=1024), so the text has to say that the common case is
+        # intended -- a warning every start that reads like a defect teaches
+        # operators to ignore warnings.
         warnings.append(
             f"embedding model {settings.model!r} returns {length} dimensions but "
-            f"the vector column is {settings.dim} wide, so {length - settings.dim} "
-            f"will be truncated on every write; recall degrades unless the model "
-            f"was trained for it (Matryoshka)."
+            f"the vector column is {settings.dim} wide, so the last "
+            f"{length - settings.dim} are truncated on every write. For a model "
+            f"trained for it (Matryoshka -- the shipped default is one) that is "
+            f"the intended usage, and cosine distance needs no renormalising; "
+            f"with any other model recall degrades. To stop truncating, set "
+            f"[embedding] dimensions = {settings.dim} and let the server shorten "
+            f"it, or dim = {length} then run `everos cascade rebuild`."
         )
     if settings.dimensions is not None and settings.dimensions != settings.dim:
         warnings.append(
@@ -213,11 +221,16 @@ async def verify_embedding_provenance(
 
     if recorded is None:
         if not may_attest:
-            return [
-                *warnings,
+            finding = (
                 "this index has no recorded embedding model; it will be "
-                "recorded by the next command that holds the index lock.",
-            ]
+                "recorded by the next command that holds the index lock."
+            )
+            # Logged as well as returned: every caller today discards the
+            # return value, so returning it alone made this finding
+            # unreachable -- and a read-only `cascade status` right after an
+            # upgrade is exactly when someone would want to see it.
+            logger.info("embedding_provenance_unrecorded", hint=finding)
+            return [*warnings, finding]
         try:
             await store.write_embedding_model(settings.model or "")
         except Exception as exc:  # ponytail: see probe_embedding_dimension
