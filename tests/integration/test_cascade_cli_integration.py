@@ -288,6 +288,60 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     assert asyncio.run(_atomic_fact_row_count()) == 2
 
 
+def test_rebuild_attests_the_model_that_produced_the_new_vectors(
+    cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cascade rebuild`` records the embedding model it just rebuilt with.
+
+    Nothing else can: a table created from a pydantic model carries no field
+    metadata, so without this the rebuilt index comes up unattested and the
+    next start recommends the rebuild that just finished -- and a model swap
+    made in between is adopted silently.
+
+    The embedding capability is stood up because the attestation is gated on
+    it, the same condition that keeps keyword-only deployments untouched.
+    """
+    import everos.component.embedding.accessor as embedding_accessor
+    from everos.component.embedding import EmbeddingCapability
+    from everos.infra.persistence.index import read_embedding_model
+    from everos.infra.persistence.lancedb import lancedb_manager
+
+    class _Provider:
+        dim = 1024
+
+        async def embed(self, text: str) -> list[float]:
+            return [0.1] * self.dim
+
+        async def embed_query(self, text: str) -> list[float]:
+            return [0.1] * self.dim
+
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            return [[0.1] * self.dim for _ in texts]
+
+    monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "fake-rebuild-model")
+    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
+    monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
+    load_settings.cache_clear()
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=_Provider())
+    )
+    monkeypatch.setattr(
+        cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
+    )
+
+    async def _recorded() -> str | None:
+        try:
+            return await read_embedding_model()
+        finally:
+            await lancedb_manager.dispose_connection()
+
+    result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    asyncio.run(_dispose_all())
+
+    assert asyncio.run(_recorded()) == "fake-rebuild-model"
+
+
 def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
     cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

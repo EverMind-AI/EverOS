@@ -43,7 +43,7 @@ def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[
 def rejecting_index(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the shared verification refuse, the way a changed model would."""
 
-    async def _refuse() -> None:
+    async def _refuse(*, may_attest: bool = True) -> None:
         raise EmbeddingProvenanceError(
             "embedding configuration does not match this index:\n"
             "  - model: index built with 'nomic-embed-text', config uses "

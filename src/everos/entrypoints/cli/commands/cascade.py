@@ -56,6 +56,7 @@ from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.infra.persistence.index import (
+    assert_record_dim_matches_settings,
     connect,
     drop_business_tables,
     ensure_business_indexes,
@@ -196,14 +197,23 @@ async def _runtime(
         engine = get_engine()
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+        # Unconditional, including under `verify=False`: `rebuild` skips
+        # verification precisely because it is repairing the index, but it is
+        # also the one command that creates every table from scratch -- a
+        # disagreement between the two readers of `dim` would be baked into
+        # the new tables and only surface on the next `server start`.
+        assert_record_dim_matches_settings()
         await connect()
         if verify:
-            # Same sequence the facade's startup() runs, in the same order:
+            # The rest of the facade's startup() sequence; the dim assertion
+            # above is hoisted out of it so `rebuild` gets it too.
             # `_runtime` does not call it (it drives connect / verify /
             # ensure separately so `rebuild` can skip the middle), so the
             # dim guard and the provenance check have to be named here or
             # they would be absent from every CLI phase.
-            await verify_configuration()
+            # Attest only while holding the index lock -- `status`,
+            # `fix` and `backfill` are read-only phases.
+            await verify_configuration(may_attest=exclusive)
         if ensure:
             await ensure_business_indexes()
         try:

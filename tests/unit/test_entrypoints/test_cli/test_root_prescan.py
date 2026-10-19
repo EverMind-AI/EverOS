@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .test_cascade_root_position import _hermetic_env
+from .conftest import hermetic_env
 
 _PROBE = (
     "from everos.entrypoints.cli.main import _bootstrap_root_from_argv;"
@@ -37,7 +37,7 @@ def _dim_seen_by_cli(root: Path, dim: int, argv: list[str]) -> int:
         capture_output=True,
         text=True,
         check=True,
-        env=_hermetic_env(),
+        env=hermetic_env(),
     )
     return int(completed.stdout.strip())
 
@@ -74,7 +74,7 @@ def test_no_root_flag_leaves_env_alone(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=True,
-        env=_hermetic_env(),
+        env=hermetic_env(),
     )
     assert completed.stdout.strip() == "<unset>"
 
@@ -91,7 +91,7 @@ def test_root_flag_overrides_an_ambient_value(tmp_path: Path) -> None:
     other = tmp_path / "other"
     other.mkdir()
     (other / "everos.toml").write_text("[embedding]\ndim = 768\n", encoding="utf-8")
-    env = _hermetic_env()
+    env = hermetic_env()
     env["EVEROS_ROOT"] = str(tmp_path)
     (tmp_path / "everos.toml").write_text("[embedding]\ndim = 1536\n", encoding="utf-8")
     completed = subprocess.run(

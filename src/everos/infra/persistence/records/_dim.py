@@ -42,11 +42,17 @@ def _dim_from_toml(path: Path) -> object | None:
     Every failure mode collapses to ``None`` on purpose: a missing file, an
     unreadable one and a malformed one all mean "this source has nothing to
     say", and none of them may take the process down (see module docstring).
+
+    ``ValueError`` rather than ``TOMLDecodeError``: a file that is not UTF-8
+    fails inside ``tomllib.load``'s own ``decode`` with ``UnicodeDecodeError``,
+    which is not a ``TOMLDecodeError`` -- and that would be an import-time
+    crash on every CLI command, which is the one thing this module exists to
+    avoid. Both are ``ValueError`` subclasses.
     """
     try:
         with path.open("rb") as fh:
             embedding = tomllib.load(fh).get("embedding")
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):
         return None
     if not isinstance(embedding, dict):
         return None

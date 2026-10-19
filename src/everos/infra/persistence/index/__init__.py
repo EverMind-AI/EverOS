@@ -130,7 +130,7 @@ def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
         schema_for(schema)
 
 
-def _assert_record_dim_matches_settings() -> None:
+def assert_record_dim_matches_settings() -> None:
     """Fail loud if the record classes and ``Settings`` disagree on the width.
 
     The record classes resolve ``[embedding] dim`` with a narrow reader of
@@ -141,8 +141,10 @@ def _assert_record_dim_matches_settings() -> None:
     memory root, a key one of them cannot parse -- and the symptom would
     otherwise be tables quietly built at the wrong width.
 
-    Reads the width off ``Episode``, which this module already imports, so no
-    import edge into ``records`` is added.
+    Exported rather than private because it has to run on paths that skip
+    the rest of verification: ``cascade rebuild`` passes ``verify=False``,
+    and it is the one command that unconditionally creates tables -- exactly
+    where a disagreement would bake the wrong width into fresh tables.
     """
     baked = Episode.to_arrow_schema().field("vector").type.list_size
     configured = load_settings().embedding.dim
@@ -155,7 +157,7 @@ def _assert_record_dim_matches_settings() -> None:
         )
 
 
-async def verify_configuration() -> None:
+async def verify_configuration(*, may_attest: bool = True) -> None:
     """Every "does this index match the configuration" check, in order.
 
     Exported as one call so the server and the CLI phases cannot run
@@ -170,9 +172,9 @@ async def verify_configuration() -> None:
         IndexSchemaMismatchError: a stored table's columns drifted from the
             current schema.
     """
-    _assert_record_dim_matches_settings()
+    assert_record_dim_matches_settings()
     await _backend().verify_business_schemas()
-    await verify_embedding_provenance(_backend())
+    await verify_embedding_provenance(_backend(), may_attest=may_attest)
 
 
 async def startup() -> Any:
@@ -256,6 +258,7 @@ __all__ = [
     "agent_skill_repo",
     "all_of",
     "any_of",
+    "assert_record_dim_matches_settings",
     "atomic_fact_repo",
     "check_primary_keys",
     "compare",

@@ -271,3 +271,115 @@ def test_probe_defeats_client_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
     assert asyncio.run(_provenance.probe_embedding_dimension()) is None
     assert captured["dim"] is not None
     assert captured["dim"] > 100_000
+
+
+async def test_dim_disagreement_between_the_two_readers_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The record classes and Settings must not quietly diverge on the width.
+
+    The record classes resolve ``[embedding] dim`` with a narrow reader of
+    their own, because the width has to be known while they are imported.
+    Two readers can disagree -- a different root, a key one of them cannot
+    parse -- and the symptom would otherwise be tables silently built at the
+    wrong width. The width is frozen at import, so the disagreement is
+    constructed from the Settings side.
+    """
+    from everos.config import load_settings
+    from everos.infra.persistence.index import assert_record_dim_matches_settings
+    from everos.infra.persistence.records.episode import Episode
+
+    baked = Episode.to_arrow_schema().field("vector").type.list_size
+    monkeypatch.setenv("EVEROS_EMBEDDING__DIM", str(baked + 256))
+    load_settings.cache_clear()
+
+    with pytest.raises(EmbeddingProvenanceError) as excinfo:
+        assert_record_dim_matches_settings()
+    message = str(excinfo.value)
+    assert str(baked) in message
+    assert str(baked + 256) in message
+
+
+async def test_matching_dim_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard must not fire on the normal case."""
+    from everos.config import load_settings
+    from everos.infra.persistence.index import assert_record_dim_matches_settings
+    from everos.infra.persistence.records.episode import Episode
+
+    baked = Episode.to_arrow_schema().field("vector").type.list_size
+    monkeypatch.setenv("EVEROS_EMBEDDING__DIM", str(baked))
+    load_settings.cache_clear()
+    assert_record_dim_matches_settings()
+
+
+async def test_a_refused_start_does_not_attest(
+    monkeypatch: pytest.MonkeyPatch, probe
+) -> None:
+    """Writing on the way out of a refusal buries what built the index.
+
+    The operator story: a wrong dim is refused, but the refusal stamps the
+    rejected model onto an index some *other* model built. Putting the real
+    model back is then reported as "index built with <the rejected one>" and
+    sends them to rebuild for nothing.
+    """
+    _set_dim(monkeypatch, 1024)
+    probe.returns = 512
+    store = _Store(recorded=None)
+    with pytest.raises(EmbeddingProvenanceError):
+        await _provenance.verify_embedding_provenance(store)
+    assert store.writes == []
+    assert await store.read_embedding_model() is None
+
+
+async def test_read_only_phases_do_not_attest(
+    monkeypatch: pytest.MonkeyPatch, probe
+) -> None:
+    """Only a phase holding the index lock may write.
+
+    `_runtime` documents that every command writing the index passes
+    `exclusive=True`; `status`, `fix` and `backfill` do not, and on a shared
+    Milvus cluster this would be a write issued from a read-only phase.
+    """
+    _set_dim(monkeypatch, 768)
+    probe.returns = 768
+    store = _Store(recorded=None)
+    findings = await _provenance.verify_embedding_provenance(store, may_attest=False)
+    assert store.writes == []
+    assert any("no recorded embedding model" in finding for finding in findings)
+
+
+async def test_a_failed_write_does_not_stop_startup(
+    monkeypatch: pytest.MonkeyPatch, probe
+) -> None:
+    """A read-only mount is not a reason to refuse to open an index."""
+    _set_dim(monkeypatch, 768)
+    probe.returns = 768
+
+    class _ReadOnly(_Store):
+        async def write_embedding_model(self, model: str) -> None:
+            raise PermissionError("read-only index mount")
+
+    findings = await _provenance.verify_embedding_provenance(_ReadOnly(recorded=None))
+    assert any("could not record" in finding for finding in findings)
+
+
+def test_the_probe_does_not_inherit_the_write_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One integer must not cost the write path's 30s x 3 on every command."""
+    captured: dict[str, object] = {}
+
+    def _fake_build(settings: object, *, dim: int | None = None) -> object:
+        captured["timeout"] = settings.timeout_seconds  # type: ignore[attr-defined]
+        captured["retries"] = settings.max_retries  # type: ignore[attr-defined]
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(_provenance, "build_embedding_provider", _fake_build)
+    monkeypatch.setenv("EVEROS_EMBEDDING__TIMEOUT_SECONDS", "30.0")
+    monkeypatch.setenv("EVEROS_EMBEDDING__MAX_RETRIES", "3")
+
+    import asyncio
+
+    asyncio.run(_provenance.probe_embedding_dimension())
+    assert captured["retries"] == 0
+    assert captured["timeout"] < 30.0

@@ -306,8 +306,14 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     # `embed` is the one capability the route does NOT read from an accessor:
     # it reports whether the startup dimension probe got an answer, because
     # "a provider could be constructed" is true even against a dead service
-    # (issue #434). Simulating the tier therefore means simulating the probe.
+    # (issue #434). But the same payload's `disabled_features` stays on the
+    # capability -- it promises what the engine will refuse, and every
+    # engine-side gate still asks that. A real deployment derives both from
+    # one configuration, so a simulated tier has to set both.
     monkeypatch.setattr(health_route, "last_probe", lambda: 1024 if embed else None)
+    monkeypatch.setattr(
+        health_route, "get_embedding_capability", lambda: _StubCapability(embed)
+    )
     monkeypatch.setattr(
         health_route, "get_rerank_capability", lambda: _StubCapability(rerank)
     )

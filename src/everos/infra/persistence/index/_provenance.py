@@ -48,6 +48,15 @@ observe -- the slice would hand back exactly ``dim`` floats either way. A
 huge value makes the slice a no-op and the real length visible.
 """
 
+_PROBE_TIMEOUT_SECONDS = 5.0
+"""Budget for the probe, separate from the write path's.
+
+The write path can afford to wait: its 30 seconds times three retries buy a
+batch of vectors. The probe buys one integer, and it sits in front of every
+`everos` command -- inheriting that budget turns a blackholed endpoint into a
+two-minute hang on `cascade status`.
+"""
+
 _READ_FAILED = object()
 """Sentinel: the attestation could not be read, as opposed to being absent.
 
@@ -86,7 +95,9 @@ async def probe_embedding_dimension() -> int | None:
     refusal to start would make a transient outage look like a misconfigured
     index.
     """
-    settings = load_settings().embedding
+    settings = load_settings().embedding.model_copy(
+        update={"timeout_seconds": _PROBE_TIMEOUT_SECONDS, "max_retries": 0}
+    )
     try:
         provider = build_embedding_provider(settings, dim=_PROBE_DIM)
         return len(await provider.embed(PROBE_TEXT))
@@ -95,12 +106,24 @@ async def probe_embedding_dimension() -> int | None:
         return None
 
 
-async def verify_embedding_provenance(store: ProvenanceStore) -> list[str]:
+async def verify_embedding_provenance(
+    store: ProvenanceStore, *, may_attest: bool = True
+) -> list[str]:
     """Compare configuration against what the model and the index actually say.
 
     Collects every mismatch before reporting, so an operator who got two
     things wrong sees both at once instead of fixing one, restarting, and
     being told about the next.
+
+    Args:
+        store: the backend that keeps this index's attestation.
+        may_attest: whether an unattested index may be written to. Only the
+            phases that hold the exclusive lock pass ``True``: a read-only
+            command writing the index would break the invariant ``_runtime``
+            documents (every command that writes passes ``exclusive=True``),
+            and on a shared Milvus cluster it would be a write issued from a
+            read-only phase. A read-only phase that finds no attestation says
+            so and moves on.
 
     Returns:
         The findings that did **not** stop startup, in the order they were
@@ -163,15 +186,11 @@ async def verify_embedding_provenance(store: ProvenanceStore) -> list[str]:
         )
         recorded = _READ_FAILED
 
-    if recorded is None:
-        await store.write_embedding_model(settings.model or "")
-        logger.info(
-            "embedding_provenance_recorded",
-            model=settings.model,
-            hint="if this index was built by a different model, run "
-            "`everos cascade rebuild`",
-        )
-    elif recorded is not _READ_FAILED and recorded != settings.model:
+    if (
+        recorded is not _READ_FAILED
+        and recorded is not None
+        and recorded != settings.model
+    ):
         errors.append(
             f"model: index built with {recorded!r}, config uses "
             f"{settings.model!r}\n"
@@ -182,8 +201,35 @@ async def verify_embedding_provenance(store: ProvenanceStore) -> list[str]:
     for detail in warnings:
         logger.warning("embedding_provenance_warning", detail=detail)
     if errors:
+        # Attesting is deliberately *after* this. A refused start that wrote
+        # anyway would stamp the rejected configuration onto an index some
+        # other model built, and the operator who then put the real model
+        # back would be told their index was built by the one that never
+        # wrote a vector -- and sent to rebuild for nothing.
         raise EmbeddingProvenanceError(
             "embedding configuration does not match this index:\n"
             + "\n".join(f"  - {error}" for error in errors)
+        )
+
+    if recorded is None:
+        if not may_attest:
+            return [
+                *warnings,
+                "this index has no recorded embedding model; it will be "
+                "recorded by the next command that holds the index lock.",
+            ]
+        try:
+            await store.write_embedding_model(settings.model or "")
+        except Exception as exc:  # ponytail: see probe_embedding_dimension
+            # A read-only mount, or a Milvus role with describe but not
+            # alter. Not being able to write down which model built an index
+            # is not a reason to refuse to open it.
+            logger.warning("embedding_provenance_write_failed", error=repr(exc))
+            return [*warnings, f"could not record the embedding model ({exc!r})"]
+        logger.info(
+            "embedding_provenance_recorded",
+            model=settings.model,
+            hint="if this index was built by a different model, run "
+            "`everos cascade rebuild`",
         )
     return warnings

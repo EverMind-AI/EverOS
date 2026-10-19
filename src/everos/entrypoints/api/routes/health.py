@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from everos import __version__
 from everos.component.capabilities import compute_disabled_features
+from everos.component.embedding import get_embedding_capability
 from everos.component.multimodal import get_multimodal_llm_capability
 from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
@@ -161,6 +162,14 @@ async def health(request: Request) -> HealthResponse:
         status="ok",
         version=__version__,
         capabilities=caps,
-        disabled_features=compute_disabled_features(caps.model_dump()),
+        # `embed` reports the startup probe, but `disabled_features` is a
+        # client contract about what the server will actually refuse -- and
+        # every engine-side gate (search, the embed-dependent strategies,
+        # backfill) still asks whether a provider could be built. A service
+        # that was unreachable at startup and came back would otherwise have
+        # the server announcing vector search disabled while serving it.
+        disabled_features=compute_disabled_features(
+            {**caps.model_dump(), "embed": get_embedding_capability().available}
+        ),
         cascade=cascade,
     )

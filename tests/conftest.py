@@ -75,6 +75,18 @@ def _reset_table_write_locks() -> None:
     MilvusRepoBase._reset_locks_for_tests()
 
 
+def _reset_startup_probe() -> None:
+    """Forget the width the startup probe measured.
+
+    Process-wide and read across packages (``/health``), so a value left by
+    one test decides another's answer. Same tell as the locks above: one test
+    module was clearing it by hand.
+    """
+    from everos.infra.persistence.index import _provenance
+
+    _provenance._last_probe = None
+
+
 @pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     import structlog
@@ -104,12 +116,14 @@ def _reset_settings_cache() -> Iterator[None]:
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
     _reset_table_write_locks()
+    _reset_startup_probe()
     yield
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
     _reset_table_write_locks()
+    _reset_startup_probe()
 
 
 @pytest.fixture(autouse=True)
