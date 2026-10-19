@@ -307,9 +307,7 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     # it reports whether the startup dimension probe got an answer, because
     # "a provider could be constructed" is true even against a dead service
     # (issue #434). Simulating the tier therefore means simulating the probe.
-    monkeypatch.setattr(
-        health_route, "last_probe", lambda: 1024 if embed else None
-    )
+    monkeypatch.setattr(health_route, "last_probe", lambda: 1024 if embed else None)
     monkeypatch.setattr(
         health_route, "get_rerank_capability", lambda: _StubCapability(rerank)
     )

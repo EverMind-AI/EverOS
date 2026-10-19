@@ -266,9 +266,7 @@ async def _tier_client(
     # which would hide a model wider than the column), so it needs a stand-in
     # here just like the LLM, the embedder and the reranker above. Patching
     # the probe rather than its recorded result, because startup re-runs it.
-    provenance = importlib.import_module(
-        "everos.infra.persistence.index._provenance"
-    )
+    provenance = importlib.import_module("everos.infra.persistence.index._provenance")
 
     async def _stub_probe() -> int | None:
         return StubEmbedder.dim if embed_available else None
