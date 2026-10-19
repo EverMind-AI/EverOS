@@ -32,6 +32,7 @@ from everos.core.errors import IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
+from ..records import EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY
 from ..records import AgentCase as AgentCase
 from ..records import AgentSkill as AgentSkill
 from ..records import AtomicFact as AtomicFact
@@ -149,16 +150,6 @@ async def migrate_fts_indexes() -> None:
         marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION), encoding="utf-8")
         logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
 
-
-EMBEDDING_MODEL_KEY = "everos.embedding_model"
-"""Arrow field-metadata key holding the model this index was built with.
-
-Each backend owns where and under what key the attestation lives, so the
-Milvus backend declares the same string for its collection property rather
-than importing this one -- the ``index`` facade already imports this module,
-so the reverse edge would be a cycle. ``tests/unit/test_infra`` pins the two
-spellings together.
-"""
 
 _PROVENANCE_COLUMN = "vector"
 """Column the attestation hangs on.

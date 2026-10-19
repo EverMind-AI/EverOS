@@ -11,6 +11,9 @@ import asyncio
 from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
+from everos.infra.persistence.records import (
+    EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY,
+)
 
 from .milvus_manager import MilvusConfigurationError as MilvusConfigurationError
 from .milvus_manager import MilvusSchemaMismatchError as MilvusSchemaMismatchError
@@ -28,15 +31,6 @@ from .repository import MilvusRepoBase as MilvusRepoBase
 from .repository import MilvusValueLimitError as MilvusValueLimitError
 
 logger = get_logger(__name__)
-
-EMBEDDING_MODEL_KEY = "everos.embedding_model"
-"""Collection property holding the model this index was built with.
-
-Deliberately the same string the LanceDB backend uses for its Arrow field
-metadata, declared separately rather than imported: the ``index`` facade
-imports both backends, so a backend importing the facade would be a cycle.
-``tests/unit/test_infra`` pins the two spellings together.
-"""
 
 
 async def ensure_business_indexes() -> None:

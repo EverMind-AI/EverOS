@@ -125,14 +125,16 @@ async def test_rewriting_replaces_the_previous_model() -> None:
     assert await lance.index_backend.read_embedding_model() == "fake-1536"
 
 
-def test_both_backends_agree_on_the_key() -> None:
-    """The two backends declare the key separately; they must not drift.
+def test_both_backends_use_the_one_key() -> None:
+    """One definition, re-exported -- not two copies that can drift.
 
-    They cannot share a constant: the ``index`` facade imports both, so a
-    backend importing the facade would be a cycle. This assertion is what
-    keeps the duplication honest.
+    An earlier version declared the string in each backend, with a comment
+    saying a shared constant would be a cycle. It would not: both backends
+    already import ``records``, which imports no sibling persistence package.
     """
     pytest.importorskip("pymilvus")
     from everos.infra.persistence import milvus
+    from everos.infra.persistence.records import EMBEDDING_MODEL_KEY
 
-    assert lance.EMBEDDING_MODEL_KEY == milvus.EMBEDDING_MODEL_KEY
+    assert lance.EMBEDDING_MODEL_KEY is EMBEDDING_MODEL_KEY
+    assert milvus.EMBEDDING_MODEL_KEY is EMBEDDING_MODEL_KEY
