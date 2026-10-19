@@ -180,6 +180,12 @@ width. The model has to agree with it:
   different lengths have no distance between them, so there is nothing to
   migrate: `everos cascade rebuild` re-embeds from markdown.
 
+- **Downgrading after changing `dim`** — an older EverOS hardcodes 1024, so it
+  refuses to start against a wider or narrower index (`schema drift:
+  type_drift=[...]`), and its `cascade rebuild` rebuilds at 1024 without
+  mentioning it. Set `dim` back to 1024 and rebuild *before* downgrading, or
+  expect to rebuild afterwards.
+
 `dimensions` is a different knob: it asks the *server* to truncate (with
 re-normalisation, which is why it is preferable when the model supports it).
 Tables are still built at `dim`. If both are set and they disagree, startup
