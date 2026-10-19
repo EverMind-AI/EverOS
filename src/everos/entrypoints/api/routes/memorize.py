@@ -13,11 +13,20 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from starlette.status import HTTP_202_ACCEPTED
 
-from everos.entrypoints.api.utils import extract_request_id
-from everos.service import memorize
+from everos.core.errors import InvalidInputError, NotFoundError
+from everos.entrypoints.api.utils import extract_request_id, memorize_queue
+from everos.service import (
+    MemorizeQueueWorker,
+    QueueRequestStatus,
+    QueueSessionStatus,
+    get_request_status,
+    get_session_status,
+    memorize,
+)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -142,11 +151,31 @@ class MemorizeAddRequest(BaseModel):
             "boundary detection or extraction. A later /flush commits the batch."
         ),
     )
+    async_mode: bool = Field(
+        default=False,
+        description=(
+            "Persist the batch to the memorize queue and return 202 at once "
+            "instead of running boundary detection and extraction inline. Poll "
+            "GET /status with the returned request_id. A session that already "
+            "has queued batches is queued even when this is false, so batches "
+            "never run out of order."
+        ),
+    )
 
 
 class AddResponseData(BaseModel):
     message_count: int
     status: Literal["accumulated", "extracted"]
+
+
+class AcceptedResponseData(BaseModel):
+    """202 body: the batch is persisted and queued for the memorize worker."""
+
+    status: Literal["queued"] = "queued"
+    message_count: int
+    pending: int = Field(
+        description="Unfinished queued batches of this session, this one included"
+    )
 
 
 class MemorizeFlushRequest(BaseModel):
@@ -162,6 +191,10 @@ class MemorizeFlushRequest(BaseModel):
         min_length=1,
         max_length=128,
         pattern=_PATH_SAFE_CHARSET,
+    )
+    async_mode: bool = Field(
+        default=False,
+        description="Queue the flush behind the session's batches and return 202.",
     )
 
 
@@ -179,16 +212,79 @@ class SuccessEnvelope[T](BaseModel):
 # Route ──────────────────────────────────────────────────────────────────────
 
 
-@router.post("/add")
+async def _queue_for(
+    request: Request, req: MemorizeAddRequest | MemorizeFlushRequest
+) -> MemorizeQueueWorker | None:
+    """The worker to enqueue on, or ``None`` when the call runs inline.
+
+    Queued when ``async_mode`` is set (and the queue accepts new async work)
+    **or** the session already has unfinished queued rows -- running inline
+    then would overtake batches the client was already told are accepted.
+    """
+    queue = memorize_queue(request)
+    if queue is None:
+        return None
+    if (req.async_mode and queue.accepting) or await queue.has_pending(
+        session_id=req.session_id, app_id=req.app_id, project_id=req.project_id
+    ):
+        return queue
+    return None
+
+
+async def _accept(
+    queue: MemorizeQueueWorker,
+    response: Response,
+    payload: dict[str, Any],
+    *,
+    request_id: str,
+    is_final: bool,
+    defer_extraction: bool,
+) -> SuccessEnvelope[AcceptedResponseData]:
+    pending = await queue.enqueue(
+        payload,
+        request_id=request_id,
+        is_final=is_final,
+        defer_extraction=defer_extraction,
+    )
+    response.status_code = HTTP_202_ACCEPTED
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=AcceptedResponseData(
+            message_count=len(payload["messages"]), pending=pending
+        ),
+    )
+
+
+_ASYNC_RESPONSES: dict[int | str, dict[str, Any]] = {
+    202: {
+        "model": SuccessEnvelope[AcceptedResponseData],
+        "description": "Queued: async_mode, or the session already had a backlog",
+    },
+    413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
+    429: {"description": "Queue at its per-session or global cap"},
+}
+
+
+@router.post("/add", responses=_ASYNC_RESPONSES)
 async def add_memory(
     req: Annotated[MemorizeAddRequest, ...],
     request: Request,
-) -> SuccessEnvelope[AddResponseData]:
+    response: Response,
+) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
     request_id = extract_request_id(request)
-    payload = req.model_dump()
-    defer_extraction = bool(payload.pop("defer_extraction"))
-    result = await memorize(payload, defer_extraction=defer_extraction)
+    payload = req.model_dump(exclude={"async_mode", "defer_extraction"})
+    queue = await _queue_for(request, req)
+    if queue is not None:
+        return await _accept(
+            queue,
+            response,
+            payload,
+            request_id=request_id,
+            is_final=False,
+            defer_extraction=req.defer_extraction,
+        )
+    result = await memorize(payload, defer_extraction=req.defer_extraction)
     return SuccessEnvelope(
         request_id=request_id,
         data=AddResponseData(
@@ -198,22 +294,31 @@ async def add_memory(
     )
 
 
-@router.post("/flush")
+@router.post("/flush", responses=_ASYNC_RESPONSES)
 async def flush_memory(
     req: Annotated[MemorizeFlushRequest, ...],
     request: Request,
-) -> SuccessEnvelope[FlushResponseData]:
+    response: Response,
+) -> SuccessEnvelope[FlushResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Force boundary detection over the current ``session_id`` buffer."""
     request_id = extract_request_id(request)
-    result = await memorize(
-        {
-            "session_id": req.session_id,
-            "app_id": req.app_id,
-            "project_id": req.project_id,
-            "messages": [],
-        },
-        is_final=True,
-    )
+    payload: dict[str, Any] = {
+        "session_id": req.session_id,
+        "app_id": req.app_id,
+        "project_id": req.project_id,
+        "messages": [],
+    }
+    queue = await _queue_for(request, req)
+    if queue is not None:
+        return await _accept(
+            queue,
+            response,
+            payload,
+            request_id=request_id,
+            is_final=True,
+            defer_extraction=False,
+        )
+    result = await memorize(payload, is_final=True)
     # service's ``accumulated`` = nothing to flush (buffer was empty);
     # ``extracted`` = at least one cell carved out.
     status: Literal["extracted", "no_extraction"] = (
@@ -223,3 +328,32 @@ async def flush_memory(
         request_id=request_id,
         data=FlushResponseData(status=status),
     )
+
+
+@router.get("/status")
+async def memory_status(
+    request: Request,
+    request_id: str | None = None,
+    session_id: str | None = None,
+    app_id: str = "default",
+    project_id: str = "default",
+) -> SuccessEnvelope[QueueRequestStatus] | SuccessEnvelope[QueueSessionStatus]:
+    """Progress of queued memorize work.
+
+    ``?request_id=`` -- the outcome of one accepted request (404 once it has
+    aged out of ``memorize.async_queue.row_retention_hours``).
+    ``?session_id=`` -- the session's unfinished / failed / still-buffered
+    counts; drain by polling until ``pending`` is 0.
+    """
+    own_request_id = extract_request_id(request)
+    if request_id is not None:
+        status = await get_request_status(request_id)
+        if status is None:
+            raise NotFoundError(f"request {request_id} not found or expired")
+        return SuccessEnvelope(request_id=own_request_id, data=status)
+    if session_id is not None:
+        summary = await get_session_status(
+            session_id=session_id, app_id=app_id, project_id=project_id
+        )
+        return SuccessEnvelope(request_id=own_request_id, data=summary)
+    raise InvalidInputError("request_id or session_id is required")

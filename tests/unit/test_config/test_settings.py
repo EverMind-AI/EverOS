@@ -157,3 +157,21 @@ def test_resolve_root_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_resolve_root_explicit() -> None:
     assert resolve_root("/custom/root") == Path("/custom/root").resolve()
+
+
+def test_memorize_async_queue_defaults_and_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[memorize.async_queue]`` ships bounded defaults; two-level env wins."""
+    q = load_settings().memorize.async_queue
+    assert q.enabled is True
+    assert q.max_pending_per_session == 50
+    assert q.max_pending_total == 200
+    assert q.max_payload_bytes == 4 * 1024 * 1024
+    assert q.max_attempts == 1
+    assert q.retry_backoff_seconds == 2.0
+    assert q.row_retention_hours == 168.0
+
+    monkeypatch.setenv("EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION", "7")
+    load_settings.cache_clear()
+    assert load_settings().memorize.async_queue.max_pending_per_session == 7

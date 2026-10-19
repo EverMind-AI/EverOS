@@ -47,6 +47,11 @@ from .knowledge import replace_document as replace_document
 from .knowledge import search_knowledge as search_knowledge
 from .memorize import MemorizeResult as MemorizeResult
 from .memorize import memorize as memorize
+from .memorize_queue import MemorizeQueueWorker as MemorizeQueueWorker
+from .memorize_queue import QueueRequestStatus as QueueRequestStatus
+from .memorize_queue import QueueSessionStatus as QueueSessionStatus
+from .memorize_queue import get_request_status as get_request_status
+from .memorize_queue import get_session_status as get_session_status
 from .search import search as search
 
 __all__ = [
@@ -60,8 +65,11 @@ __all__ = [
     "DocumentOverviewItem",
     "DuplicateDocumentError",
     "ExtractionEmptyError",
+    "MemorizeQueueWorker",
     "MemorizeResult",
     "PatchResult",
+    "QueueRequestStatus",
+    "QueueSessionStatus",
     "SearchHit",
     "SearchKnowledgeResult",
     "TopicDetail",
@@ -72,6 +80,8 @@ __all__ = [
     "delete_document",
     "get",
     "get_document",
+    "get_request_status",
+    "get_session_status",
     "get_topic",
     "list_categories",
     "list_documents",

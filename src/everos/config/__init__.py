@@ -12,6 +12,7 @@ Distinct from ``everos.component.config`` (which is a *capability* —
 loader / merger / env reader).
 """
 
+from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
 from .settings import EmbeddingSettings as EmbeddingSettings
@@ -28,6 +29,7 @@ from .settings import load_settings as load_settings
 from .settings import resolve_root as resolve_root
 
 __all__ = [
+    "AsyncQueueSettings",
     "BoundaryDetectionSettings",
     "EmbeddingSettings",
     "IndexSettings",

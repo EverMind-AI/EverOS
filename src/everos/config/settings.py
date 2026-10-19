@@ -428,6 +428,50 @@ class BoundaryDetectionSettings(BaseModel):
     hard_msg_limit: int = Field(default=500, ge=1)
 
 
+class AsyncQueueSettings(BaseModel):
+    """``async_mode`` memorize queue (``[memorize.async_queue]``).
+
+    With ``enabled`` off, ``async_mode=true`` requests run synchronously; the
+    worker still drains rows accepted earlier. The three caps bound the queue: a session
+    over ``max_pending_per_session`` or a process over ``max_pending_total``
+    rejects new rows with 429, and a body over ``max_payload_bytes`` with
+    413. A delivered row drops its body at once, so pending and delivered rows
+    stay around ``max_pending_total * max_payload_bytes``; failed rows keep
+    their bodies for the retention period and are not capped, and SQLite does
+    not shrink the file after a purge. The caps are checked without a lock,
+    so concurrent requests overshoot a little.
+
+    A row that fails ``max_attempts`` times (``retry_backoff_seconds``
+    apart) is marked ``failed`` and skipped so one bad batch cannot hold
+    up its session. The default is a single attempt: ``memorize()`` is
+    not atomic (boundary detection writes memcells and consumes the
+    session buffer before extraction runs), so re-running a batch after a
+    partial failure duplicates memcells or reports success with the
+    episode missing. Raise it only where that is acceptable. Every row,
+    whatever its status, is deleted ``row_retention_hours`` (default seven
+    days) after it was created.
+
+    Env binding:
+        EVEROS_MEMORIZE__ASYNC_QUEUE__ENABLED
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_TOTAL
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PAYLOAD_BYTES
+        EVEROS_MEMORIZE__ASYNC_QUEUE__SCAN_INTERVAL_SECONDS
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_ATTEMPTS
+        EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS
+        EVEROS_MEMORIZE__ASYNC_QUEUE__ROW_RETENTION_HOURS
+    """
+
+    enabled: bool = True
+    max_pending_per_session: int = Field(default=50, ge=1)
+    max_pending_total: int = Field(default=200, ge=1)
+    max_payload_bytes: int = Field(default=4 * 1024 * 1024, ge=1)
+    scan_interval_seconds: float = Field(default=5.0, gt=0)
+    max_attempts: int = Field(default=1, ge=1)
+    retry_backoff_seconds: float = Field(default=2.0, ge=0)
+    row_retention_hours: float = Field(default=7 * 24.0, gt=0, le=366 * 24.0)
+
+
 class MemorizeSettings(BaseModel):
     """Memorize use-case configuration.
 
@@ -450,10 +494,12 @@ class MemorizeSettings(BaseModel):
     Env binding:
         EVEROS_MEMORIZE__MODE
         EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS
+        EVEROS_MEMORIZE__ASYNC_QUEUE__*  (see :class:`AsyncQueueSettings`)
     """
 
     mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
+    async_queue: AsyncQueueSettings = AsyncQueueSettings()
 
 
 class ClusteringSettings(BaseModel):

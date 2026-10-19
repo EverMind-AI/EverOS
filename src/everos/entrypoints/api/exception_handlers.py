@@ -26,8 +26,10 @@ from starlette.status import (
     HTTP_400_BAD_REQUEST,
     HTTP_404_NOT_FOUND,
     HTTP_409_CONFLICT,
+    HTTP_413_CONTENT_TOO_LARGE,
     HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     HTTP_422_UNPROCESSABLE_CONTENT,
+    HTTP_429_TOO_MANY_REQUESTS,
     HTTP_500_INTERNAL_SERVER_ERROR,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
@@ -43,7 +45,9 @@ from everos.core.errors import (
     InvalidInputError,
     NotFoundError,
     PathTraversalError,
+    PayloadTooLargeError,
     ProviderNotConfiguredError,
+    QueueSaturatedError,
     UnsupportedModalityError,
 )
 from everos.core.observability.logging import get_logger
@@ -182,6 +186,32 @@ async def unsupported_modality_handler(
         request,
         HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         ErrorCode.UNSUPPORTED_FORMAT,
+        str(exc),
+    )
+
+
+async def payload_too_large_handler(
+    request: Request,
+    exc: PayloadTooLargeError,
+) -> JSONResponse:
+    """PayloadTooLargeError -> 413 (batch not accepted; split or go sync)."""
+    return _error_response(
+        request,
+        HTTP_413_CONTENT_TOO_LARGE,
+        ErrorCode.PAYLOAD_TOO_LARGE,
+        str(exc),
+    )
+
+
+async def queue_saturated_handler(
+    request: Request,
+    exc: QueueSaturatedError,
+) -> JSONResponse:
+    """QueueSaturatedError -> 429 (batch not accepted; retry or buffer)."""
+    return _error_response(
+        request,
+        HTTP_429_TOO_MANY_REQUESTS,
+        ErrorCode.QUEUE_SATURATED,
         str(exc),
     )
 
@@ -368,6 +398,8 @@ def register_handlers(app: FastAPI) -> None:
     # Domain errors (specific before parent)
     app.add_exception_handler(PathTraversalError, path_traversal_handler)
     app.add_exception_handler(UnsupportedModalityError, unsupported_modality_handler)
+    app.add_exception_handler(PayloadTooLargeError, payload_too_large_handler)
+    app.add_exception_handler(QueueSaturatedError, queue_saturated_handler)
     app.add_exception_handler(NotFoundError, not_found_handler)
     app.add_exception_handler(ConflictError, conflict_handler)
     app.add_exception_handler(ExtractionEmptyError, extraction_empty_handler)

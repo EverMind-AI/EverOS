@@ -21,6 +21,8 @@ from everos.core.errors import (
     LLMServiceError,
     MultimodalNotEnabledError,
     PathTraversalError,
+    PayloadTooLargeError,
+    QueueSaturatedError,
     StorageError,
     UnsupportedModalityError,
 )
@@ -75,6 +77,14 @@ def _make_app() -> FastAPI:
     @app.get("/raise/llm")
     async def _llm() -> None:
         raise LLMServiceError("LLM rate limit exceeded")
+
+    @app.get("/raise/payload-too-large")
+    async def _payload_too_large() -> None:
+        raise PayloadTooLargeError("payload is 5 MiB, limit is 4 MiB")
+
+    @app.get("/raise/queue-saturated")
+    async def _queue_saturated() -> None:
+        raise QueueSaturatedError("memorize queue saturated for session s1")
 
     @app.get("/raise/runtime")
     async def _runtime() -> None:
@@ -133,6 +143,24 @@ async def test_not_found_returns_404(client: AsyncClient) -> None:
     data = resp.json()
     assert data["error"]["code"] == "NOT_FOUND"
     _assert_envelope(data, path="/raise/not-found")
+
+
+async def test_payload_too_large_returns_413(client: AsyncClient) -> None:
+    """PayloadTooLargeError → HTTP 413, code=PAYLOAD_TOO_LARGE."""
+    resp = await client.get("/raise/payload-too-large")
+    assert resp.status_code == 413
+    data = resp.json()
+    assert data["error"]["code"] == "PAYLOAD_TOO_LARGE"
+    _assert_envelope(data, path="/raise/payload-too-large")
+
+
+async def test_queue_saturated_returns_429(client: AsyncClient) -> None:
+    """QueueSaturatedError → HTTP 429, code=QUEUE_SATURATED."""
+    resp = await client.get("/raise/queue-saturated")
+    assert resp.status_code == 429
+    data = resp.json()
+    assert data["error"]["code"] == "QUEUE_SATURATED"
+    _assert_envelope(data, path="/raise/queue-saturated")
 
 
 async def test_conflict_returns_409(client: AsyncClient) -> None:

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`async_mode` on `/add` and `/flush`: accept now, extract in the
+  background.** A request with `async_mode: true` is written to a durable
+  SQLite queue (`memorize_inbox`) and answered with `202 Accepted`; one
+  in-process worker then runs the unchanged memorize pipeline for each
+  batch in arrival order, so a session's batches and its flush never
+  overtake each other. A synchronous call on a session that still has
+  queued batches is queued too, for the same reason. The queue is bounded
+  (`413 PAYLOAD_TOO_LARGE`, `429 QUEUE_SATURATED`), a batch whose delivery
+  fails is marked `failed` and skipped (no automatic retry by default: the
+  pipeline is not atomic, so a re-run is not a clean retry), and every
+  row is deleted seven days after it was accepted. `GET /api/v2/memory/status`
+  reports one request's outcome (`?request_id=`) or a session's backlog
+  (`?session_id=`). The field name, the `202` body and the status
+  vocabulary match the EverOS Cloud gateway. Configured under
+  `[memorize.async_queue]`; `enabled = false` stops accepting new async
+  work while rows accepted earlier are still delivered. Synchronous calls
+  without a backlog are unchanged.
+
 ### Fixed
 
 - **`method="vector"` finds episodes when no atomic fact is in scope.**

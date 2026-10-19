@@ -34,6 +34,7 @@ from . import tables as tables
 from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from .repos import DocumentListPage as DocumentListPage
 from .repos import DocumentUpsertPayload as DocumentUpsertPayload
+from .repos import InboxSessionSummary as InboxSessionSummary
 from .repos import QueueSummary as QueueSummary
 from .repos import TopicUpsertPayload as TopicUpsertPayload
 from .repos import cluster_repo as cluster_repo
@@ -42,6 +43,7 @@ from .repos import knowledge_document_repo as knowledge_document_repo
 from .repos import knowledge_topic_sqlite_repo as knowledge_topic_sqlite_repo
 from .repos import md_change_state_repo as md_change_state_repo
 from .repos import memcell_repo as memcell_repo
+from .repos import memorize_inbox_repo as memorize_inbox_repo
 from .repos import mint_cluster_id as mint_cluster_id
 from .repos import reflection_report_repo as reflection_report_repo
 from .repos import unprocessed_buffer_repo as unprocessed_buffer_repo
@@ -55,6 +57,7 @@ from .tables import KnowledgeDocumentRow as KnowledgeDocumentRow
 from .tables import KnowledgeTopicRow as KnowledgeTopicRow
 from .tables import MdChangeState as MdChangeState
 from .tables import Memcell as Memcell
+from .tables import MemorizeInbox as MemorizeInbox
 from .tables import ReflectionReport as ReflectionReport
 from .tables import UnprocessedBuffer as UnprocessedBuffer
 
@@ -65,10 +68,12 @@ __all__ = [
     "ConversationStatus",
     "DocumentListPage",
     "DocumentUpsertPayload",
+    "InboxSessionSummary",
     "KnowledgeDocumentRow",
     "KnowledgeTopicRow",
     "MdChangeState",
     "Memcell",
+    "MemorizeInbox",
     "QueueSummary",
     "ReflectionReport",
     "TopicUpsertPayload",
@@ -82,6 +87,7 @@ __all__ = [
     "knowledge_topic_sqlite_repo",
     "md_change_state_repo",
     "memcell_repo",
+    "memorize_inbox_repo",
     "mint_cluster_id",
     "reflection_report_repo",
     "unprocessed_buffer_repo",

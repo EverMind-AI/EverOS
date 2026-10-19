@@ -33,6 +33,7 @@ from .lifespans import (
     CascadeLifespanProvider,
     LanceDBLifespanProvider,
     LLMLifespanProvider,
+    MemorizeQueueLifespanProvider,
     OmeLifespanProvider,
     ParserLifespanProvider,
     SqliteLifespanProvider,
@@ -75,7 +76,8 @@ def create_app(
             ``[TracingLifespanProvider(), MetricsLifespanProvider(),
             LLMLifespanProvider(), ParserLifespanProvider(),
             SqliteLifespanProvider(), LanceDBLifespanProvider(),
-            CascadeLifespanProvider(), OmeLifespanProvider()]``.
+            CascadeLifespanProvider(), MemorizeQueueLifespanProvider(),
+            OmeLifespanProvider()]``.
 
     Returns:
         FastAPI: Configured application instance.
@@ -91,6 +93,7 @@ def create_app(
             SqliteLifespanProvider(),
             LanceDBLifespanProvider(),
             CascadeLifespanProvider(),
+            MemorizeQueueLifespanProvider(),
             OmeLifespanProvider(),
         ]
 

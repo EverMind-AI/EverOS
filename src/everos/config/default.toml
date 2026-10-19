@@ -169,6 +169,26 @@ hard_msg_limit = 500
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
 
+[memorize.async_queue]
+# Queue behind ``async_mode=true`` on /add and /flush. Off -> such requests
+# run synchronously; rows accepted while it was on are still delivered.
+enabled = true
+# Unfinished rows per session; beyond this /add and /flush answer 429.
+max_pending_per_session = 50
+# Unfinished rows across all sessions; beyond this the answer is 429.
+max_pending_total = 200
+# One request body (serialised); beyond this the answer is 413.
+max_payload_bytes = 4194304
+# Fallback sweep interval. Enqueue wakes the worker immediately.
+scan_interval_seconds = 5.0
+# Delivery attempts per row before it is marked failed and skipped. Keep 1
+# unless duplicate memcells after a partial failure are acceptable: the
+# memorize pipeline is not atomic, so a re-run is not a clean retry.
+max_attempts = 1
+retry_backoff_seconds = 2.0
+# Rows (any status) are deleted this many hours after they were created.
+row_retention_hours = 168.0
+
 [knowledge]
 # Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
 # uploads are rejected with HTTP 422 before parsing/extraction. Note: the
