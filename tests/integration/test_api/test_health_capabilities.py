@@ -303,8 +303,12 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     # too so the values it actually reads honour the monkeypatch.
     from everos.entrypoints.api.routes import health as health_route
 
+    # `embed` is the one capability the route does NOT read from an accessor:
+    # it reports whether the startup dimension probe got an answer, because
+    # "a provider could be constructed" is true even against a dead service
+    # (issue #434). Simulating the tier therefore means simulating the probe.
     monkeypatch.setattr(
-        health_route, "get_embedding_capability", lambda: _StubCapability(embed)
+        health_route, "last_probe", lambda: 1024 if embed else None
     )
     monkeypatch.setattr(
         health_route, "get_rerank_capability", lambda: _StubCapability(rerank)
