@@ -19,9 +19,7 @@ the session as the partition, and ``memorize()`` is the engine.
 
 External usage::
 
-    from everos.service import (
-        MemorizeQueueWorker, get_request_status, get_session_status,
-    )
+    from everos.service import MemorizeQueueWorker, get_task, list_tasks
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ from typing import Any, Literal
 import structlog
 from pydantic import BaseModel
 
-from everos.component.utils.datetime import get_utc_now, to_timestamp_ms
+from everos.component.utils.datetime import get_utc_now
 from everos.config import AsyncQueueSettings
 from everos.core.context import reset_request_id, set_request_id
 from everos.core.errors import (
@@ -45,11 +43,10 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import (
+    LOST_STATUS_WRITE,
     MemorizeInbox,
     memorize_inbox_repo,
-    unprocessed_buffer_repo,
 )
-from everos.service._boundary import _TRACK
 from everos.service.memorize import memorize
 
 logger = get_logger(__name__)
@@ -63,30 +60,34 @@ _MARK_ATTEMPTS = 3
 _MARK_RETRY_SECONDS = 1.0
 
 
-class QueueRequestStatus(BaseModel):
-    """``GET /status?request_id=`` -- one accepted request's outcome."""
-
-    status: Literal["queued", "processing", "success", "failed"]
-    session_id: str
-    message_count: int
-    attempt: int
-    last_error: str | None
-    created_at: dt.datetime
-    updated_at: dt.datetime
+TaskStatus = Literal["queued", "processing", "success", "failed"]
+TASK_STATUSES: tuple[str, ...] = ("queued", "processing", "success", "failed")
 
 
-class QueueSessionStatus(BaseModel):
-    """``GET /status?session_id=`` -- how much of a session is still in flight.
+class TaskItem(BaseModel):
+    """``GET /tasks/{task_id}`` -- one accepted request, in the Cloud's shape.
 
-    ``pending == 0`` means every batch reached ``memorize()``; it does not
-    mean every message became an episode -- ``buffered`` counts messages
-    still waiting in ``unprocessed_buffer`` for a boundary or a flush.
+    ``id`` is the request id of the accepting call. Cloud also emits
+    ``pending`` (accepted, boundary not run yet); this build never does, so a
+    client written for Cloud sees a subset of the statuses it already handles.
     """
 
-    pending: int
-    oldest_pending_age_ms: int | None
-    failed: int
-    buffered: int
+    id: str
+    status: TaskStatus
+    task_type: Literal["memory_add", "memory_flush"]
+    error: str | None = None
+    error_code: str | None = None
+    created_at: dt.datetime
+    finished_at: dt.datetime | None = None
+
+
+class TaskPage(BaseModel):
+    """``GET /tasks`` -- one page of :class:`TaskItem`, newest first."""
+
+    total: int
+    page: int
+    page_size: int
+    items: list[TaskItem]
 
 
 class MemorizeQueueWorker:
@@ -474,45 +475,49 @@ class MemorizeQueueWorker:
         await self._reap_lost()
 
 
-# ── status readers (no worker needed; plain table reads) ───────────────────
+# ── task readers (no worker needed; plain table reads) ─────────────────────
 
 
-async def get_request_status(request_id: str) -> QueueRequestStatus | None:
-    row = await memorize_inbox_repo.find_one(request_id=request_id)
-    if row is None:
-        return None
-    return QueueRequestStatus(
-        status=row.status,
-        session_id=row.session_id,
-        message_count=row.message_count,
-        attempt=row.attempt,
-        last_error=row.last_error,
+def _task_item(row: MemorizeInbox) -> TaskItem:
+    terminal = row.status in ("success", "failed")
+    error_code: str | None = None
+    if row.last_error == LOST_STATUS_WRITE:
+        error_code = "status_write_lost"
+    elif row.last_error and ": " in row.last_error:
+        error_code = row.last_error.split(": ", 1)[0]  # the exception type
+    return TaskItem(
+        id=row.request_id,
+        status=row.status,  # type: ignore[arg-type]
+        task_type="memory_flush" if row.is_final else "memory_add",
+        error=row.last_error,
+        error_code=error_code,
         created_at=row.created_at,
-        updated_at=row.updated_at,
+        finished_at=row.updated_at if terminal else None,
     )
 
 
-async def get_session_status(
+async def get_task(request_id: str) -> TaskItem | None:
+    row = await memorize_inbox_repo.find_one(request_id=request_id)
+    return None if row is None else _task_item(row)
+
+
+async def list_tasks(
     *,
-    session_id: str,
+    session_id: str | None = None,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
     app_id: str = "default",
     project_id: str = "default",
-) -> QueueSessionStatus:
-    summary = await memorize_inbox_repo.session_summary(
-        session_id=session_id, app_id=app_id, project_id=project_id
+) -> TaskPage:
+    rows, total = await memorize_inbox_repo.list_tasks(
+        session_id=session_id,
+        status=status,
+        app_id=app_id,
+        project_id=project_id,
+        offset=(page - 1) * page_size,
+        limit=page_size,
     )
-    buffered = await unprocessed_buffer_repo.list_for_track(
-        session_id, _TRACK, app_id=app_id, project_id=project_id
-    )
-    oldest = summary.oldest_pending_created_at
-    age_ms = (
-        None
-        if oldest is None
-        else max(0, to_timestamp_ms(get_utc_now()) - to_timestamp_ms(oldest))
-    )
-    return QueueSessionStatus(
-        pending=summary.pending,
-        oldest_pending_age_ms=age_ms,
-        failed=summary.failed,
-        buffered=len(buffered),
+    return TaskPage(
+        total=total, page=page, page_size=page_size, items=[_task_item(r) for r in rows]
     )

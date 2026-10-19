@@ -11,14 +11,13 @@ Exposes the queue primitives the worker and the route need:
 - :meth:`requeue_processing` — startup crash recovery.
 - :meth:`fail_abandoned` — the stuck-row sweep.
 - :meth:`purge_expired` — retention sweep.
-- :meth:`session_summary` — ``GET /status?session_id=``.
+- :meth:`list_tasks` — ``GET /tasks`` (filter by session / status, paged).
 """
 
 from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Collection
-from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,17 +28,10 @@ from ..sqlite_manager import get_session_factory
 from ..tables import MemorizeInbox
 
 PENDING_STATUSES: tuple[str, ...] = ("queued", "processing")
+# ``last_error`` of a row the sweep failed because its status write was lost.
+LOST_STATUS_WRITE = "status write lost; outcome unknown"
 # Joins (app_id, project_id, session_id) into one comparable key in SQL.
 _SCOPE_SEP = "\x1f"
-
-
-@dataclass(frozen=True)
-class InboxSessionSummary:
-    """Per-session queue snapshot for ``GET /status?session_id=``."""
-
-    pending: int
-    failed: int
-    oldest_pending_created_at: dt.datetime | None
 
 
 class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
@@ -137,7 +129,7 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
         stmt = (
             update(MemorizeInbox)
             .where(MemorizeInbox.status == "processing")
-            .values(status="failed", last_error="status write lost; outcome unknown")
+            .values(status="failed", last_error=LOST_STATUS_WRITE)
         )
         if exclude_ids:
             stmt = stmt.where(MemorizeInbox.id.not_in(list(exclude_ids)))  # type: ignore[union-attr]
@@ -161,46 +153,50 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
             await s.commit()
             return int(result.rowcount or 0)
 
-    async def session_summary(
+    async def list_tasks(
         self,
         *,
-        session_id: str,
+        session_id: str | None = None,
+        status: str | None = None,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> InboxSessionSummary:
-        scope = (
-            MemorizeInbox.app_id == app_id,
-            MemorizeInbox.project_id == project_id,
-            MemorizeInbox.session_id == session_id,
-        )
-        pending_filter = MemorizeInbox.status.in_(PENDING_STATUSES)  # type: ignore[attr-defined]
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[MemorizeInbox], int]:
+        """Rows for ``GET /tasks``: newest first, plus the unpaged total.
+
+        ``session_id`` (with its ``app_id`` / ``project_id`` scope) and
+        ``status`` narrow the listing; either may be omitted.
+        """
+        where = []
+        if session_id is not None:
+            where += [
+                MemorizeInbox.app_id == app_id,
+                MemorizeInbox.project_id == project_id,
+                MemorizeInbox.session_id == session_id,
+            ]
+        if status is not None:
+            where.append(MemorizeInbox.status == status)
         async with session_scope(self._factory) as s:
-            pending = (
+            total = (
                 await s.execute(
-                    select(func.count())
-                    .select_from(MemorizeInbox)
-                    .where(*scope, pending_filter)
+                    select(func.count()).select_from(MemorizeInbox).where(*where)
                 )
             ).scalar_one()
-            failed = (
-                await s.execute(
-                    select(func.count())
-                    .select_from(MemorizeInbox)
-                    .where(*scope, MemorizeInbox.status == "failed")
-                )
-            ).scalar_one()
-            oldest = (
-                await s.execute(
-                    select(func.min(MemorizeInbox.created_at)).where(
-                        *scope, pending_filter
+            rows = (
+                (
+                    await s.execute(
+                        select(MemorizeInbox)
+                        .where(*where)
+                        .order_by(MemorizeInbox.id.desc())  # type: ignore[union-attr]
+                        .offset(offset)
+                        .limit(limit)
                     )
                 )
-            ).scalar_one()
-        return InboxSessionSummary(
-            pending=int(pending),
-            failed=int(failed),
-            oldest_pending_created_at=oldest,
-        )
+                .scalars()
+                .all()
+            )
+        return list(rows), int(total)
 
     async def purge_expired(self, *, before: dt.datetime) -> tuple[int, int]:
         """Delete rows created before ``before`` unless still ``processing``.

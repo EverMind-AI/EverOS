@@ -1,4 +1,4 @@
-"""``async_mode`` on ``/add``, the backlog rule on ``/flush``, and ``GET /status``.
+"""``async_mode`` on ``/add``, the backlog rule on ``/flush``, and ``GET /tasks``.
 
 The route has one rule: a request is queued (202) when it asks for
 ``async_mode`` **or** when its session already has unfinished queued rows;
@@ -25,11 +25,12 @@ from everos.config import load_settings
 from everos.core.errors import QueueSaturatedError
 from everos.entrypoints.api.app import create_app
 from everos.entrypoints.api.routes import memorize as route_mod
+from everos.entrypoints.api.routes import tasks as tasks_mod
 from everos.service.memorize import MemorizeResult
 from everos.service.memorize_queue import (
     MemorizeQueueWorker,
-    QueueRequestStatus,
-    QueueSessionStatus,
+    TaskItem,
+    TaskPage,
 )
 
 
@@ -252,78 +253,82 @@ async def test_sync_flush_with_backlog_joins_the_queue(
     assert is_final is True
 
 
-# ── GET /status ────────────────────────────────────────────────────────────
+# ── GET /tasks ─────────────────────────────────────────────────────────────
 
 
-async def test_status_by_request_id(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_task_by_id(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    async def fake_status(request_id: str) -> QueueRequestStatus | None:
-        seen.append(request_id)
-        if request_id != "r1":
+    async def fake_get(task_id: str) -> TaskItem | None:
+        seen.append(task_id)
+        if task_id != "r1":
             return None
-        return QueueRequestStatus(
+        return TaskItem(
+            id="r1",
             status="processing",
-            session_id="s1",
-            message_count=3,
-            attempt=1,
-            last_error=None,
+            task_type="memory_add",
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
-            updated_at=datetime(2026, 1, 1, 0, 0, 5, tzinfo=UTC),
         )
 
-    monkeypatch.setattr(route_mod, "get_request_status", fake_status)
+    monkeypatch.setattr(tasks_mod, "get_task", fake_get)
 
-    resp = await client.get("/api/v2/memory/status", params={"request_id": "r1"})
+    resp = await client.get("/api/v2/tasks/r1")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert (data["status"], data["session_id"], data["message_count"]) == (
+    assert (data["id"], data["status"], data["task_type"]) == (
+        "r1",
         "processing",
-        "s1",
-        3,
+        "memory_add",
     )
+    assert data["finished_at"] is None
     assert data["created_at"].startswith("2026-01-01T00:00:00")
 
-    missing = await client.get("/api/v2/memory/status", params={"request_id": "zz"})
+    missing = await client.get("/api/v2/tasks/zz")
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "NOT_FOUND"
     assert seen == ["r1", "zz"]
 
 
-async def test_status_by_session_id(
+async def test_task_list_passes_filters_and_caps_page_size(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[tuple[str, str, str]] = []
+    seen: list[dict[str, Any]] = []
 
-    async def fake_summary(
-        *, session_id: str, app_id: str = "default", project_id: str = "default"
-    ) -> QueueSessionStatus:
-        seen.append((session_id, app_id, project_id))
-        return QueueSessionStatus(
-            pending=2, oldest_pending_age_ms=8400, failed=0, buffered=12
+    async def fake_list(**kwargs: Any) -> TaskPage:
+        seen.append(kwargs)
+        return TaskPage(
+            total=0, page=kwargs["page"], page_size=kwargs["page_size"], items=[]
         )
 
-    monkeypatch.setattr(route_mod, "get_session_status", fake_summary)
+    monkeypatch.setattr(tasks_mod, "list_tasks", fake_list)
 
     resp = await client.get(
-        "/api/v2/memory/status",
-        params={"session_id": "s1", "app_id": "a", "project_id": "p"},
+        "/api/v2/tasks",
+        params={
+            "session_id": "s1",
+            "status": "queued",
+            "page": 2,
+            "page_size": 500,
+            "app_id": "a",
+        },
     )
 
     assert resp.status_code == 200
-    assert resp.json()["data"] == {
-        "pending": 2,
-        "oldest_pending_age_ms": 8400,
-        "failed": 0,
-        "buffered": 12,
-    }
-    assert seen == [("s1", "a", "p")]
+    assert resp.json()["data"] == {"total": 0, "page": 2, "page_size": 100, "items": []}
+    assert seen == [
+        {
+            "session_id": "s1",
+            "status": "queued",
+            "page": 2,
+            "page_size": 100,
+            "app_id": "a",
+            "project_id": "default",
+        }
+    ]
 
 
-async def test_status_without_selector_is_422(client: AsyncClient) -> None:
-    resp = await client.get("/api/v2/memory/status")
+async def test_task_list_rejects_unknown_status(client: AsyncClient) -> None:
+    resp = await client.get("/api/v2/tasks", params={"status": "done"})
 
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "INVALID_INPUT"

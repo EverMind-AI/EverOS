@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`413 PAYLOAD_TOO_LARGE`, `429 QUEUE_SATURATED`), a batch whose delivery
   fails is marked `failed` and skipped (no automatic retry by default: the
   pipeline is not atomic, so a re-run is not a clean retry), and every
-  row is deleted seven days after it was accepted. `GET /api/v2/memory/status`
-  reports one request's outcome (`?request_id=`) or a session's backlog
-  (`?session_id=`). The field name, the `202` body and the status
-  vocabulary match the EverOS Cloud gateway. Configured under
+  row is deleted seven days after it was accepted. `GET /api/v2/tasks/{task_id}`
+  reports one request's outcome and `GET /api/v2/tasks` lists them (filter by
+  `session_id` / `status`, paged). The field name, the `202` body, the task
+  paths and the status vocabulary match the EverOS Cloud gateway. Configured under
   `[memorize.async_queue]`; `enabled = false` stops accepting new async
   work while rows accepted earlier are still delivered. Synchronous calls
   without a backlog are unchanged.

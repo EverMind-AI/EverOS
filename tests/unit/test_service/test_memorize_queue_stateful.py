@@ -18,7 +18,7 @@ step:
    row has no body, a failed row keeps it;
 4. the caps hold: 429 is raised exactly when the model says the session or
    the process is full;
-5. ``GET /status?request_id=`` reports what the table holds.
+5. ``GET /tasks/{task_id}`` reports what the table holds.
 
 Two modes. ``TestMemorizeQueueMachine`` is the rule-based machine: one step
 at a time, deterministic, replayable, and a failure shrinks to the shortest
@@ -62,9 +62,6 @@ from everos.core.persistence import (
     create_system_engine,
 )
 from everos.infra.persistence.sqlite.repos.memorize_inbox import _MemorizeInboxRepo
-from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
-    _UnprocessedBufferRepo,
-)
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
 from everos.service import memorize_queue as mq
 from everos.service.memorize import MemorizeResult
@@ -153,11 +150,6 @@ class _Queue:
         self.worker = mq.MemorizeQueueWorker(cfg)
         self._patches = [
             mock.patch.object(mq, "memorize_inbox_repo", self.repo),
-            mock.patch.object(
-                mq,
-                "unprocessed_buffer_repo",
-                _UnprocessedBufferRepo(session_factory=self.factory),
-            ),
             mock.patch.object(mq, "memorize", memorize),
             mock.patch.object(mq, "get_utc_now", self.now),
             mock.patch.object(mq, "_MARK_RETRY_SECONDS", 0.0),
@@ -521,7 +513,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     @invariant()
     def status_reader_agrees(self) -> None:
         for rid in self.seen:
-            got = self.run(mq.get_request_status(rid))
+            got = self.run(mq.get_task(rid))
             m = self.model.get(rid)
             if m is None:
                 assert got is None, rid
@@ -604,7 +596,7 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
         async def peek() -> None:
             for _ in range(5):
                 await asyncio.sleep(rng.random() * 0.01)
-                await mq.get_session_status(session_id=rng.choice(SESSIONS))
+                await mq.list_tasks(session_id=rng.choice(SESSIONS))
 
         await asyncio.gather(
             *(produce(k, *item) for k, item in enumerate(plan)), peek()

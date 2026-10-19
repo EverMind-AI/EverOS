@@ -31,10 +31,10 @@ not need to manage either.
 # ``SQLModel.metadata`` so ``SqliteLifespanProvider.startup`` can
 # ``create_all`` without callers having to import each model module.
 from . import tables as tables
+from .repos import LOST_STATUS_WRITE as LOST_STATUS_WRITE
 from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from .repos import DocumentListPage as DocumentListPage
 from .repos import DocumentUpsertPayload as DocumentUpsertPayload
-from .repos import InboxSessionSummary as InboxSessionSummary
 from .repos import QueueSummary as QueueSummary
 from .repos import TopicUpsertPayload as TopicUpsertPayload
 from .repos import cluster_repo as cluster_repo
@@ -62,13 +62,13 @@ from .tables import ReflectionReport as ReflectionReport
 from .tables import UnprocessedBuffer as UnprocessedBuffer
 
 __all__ = [
+    "LOST_STATUS_WRITE",
     "MTIME_TOLERANCE_SECONDS",
     "Cluster",
     "ClusterMember",
     "ConversationStatus",
     "DocumentListPage",
     "DocumentUpsertPayload",
-    "InboxSessionSummary",
     "KnowledgeDocumentRow",
     "KnowledgeTopicRow",
     "MdChangeState",

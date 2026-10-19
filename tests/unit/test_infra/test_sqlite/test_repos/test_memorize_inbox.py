@@ -15,7 +15,7 @@ Pins the queue contract the worker relies on:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -165,28 +165,23 @@ async def test_fail_abandoned_marks_every_processing_row(
     assert await repo.count_pending() == 1  # the queued row is untouched
 
 
-async def test_session_summary_reports_pending_oldest_and_failed(
+async def test_list_tasks_scopes_filters_and_pages_newest_first(
     repo: _MemorizeInboxRepo,
 ) -> None:
-    oldest = datetime(2026, 1, 1, tzinfo=UTC)
-    await repo.add(_row(session_id="s1", created_at=oldest))
-    await repo.add(_row(session_id="s1", status="processing"))
-    await repo.add(_row(session_id="s1", status="failed"))
-    await repo.add(_row(session_id="s1", status="success"))
-    await repo.add(_row(session_id="other"))
+    r1 = await repo.add(_row(session_id="s1"))
+    r2 = await repo.add(_row(session_id="s1", status="failed"))
+    r3 = await repo.add(_row(session_id="s1", status="success"))
+    await repo.add(_row(session_id="s1", app_id="other"))  # another scope
+    await repo.add(_row(session_id="s2"))
 
-    summary = await repo.session_summary(session_id="s1")
-
-    assert summary.pending == 2
-    assert summary.failed == 1
-    assert summary.oldest_pending_created_at == oldest
-
-    empty = await repo.session_summary(session_id="nobody")
-    assert (empty.pending, empty.failed, empty.oldest_pending_created_at) == (
-        0,
-        0,
-        None,
-    )
+    rows, total = await repo.list_tasks(session_id="s1", limit=2)
+    assert total == 3 and [r.id for r in rows] == [r3.id, r2.id]
+    rows, total = await repo.list_tasks(session_id="s1", offset=2, limit=2)
+    assert total == 3 and [r.id for r in rows] == [r1.id]
+    rows, total = await repo.list_tasks(status="failed")
+    assert total == 1 and rows[0].id == r2.id
+    _rows, total = await repo.list_tasks()
+    assert total == 5
 
 
 async def test_claim_next_skips_sessions_in_flight(repo: _MemorizeInboxRepo) -> None:

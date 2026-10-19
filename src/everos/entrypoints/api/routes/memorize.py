@@ -17,14 +17,9 @@ from fastapi import APIRouter, Request, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from starlette.status import HTTP_202_ACCEPTED
 
-from everos.core.errors import InvalidInputError, NotFoundError
 from everos.entrypoints.api.utils import extract_request_id, memorize_queue
 from everos.service import (
     MemorizeQueueWorker,
-    QueueRequestStatus,
-    QueueSessionStatus,
-    get_request_status,
-    get_session_status,
     memorize,
 )
 
@@ -156,7 +151,7 @@ class MemorizeAddRequest(BaseModel):
         description=(
             "Persist the batch to the memorize queue and return 202 at once "
             "instead of running boundary detection and extraction inline. Poll "
-            "GET /status with the returned request_id. A session that already "
+            "GET /tasks/{request_id}. A session that already "
             "has queued batches is queued even when this is false, so batches "
             "never run out of order."
         ),
@@ -256,7 +251,7 @@ async def _accept(
     )
 
 
-_ASYNC_RESPONSES: dict[int | str, dict[str, Any]] = {
+_ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
     202: {
         "model": SuccessEnvelope[AcceptedResponseData],
         "description": "Queued: async_mode, or the session already had a backlog",
@@ -264,9 +259,16 @@ _ASYNC_RESPONSES: dict[int | str, dict[str, Any]] = {
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
 }
+_FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
+    202: {
+        "model": SuccessEnvelope[AcceptedResponseData],
+        "description": "Queued behind the session's backlog, how a flush is queued",
+    },
+    429: {"description": "Queue at its per-session or global cap"},
+}
 
 
-@router.post("/add", responses=_ASYNC_RESPONSES)
+@router.post("/add", responses=_ADD_RESPONSES)
 async def add_memory(
     req: Annotated[MemorizeAddRequest, ...],
     request: Request,
@@ -295,7 +297,7 @@ async def add_memory(
     )
 
 
-@router.post("/flush", responses=_ASYNC_RESPONSES)
+@router.post("/flush", responses=_FLUSH_RESPONSES)
 async def flush_memory(
     req: Annotated[MemorizeFlushRequest, ...],
     request: Request,
@@ -333,32 +335,3 @@ async def flush_memory(
         request_id=request_id,
         data=FlushResponseData(status=status),
     )
-
-
-@router.get("/status")
-async def memory_status(
-    request: Request,
-    request_id: str | None = None,
-    session_id: str | None = None,
-    app_id: str = "default",
-    project_id: str = "default",
-) -> SuccessEnvelope[QueueRequestStatus] | SuccessEnvelope[QueueSessionStatus]:
-    """Progress of queued memorize work.
-
-    ``?request_id=`` -- the outcome of one accepted request (404 once it has
-    aged out of ``memorize.async_queue.row_retention_hours``).
-    ``?session_id=`` -- the session's unfinished / failed / still-buffered
-    counts; drain by polling until ``pending`` is 0.
-    """
-    own_request_id = extract_request_id(request)
-    if request_id is not None:
-        status = await get_request_status(request_id)
-        if status is None:
-            raise NotFoundError(f"request {request_id} not found or expired")
-        return SuccessEnvelope(request_id=own_request_id, data=status)
-    if session_id is not None:
-        summary = await get_session_status(
-            session_id=session_id, app_id=app_id, project_id=project_id
-        )
-        return SuccessEnvelope(request_id=own_request_id, data=summary)
-    raise InvalidInputError("request_id or session_id is required")

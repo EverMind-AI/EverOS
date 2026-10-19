@@ -16,13 +16,13 @@ the buffer repo singleton are swapped for temp-bound instances) and a fake
   ``failed`` and skipped so the rows behind it still deliver.
 - ``start`` recovers ``processing`` rows left by a crash, purges expired
   rows, and ``enqueue`` wakes the running loop without waiting for a scan.
-- the two ``GET /status`` readers map rows to the public shape.
+- the two ``GET /tasks`` readers map rows to the Cloud-shaped public items.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,10 +39,7 @@ from everos.core.persistence import (
     create_system_engine,
 )
 from everos.infra.persistence.sqlite.repos.memorize_inbox import _MemorizeInboxRepo
-from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
-    _UnprocessedBufferRepo,
-)
-from everos.infra.persistence.sqlite.tables import MemorizeInbox, UnprocessedBuffer
+from everos.infra.persistence.sqlite.tables import MemorizeInbox
 from everos.service import memorize_queue as mq
 from everos.service.memorize import MemorizeResult
 
@@ -57,9 +54,6 @@ async def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _MemorizeInbo
         await conn.run_sync(SQLModel.metadata.create_all)
     inbox = _MemorizeInboxRepo(session_factory=factory)
     monkeypatch.setattr(mq, "memorize_inbox_repo", inbox)
-    monkeypatch.setattr(
-        mq, "unprocessed_buffer_repo", _UnprocessedBufferRepo(session_factory=factory)
-    )
     return inbox
 
 
@@ -327,7 +321,7 @@ async def test_stop_is_idempotent_and_safe_before_start(
 # ── status readers ─────────────────────────────────────────────────────────
 
 
-async def test_get_request_status_maps_row_and_none_when_missing(
+async def test_get_task_maps_row_in_the_cloud_shape(
     repo: _MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     await repo.add(
@@ -335,75 +329,66 @@ async def test_get_request_status_maps_row_and_none_when_missing(
             request_id="r1",
             session_id="s1",
             payload_json="{}",
-            message_count=4,
+            is_final=True,
             status="failed",
-            attempt=3,
+            attempt=1,
             last_error="RuntimeError: boom",
         )
     )
+    await repo.add(MemorizeInbox(request_id="r2", session_id="s1", payload_json="{}"))
+    await repo.add(
+        MemorizeInbox(
+            request_id="r3",
+            session_id="s1",
+            payload_json="{}",
+            status="failed",
+            last_error="status write lost; outcome unknown",
+        )
+    )
 
-    st = await mq.get_request_status("r1")
+    failed = await mq.get_task("r1")
+    queued = await mq.get_task("r2")
+    lost = await mq.get_task("r3")
 
-    assert st is not None
-    assert (st.status, st.session_id, st.message_count, st.attempt) == (
+    assert failed is not None and queued is not None and lost is not None
+    assert (failed.id, failed.status, failed.task_type) == (
+        "r1",
         "failed",
-        "s1",
-        4,
-        3,
+        "memory_flush",
     )
-    assert st.last_error == "RuntimeError: boom"
-    assert st.created_at.tzinfo is not None
-    assert await mq.get_request_status("nope") is None
-
-
-async def test_get_session_status_combines_inbox_and_buffer(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
-) -> None:
-    oldest = get_utc_now() - timedelta(seconds=30)
-    await repo.add(
-        MemorizeInbox(
-            request_id="r1", session_id="s1", payload_json="{}", created_at=oldest
-        )
-    )
-    await repo.add(
-        MemorizeInbox(
-            request_id="r2", session_id="s1", payload_json="{}", status="failed"
-        )
-    )
-    await mq.unprocessed_buffer_repo.replace(
-        "s1",
-        "memorize",
-        [
-            UnprocessedBuffer(
-                message_id="m1",
-                session_id="s1",
-                track="memorize",
-                sender_id="u",
-                role="user",
-                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-                content_items_json="[]",
-                text="hi",
-            )
-        ],
-    )
-
-    st = await mq.get_session_status(session_id="s1")
-
-    assert (st.pending, st.failed, st.buffered) == (1, 1, 1)
-    assert st.oldest_pending_age_ms is not None and st.oldest_pending_age_ms >= 29_000
-
-    empty = await mq.get_session_status(session_id="nobody")
-    assert (
-        empty.pending,
-        empty.failed,
-        empty.buffered,
-        empty.oldest_pending_age_ms,
-    ) == (
-        0,
-        0,
-        0,
+    assert (failed.error, failed.error_code) == ("RuntimeError: boom", "RuntimeError")
+    assert failed.created_at.tzinfo is not None and failed.finished_at is not None
+    assert (queued.status, queued.task_type, queued.finished_at) == (
+        "queued",
+        "memory_add",
         None,
     )
+    assert lost.error_code == "status_write_lost"
+    assert await mq.get_task("nope") is None
+
+
+async def test_list_tasks_filters_by_session_and_status_and_pages(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+) -> None:
+    for i in range(5):
+        await repo.add(
+            MemorizeInbox(
+                request_id=f"a{i}",
+                session_id="s1",
+                payload_json="{}",
+                status="success" if i % 2 else "queued",
+            )
+        )
+    await repo.add(MemorizeInbox(request_id="b0", session_id="s2", payload_json="{}"))
+
+    page = await mq.list_tasks(session_id="s1", page=1, page_size=2)
+    assert (page.total, page.page, page.page_size) == (5, 1, 2)
+    assert [t.id for t in page.items] == ["a4", "a3"]  # newest first
+    queued = await mq.list_tasks(session_id="s1", status="queued", page_size=10)
+    assert (queued.total, [t.id for t in queued.items]) == (3, ["a4", "a2", "a0"])
+    everything = await mq.list_tasks(page_size=100)
+    assert everything.total == 6
+    assert (await mq.list_tasks(session_id="nobody")).total == 0
 
 
 async def _wait_until_status(

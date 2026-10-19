@@ -152,7 +152,7 @@
             }
           },
           "202": {
-            "description": "Queued: async_mode, or the session already had a backlog",
+            "description": "Queued behind the session's backlog, how a flush is queued",
             "content": {
               "application/json": {
                 "schema": {
@@ -161,105 +161,8 @@
               }
             }
           },
-          "413": {
-            "description": "Body over memorize.async_queue.max_payload_bytes"
-          },
           "429": {
             "description": "Queue at its per-session or global cap"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/memory/status": {
-      "get": {
-        "tags": [
-          "memory"
-        ],
-        "summary": "Memory Status",
-        "description": "Progress of queued memorize work.\n\n``?request_id=`` -- the outcome of one accepted request (404 once it has\naged out of ``memorize.async_queue.row_retention_hours``).\n``?session_id=`` -- the session's unfinished / failed / still-buffered\ncounts; drain by polling until ``pending`` is 0.",
-        "operationId": "memory_status_api_v1_memory_status_get",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Request Id"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "app_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "default",
-              "title": "App Id"
-            }
-          },
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "default",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SuccessEnvelope_QueueRequestStatus_"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SuccessEnvelope_QueueSessionStatus_"
-                    }
-                  ],
-                  "title": "Response Memory Status Api V1 Memory Status Get"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -972,6 +875,157 @@
         }
       }
     },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Task List",
+        "description": "Accepted requests, newest first; ``session_id`` / ``status`` narrow it.\n\nDrain a session before exiting by polling with ``status=queued`` and\n``status=processing`` until both ``total`` are 0. ``page_size`` is capped\nat 100.",
+        "operationId": "task_list_api_v1_tasks_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_TaskPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Task Status",
+        "description": "One accepted request's outcome.\n\n``404`` once it has aged out of ``memorize.async_queue.row_retention_hours``\n(or never existed).",
+        "operationId": "task_status_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_TaskItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/memory/add": {
       "post": {
         "tags": [
@@ -1076,7 +1130,7 @@
             }
           },
           "202": {
-            "description": "Queued: async_mode, or the session already had a backlog",
+            "description": "Queued behind the session's backlog, how a flush is queued",
             "content": {
               "application/json": {
                 "schema": {
@@ -1085,105 +1139,8 @@
               }
             }
           },
-          "413": {
-            "description": "Body over memorize.async_queue.max_payload_bytes"
-          },
           "429": {
             "description": "Queue at its per-session or global cap"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v2/memory/status": {
-      "get": {
-        "tags": [
-          "memory"
-        ],
-        "summary": "Memory Status",
-        "description": "Progress of queued memorize work.\n\n``?request_id=`` -- the outcome of one accepted request (404 once it has\naged out of ``memorize.async_queue.row_retention_hours``).\n``?session_id=`` -- the session's unfinished / failed / still-buffered\ncounts; drain by polling until ``pending`` is 0.",
-        "operationId": "memory_status_api_v2_memory_status_get",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Request Id"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "app_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "default",
-              "title": "App Id"
-            }
-          },
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "default",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SuccessEnvelope_QueueRequestStatus_"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SuccessEnvelope_QueueSessionStatus_"
-                    }
-                  ],
-                  "title": "Response Memory Status Api V2 Memory Status Get"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -1889,6 +1846,157 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuiesceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Task List",
+        "description": "Accepted requests, newest first; ``session_id`` / ``status`` narrow it.\n\nDrain a session before exiting by polling with ``status=queued`` and\n``status=processing`` until both ``total`` are 0. ``page_size`` is capped\nat 100.",
+        "operationId": "task_list_api_v2_tasks_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_TaskPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Task Status",
+        "description": "One accepted request's outcome.\n\n``404`` once it has aged out of ``memorize.async_queue.row_retention_hours``\n(or never existed).",
+        "operationId": "task_status_api_v2_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_TaskItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3329,7 +3437,7 @@
           "async_mode": {
             "type": "boolean",
             "title": "Async Mode",
-            "description": "Persist the batch to the memorize queue and return 202 at once instead of running boundary detection and extraction inline. Poll GET /status with the returned request_id. A session that already has queued batches is queued even when this is false, so batches never run out of order.",
+            "description": "Persist the batch to the memorize queue and return 202 at once instead of running boundary detection and extraction inline. Poll GET /tasks/{request_id}. A session that already has queued batches is queued even when this is false, so batches never run out of order.",
             "default": false
           }
         },
@@ -3454,101 +3562,6 @@
           "content"
         ],
         "title": "MessageItemDTO"
-      },
-      "QueueRequestStatus": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "queued",
-              "processing",
-              "success",
-              "failed"
-            ],
-            "title": "Status"
-          },
-          "session_id": {
-            "type": "string",
-            "title": "Session Id"
-          },
-          "message_count": {
-            "type": "integer",
-            "title": "Message Count"
-          },
-          "attempt": {
-            "type": "integer",
-            "title": "Attempt"
-          },
-          "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "session_id",
-          "message_count",
-          "attempt",
-          "last_error",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "QueueRequestStatus",
-        "description": "``GET /status?request_id=`` -- one accepted request's outcome."
-      },
-      "QueueSessionStatus": {
-        "properties": {
-          "pending": {
-            "type": "integer",
-            "title": "Pending"
-          },
-          "oldest_pending_age_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Oldest Pending Age Ms"
-          },
-          "failed": {
-            "type": "integer",
-            "title": "Failed"
-          },
-          "buffered": {
-            "type": "integer",
-            "title": "Buffered"
-          }
-        },
-        "type": "object",
-        "required": [
-          "pending",
-          "oldest_pending_age_ms",
-          "failed",
-          "buffered"
-        ],
-        "title": "QueueSessionStatus",
-        "description": "``GET /status?session_id=`` -- how much of a session is still in flight.\n\n``pending == 0`` means every batch reached ``memorize()``; it does not\nmean every message became an episode -- ``buffered`` counts messages\nstill waiting in ``unprocessed_buffer`` for a boundary or a flush."
       },
       "QuiesceResponse": {
         "properties": {
@@ -4336,14 +4349,14 @@
         ],
         "title": "SuccessEnvelope[KnowledgeSearchResponse]"
       },
-      "SuccessEnvelope_QueueRequestStatus_": {
+      "SuccessEnvelope_TaskItem_": {
         "properties": {
           "request_id": {
             "type": "string",
             "title": "Request Id"
           },
           "data": {
-            "$ref": "#/components/schemas/QueueRequestStatus"
+            "$ref": "#/components/schemas/TaskItem"
           }
         },
         "type": "object",
@@ -4351,16 +4364,16 @@
           "request_id",
           "data"
         ],
-        "title": "SuccessEnvelope[QueueRequestStatus]"
+        "title": "SuccessEnvelope[TaskItem]"
       },
-      "SuccessEnvelope_QueueSessionStatus_": {
+      "SuccessEnvelope_TaskPage_": {
         "properties": {
           "request_id": {
             "type": "string",
             "title": "Request Id"
           },
           "data": {
-            "$ref": "#/components/schemas/QueueSessionStatus"
+            "$ref": "#/components/schemas/TaskPage"
           }
         },
         "type": "object",
@@ -4368,7 +4381,7 @@
           "request_id",
           "data"
         ],
-        "title": "SuccessEnvelope[QueueSessionStatus]"
+        "title": "SuccessEnvelope[TaskPage]"
       },
       "SuccessEnvelope_TopicDetailResponse_": {
         "properties": {
@@ -4386,6 +4399,112 @@
           "data"
         ],
         "title": "SuccessEnvelope[TopicDetailResponse]"
+      },
+      "TaskItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "success",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "task_type": {
+            "type": "string",
+            "enum": [
+              "memory_add",
+              "memory_flush"
+            ],
+            "title": "Task Type"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "task_type",
+          "created_at"
+        ],
+        "title": "TaskItem",
+        "description": "``GET /tasks/{task_id}`` -- one accepted request, in the Cloud's shape.\n\n``id`` is the request id of the accepting call. Cloud also emits\n``pending`` (accepted, boundary not run yet); this build never does, so a\nclient written for Cloud sees a subset of the statuses it already handles."
+      },
+      "TaskPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "items"
+        ],
+        "title": "TaskPage",
+        "description": "``GET /tasks`` -- one page of :class:`TaskItem`, newest first."
       },
       "ToolCallDTO": {
         "properties": {

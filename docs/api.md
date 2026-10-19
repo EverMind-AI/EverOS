@@ -29,7 +29,8 @@ business semantics the raw spec does not carry.
   - [POST /api/v2/memory/add](#post-apiv2memoryadd)
   - [POST /api/v2/memory/flush](#post-apiv2memoryflush)
   - [Asynchronous mode](#asynchronous-mode)
-  - [GET /api/v2/memory/status](#get-apiv2memorystatus)
+  - [GET /api/v2/tasks/{task_id}](#get-apiv2taskstask_id)
+  - [GET /api/v2/tasks](#get-apiv2tasks)
   - [POST /api/v2/memory/search](#post-apiv2memorysearch)
   - [POST /api/v2/memory/get](#post-apiv2memoryget)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
@@ -602,7 +603,7 @@ SuccessEnvelope wrapping:
 | `pending` | `integer` | Unfinished queued batches of this session, this one included |
 
 The envelope's `request_id` is the handle for
-[`GET /status`](#get-apiv2memorystatus).
+[`GET /tasks/{task_id}`](#get-apiv2taskstask_id).
 
 #### cURL example
 
@@ -668,8 +669,9 @@ scope.
 - `"no_extraction"` — The buffer was empty (no prior `/add` calls for
   this `(session_id, app_id, project_id)`, or it was already flushed).
 
-`202 Accepted` with the same body as `/add` (`message_count` is `0`) when
-`async_mode` is set or the session has queued batches; see
+`202 Accepted` with the same body as `/add` (`message_count` is `0`) only
+when the session already has queued batches, so the flush runs after them;
+`/flush` has no `async_mode` of its own. See
 [Asynchronous mode](#asynchronous-mode).
 
 A `200` from `/flush` is synchronous with respect to markdown persistence: by the
@@ -741,7 +743,7 @@ Limits are configured under `[memorize.async_queue]`, see
 [configuration.md](configuration.md#memorizeasync_queue).
 
 **Failure.** A batch whose delivery raises is marked `failed` and skipped
-so its session keeps moving; `GET /status?request_id=` shows `last_error`.
+so its session keeps moving; `GET /tasks/{request_id}` shows `error`.
 There is no automatic retry by default (`max_attempts = 1`), because the
 memorize pipeline is not atomic: boundary detection writes the memcell and
 consumes the session buffer before extraction runs. A failure before that
@@ -769,7 +771,7 @@ batch whose delivery had just failed when the process died before its
 Stuck rows) if the server restarts before the row is marked.
 
 **Retention.** Every queue row, whatever its status, is deleted seven days
-(`row_retention_hours`) after it was created. Status lookups return `404`
+(`row_retention_hours`) after it was created. `GET /tasks/{task_id}` returns `404`
 after that. A delivered row drops its request body at once. A `failed` row
 keeps its body (in `memorize_inbox.payload_json`, found by `request_id`)
 until purged, and failed rows are not capped: an outage in which every batch
@@ -801,47 +803,54 @@ behind its session's backlog until it drains); wait until
 `select count(*) from memorize_inbox where status in ('queued', 'processing')`
 on `system.db` is 0; then stop and downgrade.
 
-### GET /api/v2/memory/status
+### GET /api/v2/tasks/{task_id}
 
-Progress of queued memorize work. One of the two selectors is required
-(`request_id` wins when both are given); neither returns `422 INVALID_INPUT`.
+The outcome of one accepted request. The path and the body are the EverOS
+Cloud gateway's (`GET /api/v2/tasks/{task_id}`), so a client polls both the
+same way; `task_id` is the `request_id` a `202` carried.
+
+`200 OK`, or `404 NOT_FOUND` when the row never existed or has aged out of
+`row_retention_hours`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | The request id |
+| `status` | `"queued" \| "processing" \| "success" \| "failed"` | Where the batch is. Cloud can also report `pending`; this build never does |
+| `task_type` | `"memory_add" \| "memory_flush"` | — |
+| `error` | `string \| null` | Summary of the failure, if any |
+| `error_code` | `string \| null` | `status_write_lost` for a row the sweep failed, otherwise the exception type that failed the batch |
+| `created_at` | `string` (ISO 8601) | Accepted at |
+| `finished_at` | `string \| null` | Set once `status` is `success` or `failed` |
+
+### GET /api/v2/tasks
+
+Accepted requests, newest first, one page at a time. Mirrors the Cloud
+gateway's listing.
 
 #### Query parameters
 
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `request_id` | `string` | one of | — | The `request_id` from a `202` response |
-| `session_id` | `string` | one of | — | Summarise a session's queue |
-| `app_id` | `string` | no | `"default"` | Scope for `session_id` lookups |
-| `project_id` | `string` | no | `"default"` | Scope for `session_id` lookups |
+| `session_id` | `string` | no | — | Only this session's requests |
+| `app_id` / `project_id` | `string` | no | `"default"` | Scope for `session_id` |
+| `status` | `string` | no | — | One of the four statuses; anything else is `422 INVALID_INPUT` |
+| `page` | `integer` | no | `1` | `≥ 1` |
+| `page_size` | `integer` | no | `20` | `1..100`, larger values are capped |
 
-#### Response body (`?request_id=`)
-
-`200 OK`, or `404 NOT_FOUND` when the row never existed or has aged out.
-
-| Field | Type | Notes |
-|---|---|---|
-| `status` | `"queued" \| "processing" \| "success" \| "failed"` | Where the batch is |
-| `session_id` | `string` | — |
-| `message_count` | `integer` | Messages in the batch |
-| `attempt` | `integer` | Delivery attempts by the current delivery (a batch recovered after a crash starts over at 1) |
-| `last_error` | `string \| null` | Summary of the last failure, if any |
-| `created_at` / `updated_at` | `string` (ISO 8601) | Accepted at / last status change |
-
-#### Response body (`?session_id=`)
+#### Response body
 
 | Field | Type | Notes |
 |---|---|---|
-| `pending` | `integer` | Batches still `queued` or `processing` |
-| `oldest_pending_age_ms` | `integer \| null` | Age of the oldest unfinished batch |
-| `failed` | `integer` | Failed batches still within retention |
-| `buffered` | `integer` | Messages in the session buffer waiting for a boundary or a flush |
+| `total` | `integer` | Rows matching the filters, all pages |
+| `page` / `page_size` | `integer` | As requested (`page_size` after capping) |
+| `items` | `array<TaskItem>` | The page, newest first; fields as in `GET /tasks/{task_id}` |
 
-`pending == 0` means every batch reached the memorize pipeline (unless rows
-aged out before delivery, see Retention); it does
-not mean every message is an episode yet — `buffered` messages still wait
-for the boundary detector or the next `/flush`. Drain before exiting by
-polling until `pending` is `0`.
+Drain a session before exiting by polling `?session_id=X&status=queued` and
+`?session_id=X&status=processing` until both `total` are `0`. That means
+every batch reached the memorize pipeline (unless rows aged out before
+delivery, see Retention); it does not mean every message is an episode yet:
+messages still in the session buffer wait for the boundary detector or the
+next `/flush`.
 
 ### POST /api/v2/memory/search
 

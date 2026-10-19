@@ -8,7 +8,7 @@ is the delivery sequence, which is what keeps its ``/add`` batches and its
 ``/flush`` in the order the client sent them; sessions run side by side.
 
 Rows are retained for ``memorize.async_queue.row_retention_hours`` so
-``GET /status?request_id=`` can report the outcome, then purged whatever
+``GET /tasks/{task_id}`` can report the outcome, then purged whatever
 their status (``processing`` excepted).
 """
 
