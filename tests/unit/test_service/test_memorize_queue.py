@@ -974,3 +974,80 @@ async def test_start_gives_up_on_a_row_replayed_too_often(
     finally:
         await w.stop()
     assert fake.calls == []
+
+
+# ── edges: corrupt body, storage error text, external cancel ───────────────
+
+
+async def test_corrupt_payload_fails_its_own_row_and_the_pass_goes_on(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+) -> None:
+    await repo.add(
+        MemorizeInbox(request_id="bad", session_id="s1", payload_json="not json")
+    )
+    w = mq.MemorizeQueueWorker(_settings())
+    await w.enqueue(
+        _payload("s2"), request_id="good", is_final=False, defer_extraction=False
+    )
+
+    assert await w.drain_once() == 2
+
+    bad = await repo.find_one(request_id="bad")
+    good = await repo.find_one(request_id="good")
+    assert bad is not None and bad.status == "failed"
+    assert bad.last_error is not None and bad.last_error.startswith("JSONDecodeError")
+    assert good is not None and good.status == "success"
+
+
+async def test_storage_errors_are_not_echoed_in_last_error(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    async def memorize_hitting_sqlite(
+        payload: dict[str, Any], **_: Any
+    ) -> MemorizeResult:
+        if payload["session_id"] == "s1":
+            raise OperationalError(
+                "INSERT INTO x VALUES (?)", {"body": "secret"}, Exception("locked")
+            )
+        raise RuntimeError("plain message")
+
+    monkeypatch.setattr(mq, "memorize", memorize_hitting_sqlite)
+    w = mq.MemorizeQueueWorker(_settings())
+    await _enqueue_all(w, ("r1", "s1"), ("r2", "s2"))
+
+    await w.drain_once()
+
+    r1 = await repo.find_one(request_id="r1")
+    r2 = await repo.find_one(request_id="r2")
+    assert (
+        r1 is not None
+        and r1.last_error
+        == "OperationalError: storage error (details in the server log)"
+    )
+    assert "secret" not in (r1.last_error or "")
+    assert r2 is not None and r2.last_error == "RuntimeError: plain message"
+
+
+async def test_externally_cancelled_loop_relaunches(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+) -> None:
+    """A cancel that did not come from stop() counts as the loop dying."""
+    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    await w.start()
+    try:
+        assert w._task is not None
+        w._task.cancel()
+        done, _ = await asyncio.wait([w._task], timeout=2)
+        assert done
+        for _ in range(100):  # relaunch backs off one second first
+            if w._task is not None and not w._task.done():
+                break
+            await asyncio.sleep(0.05)
+        health = await w.health()
+        assert (health.loop_alive, health.loop_restarts) == (True, 1)
+        await _enqueue_all(w, ("r1", "s1"))
+        await _wait_until_status(repo, "r1", "success")
+    finally:
+        await w.stop()

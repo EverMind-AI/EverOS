@@ -53,6 +53,22 @@ from everos.service.memorize import memorize
 logger = get_logger(__name__)
 
 _ERROR_SUMMARY_CHARS = 500
+# Exceptions from these packages carry SQL text and bound parameters, i.e.
+# the request body, in their message; GET /tasks must not echo that back.
+_OPAQUE_ERROR_MODULES = ("sqlalchemy", "sqlite3", "aiosqlite")
+
+
+def _error_summary(exc: BaseException) -> str:
+    """``last_error`` for a failed batch: the type, plus the message unless
+    the exception comes from the storage layer (whose messages embed SQL and
+    parameters)."""
+    name = type(exc).__name__
+    module = type(exc).__module__ or ""
+    if module.split(".", 1)[0] in _OPAQUE_ERROR_MODULES:
+        return f"{name}: storage error (details in the server log)"
+    return f"{name}: {exc}"[:_ERROR_SUMMARY_CHARS]
+
+
 # ponytail: fixed grace on stop; a setting if shutdowns ever need tuning.
 _STOP_GRACE_SECONDS = 30.0
 # A status write that fails (sqlite busy past its timeout, disk full) is
@@ -274,13 +290,17 @@ class MemorizeQueueWorker:
     # ── self-healing ───────────────────────────────────────────────────────
 
     def _on_loop_done(self, task: asyncio.Task[None]) -> None:
-        """The loop ended: expected on ``stop()``, an error otherwise."""
-        if self._stopping or task is not self._task or task.cancelled():
+        """The loop ended: expected on ``stop()``, an error otherwise.
+
+        A cancellation that did not come from ``stop()`` (some embedding
+        code cancelling tasks wholesale) counts as the loop dying too.
+        """
+        if self._stopping or task is not self._task:
             return
         self._last_loop_error_at = get_utc_now()
         logger.error(
             "memorize_queue_loop_died",
-            error=repr(task.exception()),
+            error="cancelled" if task.cancelled() else repr(task.exception()),
             restarts=self._loop_restarts,
         )
         asyncio.get_running_loop().create_task(
@@ -451,7 +471,6 @@ class MemorizeQueueWorker:
 
     async def _process(self, row: MemorizeInbox) -> None:
         assert row.id is not None
-        payload = json.loads(row.payload_json)
         # Carry the accepting request's id so spans and logs emitted inside
         # memorize() correlate with the 202 the client received.
         token = set_request_id(row.request_id)
@@ -459,13 +478,16 @@ class MemorizeQueueWorker:
         try:
             for attempt in range(1, self._cfg.max_attempts + 1):
                 try:
+                    # Inside the try: a row whose body was hand-edited into
+                    # garbage fails with that reason, not the whole pass.
+                    payload = json.loads(row.payload_json)
                     await memorize(
                         payload,
                         is_final=row.is_final,
                         defer_extraction=row.defer_extraction,
                     )
                 except Exception as exc:
-                    error = f"{type(exc).__name__}: {exc}"[:_ERROR_SUMMARY_CHARS]
+                    error = _error_summary(exc)
                     if attempt < self._cfg.max_attempts:
                         await self._mark(
                             row.id,
