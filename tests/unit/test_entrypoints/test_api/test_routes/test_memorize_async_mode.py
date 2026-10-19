@@ -1,4 +1,4 @@
-"""``async_mode`` on ``/add`` and ``/flush``, and ``GET /status``.
+"""``async_mode`` on ``/add``, the backlog rule on ``/flush``, and ``GET /status``.
 
 The route has one rule: a request is queued (202) when it asks for
 ``async_mode`` **or** when its session already has unfinished queued rows;
@@ -226,21 +226,6 @@ async def test_saturated_queue_maps_to_429(
 
 
 # ── /flush ─────────────────────────────────────────────────────────────────
-
-
-async def test_async_flush_is_queued_as_final_row(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
-) -> None:
-    resp = await client.post(
-        "/api/v2/memory/flush", json={"session_id": "s1", "async_mode": True}
-    )
-
-    assert resp.status_code == 202
-    assert resp.json()["data"] == {"status": "queued", "message_count": 0, "pending": 1}
-    ((payload, _, is_final, defer),) = queue.enqueued
-    assert (is_final, defer) == (True, False)
-    assert payload["messages"] == []
-    assert fake_memorize.calls == []
 
 
 async def test_sync_flush_without_backlog_keeps_old_body(

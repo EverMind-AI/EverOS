@@ -170,8 +170,9 @@ hard_msg_limit = 500
 mode = "agent"
 
 [memorize.async_queue]
-# Queue behind ``async_mode=true`` on /add and /flush. Off -> such requests
-# run synchronously; rows accepted while it was on are still delivered.
+# Queue behind ``async_mode=true`` on /add (a /flush joins it only behind its
+# session's backlog). Off -> such requests run synchronously; rows accepted
+# while it was on are still delivered.
 enabled = true
 # Batches delivered at once, never two from one session: a session's batches
 # run in arrival order, sessions run side by side. 1 serialises everything.

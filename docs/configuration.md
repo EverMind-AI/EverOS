@@ -189,7 +189,8 @@ GPU) queued batch requests can exceed the timeout: lower `batch_size` and
 
 ### `[memorize.async_queue]`
 
-Bounds and behaviour of the queue behind `async_mode` on `/add` and `/flush`
+Bounds and behaviour of the queue behind `async_mode` on `/add` (a `/flush`
+joins it only behind its session's backlog)
 (see [api.md](api.md#asynchronous-mode)).
 
 | Field | Type | Default | Description |

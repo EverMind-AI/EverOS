@@ -120,7 +120,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
         "operationId": "flush_memory_api_v1_memory_flush_post",
         "requestBody": {
           "content": {
@@ -1044,7 +1044,7 @@
           "memory"
         ],
         "summary": "Flush Memory",
-        "description": "Force boundary detection over the current ``session_id`` buffer.",
+        "description": "Force boundary detection over the current ``session_id`` buffer.\n\nRuns inline unless the session still has queued batches, in which case\nthe flush joins the queue behind them and answers 202.",
         "operationId": "flush_memory_api_v2_memory_flush_post",
         "requestBody": {
           "content": {
@@ -3363,12 +3363,6 @@
             "pattern": "^[a-zA-Z0-9_.@+-]+$",
             "title": "Project Id",
             "default": "default"
-          },
-          "async_mode": {
-            "type": "boolean",
-            "title": "Async Mode",
-            "description": "Queue the flush behind the session's batches and return 202.",
-            "default": false
           }
         },
         "type": "object",

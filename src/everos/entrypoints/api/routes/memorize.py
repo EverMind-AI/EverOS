@@ -192,10 +192,6 @@ class MemorizeFlushRequest(BaseModel):
         max_length=128,
         pattern=_PATH_SAFE_CHARSET,
     )
-    async_mode: bool = Field(
-        default=False,
-        description="Queue the flush behind the session's batches and return 202.",
-    )
 
 
 class FlushResponseData(BaseModel):
@@ -213,18 +209,23 @@ class SuccessEnvelope[T](BaseModel):
 
 
 async def _queue_for(
-    request: Request, req: MemorizeAddRequest | MemorizeFlushRequest
+    request: Request,
+    req: MemorizeAddRequest | MemorizeFlushRequest,
+    *,
+    async_mode: bool,
 ) -> MemorizeQueueWorker | None:
     """The worker to enqueue on, or ``None`` when the call runs inline.
 
-    Queued when ``async_mode`` is set (and the queue accepts new async work)
-    **or** the session already has unfinished queued rows -- running inline
-    then would overtake batches the client was already told are accepted.
+    Queued when the caller asked for ``async_mode`` (and the queue accepts
+    new async work) **or** the session already has unfinished queued rows --
+    running inline then would overtake batches the client was already told
+    are accepted. ``/flush`` has no ``async_mode`` (the Cloud API has none
+    either): it only ever queues behind its session's backlog.
     """
     queue = memorize_queue(request)
     if queue is None:
         return None
-    if (req.async_mode and queue.accepting) or await queue.has_pending(
+    if (async_mode and queue.accepting) or await queue.has_pending(
         session_id=req.session_id, app_id=req.app_id, project_id=req.project_id
     ):
         return queue
@@ -274,7 +275,7 @@ async def add_memory(
     """Add messages into the user-memory + agent-memory pipelines."""
     request_id = extract_request_id(request)
     payload = req.model_dump(exclude={"async_mode", "defer_extraction"})
-    queue = await _queue_for(request, req)
+    queue = await _queue_for(request, req, async_mode=req.async_mode)
     if queue is not None:
         return await _accept(
             queue,
@@ -300,7 +301,11 @@ async def flush_memory(
     request: Request,
     response: Response,
 ) -> SuccessEnvelope[FlushResponseData] | SuccessEnvelope[AcceptedResponseData]:
-    """Force boundary detection over the current ``session_id`` buffer."""
+    """Force boundary detection over the current ``session_id`` buffer.
+
+    Runs inline unless the session still has queued batches, in which case
+    the flush joins the queue behind them and answers 202.
+    """
     request_id = extract_request_id(request)
     payload: dict[str, Any] = {
         "session_id": req.session_id,
@@ -308,7 +313,7 @@ async def flush_memory(
         "project_id": req.project_id,
         "messages": [],
     }
-    queue = await _queue_for(request, req)
+    queue = await _queue_for(request, req, async_mode=False)
     if queue is not None:
         return await _accept(
             queue,

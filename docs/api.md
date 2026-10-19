@@ -648,7 +648,6 @@ or agent run to make sure pending context becomes durable memory.
 | `session_id` | `string` | yes | — | length 1–128 |
 | `app_id` | `string` *(ScopeId)* | no | `"default"` | — |
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | — |
-| `async_mode` | `boolean` | no | `false` | queue the flush behind the session's batches and return `202` |
 
 **`session_id`** — Identifies which buffer to flush. Must match the
 `session_id` of prior `/add` calls in the same `(app_id, project_id)`
@@ -700,9 +699,12 @@ extraction LLM call):
 
 ### Asynchronous mode
 
-`async_mode: true` on `/add` or `/flush` turns the call into "accept and
-return": the request body is written to the SQLite `memorize_inbox` table
-in one transaction and the response is `202 Accepted`. An in-process
+`async_mode: true` on `/add` turns the call into "accept and return": the
+request body is written to the SQLite `memorize_inbox` table in one
+transaction and the response is `202 Accepted`. `/flush` has no
+`async_mode` (the Cloud API has no asynchronous flush either): it runs
+inline, except that a flush on a session with queued batches joins the
+queue behind them and answers `202` (see Ordering). An in-process
 worker then delivers queued batches to the same code path a synchronous
 call uses: each session's batches in the order they were accepted, several
 sessions at a time. The field name, the `202` body

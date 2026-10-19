@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`async_mode` on `/add` and `/flush`: accept now, extract in the
-  background.** A request with `async_mode: true` is written to a durable
+- **`async_mode` on `/add`: accept now, extract in the background.** A request with `async_mode: true` is written to a durable
   SQLite queue (`memorize_inbox`) and answered with `202 Accepted`; an
   in-process worker then runs the unchanged memorize pipeline for each
   batch, per session in arrival order and several sessions at a time
   (`max_concurrency`, default 4), so a session's batches and its flush
   never overtake each other and one slow session does not hold up the
   others. A synchronous call on a session that still has
-  queued batches is queued too, for the same reason. The queue is bounded
+  queued batches is queued too, for the same reason; `/flush` has no
+  `async_mode` of its own and queues only behind such a backlog. The queue is bounded
   (`413 PAYLOAD_TOO_LARGE`, `429 QUEUE_SATURATED`), a batch whose delivery
   fails is marked `failed` and skipped (no automatic retry by default: the
   pipeline is not atomic, so a re-run is not a clean retry), and every
