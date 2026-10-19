@@ -32,15 +32,23 @@ def _bootstrap_root_from_argv() -> None:
     rebuild`` only takes the group-level one. typer stays authoritative: it
     overwrites this value when it parses the flag for real, and
     ``_apply_root_env`` is where the two are reconciled.
+
+    The **last** occurrence wins, not the first, because that is the one
+    typer leaves behind: ``_apply_root_env`` runs once per level and later
+    calls overwrite earlier ones, so in ``everos cascade --root A status
+    --root B`` the command-level ``B`` is what the settings end up reporting.
+    Stopping at ``A`` would freeze the record classes at a width the
+    configuration does not agree with, and the run would be refused by
+    ``assert_record_dim_matches_settings`` rather than carried out against
+    ``B``. With a single ``--root`` -- every ordinary invocation -- first and
+    last are the same argument.
     """
     argv = sys.argv[1:]
     for index, arg in enumerate(argv):
         if arg == "--root" and index + 1 < len(argv):
             os.environ["EVEROS_ROOT"] = argv[index + 1]
-            return
-        if arg.startswith("--root="):
+        elif arg.startswith("--root="):
             os.environ["EVEROS_ROOT"] = arg.split("=", 1)[1]
-            return
 
 
 _bootstrap_root_from_argv()

@@ -107,3 +107,30 @@ def test_root_flag_overrides_an_ambient_value(tmp_path: Path) -> None:
         env=env,
     )
     assert int(completed.stdout.strip()) == 768
+
+
+def test_the_last_root_wins_like_typer(tmp_path: Path) -> None:
+    """``everos cascade --root A status --root B`` has to freeze at B.
+
+    ``_apply_root_env`` runs once per level and later calls overwrite earlier
+    ones, so typer leaves the *command-level* flag in ``EVEROS_ROOT``
+    (``cascade.py`` says so in as many words). A prescan that stops at the
+    first occurrence freezes the record classes at A's width while the
+    settings report B's, and ``assert_record_dim_matches_settings`` then
+    refuses the command instead of running it against B.
+    """
+    first = tmp_path / "first"
+    first.mkdir()
+    (first / "everos.toml").write_text("[embedding]\ndim = 1024\n", encoding="utf-8")
+    second = tmp_path / "second"
+    second.mkdir()
+    argv = [
+        "everos",
+        "cascade",
+        "--root",
+        str(first),
+        "status",
+        "--root",
+        str(second),
+    ]
+    assert _dim_seen_by_cli(second, 768, argv) == 768
