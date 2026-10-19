@@ -4,7 +4,8 @@ Singleton bound to the process-wide ``sqlite_manager`` session factory.
 
 Exposes the queue primitives the worker and the route need:
 
-- :meth:`claim_next` — smallest-id ``queued`` row, flipped to ``processing``.
+- :meth:`claim_next` — smallest-id ``queued`` row outside the sessions in
+  flight, flipped to ``processing``.
 - :meth:`mark` — land a row in a new status (attempt / error bookkeeping).
 - :meth:`count_pending` — cap checks (one session, or all).
 - :meth:`requeue_processing` — startup crash recovery.
@@ -16,6 +17,7 @@ Exposes the queue primitives the worker and the route need:
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select, update
@@ -27,6 +29,8 @@ from ..sqlite_manager import get_session_factory
 from ..tables import MemorizeInbox
 
 PENDING_STATUSES: tuple[str, ...] = ("queued", "processing")
+# Joins (app_id, project_id, session_id) into one comparable key in SQL.
+_SCOPE_SEP = "\x1f"
 
 
 @dataclass(frozen=True)
@@ -44,8 +48,15 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
     def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
         return get_session_factory()
 
-    async def claim_next(self) -> MemorizeInbox | None:
-        """Flip the smallest-id ``queued`` row to ``processing`` and return it."""
+    async def claim_next(
+        self, *, exclude_sessions: Collection[tuple[str, str, str]] = ()
+    ) -> MemorizeInbox | None:
+        """Flip the smallest-id ``queued`` row to ``processing`` and return it.
+
+        ``exclude_sessions`` are ``(app_id, project_id, session_id)`` scopes
+        that already have a row in flight; their queued rows are skipped so a
+        session never runs two batches at once and keeps its arrival order.
+        """
         async with session_scope(self._factory) as s:
             stmt = (
                 select(MemorizeInbox)
@@ -53,6 +64,17 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
                 .order_by(MemorizeInbox.id.asc())  # type: ignore[union-attr]
                 .limit(1)
             )
+            if exclude_sessions:
+                scope_key = (
+                    MemorizeInbox.app_id  # type: ignore[operator]
+                    + _SCOPE_SEP
+                    + MemorizeInbox.project_id
+                    + _SCOPE_SEP
+                    + MemorizeInbox.session_id
+                )
+                stmt = stmt.where(
+                    scope_key.not_in([_SCOPE_SEP.join(k) for k in exclude_sessions])
+                )
             row = (await s.execute(stmt)).scalars().first()
             if row is None:
                 return None
@@ -106,21 +128,21 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
             stmt = select(func.count()).select_from(MemorizeInbox).where(*where)
             return int((await s.execute(stmt)).scalar_one())
 
-    async def fail_abandoned(self) -> int:
-        """Mark every ``processing`` row as ``failed``.
+    async def fail_abandoned(self, *, exclude_ids: Collection[int] = ()) -> int:
+        """Mark every ``processing`` row outside ``exclude_ids`` as ``failed``.
 
-        Called only when no row is in flight: with the single worker idle,
-        any ``processing`` row lost its status write and its outcome is
-        unknown.
+        The worker passes the rows it is running; any other ``processing``
+        row lost its status write and its outcome is unknown.
         """
+        stmt = (
+            update(MemorizeInbox)
+            .where(MemorizeInbox.status == "processing")
+            .values(status="failed", last_error="status write lost; outcome unknown")
+        )
+        if exclude_ids:
+            stmt = stmt.where(MemorizeInbox.id.not_in(list(exclude_ids)))  # type: ignore[union-attr]
         async with session_scope(self._factory) as s:
-            result = await s.execute(
-                update(MemorizeInbox)
-                .where(MemorizeInbox.status == "processing")
-                .values(
-                    status="failed", last_error="status write lost; outcome unknown"
-                )
-            )
+            result = await s.execute(stmt)
             await s.commit()
             return int(result.rowcount or 0)
 

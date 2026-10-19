@@ -9,9 +9,11 @@ sweep with the clock moved -- against the real repo on a real SQLite file
 and the real worker, and checks the state-machine invariants after every
 step:
 
-1. at most one ``processing`` row, and none while the process is alive and idle;
-2. rows reach ``memorize()`` in arrival order; a replay after a crash repeats
-   the crashed row, it never skips ahead;
+1. no ``processing`` row while the process is alive and idle; while rows
+   run, never two of one session and never more than ``max_concurrency``;
+2. a session's rows reach ``memorize()`` in arrival order, and a row starts
+   only when no earlier row of its session is still queued; a replay after
+   a crash repeats the crashed row, it never skips ahead;
 3. ``success`` / ``failed`` never change again except by purge; a delivered
    row has no body, a failed row keeps it;
 4. the caps hold: 429 is raised exactly when the model says the session or
@@ -84,6 +86,7 @@ settings.register_profile(
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 SESSIONS = ("s1", "s2", "s3")
+MAX_CONCURRENCY = 2
 PER_SESSION_CAP = 2
 TOTAL_CAP = 4
 RETENTION_HOURS = 2.0
@@ -114,6 +117,7 @@ class _Crash(BaseException):
 
 def _settings(**overrides: Any) -> AsyncQueueSettings:
     base: dict[str, Any] = {
+        "max_concurrency": MAX_CONCURRENCY,
         "max_pending_per_session": PER_SESSION_CAP,
         "max_pending_total": TOTAL_CAP,
         "row_retention_hours": RETENTION_HOURS,
@@ -197,10 +201,15 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         self.deliveries: list[tuple[str, int]] = []
         self.n = 0
         self.crashed = False
-        self.outcomes: list[str] = []
+        # Outcome per request id, fixed when the drain starts: with rows
+        # running side by side, "the k-th memorize() call" is timing.
+        self.outcome_of: dict[str, str] = {}
         self.mid_events: list[tuple[str, bool]] = []
         self.lose_marks = 0
         self.lose_rid: str | None = None
+        self.lose_row_id: int | None = None
+        self.violations: list[str] = []
+        self.trace: list[str] = []  # what happened, for a failure's message
         self._real_mark = self.q.repo.mark
         self.q.repo.mark = self._mark_maybe_lost  # type: ignore[method-assign]
 
@@ -222,20 +231,32 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     ) -> MemorizeResult:
         rid = payload["rid"]
         m = self.model[rid]
-        self.deliveries.append((payload["session_id"], m["seq"]))
+        session = payload["session_id"]
+        self.deliveries.append((session, m["seq"]))
+        self.trace.append(
+            f"memorize({rid}/{session}) in_flight={sorted(self.q.worker._in_flight)}"
+        )
         # claim_next flipped the row before calling us; a crash leaves it so.
         m["status"] = "processing"
+        self._observe_scheduler(rid, session)
         # Requests that arrive while this row is inside memorize(): the only
         # interleaving a single event loop allows, and the one that matters.
         events, self.mid_events = self.mid_events, []
-        for session, final in events:
-            await self._enqueue_async(session, final)
-        outcome = self.outcomes.pop(0) if self.outcomes else "ok"
+        for mid_session, final in events:
+            await self._enqueue_async(mid_session, final, in_memorize=True)
+        outcome = self.outcome_of.get(rid, "ok")
+        if outcome == "crash":
+            # The whole process dies, so nothing else may be running or about
+            # to be claimed when it does: let the other rows in flight finish
+            # and let the scheduler drain every other session first, which
+            # keeps the table state after a crash deterministic.
+            await self._wait_until_alone(rid, session)
         if self.lose_rid == rid:
             # Whatever happens next, the status write is lost: the sweep
             # fails the row and the body stays.
             m["status"], m["error"], m["body"] = "failed", LOST_WRITE_ERROR, True
             outcome = "fail" if outcome == "fail" else "ok"
+        self.trace.append(f"  {rid} -> {outcome}")
         if outcome == "crash":
             raise _Crash
         if outcome == "fail":
@@ -246,8 +267,46 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             m["status"], m["body"] = "success", False
         return MemorizeResult(message_count=1, status="extracted")
 
+    def _observe_scheduler(self, rid: str, session: str) -> None:
+        """Check the scheduler's rules at the moment a row starts."""
+        in_flight = [row for row, _ in self.q.worker._in_flight.values()]
+        sessions = [row.session_id for row in in_flight]
+        if len(sessions) != len(set(sessions)):
+            self.violations.append(f"{rid}: two rows of one session in flight")
+        if len(in_flight) > MAX_CONCURRENCY:
+            self.violations.append(f"{rid}: {len(in_flight)} rows in flight")
+        seq = self.model[rid]["seq"]
+        earlier = [
+            r
+            for r, m in self.model.items()
+            if m["session"] == session and m["status"] == "queued" and m["seq"] < seq
+        ]
+        if earlier:
+            self.violations.append(f"{rid} started before {earlier} of its session")
+
+    async def _wait_until_alone(self, rid: str, session: str) -> None:
+        for _ in range(100_000):
+            others = [
+                task
+                for row, task in self.q.worker._in_flight.values()
+                if row.request_id != rid and not task.done()
+            ]
+            claimable = any(
+                m["status"] == "queued" and m["session"] != session
+                for m in self.model.values()
+            )
+            if others:
+                await asyncio.wait(others)
+            elif len(self.q.worker._in_flight) > 1 or claimable:
+                await asyncio.sleep(0)  # let the scheduler collect / claim
+            else:
+                return
+        raise RuntimeError("other rows never left the scheduler")
+
     async def _mark_maybe_lost(self, row_id: int, **values: Any) -> None:
-        if self.lose_marks:
+        # Only the chosen row's writes are lost; with two rows in flight a
+        # budget shared by both would land on whichever marks first.
+        if self.lose_marks and row_id == self.lose_row_id:
             self.lose_marks -= 1
             raise RuntimeError("database is locked")
         await self._real_mark(row_id, **values)
@@ -264,10 +323,23 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     def _enqueue(self, session: str, is_final: bool) -> None:
         self.run(self._enqueue_async(session, is_final))
 
-    async def _enqueue_async(self, session: str, is_final: bool) -> None:
+    async def _enqueue_async(
+        self, session: str, is_final: bool, *, in_memorize: bool = False
+    ) -> None:
         rid, seq = f"r{self.n}", self.n
         self.n += 1
         full = self._pending(session) >= PER_SESSION_CAP or self._pending() >= TOTAL_CAP
+        # Register the row before the insert: the scheduler may claim it and
+        # call memorize() for it before enqueue() even returns.
+        self.model[rid] = {
+            "seq": seq,
+            "row_id": None,
+            "session": session,
+            "status": "queued",
+            "body": True,
+            "error": None,
+            "created_at": None,
+        }
         try:
             pending = await self.q.worker.enqueue(
                 _payload(session, rid),
@@ -276,24 +348,27 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
                 defer_extraction=False,
             )
         except QueueSaturatedError:
-            assert full, f"429 for {rid} but the model had room"
+            del self.model[rid]
+            self.trace.append(f"enqueue({rid}/{session}) -> 429 model_full={full}")
+            # Between steps nothing moves, so the model's verdict is exact.
+            # During a drain other rows finish while enqueue() awaits its
+            # count, so the model's snapshot is stale by the time the table
+            # is read: take the product's decision as the fact.
+            assert full or in_memorize, f"429 for {rid} but the model had room"
             event("enqueue: 429")
             return
-        assert not full, f"{rid} accepted but the model says full"
+        self.trace.append(f"enqueue({rid}/{session}) -> accepted model_full={full}")
+        assert not full or in_memorize, f"{rid} accepted but the model says full"
         event("enqueue: accepted")
         row = await self.q.repo.find_one(request_id=rid)
         assert row is not None and row.id is not None
-        assert pending == self._pending(session) + 1
+        if not in_memorize:
+            # Between steps nothing runs, so the depth enqueue() reported is
+            # exactly the model's; during a drain it is a moving target.
+            assert pending == self._pending(session)
         self.seen.add(rid)
-        self.model[rid] = {
-            "seq": seq,
-            "row_id": row.id,
-            "session": session,
-            "status": "queued",
-            "body": True,
-            "error": None,
-            "created_at": row.created_at,
-        }
+        self.model[rid]["row_id"] = row.id
+        self.model[rid]["created_at"] = row.created_at
 
     def _model_purge(self) -> None:
         before = self.q.now() - timedelta(hours=RETENTION_HOURS)
@@ -326,9 +401,23 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             for rid, m in self.model.items()
             if m["status"] == "queued"
         )
-        self.outcomes = list(outcomes)
+        # One crash per drain: the first one ends the process.
+        if "crash" in outcomes:
+            first = outcomes.index("crash")
+            outcomes = outcomes[: first + 1] + [
+                "ok" if o == "crash" else o for o in outcomes[first + 1 :]
+            ]
+        # Outcomes go to the queued rows in id order; rows enqueued during
+        # this drain succeed.
+        self.outcome_of = {
+            rid: outcome for (_, rid), outcome in zip(queued, outcomes, strict=False)
+        }
         self.mid_events = list(mid)
-        for outcome in outcomes[: len(queued)]:
+        self.trace.append(
+            f"drain outcomes={self.outcome_of} mid={mid} lose={self.lose_rid} "
+            f"model={ {r: m['status'] for r, m in self.model.items()} }"
+        )
+        for outcome in self.outcome_of.values():
             event(f"drain: row {outcome}")
         if mid and queued:
             event("drain: enqueue during memorize()")
@@ -336,22 +425,35 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             event("drain: status write lost")
             # The first row's status write fails all three attempts.
             self.lose_marks = 3
-            self.lose_rid = queued[0][1]
+            self.lose_row_id, self.lose_rid = queued[0]
         try:
             self.run(self.q.worker.drain_once())
         except _Crash:
             self.crashed = True
         finally:
-            self.lose_marks, self.lose_rid = 0, None
-            self.outcomes, self.mid_events = [], []
+            self.lose_marks, self.lose_rid, self.lose_row_id = 0, None, None
+            self.outcome_of, self.mid_events = {}, []
         if not self.crashed:
             # A drain only stops when nothing is queued, and the lost-write
             # row was reaped before the next claim or after the loop.
-            assert not any(m["status"] in PENDING for m in self.model.values())
+            pending = {
+                rid: m["status"]
+                for rid, m in self.model.items()
+                if m["status"] in PENDING
+            }
+            table = {
+                r.request_id: (r.status, r.last_error) for r in self.run(self.q.rows())
+            }
+            assert not pending, (
+                f"model pending={pending} table={table} "
+                f"in_flight={list(self.q.worker._in_flight)}\n"
+                + "\n".join(self.trace[-40:])
+            )
 
     @rule()
     def restart(self) -> None:
         """What ``start()`` does: requeue the in-flight row, then sweep."""
+        self.trace.append("restart")
         requeued = self.run(self.q.repo.requeue_processing())
         in_flight = [m for m in self.model.values() if m["status"] == "processing"]
         assert requeued == len(in_flight)
@@ -366,6 +468,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     @precondition(lambda self: not self.crashed)
     @rule()
     def sweep(self) -> None:
+        self.trace.append("sweep")
         before = len(self.model)
         self.run(self.q.worker._sweep())
         self._model_purge()
@@ -391,15 +494,18 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
 
     @invariant()
     def at_most_one_in_flight(self) -> None:
+        # Between steps nothing runs; a crash leaves exactly the dying row.
         processing = [m for m in self.model.values() if m["status"] == "processing"]
         assert len(processing) <= 1
         if not self.crashed:
             assert not processing
 
     @invariant()
+    def scheduler_kept_its_rules(self) -> None:
+        assert not self.violations, self.violations
+
+    @invariant()
     def delivered_in_arrival_order(self) -> None:
-        seqs = [seq for _, seq in self.deliveries]
-        assert seqs == sorted(seqs), seqs
         per_session: dict[str, list[int]] = defaultdict(list)
         for session, seq in self.deliveries:
             per_session[session].append(seq)
@@ -514,9 +620,13 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
             r = rows[rid]
             assert r.status == ("failed" if outcome == "fail" else "success"), rid
             assert (r.payload_json != "") == (outcome == "fail"), rid
-        # Arrival order is the order the inserts committed, i.e. row id order.
-        delivered_ids = [rows[rid].id for rid in deliveries]
-        assert delivered_ids == sorted(delivered_ids), delivered_ids
+        # Per session, arrival order is the order the inserts committed, i.e.
+        # row id order; sessions are independent.
+        per_session: dict[str, list[int]] = defaultdict(list)
+        for rid in deliveries:
+            per_session[rows[rid].session_id].append(rows[rid].id)  # type: ignore[arg-type]
+        for ids in per_session.values():
+            assert ids == sorted(ids), ids
         assert len(deliveries) == len(plan)
     finally:
         await q.teardown()

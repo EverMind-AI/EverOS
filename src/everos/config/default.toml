@@ -173,6 +173,9 @@ mode = "agent"
 # Queue behind ``async_mode=true`` on /add and /flush. Off -> such requests
 # run synchronously; rows accepted while it was on are still delivered.
 enabled = true
+# Batches delivered at once, never two from one session: a session's batches
+# run in arrival order, sessions run side by side. 1 serialises everything.
+max_concurrency = 4
 # Unfinished rows per session; beyond this /add and /flush answer 429.
 max_pending_per_session = 50
 # Unfinished rows across all sessions; beyond this the answer is 429.

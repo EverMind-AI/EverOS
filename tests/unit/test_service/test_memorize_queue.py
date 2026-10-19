@@ -6,9 +6,12 @@ the buffer repo singleton are swapped for temp-bound instances) and a fake
 
 - ``enqueue`` persists the row and reports the session's pending depth.
 - the caps: 413 for an oversized body, 429 per session and globally.
-- delivery order is insertion order, across sessions, and each row lands
-  in ``success`` with the flags (``is_final`` / ``defer_extraction``) it
-  was accepted with.
+- delivery order is insertion order within a session (and across sessions
+  with ``max_concurrency = 1``), and each row lands in ``success`` with the
+  flags (``is_final`` / ``defer_extraction``) it was accepted with.
+- sessions run side by side up to ``max_concurrency``, never two batches of
+  one session at once; a new session's batch starts while another session
+  blocks; the sweep never touches a batch the worker is running.
 - a row that keeps failing is retried ``max_attempts`` times, then marked
   ``failed`` and skipped so the rows behind it still deliver.
 - ``start`` recovers ``processing`` rows left by a crash, purges expired
@@ -192,10 +195,10 @@ async def test_has_pending_reflects_queued_rows(
 # ── delivery ───────────────────────────────────────────────────────────────
 
 
-async def test_drain_delivers_in_insertion_order_with_row_flags(
+async def test_serial_drain_delivers_in_insertion_order_with_row_flags(
     repo: _MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings())
+    w = mq.MemorizeQueueWorker(_settings(max_concurrency=1))
     await w.enqueue(
         _payload("a"), request_id="r1", is_final=False, defer_extraction=True
     )
@@ -223,7 +226,7 @@ async def test_failing_row_is_retried_then_marked_failed_and_skipped(
 ) -> None:
     fake = _FakeMemorize(failing={"bad"})
     monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings(max_attempts=3))
+    w = mq.MemorizeQueueWorker(_settings(max_concurrency=1, max_attempts=3))
     await w.enqueue(
         _payload("bad"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -436,6 +439,185 @@ class _BlockingMemorize(_FakeMemorize):
         return await super().__call__(
             payload, is_final=is_final, defer_extraction=defer_extraction
         )
+
+
+class _GatedMemorize:
+    """Each call records itself, then blocks until its session's gate opens."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []  # session ids, in the order memorize() started
+        self.inside: set[str] = set()
+        self.gate: dict[str, asyncio.Event] = {}
+        self.changed = asyncio.Event()
+
+    def open(self, session: str) -> None:
+        self.gate.setdefault(session, asyncio.Event()).set()
+
+    async def wait_calls(self, n: int) -> None:
+        async with asyncio.timeout(2):
+            while len(self.calls) < n:
+                self.changed.clear()
+                await self.changed.wait()
+
+    async def __call__(
+        self,
+        payload: dict[str, Any],
+        *,
+        is_final: bool = False,
+        defer_extraction: bool = False,
+    ) -> MemorizeResult:
+        session = payload["session_id"]
+        assert session not in self.inside, f"two batches of {session} at once"
+        self.inside.add(session)
+        self.calls.append(session)
+        self.changed.set()
+        try:
+            await self.gate.setdefault(session, asyncio.Event()).wait()
+        finally:
+            self.inside.discard(session)
+        return MemorizeResult(message_count=1, status="extracted")
+
+
+async def _enqueue_all(w: mq.MemorizeQueueWorker, *rows: tuple[str, str]) -> None:
+    for request_id, session in rows:
+        await w.enqueue(
+            _payload(session),
+            request_id=request_id,
+            is_final=False,
+            defer_extraction=False,
+        )
+
+
+async def test_sessions_run_side_by_side_each_in_order(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings())
+    await _enqueue_all(w, ("a1", "a"), ("b1", "b"), ("a2", "a"))
+
+    drain = asyncio.create_task(w.drain_once())
+    await fake.wait_calls(2)
+    assert fake.inside == {"a", "b"}  # two sessions at once ...
+    assert fake.calls == ["a", "b"]  # ... but a2 waits for a1, not for b1
+    fake.open("a")
+    await fake.wait_calls(3)
+    assert fake.calls == ["a", "b", "a"]
+    fake.open("b")
+    assert await asyncio.wait_for(drain, timeout=2) == 3
+
+    statuses = {r.request_id: r.status for r in await repo.list_all()}
+    assert statuses == {"a1": "success", "b1": "success", "a2": "success"}
+
+
+async def test_max_concurrency_bounds_the_rows_in_flight(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings(max_concurrency=2))
+    await _enqueue_all(w, ("a1", "a"), ("b1", "b"), ("c1", "c"))
+
+    drain = asyncio.create_task(w.drain_once())
+    await fake.wait_calls(2)
+    await asyncio.sleep(0.05)
+    assert fake.calls == ["a", "b"]  # c waits for a slot
+    fake.open("a")
+    await fake.wait_calls(3)
+    assert fake.calls == ["a", "b", "c"]
+    fake.open("b")
+    fake.open("c")
+    assert await asyncio.wait_for(drain, timeout=2) == 3
+
+
+async def test_new_session_starts_while_another_session_blocks(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An enqueue wakes the scheduler; it must not wait for the running batch."""
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings())
+    await _enqueue_all(w, ("a1", "a"))
+
+    drain = asyncio.create_task(w.drain_once())
+    await fake.wait_calls(1)
+    await _enqueue_all(w, ("b1", "b"))  # arrives while a1 is inside memorize()
+    await fake.wait_calls(2)
+    assert fake.inside == {"a", "b"}
+    fake.open("a")
+    fake.open("b")
+    assert await asyncio.wait_for(drain, timeout=2) == 2
+
+
+async def test_sweep_spares_the_rows_in_flight(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings())
+    await _enqueue_all(w, ("a1", "a"))
+    drain = asyncio.create_task(w.drain_once())
+    await fake.wait_calls(1)
+    await repo.add(
+        MemorizeInbox(
+            request_id="stuck", session_id="z", payload_json="{}", status="processing"
+        )
+    )
+
+    await w._sweep()
+
+    statuses = {r.request_id: r.status for r in await repo.list_all()}
+    assert statuses == {"a1": "processing", "stuck": "failed"}
+    fake.open("a")
+    assert await asyncio.wait_for(drain, timeout=2) == 1
+    a1 = await repo.find_one(request_id="a1")
+    assert a1 is not None and a1.status == "success"
+
+
+async def test_stop_waits_for_every_row_in_flight(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings())
+    await w.start()
+    await _enqueue_all(w, ("a1", "a"), ("b1", "b"))
+    await fake.wait_calls(2)
+
+    stopper = asyncio.create_task(w.stop())
+    fake.open("a")
+    await asyncio.sleep(0.05)
+    assert not stopper.done()  # b1 is still inside memorize()
+    fake.open("b")
+    await asyncio.wait_for(stopper, timeout=2)
+
+    statuses = {r.request_id: r.status for r in await repo.list_all()}
+    assert statuses == {"a1": "success", "b1": "success"}
+
+
+async def test_start_requeues_every_processing_row(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+) -> None:
+    """A crash with several batches in flight replays all of them."""
+    for rid, session in (("a1", "a"), ("b1", "b")):
+        await repo.add(
+            MemorizeInbox(
+                request_id=rid,
+                session_id=session,
+                payload_json=f'{{"session_id": "{session}", "messages": []}}',
+                status="processing",
+            )
+        )
+    w = mq.MemorizeQueueWorker(_settings())
+
+    await w.start()
+    try:
+        await _wait_until_status(repo, "a1", "success")
+        await _wait_until_status(repo, "b1", "success")
+    finally:
+        await w.stop()
+
+    assert sorted(c[0] for c in fake.calls) == ["a", "b"]
 
 
 async def test_stop_waits_for_the_row_in_flight(

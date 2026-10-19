@@ -1,11 +1,11 @@
 """``memorize_inbox`` — durable queue for ``async_mode`` memorize requests.
 
 One row per accepted ``/add`` or ``/flush`` request. The route inserts the
-row (``queued``) before returning 202; a single in-process worker claims
-rows in ``id`` order, calls ``memorize()`` and lands each row in
-``success`` or ``failed``. ``id`` doubles as the global delivery sequence,
-which is what keeps a session's ``/add`` batches and its ``/flush`` in the
-order the client sent them.
+row (``queued``) before returning 202; the in-process worker claims rows
+in ``id`` order, never two of one session at a time, calls ``memorize()``
+and lands each row in ``success`` or ``failed``. Within a session ``id``
+is the delivery sequence, which is what keeps its ``/add`` batches and its
+``/flush`` in the order the client sent them; sessions run side by side.
 
 Rows are retained for ``memorize.async_queue.row_retention_hours`` so
 ``GET /status?request_id=`` can report the outcome, then purged whatever
@@ -20,7 +20,7 @@ from everos.core.persistence.sqlite import BaseTable, Field
 
 
 class MemorizeInbox(BaseTable, table=True):
-    """One accepted async memorize request; ``id`` is the delivery order."""
+    """One accepted async memorize request; ``id`` orders a session's rows."""
 
     __tablename__ = "memorize_inbox"  # type: ignore[assignment]
     __table_args__ = (

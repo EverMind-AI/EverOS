@@ -2,17 +2,20 @@
 
 The HTTP route inserts an accepted ``/add`` or ``/flush`` body into
 ``memorize_inbox`` (one row, one commit) and answers 202. This worker
-claims rows in ``id`` order and calls the unchanged :func:`memorize` for
-each, so a session's batches and its flush run in the order the client
-sent them. The per-session lock inside ``memorize()`` still provides
-mutual exclusion against synchronous calls; the inbox ``id`` provides the
-order. A row whose delivery fails is marked ``failed`` and skipped -- its
-session, and every other session, keeps moving.
+claims rows in ``id`` order, never two of one session at a time and at
+most ``max_concurrency`` overall, and calls the unchanged :func:`memorize`
+for each: a session's batches and its flush run in the order the client
+sent them, and sessions do not wait for each other. The per-session lock
+inside ``memorize()`` still provides mutual exclusion against synchronous
+calls; the inbox ``id`` provides the order. A row whose delivery fails is
+marked ``failed`` and skipped -- its session, and every other session,
+keeps moving.
 
 Cloud runs the same shape as gateway -> msgbus -> Kafka -> consumer ->
-engine. Here the whole chain lives in one process: the route is the
-gateway, the SQLite table is the topic, this worker is the consumer, and
-``memorize()`` is the engine.
+engine, partitioned by group so groups run in parallel and each group in
+order. Here the whole chain lives in one process: the route is the
+gateway, the SQLite table is the topic, this worker is the consumer with
+the session as the partition, and ``memorize()`` is the engine.
 
 External usage::
 
@@ -102,6 +105,10 @@ class MemorizeQueueWorker:
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
         self._status_write_lost = False
+        # Rows being delivered right now, by id; the scheduler's own view,
+        # which is what lets the sweep tell a lost status write from a row
+        # that is simply still running.
+        self._in_flight: dict[int, tuple[MemorizeInbox, asyncio.Task[None]]] = {}
 
     # ── producer side (called by the route) ────────────────────────────────
 
@@ -198,14 +205,18 @@ class MemorizeQueueWorker:
         self._stopping = False
         self._wake.set()  # deliver whatever survived the restart right away
         self._task = asyncio.create_task(self._run(), name="memorize-queue-worker")
-        logger.info("memorize_queue_started", accepting=self.accepting)
+        logger.info(
+            "memorize_queue_started",
+            accepting=self.accepting,
+            max_concurrency=self._cfg.max_concurrency,
+        )
 
     async def stop(self) -> None:
-        """Finish the row in flight (bounded), then exit the loop.
+        """Finish the rows in flight (bounded), then exit the loop.
 
-        Cancelling mid-``memorize()`` would leave a row ``processing`` after
-        its memcell may already be written; the restart would then replay
-        it. Waiting keeps a normal restart exactly-once for rows that finish
+        Cancelling mid-``memorize()`` would leave rows ``processing`` after
+        their memcells may already be written; the restart would then replay
+        them. Waiting keeps a normal restart exactly-once for rows that finish
         within the grace period; a longer row is replayed like a crash.
         """
         if self._task is None:
@@ -224,22 +235,89 @@ class MemorizeQueueWorker:
         logger.info("memorize_queue_stopped")
 
     async def drain_once(self) -> int:
-        """Deliver every ``queued`` row in ``id`` order; return how many.
+        """Deliver every ``queued`` row; return how many were started.
 
-        One consumer at a time: not for use while the loop is running.
+        Up to ``max_concurrency`` rows run at once, never two of one session:
+        a session's rows go in ``id`` order, sessions run side by side.
+        Returns once nothing is queued and nothing is in flight (after
+        ``stop()``: once the rows in flight finished). One scheduler at a
+        time: not for use while the loop is running.
         """
-        delivered = 0
-        while not self._stopping:
-            if self._status_write_lost:
-                await self._reap_lost()  # before the next batch, not after it
-            row = await memorize_inbox_repo.claim_next()
-            if row is None:
-                break
-            await self._process(row)
-            delivered += 1
+        started = 0
+        try:
+            while True:
+                if self._status_write_lost:
+                    await self._reap_lost()  # before the next claim, not after
+                while (
+                    not self._stopping
+                    and len(self._in_flight) < self._cfg.max_concurrency
+                ):
+                    row = await memorize_inbox_repo.claim_next(
+                        exclude_sessions=self._busy_sessions()
+                    )
+                    if row is None:
+                        break
+                    assert row.id is not None
+                    task = asyncio.create_task(
+                        self._process(row), name=f"memorize-queue-row-{row.id}"
+                    )
+                    self._in_flight[row.id] = (row, task)
+                    started += 1
+                    logger.info(
+                        "memorize_queue_claimed",
+                        row_id=row.id,
+                        request_id=row.request_id,
+                        session_id=row.session_id,
+                        in_flight=len(self._in_flight),
+                    )
+                if not self._in_flight:
+                    break
+                await self._wait_for_progress()
+        except asyncio.CancelledError:
+            # stop() ran out of grace: abandon the rows in flight; the next
+            # start() requeues them.
+            for _, task in self._in_flight.values():
+                task.cancel()
+            await asyncio.gather(
+                *(task for _, task in self._in_flight.values()),
+                return_exceptions=True,
+            )
+            self._in_flight.clear()
+            raise
         if self._status_write_lost:
             await self._reap_lost()
-        return delivered
+        return started
+
+    def _busy_sessions(self) -> set[tuple[str, str, str]]:
+        return {
+            (row.app_id, row.project_id, row.session_id)
+            for row, _ in self._in_flight.values()
+        }
+
+    async def _wait_for_progress(self) -> None:
+        """Block until a row in flight finishes or an enqueue wakes us.
+
+        The wake matters when slots are free but every queued row belongs
+        to a session already in flight: a new session's row must not wait
+        for the longest running batch.
+        """
+        tasks = [task for _, task in self._in_flight.values()]
+        waker = asyncio.ensure_future(self._wake.wait())
+        done, _ = await asyncio.wait(
+            [*tasks, waker], return_when=asyncio.FIRST_COMPLETED
+        )
+        if waker in done:
+            self._wake.clear()
+        else:
+            waker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waker
+        for row_id, (_, task) in list(self._in_flight.items()):
+            if task.done():
+                del self._in_flight[row_id]
+                # _process handles Exception itself; anything else means the
+                # process is going down and the row stays ``processing``.
+                task.result()
 
     # ── consumer side ──────────────────────────────────────────────────────
 
@@ -348,24 +426,30 @@ class MemorizeQueueWorker:
                 await asyncio.sleep(_MARK_RETRY_SECONDS)
 
     async def _reap_lost(self) -> None:
-        """Fail every ``processing`` row; only called when no row is in flight."""
+        """Fail every ``processing`` row this scheduler is not running."""
+        # Clear the flag before the write, not after: a row still running
+        # may lose its own status write meanwhile and raise it again, and
+        # that signal must survive this reap.
+        self._status_write_lost = False
         try:
-            stuck = await memorize_inbox_repo.fail_abandoned()
+            stuck = await memorize_inbox_repo.fail_abandoned(
+                exclude_ids=list(self._in_flight)
+            )
         except Exception:
+            self._status_write_lost = True
             logger.exception("memorize_queue_reap_failed")
             return
-        self._status_write_lost = False
         if stuck:
             logger.warning("memorize_queue_failed_abandoned", count=stuck)
 
     async def _sweep(self) -> None:
         """Expire old rows; fail ``processing`` rows nobody is working on.
 
-        Runs only between rows (never during ``_process``), so with one
-        worker every ``processing`` row it sees lost its status write. The
-        outcome is unknown (the lost write is usually the ``success`` one), so
-        the row is marked ``failed`` rather than replayed. Housekeeping must
-        never stop delivery: each step logs and moves on.
+        The scheduler knows the rows it has in flight, so any other
+        ``processing`` row lost its status write. The outcome is unknown (the
+        lost write is usually the ``success`` one), so the row is marked
+        ``failed`` rather than replayed. Housekeeping must never stop
+        delivery: each step logs and moves on.
         """
         before = get_utc_now() - dt.timedelta(hours=self._cfg.row_retention_hours)
         try:
@@ -385,8 +469,8 @@ class MemorizeQueueWorker:
                 )
             elif deleted:
                 logger.info("memorize_queue_purged", count=deleted)
-        # ponytail: single-worker sweep; a lease column if workers ever run in
-        # more than one process.
+        # ponytail: in-process bookkeeping; a lease column if workers ever run
+        # in more than one process.
         await self._reap_lost()
 
 

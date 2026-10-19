@@ -432,7 +432,11 @@ class AsyncQueueSettings(BaseModel):
     """``async_mode`` memorize queue (``[memorize.async_queue]``).
 
     With ``enabled`` off, ``async_mode=true`` requests run synchronously; the
-    worker still drains rows accepted earlier. The three caps bound the queue: a session
+    worker still drains rows accepted earlier. Up to ``max_concurrency``
+    batches are delivered at once, never two from one session: a session's
+    batches run in arrival order, sessions run side by side, so one slow
+    session does not hold up the others; ``1`` serialises everything. The
+    three caps bound the queue: a session
     over ``max_pending_per_session`` or a process over ``max_pending_total``
     rejects new rows with 429, and a body over ``max_payload_bytes`` with
     413. A delivered row drops its body at once, so pending and delivered rows
@@ -453,6 +457,7 @@ class AsyncQueueSettings(BaseModel):
 
     Env binding:
         EVEROS_MEMORIZE__ASYNC_QUEUE__ENABLED
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_CONCURRENCY
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_TOTAL
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PAYLOAD_BYTES
@@ -463,6 +468,7 @@ class AsyncQueueSettings(BaseModel):
     """
 
     enabled: bool = True
+    max_concurrency: int = Field(default=4, ge=1)
     max_pending_per_session: int = Field(default=50, ge=1)
     max_pending_total: int = Field(default=200, ge=1)
     max_payload_bytes: int = Field(default=4 * 1024 * 1024, ge=1)

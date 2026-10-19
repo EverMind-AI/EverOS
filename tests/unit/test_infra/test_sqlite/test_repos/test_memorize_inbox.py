@@ -187,3 +187,33 @@ async def test_session_summary_reports_pending_oldest_and_failed(
         0,
         None,
     )
+
+
+async def test_claim_next_skips_sessions_in_flight(repo: _MemorizeInboxRepo) -> None:
+    """The smallest-id queued row outside the busy sessions, or None."""
+    a1 = await repo.add(_row("a"))
+    b1 = await repo.add(_row("b"))
+    a2 = await repo.add(_row("a"))
+
+    first = await repo.claim_next()
+    assert first is not None and first.id == a1.id
+    busy = {("default", "default", "a")}
+    second = await repo.claim_next(exclude_sessions=busy)
+    assert second is not None and second.id == b1.id  # a2 waits for a1
+    assert await repo.claim_next(exclude_sessions=busy) is None
+    third = await repo.claim_next()
+    assert third is not None and third.id == a2.id
+
+
+async def test_fail_abandoned_spares_the_rows_in_flight(
+    repo: _MemorizeInboxRepo,
+) -> None:
+    running = await repo.add(_row("a", status="processing"))
+    stuck = await repo.add(_row("b", status="processing"))
+    assert running.id is not None
+
+    failed = await repo.fail_abandoned(exclude_ids=[running.id])
+
+    assert failed == 1
+    rows = {r.id: r.status for r in await repo.list_all()}
+    assert rows == {running.id: "processing", stuck.id: "failed"}

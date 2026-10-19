@@ -195,6 +195,7 @@ Bounds and behaviour of the queue behind `async_mode` on `/add` and `/flush`
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Off: new `async_mode` requests run synchronously; rows accepted while on are still delivered, and their sessions keep the ordering rule. |
+| `max_concurrency` | int | `4` | Batches delivered at once, never two from one session: a session's batches run in arrival order, sessions run side by side. `1` serialises everything. |
 | `max_pending_per_session` | int | `50` | Unfinished batches per session; beyond this `/add` and `/flush` answer `429`. |
 | `max_pending_total` | int | `200` | Unfinished batches across all sessions; beyond this the answer is `429`. |
 | `max_payload_bytes` | int | `4194304` | One serialised request body; beyond this the answer is `413`. |

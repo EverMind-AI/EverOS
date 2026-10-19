@@ -165,6 +165,7 @@ def test_memorize_async_queue_defaults_and_env_override(
     """``[memorize.async_queue]`` ships bounded defaults; two-level env wins."""
     q = load_settings().memorize.async_queue
     assert q.enabled is True
+    assert q.max_concurrency == 4
     assert q.max_pending_per_session == 50
     assert q.max_pending_total == 200
     assert q.max_payload_bytes == 4 * 1024 * 1024

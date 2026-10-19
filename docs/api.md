@@ -566,9 +566,10 @@ add always reports `status: "accumulated"`.
 
 **`async_mode`** — When `true`, `/add` persists the batch to the durable
 memorize queue and returns `202 Accepted` without running boundary
-detection or extraction; a single worker delivers queued batches in
-arrival order. See [Asynchronous mode](#asynchronous-mode) for the `202`
-body, the ordering rule and how to poll progress.
+detection or extraction; a background worker delivers queued batches in
+arrival order per session, several sessions at a time. See
+[Asynchronous mode](#asynchronous-mode) for the `202` body, the ordering
+rule and how to poll progress.
 
 #### Response body
 
@@ -701,9 +702,10 @@ extraction LLM call):
 
 `async_mode: true` on `/add` or `/flush` turns the call into "accept and
 return": the request body is written to the SQLite `memorize_inbox` table
-in one transaction and the response is `202 Accepted`. A single in-process
+in one transaction and the response is `202 Accepted`. An in-process
 worker then delivers queued batches to the same code path a synchronous
-call uses, in the order they were accepted. The field name, the `202` body
+call uses: each session's batches in the order they were accepted, several
+sessions at a time. The field name, the `202` body
 (`status: "queued"` plus the envelope's `request_id`) and the status
 vocabulary (`queued` / `processing` / `success` / `failed`) match the
 EverOS Cloud gateway, so one client can talk to both.
@@ -714,7 +716,11 @@ that true, a synchronous call (`async_mode` omitted or `false`) on a
 session that still has queued batches is queued too and answered with
 `202` — otherwise it would overtake work the client was already told is
 accepted. Clients that never use `async_mode` never see this: their
-sessions never have queued batches.
+sessions never have queued batches. Sessions are independent of each
+other: up to `max_concurrency` batches (default 4) run at once, never two
+from one session, so one slow session does not hold up the others, and
+there is no ordering between sessions. Like the Cloud consumer, which runs
+groups in parallel and each group in order.
 
 **Backpressure.** The queue is bounded. A batch is rejected before it is
 stored when:
@@ -751,9 +757,11 @@ delivery had already written its memcell, an `/add` replay duplicates that
 memory; a `/flush` replay finds an empty buffer and does nothing, so a crash
 that fell between the memcell write and the episode write leaves that
 memcell without its episode. A
-normal shutdown waits up to 30 seconds for the row in flight; a row that
-takes longer, or a process manager that kills earlier (`docker stop` sends
-SIGKILL after 10 seconds by default), is replayed the same way. So is a
+normal shutdown waits up to 30 seconds for the rows in flight (up to
+`max_concurrency` of them, one per session); a row that takes longer, or a
+process manager that kills earlier (`docker stop` sends SIGKILL after 10
+seconds by default), is replayed the same way, so one restart can replay
+up to `max_concurrency` batches. So is a
 batch whose delivery had just failed when the process died before its
 `failed` mark was written, and a batch whose status write was lost (see
 Stuck rows) if the server restarts before the row is marked.
@@ -770,8 +778,10 @@ happens.
 
 **Stuck rows.** A row left `processing` because its status write was lost
 (SQLite busy past its timeout, disk full) is marked `failed` before the
-worker starts its next batch, or after that batch if that write fails too,
-so a session's `pending` does not stay non-zero because of it. Its `last_error` reads `status write lost; outcome unknown`:
+worker claims its next batch, or at its next scheduling pass if that write
+fails too, so a session's `pending` does not stay non-zero because of it;
+batches the worker is still running are never swept. Its `last_error`
+reads `status write lost; outcome unknown`:
 the batch may well have been delivered in full (the lost write is usually
 the `success` one), so check the session's memories before re-sending it.
 If the server restarts before that mark lands, the row is replayed like a
