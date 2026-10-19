@@ -176,6 +176,14 @@ width. The model has to agree with it:
   trained for it (Matryoshka representation learning); with any other model
   recall degrades, because a plain prefix of an embedding is not a valid
   embedding. Either match `dim` to the model or use a Matryoshka model.
+
+  **The shipped default is this case**: `Qwen/Qwen3-Embedding-4B` returns 2560
+  dimensions and the default `dim` is 1024, so a default install sees this
+  warning at every start. It is Matryoshka-trained, 1024 is one of its
+  published truncation points, and the index compares with cosine distance, so
+  nothing is lost. To silence it, set `dimensions = 1024` so the server returns
+  the shorter vector — but only if your endpoint accepts that parameter; some
+  self-hosted servers reject it outright, which is why it is not the default.
 - **Changing `dim` on an existing index** — startup stops. Vectors of
   different lengths have no distance between them, so there is nothing to
   migrate: `everos cascade rebuild` re-embeds from markdown.
@@ -190,6 +198,14 @@ width. The model has to agree with it:
 re-normalisation, which is why it is preferable when the model supports it).
 Tables are still built at `dim`. If both are set and they disagree, startup
 warns and names both values.
+
+The width is measured by one embedding call at startup, with a **5-second
+budget and no retries** — it buys a single integer and sits in front of every
+`everos` command, so it does not inherit `timeout_seconds` × `max_retries`. A
+model that is still loading (a cold local endpoint) can miss that budget: the
+width check is then skipped for that start, the tables are created at `dim`,
+and `/health` reports `embed: false` until the next restart. Start the model
+first, or restart once it is up.
 
 #### Changing the embedding model
 
