@@ -53,6 +53,28 @@ def _isolate_everos_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
 
 
+def _reset_table_write_locks() -> None:
+    """Drop the per-table write-lock pools between tests.
+
+    Same hazard as ``_partition_locks`` above, one layer down: the pools are
+    class attributes, so a lock first acquired in one test's loop is handed to
+    the next test's loop and raises "bound to a different event loop". Each
+    backend ships the hook for exactly this -- three unit modules already call
+    it by hand, which is the tell that it belongs here instead.
+
+    The Milvus hook is behind an import guard because pymilvus is an optional
+    extra and the suite has to run without it.
+    """
+    from everos.core.persistence.lancedb.repository import LanceRepoBase
+
+    LanceRepoBase._reset_locks_for_tests()
+    try:
+        from everos.infra.persistence.milvus.repository import MilvusRepoBase
+    except ImportError:
+        return
+    MilvusRepoBase._reset_locks_for_tests()
+
+
 @pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     import structlog
@@ -81,11 +103,13 @@ def _reset_settings_cache() -> Iterator[None]:
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
+    _reset_table_write_locks()
     yield
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
+    _reset_table_write_locks()
 
 
 @pytest.fixture(autouse=True)
