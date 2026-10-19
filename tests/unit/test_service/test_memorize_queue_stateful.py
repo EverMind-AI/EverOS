@@ -34,6 +34,7 @@ import os
 import random
 import shutil
 import tempfile
+import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -542,12 +543,25 @@ def test_machine_catches_a_lost_replay() -> None:
 
 # ── mode 2: real asyncio tasks racing the running loop ─────────────────────
 
+# The deep profile also widens the plan; the scout should wander further locally.
+_PLAN_MAX = 30 if os.environ.get("HYPOTHESIS_PROFILE") == "deep" else 10
 
-async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
+
+async def _jittered(
+    plan: list[tuple[str, bool, str]], seed: int, restart_at: float | None
+) -> None:
+    """Real producers, the real loop, random pauses; ``restart_at`` (0..1)
+    stops and restarts the worker that far into the run, or never."""
     rng = random.Random(seed)
     outcome_of: dict[str, str] = {}
     deliveries: list[str] = []
+    rid_of_row: dict[int, str] = {}
     settled = asyncio.Event()
+    t0 = time.perf_counter()
+    trace: list[str] = []
+
+    def note(event: str) -> None:
+        trace.append(f"{(time.perf_counter() - t0) * 1000:7.1f}ms {event}")
 
     async def fake_memorize(
         payload: dict[str, Any],
@@ -557,7 +571,10 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
     ) -> MemorizeResult:
         rid = payload["rid"]
         deliveries.append(rid)
+        session = payload["session_id"]
+        note(f"memorize {rid}/{session} in_flight={sorted(q.worker._in_flight)}")
         await asyncio.sleep(rng.random() * 0.005)
+        note(f"  {rid} -> {outcome_of[rid]}")
         if outcome_of[rid] == "fail":
             raise RuntimeError("boom")
         return MemorizeResult(message_count=1, status="extracted")
@@ -573,6 +590,7 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
     async def counting_mark(row_id: int, **values: Any) -> None:
         nonlocal terminal
         await real_mark(row_id, **values)
+        note(f"mark {rid_of_row.get(row_id, f'row{row_id}')} {values.get('status')}")
         if values.get("status") in ("success", "failed"):
             terminal += 1
             if terminal == len(plan):
@@ -586,31 +604,47 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
             rid = f"r{k}"
             outcome_of[rid] = outcome
             await asyncio.sleep(rng.random() * 0.01)
-            await q.worker.enqueue(
+            pending = await q.worker.enqueue(
                 _payload(session, rid),
                 request_id=rid,
                 is_final=is_final,
                 defer_extraction=False,
             )
+            note(f"enqueue {rid}/{session} accepted pending={pending}")
+            row = await q.repo.find_one(request_id=rid)
+            if row is not None and row.id is not None:
+                rid_of_row[row.id] = rid
 
         async def peek() -> None:
             for _ in range(5):
                 await asyncio.sleep(rng.random() * 0.01)
                 await mq.list_tasks(session_id=rng.choice(SESSIONS))
 
+        async def restart() -> None:
+            if restart_at is None:
+                return
+            await asyncio.sleep(restart_at * 0.05)
+            note("restart: stop()")
+            await q.worker.stop()
+            note("restart: stopped, start()")
+            await q.worker.start()
+            note("restart: started")
+
         await asyncio.gather(
-            *(produce(k, *item) for k, item in enumerate(plan)), peek()
+            *(produce(k, *item) for k, item in enumerate(plan)), peek(), restart()
         )
         async with asyncio.timeout(5.0):
             await settled.wait()
         await q.worker.stop()
-        assert await q.repo.count_pending() == 0
+        assert await q.repo.count_pending() == 0, "\n".join(trace)
 
         rows = {r.request_id: r for r in await q.rows()}
-        assert set(rows) == set(outcome_of)
+        assert set(rows) == set(outcome_of), "\n".join(trace)
         for rid, outcome in outcome_of.items():
             r = rows[rid]
-            assert r.status == ("failed" if outcome == "fail" else "success"), rid
+            assert r.status == ("failed" if outcome == "fail" else "success"), (
+                rid + "\n" + "\n".join(trace)
+            )
             assert (r.payload_json != "") == (outcome == "fail"), rid
         # Per session, arrival order is the order the inserts committed, i.e.
         # row id order; sessions are independent.
@@ -618,8 +652,9 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
         for rid in deliveries:
             per_session[rows[rid].session_id].append(rows[rid].id)  # type: ignore[arg-type]
         for ids in per_session.values():
-            assert ids == sorted(ids), ids
-        assert len(deliveries) == len(plan)
+            assert ids == sorted(ids), f"{ids}\n" + "\n".join(trace)
+        # A row that finished inside stop()'s grace is never replayed.
+        assert len(deliveries) == len(plan), "\n".join(trace)
     finally:
         await q.teardown()
 
@@ -630,10 +665,13 @@ async def _jittered(plan: list[tuple[str, bool, str]], seed: int) -> None:
             st.sampled_from(SESSIONS), st.booleans(), st.sampled_from(["ok", "fail"])
         ),
         min_size=1,
-        max_size=10,
+        max_size=_PLAN_MAX,
     ),
     seed=st.integers(0, 10_000),
+    restart_at=st.one_of(st.none(), st.floats(0.0, 1.0)),
 )
 @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
-def test_jittered_real_tasks(plan: list[tuple[str, bool, str]], seed: int) -> None:
-    asyncio.run(_jittered(plan, seed))
+def test_jittered_real_tasks(
+    plan: list[tuple[str, bool, str]], seed: int, restart_at: float | None
+) -> None:
+    asyncio.run(_jittered(plan, seed, restart_at))
