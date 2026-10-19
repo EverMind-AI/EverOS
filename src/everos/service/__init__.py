@@ -49,6 +49,7 @@ from .memorize import MemorizeResult as MemorizeResult
 from .memorize import memorize as memorize
 from .memorize_queue import TASK_STATUSES as TASK_STATUSES
 from .memorize_queue import MemorizeQueueWorker as MemorizeQueueWorker
+from .memorize_queue import QueueHealth as QueueHealth
 from .memorize_queue import TaskItem as TaskItem
 from .memorize_queue import TaskPage as TaskPage
 from .memorize_queue import get_task as get_task
@@ -70,6 +71,7 @@ __all__ = [
     "MemorizeQueueWorker",
     "MemorizeResult",
     "PatchResult",
+    "QueueHealth",
     "SearchHit",
     "SearchKnowledgeResult",
     "TaskItem",

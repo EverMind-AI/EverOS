@@ -171,6 +171,7 @@ def test_memorize_async_queue_defaults_and_env_override(
     assert q.max_payload_bytes == 4 * 1024 * 1024
     assert q.max_attempts == 1
     assert q.retry_backoff_seconds == 2.0
+    assert q.max_replays == 3
     assert q.row_retention_hours == 168.0
 
     monkeypatch.setenv("EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION", "7")

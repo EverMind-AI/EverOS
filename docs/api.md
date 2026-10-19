@@ -768,7 +768,19 @@ seconds by default), is replayed the same way, so one restart can replay
 up to `max_concurrency` batches. So is a
 batch whose delivery had just failed when the process died before its
 `failed` mark was written, and a batch whose status write was lost (see
-Stuck rows) if the server restarts before the row is marked.
+Stuck rows) if the server restarts before the row is marked. Replays are
+bounded: a batch that has been replayed `max_replays` times (default 3)
+without ever finishing is marked `failed` with `error_code`
+`replays_exhausted` instead of being requeued again, so a batch that kills
+the process cannot crash-loop it.
+
+**Operations.** `GET /health` carries a `memorize_queue` block: `healthy`
+(the delivery loop is alive), `pending`, `oldest_pending_age_s`, `failed`,
+`loop_restarts` and `last_loop_error_at`. The probe only observes: a loop
+that dies relaunches itself (with backoff) and is relaunched by the next
+`/add`, and `loop_restarts` counts those. Alert on `healthy` and on
+`loop_restarts` changing; a growing `oldest_pending_age_s` with a live loop
+means delivery is slower than arrival.
 
 **Retention.** Every queue row, whatever its status, is deleted seven days
 (`row_retention_hours`) after it was created. `GET /tasks/{task_id}` returns `404`
@@ -818,7 +830,7 @@ same way; `task_id` is the `request_id` a `202` carried.
 | `status` | `"queued" \| "processing" \| "success" \| "failed"` | Where the batch is. Cloud can also report `pending`; this build never does |
 | `task_type` | `"memory_add" \| "memory_flush"` | — |
 | `error` | `string \| null` | Summary of the failure, if any |
-| `error_code` | `string \| null` | `status_write_lost` for a row the sweep failed, otherwise the exception type that failed the batch |
+| `error_code` | `string \| null` | `status_write_lost` for a row the sweep failed, `replays_exhausted` for one replayed `max_replays` times without finishing, otherwise the exception type that failed the batch |
 | `created_at` | `string` (ISO 8601) | Accepted at |
 | `finished_at` | `string \| null` | Set once `status` is `success` or `failed` |
 

@@ -30,6 +30,14 @@ from ..tables import MemorizeInbox
 PENDING_STATUSES: tuple[str, ...] = ("queued", "processing")
 # ``last_error`` of a row the sweep failed because its status write was lost.
 LOST_STATUS_WRITE = "status write lost; outcome unknown"
+# ``last_error`` prefix of a row start() gave up on after too many replays.
+REPLAYS_EXHAUSTED_PREFIX = "replayed "
+
+
+def replays_exhausted(n: int) -> str:
+    return f"{REPLAYS_EXHAUSTED_PREFIX}{n} times without finishing; giving up"
+
+
 # Joins (app_id, project_id, session_id) into one comparable key in SQL.
 _SCOPE_SEP = "\x1f"
 
@@ -138,20 +146,47 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
             await s.commit()
             return int(result.rowcount or 0)
 
-    async def requeue_processing(self) -> int:
-        """Return every ``processing`` row to ``queued`` (startup recovery).
+    async def requeue_processing(self, *, max_replays: int = 3) -> tuple[int, int]:
+        """Startup recovery: return ``processing`` rows to ``queued``, bounded.
 
         A row left ``processing`` was in flight when the process died; it is
-        delivered again (at-least-once).
+        delivered again (at-least-once) and ``attempt`` counts that replay.
+        A row already replayed ``max_replays`` times is marked ``failed``
+        instead, so a batch that kills the process cannot crash-loop it.
+        Returns ``(requeued, given_up)``.
         """
         async with session_scope(self._factory) as s:
-            result = await s.execute(
+            gave_up = await s.execute(
+                update(MemorizeInbox)
+                .where(
+                    MemorizeInbox.status == "processing",
+                    MemorizeInbox.attempt >= max_replays,
+                )
+                .values(status="failed", last_error=replays_exhausted(max_replays))
+            )
+            requeued = await s.execute(
                 update(MemorizeInbox)
                 .where(MemorizeInbox.status == "processing")
-                .values(status="queued")
+                .values(status="queued", attempt=MemorizeInbox.attempt + 1)
             )
             await s.commit()
-            return int(result.rowcount or 0)
+            return int(requeued.rowcount or 0), int(gave_up.rowcount or 0)
+
+    async def count_status(self, status: str) -> int:
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(func.count())
+                .select_from(MemorizeInbox)
+                .where(MemorizeInbox.status == status)
+            )
+            return int((await s.execute(stmt)).scalar_one())
+
+    async def oldest_pending_created_at(self) -> dt.datetime | None:
+        async with session_scope(self._factory) as s:
+            stmt = select(func.min(MemorizeInbox.created_at)).where(
+                MemorizeInbox.status.in_(PENDING_STATUSES)  # type: ignore[attr-defined]
+            )
+            return (await s.execute(stmt)).scalar_one()
 
     async def list_tasks(
         self,

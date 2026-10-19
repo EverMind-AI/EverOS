@@ -17,6 +17,7 @@ from .md_change_state import QueueSummary as QueueSummary
 from .md_change_state import md_change_state_repo as md_change_state_repo
 from .memcell import memcell_repo as memcell_repo
 from .memorize_inbox import LOST_STATUS_WRITE as LOST_STATUS_WRITE
+from .memorize_inbox import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
 from .memorize_inbox import memorize_inbox_repo as memorize_inbox_repo
 from .reflection_report import reflection_report_repo as reflection_report_repo
 from .unprocessed_buffer import unprocessed_buffer_repo as unprocessed_buffer_repo
@@ -24,6 +25,7 @@ from .unprocessed_buffer import unprocessed_buffer_repo as unprocessed_buffer_re
 __all__ = [
     "LOST_STATUS_WRITE",
     "MTIME_TOLERANCE_SECONDS",
+    "REPLAYS_EXHAUSTED_PREFIX",
     "DocumentListPage",
     "DocumentUpsertPayload",
     "QueueSummary",

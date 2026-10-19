@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
@@ -12,7 +14,7 @@ from everos.component.multimodal import get_multimodal_llm_capability
 from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
 from everos.core.observability.logging import get_logger
-from everos.entrypoints.api.utils import cascade_orchestrator
+from everos.entrypoints.api.utils import cascade_orchestrator, memorize_queue
 
 logger = get_logger(__name__)
 
@@ -55,6 +57,29 @@ class CascadeHealthBlock(BaseModel):
     prune_stale_seconds: float
 
 
+class MemorizeQueueHealthBlock(BaseModel):
+    """Readiness of the ``async_mode`` memorize queue.
+
+    ``healthy`` is the delivery loop being alive. The probe only observes;
+    the loop relaunches itself (and on the next ``/add``), and
+    ``loop_restarts`` counts how often that happened. ``pending`` and
+    ``oldest_pending_age_s`` are the backlog: growing with a live loop means
+    delivery is slower than arrival (or the LLM is down), which is a
+    capacity signal, not a liveness one. Alert on ``healthy`` and on
+    ``loop_restarts`` changing.
+    """
+
+    healthy: bool
+    reasons: list[str]
+    loop_alive: bool
+    accepting: bool
+    pending: int
+    oldest_pending_age_s: float | None
+    failed: int
+    loop_restarts: int
+    last_loop_error_at: datetime | None
+
+
 class HealthResponse(BaseModel):
     """Response schema for ``GET /health``.
 
@@ -73,6 +98,8 @@ class HealthResponse(BaseModel):
     cascade: CascadeHealthBlock | None = None
     """Present when the cascade lifespan is running; ``None`` for a
     minimal app built without it."""
+    memorize_queue: MemorizeQueueHealthBlock | None = None
+    """Present when the memorize queue lifespan is running."""
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -141,10 +168,32 @@ async def health(request: Request) -> HealthResponse:
                 optimize_failure_streak=0,
                 prune_stale_seconds=0.0,
             )
+    queue_block: MemorizeQueueHealthBlock | None = None
+    worker = memorize_queue(request)
+    if worker is not None:
+        try:
+            qh = await worker.health()
+            queue_block = MemorizeQueueHealthBlock(**qh.model_dump())
+        except Exception as exc:
+            # Same rule as the cascade block: a locked DB must not turn the
+            # liveness probe into a 500.
+            logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
+            queue_block = MemorizeQueueHealthBlock(
+                healthy=False,
+                reasons=[f"memorize queue health probe failed: {exc!r}"],
+                loop_alive=False,
+                accepting=False,
+                pending=0,
+                oldest_pending_age_s=None,
+                failed=0,
+                loop_restarts=0,
+                last_loop_error_at=None,
+            )
     return HealthResponse(
         status="ok",
         version=__version__,
         capabilities=caps,
         disabled_features=compute_disabled_features(caps.model_dump()),
         cascade=cascade,
+        memorize_queue=queue_block,
     )

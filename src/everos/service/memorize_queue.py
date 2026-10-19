@@ -44,6 +44,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import (
     LOST_STATUS_WRITE,
+    REPLAYS_EXHAUSTED_PREFIX,
     MemorizeInbox,
     memorize_inbox_repo,
 )
@@ -90,6 +91,28 @@ class TaskPage(BaseModel):
     items: list[TaskItem]
 
 
+class QueueHealth(BaseModel):
+    """The ``memorize_queue`` block of ``GET /health``.
+
+    ``healthy`` is the delivery loop being alive. The probe only observes:
+    a dead loop is reported as such, and it is the loop's own exit callback
+    (and the next ``enqueue``) that relaunches it, so ``loop_restarts``
+    counts every time that happened. The counts are for alerting: a growing
+    ``oldest_pending_age_s`` with a live loop means delivery is slower than
+    arrival (or the LLM is down).
+    """
+
+    healthy: bool
+    reasons: list[str]
+    loop_alive: bool
+    accepting: bool
+    pending: int
+    oldest_pending_age_s: float | None
+    failed: int
+    loop_restarts: int
+    last_loop_error_at: dt.datetime | None
+
+
 class MemorizeQueueWorker:
     """Single consumer over ``memorize_inbox``; see the module docstring.
 
@@ -106,6 +129,8 @@ class MemorizeQueueWorker:
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
         self._status_write_lost = False
+        self._loop_restarts = 0
+        self._last_loop_error_at: dt.datetime | None = None
         # Rows being delivered right now, by id; the scheduler's own view,
         # which is what lets the sweep tell a lost status write from a row
         # that is simply still running.
@@ -184,6 +209,8 @@ class MemorizeQueueWorker:
             )
         )
         self._wake.set()
+        if self._task is not None and self._task.done():
+            await self.ensure_running()  # a dead loop heals on the next use
         logger.info(
             "memorize_queue_enqueued",
             row_id=row.id,
@@ -199,13 +226,22 @@ class MemorizeQueueWorker:
         """Recover ``processing`` rows, purge expired ones, launch the loop."""
         if self._task is not None:
             return
-        requeued = await memorize_inbox_repo.requeue_processing()
+        requeued, gave_up = await memorize_inbox_repo.requeue_processing(
+            max_replays=self._cfg.max_replays
+        )
         if requeued:
             logger.info("memorize_queue_requeued_processing", count=requeued)
+        if gave_up:
+            logger.error(
+                "memorize_queue_replays_exhausted",
+                count=gave_up,
+                max_replays=self._cfg.max_replays,
+            )
         await self._sweep()
         self._stopping = False
         self._wake.set()  # deliver whatever survived the restart right away
         self._task = asyncio.create_task(self._run(), name="memorize-queue-worker")
+        self._task.add_done_callback(self._on_loop_done)
         logger.info(
             "memorize_queue_started",
             accepting=self.accepting,
@@ -234,6 +270,84 @@ class MemorizeQueueWorker:
                 await self._task
         self._task = None
         logger.info("memorize_queue_stopped")
+
+    # ── self-healing ───────────────────────────────────────────────────────
+
+    def _on_loop_done(self, task: asyncio.Task[None]) -> None:
+        """The loop ended: expected on ``stop()``, an error otherwise."""
+        if self._stopping or task is not self._task or task.cancelled():
+            return
+        self._last_loop_error_at = get_utc_now()
+        logger.error(
+            "memorize_queue_loop_died",
+            error=repr(task.exception()),
+            restarts=self._loop_restarts,
+        )
+        asyncio.get_running_loop().create_task(
+            self._restart_later(), name="memorize-queue-restart"
+        )
+
+    async def _restart_later(self) -> None:
+        # Back off, so a loop that dies at once cannot restart in a hot loop.
+        await asyncio.sleep(min(2.0**self._loop_restarts, 60.0))
+        await self.ensure_running()
+
+    async def ensure_running(self) -> bool:
+        """Relaunch the loop if it died; ``True`` when it is running after.
+
+        ``False`` while stopping, and for a worker that was never started
+        (the lifespan owns the first start). Called from ``enqueue``, so the
+        queue heals on its next use even before the restart scheduled by the
+        loop's own exit has run.
+        """
+        if self._stopping or self._task is None:
+            return False
+        if not self._task.done():
+            return True
+        self._loop_restarts += 1
+        await self._abandon_in_flight()
+        self._task = None
+        logger.warning("memorize_queue_loop_restarting", restarts=self._loop_restarts)
+        await self.start()
+        return True
+
+    async def _abandon_in_flight(self) -> None:
+        """Cancel the rows in flight; the next ``start()`` requeues them."""
+        for _, task in self._in_flight.values():
+            task.cancel()
+        await asyncio.gather(
+            *(task for _, task in self._in_flight.values()), return_exceptions=True
+        )
+        self._in_flight.clear()
+
+    async def health(self) -> QueueHealth:
+        """Probe for ``GET /health``: observe, never act."""
+        reasons: list[str] = []
+        alive = self._task is not None and not self._task.done()
+        if not alive:
+            reasons.append(
+                "delivery loop is stopping"
+                if self._stopping
+                else "delivery loop is not running"
+            )
+        pending = await memorize_inbox_repo.count_pending()
+        oldest = await memorize_inbox_repo.oldest_pending_created_at()
+        age = (
+            None
+            if oldest is None
+            else max(0.0, (get_utc_now() - oldest).total_seconds())
+        )
+        return QueueHealth(
+            healthy=alive,
+            reasons=reasons,
+            loop_alive=alive,
+            accepting=self.accepting,
+            pending=pending,
+            oldest_pending_age_s=age,
+            failed=await memorize_inbox_repo.count_status("failed"),
+            loop_restarts=self._loop_restarts,
+            last_loop_error_at=self._last_loop_error_at,
+        )
 
     async def drain_once(self) -> int:
         """Deliver every ``queued`` row; return how many were started.
@@ -277,13 +391,7 @@ class MemorizeQueueWorker:
         except asyncio.CancelledError:
             # stop() ran out of grace: abandon the rows in flight; the next
             # start() requeues them.
-            for _, task in self._in_flight.values():
-                task.cancel()
-            await asyncio.gather(
-                *(task for _, task in self._in_flight.values()),
-                return_exceptions=True,
-            )
-            self._in_flight.clear()
+            await self._abandon_in_flight()
             raise
         if self._status_write_lost:
             await self._reap_lost()
@@ -338,6 +446,7 @@ class MemorizeQueueWorker:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self._last_loop_error_at = get_utc_now()
                 logger.exception("memorize_queue_loop_error")
 
     async def _process(self, row: MemorizeInbox) -> None:
@@ -483,6 +592,8 @@ def _task_item(row: MemorizeInbox) -> TaskItem:
     error_code: str | None = None
     if row.last_error == LOST_STATUS_WRITE:
         error_code = "status_write_lost"
+    elif row.last_error and row.last_error.startswith(REPLAYS_EXHAUSTED_PREFIX):
+        error_code = "replays_exhausted"
     elif row.last_error and ": " in row.last_error:
         error_code = row.last_error.split(": ", 1)[0]  # the exception type
     return TaskItem(

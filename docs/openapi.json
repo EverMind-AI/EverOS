@@ -3297,6 +3297,16 @@
                 "type": "null"
               }
             ]
+          },
+          "memorize_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemorizeQueueHealthBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3478,6 +3488,78 @@
           "session_id"
         ],
         "title": "MemorizeFlushRequest"
+      },
+      "MemorizeQueueHealthBlock": {
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "loop_alive": {
+            "type": "boolean",
+            "title": "Loop Alive"
+          },
+          "accepting": {
+            "type": "boolean",
+            "title": "Accepting"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "oldest_pending_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Pending Age S"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "loop_restarts": {
+            "type": "integer",
+            "title": "Loop Restarts"
+          },
+          "last_loop_error_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Loop Error At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "reasons",
+          "loop_alive",
+          "accepting",
+          "pending",
+          "oldest_pending_age_s",
+          "failed",
+          "loop_restarts",
+          "last_loop_error_at"
+        ],
+        "title": "MemorizeQueueHealthBlock",
+        "description": "Readiness of the ``async_mode`` memorize queue.\n\n``healthy`` is the delivery loop being alive. The probe only observes;\nthe loop relaunches itself (and on the next ``/add``), and\n``loop_restarts`` counts how often that happened. ``pending`` and\n``oldest_pending_age_s`` are the backlog: growing with a live loop means\ndelivery is slower than arrival (or the LLM is down), which is a\ncapacity signal, not a liveness one. Alert on ``healthy`` and on\n``loop_restarts`` changing."
       },
       "MessageItemDTO": {
         "properties": {

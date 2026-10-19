@@ -364,6 +364,18 @@ async def test_get_task_maps_row_in_the_cloud_shape(
         None,
     )
     assert lost.error_code == "status_write_lost"
+    await repo.add(
+        MemorizeInbox(
+            request_id="r4",
+            session_id="s1",
+            payload_json="{}",
+            status="failed",
+            attempt=3,
+            last_error="replayed 3 times without finishing; giving up",
+        )
+    )
+    poison = await mq.get_task("r4")
+    assert poison is not None and poison.error_code == "replays_exhausted"
     assert await mq.get_task("nope") is None
 
 
@@ -832,3 +844,133 @@ async def test_purge_failure_does_not_stop_delivery(
         await _wait_until_status(repo, "r1", "success")
     finally:
         await w.stop()
+
+
+# ── self-healing: a dead loop comes back, a poison row stops replaying ──────
+
+
+class _LoopKiller(BaseException):
+    """Not an Exception: the loop's own error handling must not catch it."""
+
+
+async def _kill_loop(
+    w: mq.MemorizeQueueWorker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Make the next sweep raise past the loop's handler; wait for the loop to die."""
+    real_sweep = w._sweep
+    armed = True
+
+    async def sweep_then_die() -> None:
+        nonlocal armed
+        if armed:
+            armed = False
+            raise _LoopKiller
+        await real_sweep()
+
+    monkeypatch.setattr(w, "_sweep", sweep_then_die)
+    assert w._task is not None
+    w._wake.set()
+    done, _ = await asyncio.wait([w._task], timeout=2)
+    assert done, "loop did not die"
+
+
+async def test_dead_loop_restarts_on_next_enqueue(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    await w.start()
+    try:
+        await _kill_loop(w, monkeypatch)
+        monkeypatch.setattr(mq, "_restart_later", None, raising=False)  # not relied on
+
+        await w.enqueue(
+            _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
+        )
+
+        assert w._task is not None and not w._task.done()
+        await _wait_until_status(repo, "r1", "success")
+        health = await w.health()
+        assert (health.healthy, health.loop_restarts, health.pending) == (True, 1, 0)
+        assert health.last_loop_error_at is not None
+    finally:
+        await w.stop()
+
+
+async def test_dead_loop_restarts_itself(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No traffic needed: the loop's own exit schedules the relaunch."""
+    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    await w.start()
+    try:
+        await _kill_loop(w, monkeypatch)
+        for _ in range(100):  # first relaunch backs off one second
+            if w._task is not None and not w._task.done():
+                break
+            await asyncio.sleep(0.05)
+        assert w._task is not None and not w._task.done(), "loop did not relaunch"
+        assert (await w.health()).loop_restarts == 1
+    finally:
+        await w.stop()
+
+
+async def test_health_observes_a_dead_loop_and_the_backlog(
+    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _GatedMemorize()
+    monkeypatch.setattr(mq, "memorize", fake)
+    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    await w.start()
+    try:
+        await _enqueue_all(w, ("a1", "a"))
+        await fake.wait_calls(1)
+        live = await w.health()
+        assert (live.healthy, live.loop_alive, live.pending, live.failed) == (
+            True,
+            True,
+            1,
+            0,
+        )
+        assert live.oldest_pending_age_s is not None and live.oldest_pending_age_s >= 0
+        fake.open("a")
+        await _wait_until_status(repo, "a1", "success")
+
+        await _kill_loop(w, monkeypatch)
+        dead = await w.health()  # the probe only observes
+        assert (dead.healthy, dead.loop_alive, dead.loop_restarts) == (False, False, 0)
+        assert dead.reasons == ["delivery loop is not running"]
+        for _ in range(100):  # the loop's own exit relaunches it, with backoff
+            if w._task is not None and not w._task.done():
+                break
+            await asyncio.sleep(0.05)
+        back = await w.health()
+        assert (back.healthy, back.loop_restarts) == (True, 1)
+        assert back.reasons == []
+    finally:
+        await w.stop()
+
+
+async def test_start_gives_up_on_a_row_replayed_too_often(
+    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+) -> None:
+    """A batch that keeps killing the process is failed, not replayed forever."""
+    await repo.add(
+        MemorizeInbox(
+            request_id="poison",
+            session_id="s1",
+            payload_json='{"session_id": "s1", "messages": []}',
+            status="processing",
+            attempt=3,
+        )
+    )
+    w = mq.MemorizeQueueWorker(_settings())  # max_replays defaults to 3
+
+    await w.start()
+    try:
+        row = await repo.find_one(request_id="poison")
+        assert row is not None and row.status == "failed"
+        assert row.last_error == "replayed 3 times without finishing; giving up"
+        assert (await mq.get_task("poison")).error_code == "replays_exhausted"  # type: ignore[union-attr]
+    finally:
+        await w.stop()
+    assert fake.calls == []

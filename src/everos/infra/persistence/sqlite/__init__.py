@@ -33,6 +33,7 @@ not need to manage either.
 from . import tables as tables
 from .repos import LOST_STATUS_WRITE as LOST_STATUS_WRITE
 from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
+from .repos import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
 from .repos import DocumentListPage as DocumentListPage
 from .repos import DocumentUpsertPayload as DocumentUpsertPayload
 from .repos import QueueSummary as QueueSummary
@@ -64,6 +65,7 @@ from .tables import UnprocessedBuffer as UnprocessedBuffer
 __all__ = [
     "LOST_STATUS_WRITE",
     "MTIME_TOLERANCE_SECONDS",
+    "REPLAYS_EXHAUSTED_PREFIX",
     "Cluster",
     "ClusterMember",
     "ConversationStatus",

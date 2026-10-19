@@ -451,9 +451,13 @@ class AsyncQueueSettings(BaseModel):
     not atomic (boundary detection writes memcells and consumes the
     session buffer before extraction runs), so re-running a batch after a
     partial failure duplicates memcells or reports success with the
-    episode missing. Raise it only where that is acceptable. Every row,
-    whatever its status, is deleted ``row_retention_hours`` (default seven
-    days) after it was created.
+    episode missing. Raise it only where that is acceptable. A row that was
+    in flight when the process died is requeued and replayed on the next
+    start (at-least-once); one that has been replayed ``max_replays`` times
+    without ever finishing is marked ``failed`` instead, so a batch that
+    kills the process cannot crash-loop it forever. Every row, whatever its
+    status, is deleted ``row_retention_hours`` (default seven days) after
+    it was created.
 
     Env binding:
         EVEROS_MEMORIZE__ASYNC_QUEUE__ENABLED
@@ -464,6 +468,7 @@ class AsyncQueueSettings(BaseModel):
         EVEROS_MEMORIZE__ASYNC_QUEUE__SCAN_INTERVAL_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_ATTEMPTS
         EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_REPLAYS
         EVEROS_MEMORIZE__ASYNC_QUEUE__ROW_RETENTION_HOURS
     """
 
@@ -475,6 +480,7 @@ class AsyncQueueSettings(BaseModel):
     scan_interval_seconds: float = Field(default=5.0, gt=0)
     max_attempts: int = Field(default=1, ge=1)
     retry_backoff_seconds: float = Field(default=2.0, ge=0)
+    max_replays: int = Field(default=3, ge=1)
     row_retention_hours: float = Field(default=7 * 24.0, gt=0, le=366 * 24.0)
 
 

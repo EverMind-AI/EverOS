@@ -1,30 +1,64 @@
 """Model-based test of the ``async_mode`` queue: hypothesis drives the worker.
 
 The unit tests next door pin the sequences someone thought of. This file
-lets ``hypothesis`` generate thousands of operation sequences -- enqueue
-through the caps, a drain whose rows succeed / fail / die mid-``memorize()``,
-requests that arrive *while* a row is inside ``memorize()`` (the real
-single-loop interleaving), a lost status write, a restart, the retention
-sweep with the clock moved -- against the real repo on a real SQLite file
-and the real worker, and checks the state-machine invariants after every
-step:
+lets ``hypothesis`` generate thousands of operation sequences against the
+real inbox repo (SQLite on a temp file) and the real worker, with only three
+things replaced: ``memorize()`` (the LLM pipeline), the clock, and the one
+second pause between status-write retries.
 
-1. no ``processing`` row while the process is alive and idle; while rows
-   run, never two of one session and never more than ``max_concurrency``;
-2. a session's rows reach ``memorize()`` in arrival order, and a row starts
-   only when no earlier row of its session is still queued; a replay after
-   a crash repeats the crashed row, it never skips ahead;
-3. ``success`` / ``failed`` never change again except by purge; a delivered
-   row has no body, a failed row keeps it;
-4. the caps hold: 429 is raised exactly when the model says the session or
-   the process is full;
-5. ``GET /tasks/{task_id}`` reports what the table holds.
+How the pieces divide the work (the pattern to copy for another component):
 
-Two modes. ``TestMemorizeQueueMachine`` is the rule-based machine: one step
-at a time, deterministic, replayable, and a failure shrinks to the shortest
-sequence. ``test_jittered_real_tasks`` runs the same kind of plan with real
-``asyncio`` tasks racing the running worker loop: true interleaving, not
-replayable. ``HYPOTHESIS_PROFILE=deep`` runs many more examples locally.
+- **Rules** are only what the outside world can do to the system: enqueue,
+  a drain whose rows succeed / fail / die mid-``memorize()`` (optionally
+  with requests arriving *while* a row is inside ``memorize()``, or a status
+  write that fails all retries), restart, sweep, moving the clock. Internal
+  chains (wake -> claim -> task -> mark -> claim again) are left to the real
+  code; the rule parameters exist to create the situations where those
+  chains interleave.
+- **The model** (``self.model``) is the spec's state machine (plan §4.4)
+  written as assignments: what each row *should* be after each step. It is
+  computed from the inputs, never read back from the table, and never copies
+  the implementation -- that is what makes the comparison a check.
+- **Invariants** run after every step and compare the real table with the
+  model:
+
+  1. no ``processing`` row while the process is alive and idle; while rows
+     run, never two of one session and never more than ``max_concurrency``;
+  2. a session's rows reach ``memorize()`` in arrival order, and a row starts
+     only when no earlier row of its session is still queued; a replay after
+     a crash repeats the crashed row, it never skips ahead;
+  3. ``success`` / ``failed`` never change again except by purge; a delivered
+     row has no body, a failed row keeps it;
+  4. the caps hold: 429 is raised exactly when the model says the session or
+     the process is full (asserted between steps; during a drain the table
+     is a moving target and the product's verdict is taken as the fact);
+  5. ``GET /tasks/{task_id}`` reports what the table holds.
+
+Concurrency is the product's own: the worker creates one asyncio task per
+row. The test only decides what happens at the moment a row is inside
+``memorize()`` -- return, raise, let a request arrive (a real insert, so a
+real await), or die -- and keeps that moment deterministic (a crash waits
+until it is the only row in flight; outcomes are keyed by request id, not by
+call order), so every failing sequence shrinks and replays.
+
+Three tests:
+
+- ``TestMemorizeQueueMachine`` -- the rule-based machine above. Deterministic,
+  replayable, shrinking; a failure prints the shortest sequence plus the
+  machine's own trace of what happened.
+- ``test_jittered_real_tasks`` -- the scout: real producers racing the real
+  worker loop with random pauses, slow memorize(), lost status writes and a
+  mid-run stop()/start(). True interleaving, not replayable; a failure prints
+  a millisecond trace so the interleaving can be rebuilt as a machine
+  sequence (``mid=`` puts "who arrived during whose memorize()" into words).
+- ``test_machine_catches_a_lost_replay`` -- the self-check: inject one bug and
+  pin that an invariant trips. A machine that cannot fail proves nothing.
+
+``--hypothesis-show-statistics`` lists how many examples hit each branch
+(crash, lost write, enqueue during memorize(), replay, purge, restart);
+a branch at 0% was not exercised. ``HYPOTHESIS_PROFILE=deep`` runs 1000
+sequences, 1000 jittered runs with plans up to 30 requests and memorize()
+up to 0.3 s; CI runs 60 of each in about 15 s.
 """
 
 from __future__ import annotations
@@ -89,6 +123,8 @@ PER_SESSION_CAP = 2
 TOTAL_CAP = 4
 RETENTION_HOURS = 2.0
 LOST_WRITE_ERROR = "status write lost; outcome unknown"
+MAX_REPLAYS = 3  # the settings default; a crashed row is replayed this often
+REPLAYS_EXHAUSTED_ERROR = f"replayed {MAX_REPLAYS} times without finishing; giving up"
 # Clock steps whose sums never land within minutes of the retention edge,
 # so model and worker agree on what is expired.
 CLOCK_STEPS_HOURS = (0.3, 3.0)
@@ -192,6 +228,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         self.model: dict[str, dict[str, Any]] = {}
         self.seen: set[str] = set()
         self.deliveries: list[tuple[str, int]] = []
+        self.requeued: dict[str, int] = defaultdict(int)
         self.n = 0
         self.crashed = False
         # Outcome per request id, fixed when the drain starts: with rows
@@ -201,6 +238,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         self.lose_marks = 0
         self.lose_rid: str | None = None
         self.lose_row_id: int | None = None
+        self.die_after_loss = False
         self.violations: list[str] = []
         self.trace: list[str] = []  # what happened, for a failure's message
         self._real_mark = self.q.repo.mark
@@ -244,7 +282,13 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             # and let the scheduler drain every other session first, which
             # keeps the table state after a crash deterministic.
             await self._wait_until_alone(rid, session)
-        if self.lose_rid == rid:
+        if self.lose_rid == rid and self.die_after_loss:
+            # The status write is lost AND the process dies before the sweep
+            # can reap it: the row stays processing, the next start() requeues
+            # it and it is replayed (the documented at-least-once case).
+            await self._wait_until_alone(rid, session)
+            outcome = "fail" if outcome == "fail" else "ok"
+        elif self.lose_rid == rid:
             # Whatever happens next, the status write is lost: the sweep
             # fails the row and the body stays.
             m["status"], m["error"], m["body"] = "failed", LOST_WRITE_ERROR, True
@@ -255,6 +299,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         if outcome == "fail":
             if self.lose_rid != rid:
                 m["status"], m["body"] = "failed", True
+                m["error"] = "RuntimeError: boom"  # what _process stores
             raise RuntimeError("boom")
         if self.lose_rid != rid:
             m["status"], m["body"] = "success", False
@@ -278,7 +323,8 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             self.violations.append(f"{rid} started before {earlier} of its session")
 
     async def _wait_until_alone(self, rid: str, session: str) -> None:
-        for _ in range(100_000):
+        deadline = time.perf_counter() + 30.0  # a hang must fail, not freeze
+        while time.perf_counter() < deadline:
             others = [
                 task
                 for row, task in self.q.worker._in_flight.values()
@@ -289,18 +335,20 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
                 for m in self.model.values()
             )
             if others:
-                await asyncio.wait(others)
+                await asyncio.wait(others, timeout=1.0)
             elif len(self.q.worker._in_flight) > 1 or claimable:
                 await asyncio.sleep(0)  # let the scheduler collect / claim
             else:
                 return
-        raise RuntimeError("other rows never left the scheduler")
+        raise RuntimeError(f"{rid}: other rows never left the scheduler")
 
     async def _mark_maybe_lost(self, row_id: int, **values: Any) -> None:
         # Only the chosen row's writes are lost; with two rows in flight a
         # budget shared by both would land on whichever marks first.
         if self.lose_marks and row_id == self.lose_row_id:
             self.lose_marks -= 1
+            if self.lose_marks == 0 and self.die_after_loss:
+                raise _Crash  # kill -9 lands between the lost write and the sweep
             raise RuntimeError("database is locked")
         await self._real_mark(row_id, **values)
 
@@ -384,9 +432,14 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         outcomes=st.lists(st.sampled_from(["ok", "fail", "crash"]), max_size=4),
         mid=st.lists(st.tuples(st.sampled_from(SESSIONS), st.booleans()), max_size=2),
         lose_write=st.booleans(),
+        die_after_loss=st.booleans(),
     )
     def drain(
-        self, outcomes: list[str], mid: list[tuple[str, bool]], lose_write: bool
+        self,
+        outcomes: list[str],
+        mid: list[tuple[str, bool]],
+        lose_write: bool,
+        die_after_loss: bool,
     ) -> None:
         """One ``drain_once``: rows deliver in id order with these outcomes."""
         queued = sorted(
@@ -400,6 +453,11 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             outcomes = outcomes[: first + 1] + [
                 "ok" if o == "crash" else o for o in outcomes[first + 1 :]
             ]
+        if lose_write and die_after_loss and queued:
+            # The lost-write row's death is this drain's crash. Two rows both
+            # waiting to be the only one in flight before dying would wait
+            # forever, so no other row crashes in this drain.
+            outcomes = ["ok" if o == "crash" else o for o in outcomes]
         # Outcomes go to the queued rows in id order; rows enqueued during
         # this drain succeed.
         self.outcome_of = {
@@ -415,16 +473,22 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         if mid and queued:
             event("drain: enqueue during memorize()")
         if lose_write and queued:
-            event("drain: status write lost")
             # The first row's status write fails all three attempts.
             self.lose_marks = 3
             self.lose_row_id, self.lose_rid = queued[0]
+            self.die_after_loss = die_after_loss
+            event(
+                "drain: status write lost, then crash"
+                if die_after_loss
+                else "drain: status write lost"
+            )
         try:
             self.run(self.q.worker.drain_once())
         except _Crash:
             self.crashed = True
         finally:
             self.lose_marks, self.lose_rid, self.lose_row_id = 0, None, None
+            self.die_after_loss = False
             self.outcome_of, self.mid_events = {}, []
         if not self.crashed:
             # A drain only stops when nothing is queued, and the lost-write
@@ -447,12 +511,31 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     def restart(self) -> None:
         """What ``start()`` does: requeue the in-flight row, then sweep."""
         self.trace.append("restart")
-        requeued = self.run(self.q.repo.requeue_processing())
-        in_flight = [m for m in self.model.values() if m["status"] == "processing"]
-        assert requeued == len(in_flight)
-        event("restart: replayed a crashed row" if in_flight else "restart: clean")
-        for m in in_flight:
-            m["status"] = "queued"
+        requeued, gave_up = self.run(
+            self.q.repo.requeue_processing(max_replays=MAX_REPLAYS)
+        )
+        in_flight = [
+            (rid, m) for rid, m in self.model.items() if m["status"] == "processing"
+        ]
+        poison = [rid for rid, _ in in_flight if self.requeued[rid] >= MAX_REPLAYS]
+        assert (requeued, gave_up) == (len(in_flight) - len(poison), len(poison))
+        if poison:
+            event("restart: gave up on a poison row")
+        elif in_flight:
+            event("restart: replayed a crashed row")
+        else:
+            event("restart: clean")
+        for rid, m in in_flight:
+            if rid in poison:
+                # Replayed MAX_REPLAYS times without finishing: failed, body kept.
+                m["status"], m["error"], m["body"] = (
+                    "failed",
+                    REPLAYS_EXHAUSTED_ERROR,
+                    True,
+                )
+            else:
+                m["status"] = "queued"
+                self.requeued[rid] += 1
         self.q.worker = mq.MemorizeQueueWorker(_settings())
         self.run(self.q.worker._sweep())
         self._model_purge()
@@ -484,6 +567,40 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             assert (r.payload_json != "") == m["body"], (r.request_id, r.status)
             if m["error"] is not None:
                 assert r.last_error == m["error"]
+            if r.status == "success":
+                assert r.last_error is None, r.request_id
+            assert r.updated_at >= r.created_at, r.request_id
+
+    @invariant()
+    def delivered_at_most_once_per_life(self) -> None:
+        # A row reaches memorize() once per time it was (re)queued: never
+        # twice in one life, never silently skipped on a replay.
+        seq_to_rid = {m["seq"]: rid for rid, m in self.model.items()}
+        seen: dict[str, int] = defaultdict(int)
+        for _session, seq in self.deliveries:
+            if seq in seq_to_rid:
+                seen[seq_to_rid[seq]] += 1
+        for rid, n in seen.items():
+            assert n <= 1 + self.requeued[rid], (rid, n, self.requeued[rid])
+
+    @invariant()
+    def backlog_readers_agree(self) -> None:
+        # The route's backlog rule and GET /tasks read the same table the
+        # model describes.
+        for session in SESSIONS:
+            expected = self._pending(session) > 0
+            got = self.run(self.q.worker.has_pending(session_id=session))
+            assert got == expected, (session, got, expected)
+            page = self.run(mq.list_tasks(session_id=session, page_size=100))
+            want = defaultdict(int)
+            for m in self.model.values():
+                if m["session"] == session:
+                    want[m["status"]] += 1
+            assert page.total == sum(want.values()), (session, page.total, want)
+            seen = defaultdict(int)
+            for item in page.items:
+                seen[item.status] += 1
+            assert dict(seen) == dict(want), (session, dict(seen), dict(want))
 
     @invariant()
     def at_most_one_in_flight(self) -> None:
@@ -520,6 +637,9 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
                 assert got is None, rid
             else:
                 assert got is not None and got.status == m["status"], rid
+                assert (got.finished_at is not None) == (
+                    m["status"] in ("success", "failed")
+                ), rid
 
 
 TestMemorizeQueueMachine = MemorizeQueueMachine.TestCase
@@ -531,9 +651,14 @@ TestMemorizeQueueMachine = MemorizeQueueMachine.TestCase
 def test_machine_catches_a_lost_replay() -> None:
     machine = MemorizeQueueMachine()
     try:
-        machine.q.repo.requeue_processing = machine.q.repo.fail_abandoned  # type: ignore[method-assign]
+        real_fail_abandoned = machine.q.repo.fail_abandoned
+
+        async def forgets_the_row(**kwargs: Any) -> tuple[int, int]:
+            return await real_fail_abandoned(), 0  # the bug: failed, not requeued
+
+        machine.q.repo.requeue_processing = forgets_the_row  # type: ignore[method-assign]
         machine.enqueue("s1", False)
-        machine.drain(["crash"], [], False)
+        machine.drain(["crash"], [], False, False)
         machine.restart()
         with pytest.raises(AssertionError):
             machine.table_matches_model()
@@ -541,22 +666,61 @@ def test_machine_catches_a_lost_replay() -> None:
         machine.teardown()
 
 
+def test_machine_catches_two_rows_of_one_session() -> None:
+    """Second self-check: a claim that ignores busy sessions must trip the
+    scheduler observation, not slip through as a different ordering."""
+    machine = MemorizeQueueMachine()
+    try:
+        real_claim = machine.q.repo.claim_next
+
+        async def claim_ignoring_busy_sessions(**kwargs: Any) -> MemorizeInbox | None:
+            return await real_claim(exclude_sessions=())  # the bug
+
+        machine.q.repo.claim_next = claim_ignoring_busy_sessions  # type: ignore[method-assign]
+        machine.enqueue("s1", False)
+        machine.enqueue("s1", False)
+        # Both rows get claimed at once; the first one's memorize() lets the
+        # second start by waiting on an enqueue, so they overlap for sure.
+        machine.drain(["ok", "ok"], [("s2", False)], False, False)
+        with pytest.raises(AssertionError):
+            machine.scheduler_kept_its_rules()
+    finally:
+        machine.teardown()
+
+
 # ── mode 2: real asyncio tasks racing the running loop ─────────────────────
 
-# The deep profile also widens the plan; the scout should wander further locally.
-_PLAN_MAX = 30 if os.environ.get("HYPOTHESIS_PROFILE") == "deep" else 10
+# The deep profile widens the plan and slows memorize(); the scout should
+# wander further locally than CI has time for.
+_DEEP = os.environ.get("HYPOTHESIS_PROFILE") == "deep"
+_PLAN_MAX = 30 if _DEEP else 10
+_SLOW_MAX = 0.3 if _DEEP else 0.05  # seconds a memorize() may take
 
 
 async def _jittered(
-    plan: list[tuple[str, bool, str]], seed: int, restart_at: float | None
+    plan: list[tuple[str, bool, str]],
+    seed: int,
+    restart_at: float | None,
+    lose: list[int],
+    slow: float,
 ) -> None:
-    """Real producers, the real loop, random pauses; ``restart_at`` (0..1)
-    stops and restarts the worker that far into the run, or never."""
+    """Real producers, the real loop, random pauses.
+
+    ``restart_at`` (0..1) stops and restarts the worker that far into the
+    run, or never. ``lose`` names plan entries whose terminal status write
+    fails all three attempts (sqlite locked / disk full). ``slow`` is the
+    longest a memorize() may take, so rows of different sessions really do
+    overlap.
+    """
     rng = random.Random(seed)
     outcome_of: dict[str, str] = {}
     deliveries: list[str] = []
+    calls: dict[str, int] = defaultdict(int)
     rid_of_row: dict[int, str] = {}
+    lose_rids = {f"r{k}" for k in lose if k < len(plan)}
+    lost_budget = {rid: 3 for rid in lose_rids}  # _MARK_ATTEMPTS
     settled = asyncio.Event()
+    violations: list[str] = []
     t0 = time.perf_counter()
     trace: list[str] = []
 
@@ -570,10 +734,19 @@ async def _jittered(
         defer_extraction: bool = False,
     ) -> MemorizeResult:
         rid = payload["rid"]
-        deliveries.append(rid)
         session = payload["session_id"]
-        note(f"memorize {rid}/{session} in_flight={sorted(q.worker._in_flight)}")
-        await asyncio.sleep(rng.random() * 0.005)
+        deliveries.append(rid)
+        calls[rid] += 1
+        busy = sorted(q.worker._in_flight)
+        note(f"memorize {rid}/{session} #{calls[rid]} in_flight={busy}")
+        same = [
+            r.request_id
+            for r, _ in q.worker._in_flight.values()
+            if r.session_id == session
+        ]
+        if len(same) > 1:
+            violations.append(f"{rid}: {same} of {session} in flight together")
+        await asyncio.sleep(rng.random() * (0.005 + slow))
         note(f"  {rid} -> {outcome_of[rid]}")
         if outcome_of[rid] == "fail":
             raise RuntimeError("boom")
@@ -585,18 +758,52 @@ async def _jittered(
     q = _Queue(fake_memorize, cfg)
     await q.setup()
     real_mark = q.repo.mark
+    real_fail_abandoned = q.repo.fail_abandoned
     terminal = 0
+
+    def maybe_settled() -> None:
+        if terminal >= len(plan):
+            settled.set()
+
+    async def rid_for(row_id: int) -> str:
+        rid = rid_of_row.get(row_id)
+        if rid is None:  # the producer may not have mapped it yet
+            row = await q.repo.get_by_id(row_id)
+            rid = row.request_id if row is not None else f"row{row_id}"
+            rid_of_row[row_id] = rid
+        return rid
 
     async def counting_mark(row_id: int, **values: Any) -> None:
         nonlocal terminal
+        rid = await rid_for(row_id)
+        status = values.get("status")
+        if status in ("success", "failed") and lost_budget.get(rid, 0) > 0:
+            lost_budget[rid] -= 1
+            note(f"mark {rid} {status} LOST ({3 - lost_budget[rid]}/3)")
+            raise RuntimeError("database is locked")
         await real_mark(row_id, **values)
-        note(f"mark {rid_of_row.get(row_id, f'row{row_id}')} {values.get('status')}")
-        if values.get("status") in ("success", "failed"):
+        note(f"mark {rid} {status}")
+        if status in ("success", "failed"):
             terminal += 1
-            if terminal == len(plan):
-                settled.set()
+            maybe_settled()
+
+    async def counting_fail_abandoned(**kwargs: Any) -> int:
+        nonlocal terminal
+        n = await real_fail_abandoned(**kwargs)
+        if n:
+            note(f"reap {n} lost row(s)")
+            terminal += n
+            maybe_settled()
+        return n
 
     q.repo.mark = counting_mark  # type: ignore[method-assign]
+    q.repo.fail_abandoned = counting_fail_abandoned  # type: ignore[method-assign]
+    restarted = False
+    event(f"jitter: slow={slow}")
+    if lose_rids:
+        event("jitter: status write lost")
+    if restart_at is not None:
+        event("jitter: restart mid-run")
     try:
         await q.worker.start()
 
@@ -613,7 +820,7 @@ async def _jittered(
             note(f"enqueue {rid}/{session} accepted pending={pending}")
             row = await q.repo.find_one(request_id=rid)
             if row is not None and row.id is not None:
-                rid_of_row[row.id] = rid
+                rid_of_row.setdefault(row.id, rid)
 
         async def peek() -> None:
             for _ in range(5):
@@ -621,40 +828,59 @@ async def _jittered(
                 await mq.list_tasks(session_id=rng.choice(SESSIONS))
 
         async def restart() -> None:
+            nonlocal restarted
             if restart_at is None:
                 return
-            await asyncio.sleep(restart_at * 0.05)
+            # Land somewhere inside the run, whatever its length.
+            await asyncio.sleep(restart_at * (0.05 + slow * len(plan) / 2))
             note("restart: stop()")
             await q.worker.stop()
             note("restart: stopped, start()")
             await q.worker.start()
+            restarted = True
             note("restart: started")
 
         await asyncio.gather(
             *(produce(k, *item) for k, item in enumerate(plan)), peek(), restart()
         )
-        async with asyncio.timeout(5.0):
+        async with asyncio.timeout(60.0):
             await settled.wait()
         await q.worker.stop()
-        assert await q.repo.count_pending() == 0, "\n".join(trace)
+        dump = "\n".join(trace)
+        assert not violations, f"{violations}\n{dump}"
+        assert await q.repo.count_pending() == 0, dump
 
         rows = {r.request_id: r for r in await q.rows()}
-        assert set(rows) == set(outcome_of), "\n".join(trace)
+        assert set(rows) == set(outcome_of), dump
         for rid, outcome in outcome_of.items():
             r = rows[rid]
-            assert r.status == ("failed" if outcome == "fail" else "success"), (
-                rid + "\n" + "\n".join(trace)
-            )
+            expected = "failed" if outcome == "fail" else "success"
+            if rid in lose_rids and calls[rid] == 1:
+                # Its own status write never landed: the sweep failed it and
+                # kept the body, whatever memorize() had returned.
+                event("jitter: lost row reaped by the sweep")
+                assert (r.status, r.last_error) == ("failed", LOST_WRITE_ERROR), (
+                    rid + "\n" + dump
+                )
+                assert r.payload_json != "", rid
+                continue
+            if rid in lose_rids:
+                # Restarted before the sweep got to it: requeued and replayed
+                # like a crash (documented at-least-once), and the replay's
+                # own write landed.
+                event("jitter: lost row replayed after restart")
+                assert restarted and calls[rid] == 2, rid + "\n" + dump
+            else:
+                assert calls[rid] == 1, rid + "\n" + dump
+            assert r.status == expected, rid + "\n" + dump
             assert (r.payload_json != "") == (outcome == "fail"), rid
         # Per session, arrival order is the order the inserts committed, i.e.
-        # row id order; sessions are independent.
+        # row id order; a replay repeats a row, it never skips ahead.
         per_session: dict[str, list[int]] = defaultdict(list)
         for rid in deliveries:
             per_session[rows[rid].session_id].append(rows[rid].id)  # type: ignore[arg-type]
         for ids in per_session.values():
-            assert ids == sorted(ids), f"{ids}\n" + "\n".join(trace)
-        # A row that finished inside stop()'s grace is never replayed.
-        assert len(deliveries) == len(plan), "\n".join(trace)
+            assert ids == sorted(ids), f"{ids}\n" + dump
     finally:
         await q.teardown()
 
@@ -669,9 +895,15 @@ async def _jittered(
     ),
     seed=st.integers(0, 10_000),
     restart_at=st.one_of(st.none(), st.floats(0.0, 1.0)),
+    lose=st.lists(st.integers(0, _PLAN_MAX - 1), unique=True, max_size=3),
+    slow=st.sampled_from([0.0, 0.05, _SLOW_MAX]),
 )
 @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 def test_jittered_real_tasks(
-    plan: list[tuple[str, bool, str]], seed: int, restart_at: float | None
+    plan: list[tuple[str, bool, str]],
+    seed: int,
+    restart_at: float | None,
+    lose: list[int],
+    slow: float,
 ) -> None:
-    asyncio.run(_jittered(plan, seed, restart_at))
+    asyncio.run(_jittered(plan, seed, restart_at, lose, slow))

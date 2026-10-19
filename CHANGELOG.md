@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row is deleted seven days after it was accepted. `GET /api/v2/tasks/{task_id}`
   reports one request's outcome and `GET /api/v2/tasks` lists them (filter by
   `session_id` / `status`, paged). The field name, the `202` body, the task
-  paths and the status vocabulary match the EverOS Cloud gateway. Configured under
+  paths and the status vocabulary match the EverOS Cloud gateway. Replays
+  after a crash are bounded (`max_replays`, default 3), the delivery loop
+  relaunches itself if it ever dies, and `GET /health` reports the queue
+  (`memorize_queue` block: loop alive, backlog, failed, restarts). Configured under
   `[memorize.async_queue]`; `enabled = false` stops accepting new async
   work while rows accepted earlier are still delivered. Synchronous calls
   without a backlog are unchanged.

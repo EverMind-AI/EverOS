@@ -120,9 +120,27 @@ async def test_requeue_processing_returns_stale_rows_to_queued(
     await repo.add(_row(status="processing"))
     await repo.add(_row(status="success"))
 
-    assert await repo.requeue_processing() == 2
+    assert await repo.requeue_processing() == (2, 0)
     assert await repo.count_pending(session_id="s1") == 2
     assert await repo.claim_next() is not None
+
+
+async def test_requeue_processing_gives_up_after_max_replays(
+    repo: _MemorizeInboxRepo,
+) -> None:
+    """Each replay bumps ``attempt``; at ``max_replays`` the row is failed."""
+    poison = await repo.add(_row(status="processing", attempt=2))
+    fresh = await repo.add(_row(status="processing", attempt=0))
+
+    assert await repo.requeue_processing(max_replays=2) == (1, 1)
+
+    rows = {r.id: r for r in await repo.list_all()}
+    assert rows[fresh.id].status == "queued" and rows[fresh.id].attempt == 1
+    assert rows[poison.id].status == "failed"
+    assert rows[poison.id].last_error is not None
+    assert rows[poison.id].last_error.startswith("replayed 2 times")
+    assert await repo.count_status("failed") == 1
+    assert await repo.oldest_pending_created_at() == rows[fresh.id].created_at
 
 
 async def test_purge_expired_deletes_old_rows_except_processing(

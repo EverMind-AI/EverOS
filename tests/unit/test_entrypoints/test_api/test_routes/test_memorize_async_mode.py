@@ -29,6 +29,7 @@ from everos.entrypoints.api.routes import tasks as tasks_mod
 from everos.service.memorize import MemorizeResult
 from everos.service.memorize_queue import (
     MemorizeQueueWorker,
+    QueueHealth,
     TaskItem,
     TaskPage,
 )
@@ -42,6 +43,7 @@ class _StubQueue(MemorizeQueueWorker):
         self.enqueued: list[tuple[dict[str, Any], str, bool, bool]] = []
         self.saturated = False
         self.accepting = True
+        self.health_calls = 0
 
     async def has_pending(
         self,
@@ -51,6 +53,20 @@ class _StubQueue(MemorizeQueueWorker):
         project_id: str = "default",
     ) -> bool:
         return self.pending.get(session_id, 0) > 0
+
+    async def health(self) -> QueueHealth:
+        self.health_calls += 1
+        return QueueHealth(
+            healthy=True,
+            reasons=[],
+            loop_alive=True,
+            accepting=self.accepting,
+            pending=sum(self.pending.values()),
+            oldest_pending_age_s=1.5 if self.pending else None,
+            failed=0,
+            loop_restarts=0,
+            last_loop_error_at=None,
+        )
 
     async def enqueue(
         self,
@@ -359,3 +375,33 @@ async def test_backlog_still_queues_sync_calls_when_not_accepting(
 
     assert resp.status_code == 202
     assert fake_memorize.calls == []
+
+
+# ── GET /health carries the queue block ────────────────────────────────────
+
+
+async def test_health_reports_the_memorize_queue_block(
+    client: AsyncClient, queue: _StubQueue
+) -> None:
+    queue.pending = {"s1": 2}
+
+    resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    block = resp.json()["memorize_queue"]
+    assert block["healthy"] is True and block["loop_alive"] is True
+    assert (block["pending"], block["oldest_pending_age_s"], block["failed"]) == (
+        2,
+        1.5,
+        0,
+    )
+    assert block["loop_restarts"] == 0 and block["last_loop_error_at"] is None
+    assert queue.health_calls == 1
+
+
+async def test_health_without_the_queue_lifespan_has_no_block(app: FastAPI) -> None:
+    app.state.lifespan_data = {}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["memorize_queue"] is None
