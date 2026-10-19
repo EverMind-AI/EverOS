@@ -39,7 +39,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, currently_in_test_context, given, settings
+from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine,
@@ -91,6 +92,16 @@ LOST_WRITE_ERROR = "status write lost; outcome unknown"
 # so model and worker agree on what is expired.
 CLOCK_STEPS_HOURS = (0.3, 3.0)
 PENDING = ("queued", "processing")
+
+
+def event(label: str) -> None:
+    """Count a rule outcome in ``--hypothesis-show-statistics``.
+
+    The self-check test drives the machine by hand, outside hypothesis,
+    where ``hypothesis.event`` refuses to record.
+    """
+    if currently_in_test_context():
+        _hypothesis_event(label)
 
 
 class _Crash(BaseException):
@@ -266,8 +277,10 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             )
         except QueueSaturatedError:
             assert full, f"429 for {rid} but the model had room"
+            event("enqueue: 429")
             return
         assert not full, f"{rid} accepted but the model says full"
+        event("enqueue: accepted")
         row = await self.q.repo.find_one(request_id=rid)
         assert row is not None and row.id is not None
         assert pending == self._pending(session) + 1
@@ -315,7 +328,12 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         )
         self.outcomes = list(outcomes)
         self.mid_events = list(mid)
+        for outcome in outcomes[: len(queued)]:
+            event(f"drain: row {outcome}")
+        if mid and queued:
+            event("drain: enqueue during memorize()")
         if lose_write and queued:
+            event("drain: status write lost")
             # The first row's status write fails all three attempts.
             self.lose_marks = 3
             self.lose_rid = queued[0][1]
@@ -337,6 +355,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         requeued = self.run(self.q.repo.requeue_processing())
         in_flight = [m for m in self.model.values() if m["status"] == "processing"]
         assert requeued == len(in_flight)
+        event("restart: replayed a crashed row" if in_flight else "restart: clean")
         for m in in_flight:
             m["status"] = "queued"
         self.q.worker = mq.MemorizeQueueWorker(_settings())
@@ -347,8 +366,10 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     @precondition(lambda self: not self.crashed)
     @rule()
     def sweep(self) -> None:
+        before = len(self.model)
         self.run(self.q.worker._sweep())
         self._model_purge()
+        event("sweep: purged rows" if len(self.model) < before else "sweep: nothing")
 
     @rule(hours=st.sampled_from(CLOCK_STEPS_HOURS))
     def advance_clock(self, hours: float) -> None:
