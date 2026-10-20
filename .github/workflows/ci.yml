@@ -91,9 +91,13 @@ jobs:
   # OME run machine. Runs the machine alone, repeatedly, until it fails and
   # prints its drain diagnostics.
   probe-ome-windows:
-    name: probe OME machine (Windows, temporary)
+    name: probe OME machine (Windows, temporary, ${{ matrix.mode }})
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [suite-1, suite-2, suite-3, suite-4, suite-5, deep]
     steps:
       - uses: actions/checkout@v6
 
@@ -109,13 +113,26 @@ jobs:
       - name: Install dependencies (frozen)
         run: uv sync --frozen
 
-      - name: Run the OME machine until it fails
+      # suite-*: the whole unit suite, the condition under which the red
+      # appeared (2 of 5 runs); deep: the machine alone under the deep
+      # profile (500 sequences x 30 steps). A test running longer than 600 s
+      # dumps every thread's stack (-o faulthandler_timeout), so a hang
+      # leaves a trace; each pytest run is capped at 100 min.
+      - name: Run until it fails
         shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
         run: |
-          for i in $(seq 1 25); do
-            echo "=== probe $i"
-            uv run pytest tests/unit/test_properties/test_ome_run_stateful.py -q -p no:cacheprovider -x --tb=short || exit 1
-          done
+          set -o pipefail
+          echo "=== probe $MODE $(date -u +%H:%M:%S)"
+          if [ "$MODE" = "deep" ]; then
+            HYPOTHESIS_PROFILE=deep timeout 6000 uv run pytest tests/unit/test_properties/test_ome_run_stateful.py -q -p no:cacheprovider -x --tb=short -o faulthandler_timeout=600 2>&1 | tail -150
+          else
+            timeout 6000 uv run pytest tests/unit -q -x --tb=short -o faulthandler_timeout=600 2>&1 | tail -150
+          fi
+          rc=${PIPESTATUS[0]}
+          echo "=== probe $MODE exited $rc $(date -u +%H:%M:%S)"
+          exit $rc
 
   unit-py313:
     name: unit tests (3.13)

@@ -36,7 +36,10 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import time
+import traceback
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
 from unittest import mock
@@ -50,6 +53,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from everos.component.utils.datetime import get_utc_now, to_iso_format
 from everos.infra.ome import BaseEvent, Immediate, RunStatus, offline_strategy
 from everos.infra.ome._dispatch import runner as runner_mod
+from everos.infra.ome._stores import storage as storage_mod
 from everos.infra.ome.testing import StrategyTestHarness
 
 settings.register_profile(
@@ -100,6 +104,27 @@ class _Undeclared(BaseEvent):
 
 
 _calls: dict[str, int] = defaultdict(int)
+
+# Diagnostics for the intermittent Windows red: every OME connection is
+# registered while open (when, from where), so a drain timeout can say which
+# connections were still open and for how long.
+_open_connections: dict[int, tuple[float, str]] = {}
+_real_connect = storage_mod.OMEStorage.connect
+
+
+@asynccontextmanager
+async def _registered_connect(self: Any) -> Any:
+    key = id(object())
+    origin = "".join(traceback.format_stack(limit=8)[:-1])
+    _open_connections[key] = (time.monotonic(), origin)
+    try:
+        async with _real_connect(self) as conn:
+            yield conn
+    finally:
+        _open_connections.pop(key, None)
+
+
+storage_mod.OMEStorage.connect = _registered_connect  # type: ignore[method-assign]
 
 
 @offline_strategy(
@@ -174,9 +199,15 @@ class OmeRunMachine(RuleBasedStateMachine):
             except Exception as read_error:
                 rows = [f"find_running failed: {read_error!r}"]
             threads = sorted(t.name for t in threading.enumerate())
+            now = time.monotonic()
+            held = "\n".join(
+                f"--- open for {now - opened:.1f}s, from:\n{origin}"
+                for opened, origin in _open_connections.values()
+            )
             raise TimeoutError(
                 f"{e}; active_runs={self.engine._active_runs}; running={rows}; "
-                f"threads={threads}; trace={self.trace[-8:]}"
+                f"threads={threads}; trace={self.trace[-8:]}\n"
+                f"open connections ({len(_open_connections)}):\n{held}"
             ) from e
 
     # ── rules ──────────────────────────────────────────────────────────────
