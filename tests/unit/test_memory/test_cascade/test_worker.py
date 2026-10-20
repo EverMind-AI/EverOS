@@ -1610,20 +1610,23 @@ async def test_rebuild_wait_timeout_leaves_the_optimize_running(
     from everos.memory.cascade import worker as wmod
 
     monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
+    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.2)
     # The same constant bounds each maintenance call, so one long call cannot
-    # outlive the wait: two short beats around the 0.2 s cooldown do.
+    # outlive the wait: two short beats around a cooldown longer than the
+    # wait do. Beats are far below the wait and the cooldown far above it, so
+    # a coarse clock (Windows, where a 20 ms sleep ran past a 50 ms wait and
+    # the first beat was cut short) does not change the outcome.
     fake = _FakeLanceRepo(optimize_delay=0.02)
     w = CascadeWorker(
         {"episode": _OkHandlerWithRepo(fake)},
         retry_backoff_seconds=0,
-        optimize_min_interval_seconds=0.2,
+        optimize_min_interval_seconds=0.6,
     )
     try:
         w._schedule_optimize("episode")
         await asyncio.sleep(0.01)
         w._schedule_optimize("episode")  # mid-beat: a second beat after cooldown
-        await w._run_rebuild_once("episode")  # waits 0.05 s, then skips
+        await w._run_rebuild_once("episode")  # waits 0.2 s, then skips
         assert not fake.rebuild_calls, "must not rebuild under a live runner"
         await w._flush_optimizers()
         assert len(fake.beats) == 2, "both beats must run to completion"
