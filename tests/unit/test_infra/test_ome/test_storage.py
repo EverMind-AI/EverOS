@@ -186,3 +186,24 @@ async def test_writes_queue_behind_the_holder(tmp_path: Path) -> None:
     async with storage.connect() as conn:
         cur = await conn.execute("SELECT bucket_key FROM idle_store ORDER BY rowid")
         assert [r[0] for r in await cur.fetchall()] == order
+
+
+@pytest.mark.asyncio
+async def test_held_open_connection_keeps_the_wal_alive(tmp_path: Path) -> None:
+    """While the engine holds a connection open, closing a per-statement
+    connection is never the last close, so the WAL files stay; releasing
+    the held connection is the last close and removes them."""
+    storage = OMEStorage(db_path=tmp_path / "ome.db")
+    await storage.init()
+    await storage.hold_open()
+    wal = tmp_path / "ome.db-wal"
+    async with storage.write() as conn:
+        await conn.execute(
+            "INSERT INTO idle_store (strategy_name, bucket_key, last_activity_ts) "
+            "VALUES ('s', 'b', '2026')"
+        )
+    assert wal.exists(), "the short-lived connection's close was treated as the last"
+    await storage.release()
+    assert storage._keeper is None
+    assert not wal.exists(), "the held connection's close must be the last close"
+    await storage.release()  # idempotent

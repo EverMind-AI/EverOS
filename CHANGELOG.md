@@ -80,7 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently drops the run when it lands on the RUNNING insert and leaves the
   row RUNNING until a restart when it lands on a status update. Writers now
   queue on an in-process lock that nobody overtakes before touching the
-  file. Found by the OME run state-machine test, which failed on Windows CI.
+  file. The engine also keeps one connection open for its lifetime: with
+  a connection per statement, every close used to be the last close, which
+  checkpoints and deletes the WAL files under an exclusive lock and on
+  Windows held a fresh connection's first statement past the same timeout. Found by the OME run state-machine test, which failed on Windows CI.
 - **A message the model can never segment no longer blocks its session.**
   Boundary detection retries an unusable reply three times per call; a
   message that always produced one stayed in the session's buffer, every

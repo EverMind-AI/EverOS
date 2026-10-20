@@ -80,6 +80,7 @@ class OMEStorage:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self._write_gate: asyncio.Lock | None = None
+        self._keeper: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
         """Create parent dirs + apply file-level pragmas + create schema.
@@ -116,6 +117,33 @@ class OMEStorage:
             for pragma in _CONN_PRAGMAS:
                 await conn.execute(pragma)
             yield conn
+
+    async def hold_open(self) -> None:
+        """Keep one connection open for the engine's lifetime.
+
+        In WAL mode the last connection to close checkpoints the WAL and
+        deletes the -wal / -shm files under an exclusive lock. Every
+        store call here opens and closes its own connection, so that path
+        ran dozens of times a second, and on Windows it held the lock for
+        seconds at a time: a fresh connection's first statement waited out
+        the 5 s busy timeout and failed with database is locked (the
+        OME run state-machine test on Windows CI). While this connection
+        is open no other close is the last one. It holds no transaction,
+        so checkpoints still run; it has read the header once so that the
+        WAL is attached to it.
+        """
+        if self._keeper is None:
+            keeper = await aiosqlite.connect(self.db_path)
+            cur = await keeper.execute("PRAGMA user_version")
+            await cur.fetchone()
+            self._keeper = keeper
+
+    async def release(self) -> None:
+        """Close the connection :meth:`hold_open` keeps; the last close
+        checkpoints and removes the WAL files as usual."""
+        if self._keeper is not None:
+            keeper, self._keeper = self._keeper, None
+            await keeper.close()
 
     def _gate(self) -> asyncio.Lock:
         if self._write_gate is None:

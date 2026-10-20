@@ -284,6 +284,7 @@ class OfflineEngine:
         await self._storage.init()
         self._acquire_lock()
         try:
+            await self._storage.hold_open()
             self._registry.validate()
             self._init_components()
             self._idle_event = asyncio.Event()
@@ -463,6 +464,7 @@ class OfflineEngine:
             finally:
                 self._scheduler = None
         _ENGINES.pop(self._engine_id, None)
+        await self._storage.release()
         self._release_lock()
         self._idle_event = None
         self._active_runs = 0
@@ -539,6 +541,7 @@ class OfflineEngine:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
         _ENGINES.pop(self._engine_id, None)
+        await self._storage.release()
         self._release_lock()
         self._started = False
         self._idle_event = None
