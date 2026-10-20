@@ -570,6 +570,14 @@ def _remove_unindexed_doc_dirs(knowledge_dir: Path, doc_id: str) -> int:
     for doc_dir in knowledge_dir.glob("*/*"):
         if not doc_dir.is_dir() or not doc_dir.name.endswith(suffix):
             continue
+        # ``Path.glob`` walks hidden directories too, and a replace in
+        # progress keeps the document's backup under a ``.<name>.backup``
+        # path; a cleanup that reached into it would delete the very copy
+        # the restore is about to bring back.
+        if any(
+            part.startswith(".") for part in doc_dir.relative_to(knowledge_dir).parts
+        ):
+            continue
         topics += sum(1 for _ in doc_dir.glob("[0-9]*.md"))
         shutil.rmtree(doc_dir)
     return topics
