@@ -88,8 +88,16 @@ class KindSpec:
         single path component, not ``/``. See module docstring for why
         :class:`pathlib.PurePosixPath.match` is preferred over bare
         :func:`fnmatch.fnmatch`.
+
+        ``PurePosixPath.match`` is anchored on the right, so on its own it
+        also accepted a path with extra leading components -- one the
+        scanner's root-anchored ``glob`` would never visit, so the watcher
+        and the scanner disagreed on it. Requiring the same number of
+        components makes the match a full one.
         """
-        return PurePosixPath(rel_md_path).match(self.path_glob())
+        path = PurePosixPath(rel_md_path)
+        pattern = PurePosixPath(self.path_glob())
+        return len(path.parts) == len(pattern.parts) and path.match(str(pattern))
 
 
 KIND_REGISTRY: tuple[KindSpec, ...] = (
