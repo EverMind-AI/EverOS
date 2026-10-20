@@ -99,15 +99,14 @@ def test_iso_round_trip_keeps_the_instant(d: dt.datetime, offset_minutes: int) -
     assert back.utcoffset() is not None, "the rendered form must carry an offset"
 
 
-@given(seconds=st.integers(0, 10**12 - 1))
+@given(seconds=st.integers(0, _MS_MAX // 1000))
 def test_from_timestamp_reads_values_below_the_threshold_as_seconds(
     seconds: int,
 ) -> None:
-    # year 9999 is the datetime ceiling: ~2.5e11 s; above that the heuristic
-    # cannot help and fromtimestamp itself refuses.
-    if seconds > 253_402_300_799:
-        return
-    assert dtu.from_timestamp(seconds) == dt.datetime.fromtimestamp(seconds, tz=_UTC)
+    # Up to 2100: beyond that the platform's own fromtimestamp refuses on
+    # Windows long before the 1e12 threshold matters.
+    expected = dt.datetime(1970, 1, 1, tzinfo=_UTC) + dt.timedelta(seconds=seconds)
+    assert dtu.from_timestamp(seconds) == expected
 
 
 @given(ms=st.integers(10**12, _MS_MAX))

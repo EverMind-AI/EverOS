@@ -86,7 +86,9 @@ def test_only_the_aliasing_pair_is_rejected() -> None:
 
 @given(x=accepted_app_ids, y=accepted_project_ids)
 def test_accepted_ids_stay_under_the_root(x: str, y: str) -> None:
-    root = Path("/memory-root")  # resolution needs no real directory
+    # Resolution needs no real directory; resolve the root too, or on Windows
+    # the drive letter the target gains makes it "not relative" to the root.
+    root = Path("/memory-root").resolve()
     target = (root / mr.app_dir_name(x) / mr.project_dir_name(y)).resolve()
     assert target.is_relative_to(root)
     assert len(target.relative_to(root).parts) == 2
