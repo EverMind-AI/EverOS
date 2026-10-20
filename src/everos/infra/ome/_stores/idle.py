@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from everos.component.utils.datetime import from_iso_format, to_iso_format
+from everos.component.utils.datetime import ensure_utc, from_iso_format, to_iso_format
 from everos.infra.ome._stores.storage import OMEStorage
 
 
@@ -23,6 +23,10 @@ class IdleStore:
 
     async def touch(self, strategy_name: str, bucket_key: str, *, at: datetime) -> None:
         """UPSERT ``last_activity_ts = at`` for ``(strategy_name, bucket_key)``."""
+        # One zone for every stored string, or the lexicographic order the
+        # scan relies on stops being temporal order: ``to_iso_format`` keeps
+        # the input's offset.
+        at = ensure_utc(at) or at
         async with self._storage.connect() as conn:
             await conn.execute(
                 "INSERT INTO idle_store "
@@ -38,8 +42,10 @@ class IdleStore:
         self, strategy_name: str, *, idle_seconds: int, now: datetime
     ) -> list[str]:
         """Return bucket_keys with ``last_activity_ts`` older than ``idle_seconds``."""
-        # Cutoff on the RHS so the indexed column stays un-wrapped.
-        cutoff = to_iso_format(now - timedelta(seconds=idle_seconds))
+        # Cutoff on the RHS so the indexed column stays un-wrapped, rendered
+        # in the zone every row was written in.
+        now_utc = ensure_utc(now) or now
+        cutoff = to_iso_format(now_utc - timedelta(seconds=idle_seconds))
         async with self._storage.connect() as conn:
             cur = await conn.execute(
                 "SELECT bucket_key FROM idle_store "
