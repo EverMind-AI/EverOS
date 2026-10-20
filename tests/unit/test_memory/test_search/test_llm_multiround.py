@@ -23,7 +23,6 @@ from everos.memory.search import llm_multiround
 from everos.memory.search.llm_multiround import (
     LLMRoundDecider,
     RoundDecision,
-    _balanced_objects,
     _coerce_core_indices,
     _dataset_from_owner,
     _parse_decision,
@@ -171,11 +170,10 @@ def test_parse_decision_raises_without_json() -> None:
         _parse_decision("no json here")
 
 
-def test_balanced_objects_outermost_first() -> None:
-    assert _balanced_objects('{"a": {"b": 1}} tail {"c": 2}') == [
-        '{"a": {"b": 1}}',
-        '{"c": 2}',
-    ]
+def test_parse_decision_ignores_braces_inside_values_and_prose() -> None:
+    # Found by the parse law: a brace counter returned the "{}" inside a value.
+    obj = _parse_decision('{"aa": "}", "a": "{}"} note } then ')
+    assert obj == {"aa": "}", "a": "{}"}
 
 
 def test_coerce_core_indices_filters_and_dedups() -> None:
