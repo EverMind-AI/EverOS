@@ -40,6 +40,11 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 # final backstop regardless.
 _PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.@+-]+$"
 _PATH_TRAVERSAL_TOKENS = frozenset({".", ".."})
+# The on-disk directory names of the default scope. An id spelled like one
+# would share that directory with the default scope and be read back as
+# ``default`` by ``app_id_from_dir`` / ``project_id_from_dir``, so its index
+# rows would carry the wrong scope.
+_RESERVED_SCOPE_DIRS = frozenset({"default_app", "default_project"})
 
 
 _PATH_SAFE_RE = re.compile(_PATH_SAFE_CHARSET)
@@ -48,6 +53,11 @@ _PATH_SAFE_RE = re.compile(_PATH_SAFE_CHARSET)
 def _reject_path_traversal(value: str) -> str:
     if value in _PATH_TRAVERSAL_TOKENS:
         raise ValueError("'.' and '..' are reserved (path traversal)")
+    if value in _RESERVED_SCOPE_DIRS:
+        raise ValueError(
+            "'default_app' and 'default_project' are the directory names of "
+            "the default scope; use 'default'"
+        )
     if not _PATH_SAFE_RE.match(value):
         raise ValueError(
             "Only alphanumerics, underscore, dot, hyphen, @, and + are allowed"
