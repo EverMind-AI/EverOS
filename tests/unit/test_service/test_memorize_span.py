@@ -6,9 +6,9 @@ wrapping + name selection (add vs flush) driven by ``is_final``.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import pytest
@@ -36,11 +36,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
         AsyncMock(return_value=mm.MemorizeResult(message_count=0, status="extracted")),
     )
 
-    @asynccontextmanager
-    async def _fake_lock(session_id: str) -> AsyncIterator[None]:
-        yield
-
-    monkeypatch.setattr(mm, "get_session_lock", _fake_lock)
+    # memorize() acquires and releases the lock explicitly (the timeout
+    # bounds the wait only), so the stand-in is a real, uncontended Lock.
+    monkeypatch.setattr(mm, "get_session_lock", lambda session_id: asyncio.Lock())
 
     exporter = InMemorySpanExporter()
     shutdown_tracing()

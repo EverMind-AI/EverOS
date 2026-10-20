@@ -25,6 +25,7 @@ insert its own row per cell.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import TYPE_CHECKING, Literal, NamedTuple
@@ -125,8 +126,15 @@ async def prepare_cells(
     prompt_loader: PromptLoader,
     hard_token_limit: int,
     hard_msg_limit: int,
+    timeout_seconds: float | None = None,
 ) -> BoundaryOutcome:
-    """Run the boundary stage end-to-end and persist tail back to buffer."""
+    """Run the boundary stage end-to-end and persist tail back to buffer.
+
+    ``timeout_seconds`` bounds each boundary LLM attempt (a ``TimeoutError``
+    propagates). It is the one step here that can hang, and it runs before
+    any write, so a timeout leaves the buffer and the memcell table exactly
+    as they were.
+    """
     app_id = ingested.app_id
     project_id = ingested.project_id
     fresh = _filter_for_mode(ingested.messages, mode)
@@ -165,6 +173,7 @@ async def prepare_cells(
         is_final=is_final,
         hard_token_limit=hard_token_limit,
         hard_msg_limit=hard_msg_limit,
+        timeout_seconds=timeout_seconds,
     )
 
     if not cells:
@@ -248,30 +257,34 @@ async def _detect(
     is_final: bool,
     hard_token_limit: int,
     hard_msg_limit: int,
+    timeout_seconds: float | None = None,
 ) -> tuple[list[MemCell], list[ConversationItem]]:
     # Retry on ValueError to absorb transient LLM JSON-parse failures from
-    # the everalgo boundary detector; non-ValueError errors propagate.
+    # the everalgo boundary detector; non-ValueError errors propagate. Each
+    # attempt is bounded on its own: the budget is the time a call may hold
+    # the session lock, and a TimeoutError leaves nothing written.
     last_err: ValueError | None = None
     for attempt in range(_BOUNDARY_MAX_ATTEMPTS):
         try:
-            if mode == "chat":
-                chat_msgs = [_to_chat_message(m) for m in merged]
-                result = await detect_boundaries(
-                    chat_msgs,
-                    llm=llm_client,
-                    prompt=prompt,
-                    is_final=is_final,
-                    hard_token_limit=hard_token_limit,
-                    hard_msg_limit=hard_msg_limit,
-                )
+            async with asyncio.timeout(timeout_seconds):
+                if mode == "chat":
+                    chat_msgs = [_to_chat_message(m) for m in merged]
+                    result = await detect_boundaries(
+                        chat_msgs,
+                        llm=llm_client,
+                        prompt=prompt,
+                        is_final=is_final,
+                        hard_token_limit=hard_token_limit,
+                        hard_msg_limit=hard_msg_limit,
+                    )
+                    return list(result.cells), list(result.tail)
+                # Agent mode — facade does filter→detect→remap to preserve
+                # tool items. AgentBoundaryDetector intentionally does not
+                # expose hard limits; the boundary primitive's defaults apply.
+                items = [_to_conversation_item(m) for m in merged]
+                detector = AgentBoundaryDetector(llm=llm_client)
+                result = await detector.adetect(items, is_final=is_final, prompt=prompt)
                 return list(result.cells), list(result.tail)
-            # Agent mode — facade does filter→detect→remap to preserve tool
-            # items. AgentBoundaryDetector intentionally does not expose hard
-            # limits; the boundary primitive's defaults apply.
-            items = [_to_conversation_item(m) for m in merged]
-            detector = AgentBoundaryDetector(llm=llm_client)
-            result = await detector.adetect(items, is_final=is_final, prompt=prompt)
-            return list(result.cells), list(result.tail)
         except ValueError as err:
             last_err = err
             logger.warning(

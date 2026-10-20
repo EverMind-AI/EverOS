@@ -47,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A session-lock timeout could cancel extraction after the memcell was
+  written.** `memorize()` wrapped the whole call in
+  `session_lock_timeout_seconds`; a timeout that landed after the boundary
+  had written the memcell row and consumed the buffer cancelled the
+  extraction pipelines, and nothing retried them: the cell stayed without an
+  episode for good. The timeout now bounds the two places a call can hang
+  while another waits on the lock, the lock wait and the boundary LLM call,
+  both of which run before any write; once a cell is committed its
+  extraction runs to completion, after the lock is released and shielded
+  from a cancelled request. Found by a property test that lands random
+  concurrent calls under random timeouts.
 - **A replayed clustering run inflated the cluster's count.** OME delivers a
   strategy run at least once; when `trigger_profile_clustering` or
   `trigger_skill_clustering` ran again for an episode or case it had already
