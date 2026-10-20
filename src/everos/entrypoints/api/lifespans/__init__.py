@@ -17,6 +17,8 @@ External usage::
         SqliteLifespanProvider,
         LanceDBLifespanProvider,
         CascadeLifespanProvider,
+        MemorizeLifespanProvider,
+        MemorizeQueueLifespanProvider,
         OmeLifespanProvider,
     )
 """
@@ -25,6 +27,9 @@ from .cascade import CascadeLifespanProvider as CascadeLifespanProvider
 from .lancedb import LanceDBLifespanProvider as LanceDBLifespanProvider
 from .llm import LLMLifespanProvider as LLMLifespanProvider
 from .memorize import MemorizeLifespanProvider as MemorizeLifespanProvider
+from .memorize_queue import (
+    MemorizeQueueLifespanProvider as MemorizeQueueLifespanProvider,
+)
 from .ome import OmeLifespanProvider as OmeLifespanProvider
 from .parser import ParserLifespanProvider as ParserLifespanProvider
 from .sqlite import SqliteLifespanProvider as SqliteLifespanProvider
@@ -33,6 +38,8 @@ __all__ = [
     "CascadeLifespanProvider",
     "LLMLifespanProvider",
     "LanceDBLifespanProvider",
+    "MemorizeLifespanProvider",
+    "MemorizeQueueLifespanProvider",
     "OmeLifespanProvider",
     "ParserLifespanProvider",
     "SqliteLifespanProvider",

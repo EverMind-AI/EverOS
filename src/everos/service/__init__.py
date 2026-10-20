@@ -47,9 +47,17 @@ from .knowledge import replace_document as replace_document
 from .knowledge import search_knowledge as search_knowledge
 from .memorize import MemorizeResult as MemorizeResult
 from .memorize import memorize as memorize
+from .memorize_queue import TASK_STATUSES as TASK_STATUSES
+from .memorize_queue import MemorizeQueueWorker as MemorizeQueueWorker
+from .memorize_queue import QueueHealth as QueueHealth
+from .memorize_queue import TaskItem as TaskItem
+from .memorize_queue import TaskPage as TaskPage
+from .memorize_queue import get_task as get_task
+from .memorize_queue import list_tasks as list_tasks
 from .search import search as search
 
 __all__ = [
+    "TASK_STATUSES",
     "CategoryOverview",
     "CreateDocumentResult",
     "DeleteResult",
@@ -60,10 +68,14 @@ __all__ = [
     "DocumentOverviewItem",
     "DuplicateDocumentError",
     "ExtractionEmptyError",
+    "MemorizeQueueWorker",
     "MemorizeResult",
     "PatchResult",
+    "QueueHealth",
     "SearchHit",
     "SearchKnowledgeResult",
+    "TaskItem",
+    "TaskPage",
     "TopicDetail",
     "TopicNotFoundError",
     "TopicOverview",
@@ -72,9 +84,11 @@ __all__ = [
     "delete_document",
     "get",
     "get_document",
+    "get_task",
     "get_topic",
     "list_categories",
     "list_documents",
+    "list_tasks",
     "memorize",
     "patch_document",
     "replace_document",

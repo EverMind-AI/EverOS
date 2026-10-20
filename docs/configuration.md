@@ -245,6 +245,25 @@ unaffected: nothing is probed, compared, or recorded.
 | `mode` | string | `"agent"` | Conversation mode: `chat` (user-memory only) or `agent` (user + agent memory). Requires restart. |
 | `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per memorize() invocation. |
 
+### `[memorize.async_queue]`
+
+Bounds and behaviour of the queue behind `async_mode` on `/add` (a `/flush`
+joins it only behind its session's backlog)
+(see [api.md](api.md#asynchronous-mode)).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Off: new `async_mode` requests run synchronously; rows accepted while on are still delivered, and their sessions keep the ordering rule. |
+| `max_concurrency` | int | `4` | Batches delivered at once, never two from one session: a session's batches run in arrival order, sessions run side by side. `1` serialises everything. |
+| `max_pending_per_session` | int | `50` | Unfinished batches per session; beyond this `/add` and `/flush` answer `429`. |
+| `max_pending_total` | int | `200` | Unfinished batches across all sessions; beyond this the answer is `429`. |
+| `max_payload_bytes` | int | `4194304` | One serialised request body; beyond this the answer is `413`. |
+| `scan_interval_seconds` | float | `5.0` | Fallback sweep interval; an enqueue wakes the worker immediately. |
+| `max_attempts` | int | `1` | Delivery attempts per batch before it is marked `failed` and skipped. Keep `1` unless duplicate memcells after a partial failure are acceptable: the pipeline is not atomic. |
+| `retry_backoff_seconds` | float | `2.0` | Pause between attempts. |
+| `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
+| `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
+
 ### `[clustering]`
 
 | Field | Type | Default | Description |

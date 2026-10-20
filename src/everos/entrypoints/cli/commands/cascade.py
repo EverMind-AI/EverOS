@@ -58,6 +58,7 @@ from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.infra.persistence.index import (
     assert_record_dim_matches_settings,
     connect,
+    count_business_rows,
     drop_business_tables,
     ensure_business_indexes,
     shutdown,
@@ -373,6 +374,27 @@ def status(
             typer.echo(f"  max:           {summary.max_lsn}")
             typer.echo(f"  last_processed: {summary.last_processed_lsn}")
             typer.echo(f"  lag:            {lag}")
+            # Counted live here, unlike /health's startup snapshot: this is
+            # a command someone runs *because* they are suspicious, and the
+            # answer they came for is whether the index holds anything.
+            rows = await count_business_rows()
+            typer.echo("index rows:")
+            for table, count in rows.items():
+                typer.echo(f"  {table + ':':<24} {count}")
+            # `summary.done` would count completed deletions, so a user who
+            # removed their last markdown file would be warned that their
+            # index is missing and sent to rebuild it from nothing.
+            live = await md_change_state_repo.count_done_live_sources()
+            if live > 0 and summary.pending == 0 and not any(rows.values()):
+                typer.secho(
+                    f"\n  {live} source file(s) are indexed but every "
+                    "index table is empty.\n"
+                    "  Searches will return nothing. If the index directory was "
+                    "removed, run `everos cascade rebuild`\n"
+                    "  to re-index from markdown -- markdown is the source of "
+                    "truth and is not touched.",
+                    fg=typer.colors.YELLOW,
+                )
 
     asyncio.run(_run())
 

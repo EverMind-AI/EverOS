@@ -22,6 +22,7 @@ from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
+from everos.infra.persistence.index import count_business_rows
 from everos.infra.persistence.sqlite import (
     MdChangeState,
     QueueSummary,
@@ -133,6 +134,27 @@ class CascadeHealth:
     unrecoverable_total: int
     optimize_failure_streak: int
     prune_stale_seconds: float
+    index_rows: dict[str, int]
+    """Rows per business table, **as counted once at startup**.
+
+    A snapshot for the same reason ``capabilities.embed`` is one: counting
+    is a round trip per collection on a remote backend and ``/health`` is
+    polled. It does not move while the process runs, so a rebuild shows up
+    only after a restart -- or immediately in ``cascade status``, which
+    counts live.
+    """
+    index_emptied: bool
+    """The ledger says every file is indexed, and every table is empty.
+
+    Deleting ``.index/lancedb`` leaves exactly this state: the ledger lives
+    in ``.index/sqlite`` and survives, so the scanner enqueues nothing and
+    every surface reports a healthy, fully drained pipeline over a store
+    that holds nothing (issue #501). Reported without flipping
+    :attr:`healthy`, like ``failed_permanent``: this is a startup snapshot,
+    and a verdict that cannot clear until the next restart is a worse
+    signal than a number an operator can read. Recovery is ``everos
+    cascade rebuild``; markdown is untouched throughout.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -219,6 +241,8 @@ class CascadeOrchestrator:
         )
         self._watcher: CascadeWatcher | None = None
         self._started = False
+        self._index_rows: dict[str, int] = {}
+        self._index_emptied = False
 
     async def start(self) -> None:
         """Launch the watcher (sync thread) + scanner + worker tasks.
@@ -246,6 +270,7 @@ class CascadeOrchestrator:
         if orphans:
             logger.info("cascade_recovered_orphan_processing", count=orphans)
         await reconcile_index_once(self._memory_root)
+        await self._snapshot_index_rows()
         if os.getenv("EVEROS_DISABLE_CASCADE_WATCHER", "").strip().lower() in (
             "1",
             "true",
@@ -260,6 +285,49 @@ class CascadeOrchestrator:
         await self._worker.start()
         self._started = True
         logger.info("cascade_orchestrator_started")
+
+    async def _snapshot_index_rows(self) -> None:
+        """Count what the index holds, and say so when it holds nothing.
+
+        Runs after :func:`reconcile_index_once` so a pass that re-armed
+        itself gets to enqueue first -- otherwise this would report an
+        emptiness the next drain is already fixing.
+
+        The verdict needs all three facts: the ledger claims **live**
+        sources were indexed, it claims nothing is waiting, and every table
+        is empty. A fresh root has nothing done and a draining one has work
+        pending, so neither trips it.
+
+        "Live" is load-bearing. ``QueueSummary.done`` includes completed
+        deletions, which the reconciler keeps on purpose, so a user who
+        deleted their last markdown file would otherwise look identical to
+        a wiped index -- reported forever, and pointed at a rebuild that
+        could not add anything back.
+        """
+        try:
+            self._index_rows = await count_business_rows()
+        except Exception as exc:  # pragma: no cover - backend-specific
+            # Counting is diagnostics; a backend that cannot answer must
+            # not stop the cascade from starting.
+            logger.warning("cascade_index_row_count_failed", error=repr(exc))
+            return
+        summary = await md_change_state_repo.queue_summary()
+        live = await md_change_state_repo.count_done_live_sources()
+        self._index_emptied = (
+            live > 0 and summary.pending == 0 and not any(self._index_rows.values())
+        )
+        if self._index_emptied:
+            logger.warning(
+                "cascade_index_empty_but_ledger_done",
+                done=live,
+                rows=self._index_rows,
+                hint=(
+                    "the ledger says every file is indexed but every index "
+                    "table is empty -- searches will return nothing. If the "
+                    "index directory was removed, run `everos cascade "
+                    "rebuild` to re-index from markdown."
+                ),
+            )
 
     async def stop(self) -> None:
         """Shut everything down in reverse order."""
@@ -382,4 +450,6 @@ class CascadeOrchestrator:
             unrecoverable_total=wh.unrecoverable_total,
             optimize_failure_streak=wh.optimize_failure_streak,
             prune_stale_seconds=wh.prune_stale_seconds,
+            index_rows=dict(self._index_rows),
+            index_emptied=self._index_emptied,
         )

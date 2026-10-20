@@ -976,11 +976,20 @@ class CascadeWorker:
             # rebuild_indexes carries its own 300s deadline; that only covers
             # the critical section, not the task's dispatch and teardown around
             # it, so the transitive bound was never real.
+            #
+            # ``asyncio.wait``, not ``asyncio.timeout`` around ``await task``:
+            # the latter cancels the task it was waiting for when the deadline
+            # fires. Here that killed the rebuild mid-flight, and because the
+            # rebuild loop's ``_run_rebuild_once`` only catches ``Exception``,
+            # the ``CancelledError`` ended the loop itself — silently, since
+            # the done-callback treats a cancelled task as a ``stop()``. Found
+            # by the maintenance state-machine test. A failed rebuild is
+            # already logged and counted by ``_run_rebuild_once``.
             if state.rebuild_task is not None and not state.rebuild_task.done():
-                try:
-                    async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
-                        await state.rebuild_task
-                except TimeoutError:
+                done, _ = await asyncio.wait(
+                    {state.rebuild_task}, timeout=_MAINTENANCE_TASK_TIMEOUT_SECONDS
+                )
+                if not done:
                     # Give up this beat rather than compact under a live
                     # rebuild — the two commit on the same manifest, which is
                     # what the wait exists to prevent. Writes keep the dirty
@@ -991,8 +1000,6 @@ class CascadeWorker:
                         waited_seconds=_MAINTENANCE_TASK_TIMEOUT_SECONDS,
                     )
                     return
-                except Exception:
-                    pass  # _run_rebuild_once already logged and counted it
             while state.dirty and not self._stop.is_set():
                 state.dirty = False
                 state.last_run_at = time.monotonic()
@@ -1271,13 +1278,17 @@ class CascadeWorker:
             and not state.task.done()
             and state.task is not asyncio.current_task()
         ):
-            try:
-                # Bounded: an optimize task that hangs must not park the rebuild
-                # loop behind it. Same defect class as the table-handle await —
-                # a wait with no deadline in a path a scheduler depends on.
-                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
-                    await state.task
-            except TimeoutError:
+            # Bounded: an optimize task that hangs must not park the rebuild
+            # loop behind it. Same defect class as the table-handle await —
+            # a wait with no deadline in a path a scheduler depends on.
+            # ``asyncio.wait`` so the deadline only stops the waiting: the
+            # ``asyncio.timeout`` form cancelled the runner it was waiting for,
+            # killing the beat it was meant to stay clear of (see the mirror
+            # wait in ``_optimize_runner``).
+            done, _ = await asyncio.wait(
+                {state.task}, timeout=_MAINTENANCE_TASK_TIMEOUT_SECONDS
+            )
+            if not done:
                 # Skip this sweep rather than rebuild concurrently with an
                 # optimize that is still running: dropping indices under it is
                 # exactly the interleaving this wait exists to prevent. The 12h
@@ -1288,8 +1299,6 @@ class CascadeWorker:
                     waited_seconds=_MAINTENANCE_TASK_TIMEOUT_SECONDS,
                 )
                 return
-            except Exception:
-                pass  # the optimize runner already logged and counted it
         # Retry a lost commit race in place. Lance labels it "Retryable" and
         # means it: the rebuild transaction was preempted by a concurrent
         # writer (another process, since the write lock is in-process only) and

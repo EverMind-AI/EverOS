@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`async_mode` on `/add`: accept now, extract in the background.** A request with `async_mode: true` is written to a durable
+  SQLite queue (`memorize_inbox`) and answered with `202 Accepted`; an
+  in-process worker then runs the unchanged memorize pipeline for each
+  batch, per session in arrival order and several sessions at a time
+  (`max_concurrency`, default 4), so a session's batches and its flush
+  never overtake each other and one slow session does not hold up the
+  others. A synchronous call on a session that still has
+  queued batches is queued too, for the same reason; `/flush` has no
+  `async_mode` of its own and queues only behind such a backlog. The queue is bounded
+  (`413 PAYLOAD_TOO_LARGE`, `429 QUEUE_SATURATED`), a batch whose delivery
+  fails is marked `failed` and skipped (no automatic retry by default: the
+  pipeline is not atomic, so a re-run is not a clean retry), and every
+  row is deleted seven days after it was accepted. `GET /api/v2/tasks/{task_id}`
+  reports one request's outcome and `GET /api/v2/tasks` lists them (filter by
+  `session_id` / `status`, paged). The field name, the `202` body, the task
+  paths and the status vocabulary match the EverOS Cloud gateway. Replays
+  after a crash are bounded (`max_replays`, default 3), the delivery loop
+  relaunches itself if it ever dies, and `GET /health` reports the queue
+  (`memorize_queue` block: loop alive, backlog, failed, restarts). Configured under
+  `[memorize.async_queue]`; `enabled = false` stops accepting new async
+  work while rows accepted earlier are still delivered. Synchronous calls
+  without a backlog are unchanged.
+
 - **`[embedding] dim` sets the width of every vector column.** It used to be
   hardcoded at 1024, so a model of any other width could not be used: a
   narrower one failed every write, a wider one was truncated without saying
@@ -124,6 +147,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its highest**, and the multi-round decider's JSON parser gave up on a reply
   with a stray `{` in the prose before the object (its docstring promised
   otherwise); it now also decodes from every brace.
+- **Cascade worker: a bounded wait between optimize and rebuild cancelled the
+  task it waited on.** The optimize runner waits up to 180 s for an in-flight
+  index rebuild of the same kind, and the rebuild loop waits for an in-flight
+  optimize, so the two never commit on one LanceDB manifest at once. Both
+  waits used `asyncio.timeout` around `await task`, which cancels the awaited
+  task when the deadline fires: a rebuild longer than the wait, with a write
+  landing on that table meanwhile, was killed mid-flight, and the rebuild loop
+  ended with it, silently, so no periodic rebuild ran again until restart and
+  that table's index UUID / FTS segment count grew unbounded. The mirror wait
+  cancelled the optimize beat it was meant to stay clear of. Both waits now
+  only stop waiting. Present since 1.2.2.
 - **`method="vector"` finds episodes when no atomic fact is in scope.**
   Vector search over episodes recalls through atomic facts, and it returned
   an empty list (HTTP 200, no log line) whenever none were in scope — fact

@@ -37,6 +37,8 @@ class ErrorCode(StrEnum):
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED"
+    PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
+    QUEUE_SATURATED = "QUEUE_SATURATED"
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +137,22 @@ class UnsupportedModalityError(DomainError):
 
     Wraps everalgo's ``NotImplementedError`` / dispatch ``ValueError`` so
     the caller gets a stable 415 instead of a raw 500.
+    """
+
+
+class PayloadTooLargeError(DomainError):
+    """An ``async_mode`` memorize request exceeds ``max_payload_bytes``.
+
+    The batch was **not** accepted. The API layer maps it to HTTP 413; the
+    caller should split the batch or send it synchronously.
+    """
+
+
+class QueueSaturatedError(DomainError):
+    """The async memorize queue is at its per-session or global cap.
+
+    The batch was **not** accepted. The API layer maps it to HTTP 429; the
+    caller must retry later or buffer the batch itself -- never drop it.
     """
 
 

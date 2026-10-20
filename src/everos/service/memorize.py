@@ -260,7 +260,7 @@ async def memorize(
             skip boundary detection and both extraction pipelines. Intended for
             clients that batch work and call ``/flush`` on idle or thresholds.
 
-    Concurrency: serialised per ``session_id`` via
+    Concurrency: serialised per ``(app_id, project_id, session_id)`` via
     :func:`everos.service._session_lock.get_session_lock`. The lock
     spans the read-merge-boundary-write cycle so concurrent /add calls
     on the same session cannot lose-update each other's tail.
@@ -299,8 +299,15 @@ async def memorize(
             "request_id": resolve_request_id(),
         },
     ):
+        # Buffers and memcells are scoped by app / project, so two sessions
+        # that merely share a session_id across projects must not wait on
+        # each other (the queue runs them side by side).
+        lock_key = (
+            f"{payload.get('app_id', 'default')}\x1f"
+            f"{payload.get('project_id', 'default')}\x1f{session_id}"
+        )
         timeout_s = settings.memorize.session_lock_timeout_seconds
-        lock = get_session_lock(session_id)
+        lock = get_session_lock(lock_key)
         async with asyncio.timeout(timeout_s):
             await lock.acquire()
         try:

@@ -28,6 +28,9 @@ business semantics the raw spec does not carry.
 - [Endpoints](#endpoints)
   - [POST /api/v2/memory/add](#post-apiv2memoryadd)
   - [POST /api/v2/memory/flush](#post-apiv2memoryflush)
+  - [Asynchronous mode](#asynchronous-mode)
+  - [GET /api/v2/tasks/{task_id}](#get-apiv2taskstask_id)
+  - [GET /api/v2/tasks](#get-apiv2tasks)
   - [POST /api/v2/memory/search](#post-apiv2memorysearch)
   - [POST /api/v2/memory/get](#post-apiv2memoryget)
   - [POST /api/v2/ome/trigger](#post-apiv2ometrigger)
@@ -235,6 +238,8 @@ parsing the human-readable `message` field.
 | `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |
+| `PAYLOAD_TOO_LARGE` | `413` | No | An `async_mode` request body exceeds `memorize.async_queue.max_payload_bytes`; the batch was not accepted |
+| `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
@@ -541,6 +546,7 @@ the `status` field — see [Response body](#response-body) below.
 | `project_id` | `string` *(ScopeId)* | no | `"default"` | see [ScopeId](#scopeid-app_id-and-project_id) |
 | `messages` | `array<MessageItem>` | yes | — | 1–500 items |
 | `defer_extraction` | `boolean` | no | `false` | buffer durably without boundary or extraction LLM calls |
+| `async_mode` | `boolean` | no | `false` | queue the batch and return `202` immediately; see [Asynchronous mode](#asynchronous-mode) |
 
 **`session_id`** — Identifies the conversation buffer on the server.
 Messages POSTed with the same `(session_id, app_id, project_id)`
@@ -563,6 +569,13 @@ clients can capture every turn cheaply and call `/flush` after an idle
 window, a size threshold, or a session switch. A successful deferred
 add always reports `status: "accumulated"`.
 
+**`async_mode`** — When `true`, `/add` persists the batch to the durable
+memorize queue and returns `202 Accepted` without running boundary
+detection or extraction; a background worker delivers queued batches in
+arrival order per session, several sessions at a time. See
+[Asynchronous mode](#asynchronous-mode) for the `202` body, the ordering
+rule and how to poll progress.
+
 #### Response body
 
 `200 OK` returns a SuccessEnvelope wrapping:
@@ -582,6 +595,19 @@ correlation.
 - `"extracted"` — During this call the boundary detector tripped; the
   LLM ran extraction and the writers persisted at least one memory
   cell. The buffer is empty after the call returns.
+
+`202 Accepted` — only with `async_mode`, or when the session already has
+queued batches (see [Asynchronous mode](#asynchronous-mode)) — returns a
+SuccessEnvelope wrapping:
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"queued"` | The batch is persisted; delivery happens in the background |
+| `message_count` | `integer` | Number of messages accepted in this call |
+| `pending` | `integer` | Unfinished queued batches of this session, this one included |
+
+The envelope's `request_id` is the handle for
+[`GET /tasks/{task_id}`](#get-apiv2taskstask_id).
 
 #### cURL example
 
@@ -647,7 +673,12 @@ scope.
 - `"no_extraction"` — The buffer was empty (no prior `/add` calls for
   this `(session_id, app_id, project_id)`, or it was already flushed).
 
-`/flush` is synchronous with respect to markdown persistence: by the
+`202 Accepted` with the same body as `/add` (`message_count` is `0`) only
+when the session already has queued batches, so the flush runs after them;
+`/flush` has no `async_mode` of its own. See
+[Asynchronous mode](#asynchronous-mode).
+
+A `200` from `/flush` is synchronous with respect to markdown persistence: by the
 time the response returns, the new entry is on disk. Derived index
 sync is still asynchronous — see
 [Eventual consistency](#eventual-consistency).
@@ -671,6 +702,171 @@ extraction LLM call):
     }
 }
 ```
+
+### Asynchronous mode
+
+`async_mode: true` on `/add` turns the call into "accept and return": the
+request body is written to the SQLite `memorize_inbox` table in one
+transaction and the response is `202 Accepted`. `/flush` has no
+`async_mode` (the Cloud API has no asynchronous flush either): it runs
+inline, except that a flush on a session with queued batches joins the
+queue behind them and answers `202` (see Ordering). An in-process
+worker then delivers queued batches to the same code path a synchronous
+call uses: each session's batches in the order they were accepted, several
+sessions at a time. The field name, the `202` body
+(`status: "queued"` plus the envelope's `request_id`) and the status
+vocabulary (`queued` / `processing` / `success` / `failed`) match the
+EverOS Cloud gateway, so one client can talk to both.
+
+**Ordering.** Batches of one session are delivered strictly in arrival
+order, and a `/flush` runs after every `/add` accepted before it. To keep
+that true, a synchronous call (`async_mode` omitted or `false`) on a
+session that still has queued batches is queued too and answered with
+`202` — otherwise it would overtake work the client was already told is
+accepted. Clients that never use `async_mode` never see this: their
+sessions never have queued batches. Sessions are independent of each
+other: up to `max_concurrency` batches (default 4) run at once, never two
+from one session, so one slow session does not hold up the others, and
+there is no ordering between sessions. Like the Cloud consumer, which runs
+groups in parallel and each group in order.
+
+**Backpressure.** The queue is bounded. A batch is rejected before it is
+stored when:
+
+| Condition | HTTP | `error.code` | Default limit |
+|---|---|---|---|
+| Serialised body too large | `413` | `PAYLOAD_TOO_LARGE` | 4 MiB |
+| Session has too many unfinished batches | `429` | `QUEUE_SATURATED` | 50 |
+| Process has too many unfinished batches | `429` | `QUEUE_SATURATED` | 200 |
+
+The caps are checked before the insert without a lock, so a burst of
+concurrent requests can overshoot them by a few rows. A rejected batch was
+**not** accepted: retry later or keep it client-side.
+`pending` in every `202` body lets a client slow down before hitting `429`.
+Limits are configured under `[memorize.async_queue]`, see
+[configuration.md](configuration.md#memorizeasync_queue).
+
+**Failure.** A batch whose delivery raises is marked `failed` and skipped
+so its session keeps moving; `GET /tasks/{request_id}` shows `error`.
+There is no automatic retry by default (`max_attempts = 1`), because the
+memorize pipeline is not atomic: boundary detection writes the memcell and
+consumes the session buffer before extraction runs. A failure before that
+point (the common one: the boundary LLM call failed) leaves nothing behind,
+and re-sending the batch is safe. A failure after it leaves the memcell
+without its episode; re-sending then cuts a second memcell, and a `/flush`
+finds an empty buffer. `last_error` does not say which step failed. The
+server never re-drives a failed batch and deletes its row with the others
+after seven days. Synchronous calls have the same property; they just hand
+the decision to the client as a 5xx.
+
+**Delivery is at-least-once across a crash.** A row that was in flight
+when the process died is delivered again on the next start. If the first
+delivery had already written its memcell, an `/add` replay duplicates that
+memory; a `/flush` replay finds an empty buffer and does nothing, so a crash
+that fell between the memcell write and the episode write leaves that
+memcell without its episode. A
+normal shutdown waits up to 30 seconds for the rows in flight (up to
+`max_concurrency` of them, one per session); a row that takes longer, or a
+process manager that kills earlier (`docker stop` sends SIGKILL after 10
+seconds by default), is replayed the same way, so one restart can replay
+up to `max_concurrency` batches. So is a
+batch whose delivery had just failed when the process died before its
+`failed` mark was written, and a batch whose status write was lost (see
+Stuck rows) if the server restarts before the row is marked. Replays are
+bounded: a batch that has been replayed `max_replays` times (default 3)
+without ever finishing is marked `failed` with `error_code`
+`replays_exhausted` instead of being requeued again, so a batch that kills
+the process cannot crash-loop it.
+
+**Operations.** `GET /health` carries a `memorize_queue` block: `healthy`
+(the delivery loop is alive), `pending`, `oldest_pending_age_s`, `failed`,
+`loop_restarts` and `last_loop_error_at`. The probe only observes: a loop
+that dies relaunches itself (with backoff) and is relaunched by the next
+`/add`, and `loop_restarts` counts those. Alert on `healthy` and on
+`loop_restarts` changing; a growing `oldest_pending_age_s` with a live loop
+means delivery is slower than arrival.
+
+**Retention.** Every queue row, whatever its status, is deleted seven days
+(`row_retention_hours`) after it was created. `GET /tasks/{task_id}` returns `404`
+after that. A delivered row drops its request body at once. A `failed` row
+keeps its body (in `memorize_inbox.payload_json`, found by `request_id`)
+until purged, and failed rows are not capped: an outage in which every batch
+fails keeps every body accepted during it for the retention period. SQLite
+reuses the freed pages but does not shrink `system.db`. A row that ages out
+while still `queued` was never delivered; the purge logs a warning when that
+happens.
+
+**Stuck rows.** A row left `processing` because its status write was lost
+(SQLite busy past its timeout, disk full) is marked `failed` before the
+worker claims its next batch, or at its next scheduling pass if that write
+fails too, so a session's `pending` does not stay non-zero because of it;
+batches the worker is still running are never swept. Its `last_error`
+reads `status write lost; outcome unknown`:
+the batch may well have been delivered in full (the lost write is usually
+the `success` one), so check the session's memories before re-sending it.
+If the server restarts before that mark lands, the row is replayed like a
+crash (see above).
+
+Setting `[memorize.async_queue] enabled = false` closes the door:
+`async_mode` is accepted but ignored and new calls run synchronously unless
+their session still has queued rows. Rows accepted while it was on are still
+delivered by the worker, and a session that still has such rows still queues
+its synchronous calls behind them, so no drain is needed before switching.
+Downgrading to a release without `async_mode` is different: queued rows are
+neither delivered nor deleted there. Set `enabled = false` and restart first,
+so `async_mode` requests stop adding rows (a synchronous call still queues
+behind its session's backlog until it drains); wait until
+`select count(*) from memorize_inbox where status in ('queued', 'processing')`
+on `system.db` is 0; then stop and downgrade.
+
+### GET /api/v2/tasks/{task_id}
+
+The outcome of one accepted request. The path and the body are the EverOS
+Cloud gateway's (`GET /api/v2/tasks/{task_id}`), so a client polls both the
+same way; `task_id` is the `request_id` a `202` carried.
+
+`200 OK`, or `404 NOT_FOUND` when the row never existed or has aged out of
+`row_retention_hours`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | The request id |
+| `status` | `"queued" \| "processing" \| "success" \| "failed"` | Where the batch is. Cloud can also report `pending`; this build never does |
+| `task_type` | `"memory_add" \| "memory_flush"` | — |
+| `error` | `string \| null` | Summary of the failure, if any |
+| `error_code` | `string \| null` | `status_write_lost` for a row the sweep failed, `replays_exhausted` for one replayed `max_replays` times without finishing, otherwise the exception type that failed the batch |
+| `created_at` | `string` (ISO 8601) | Accepted at |
+| `finished_at` | `string \| null` | Set once `status` is `success` or `failed` |
+
+### GET /api/v2/tasks
+
+Accepted requests, newest first, one page at a time. Mirrors the Cloud
+gateway's listing.
+
+#### Query parameters
+
+| Parameter | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `session_id` | `string` | no | — | Only this session's requests |
+| `app_id` / `project_id` | `string` | no | `"default"` | Scope for `session_id` |
+| `status` | `string` | no | — | One of the four statuses; anything else is `422 INVALID_INPUT` |
+| `page` | `integer` | no | `1` | `≥ 1` |
+| `page_size` | `integer` | no | `20` | `1..100`, larger values are capped |
+
+#### Response body
+
+| Field | Type | Notes |
+|---|---|---|
+| `total` | `integer` | Rows matching the filters, all pages |
+| `page` / `page_size` | `integer` | As requested (`page_size` after capping) |
+| `items` | `array<TaskItem>` | The page, newest first; fields as in `GET /tasks/{task_id}` |
+
+Drain a session before exiting by polling `?session_id=X&status=queued` and
+`?session_id=X&status=processing` until both `total` are `0`. That means
+every batch reached the memorize pipeline (unless rows aged out before
+delivery, see Retention); it does not mean every message is an episode yet:
+messages still in the session buffer wait for the boundary detector or the
+next `/flush`.
 
 ### POST /api/v2/memory/search
 

@@ -86,6 +86,31 @@ meaningful. Prefer adding a directory to `EXEMPT_PREFIXES` over raising
 `MAX_KB` for the whole repository; a unit test pins the list so it cannot grow
 unnoticed.
 
+**Property-based and state-machine tests.** For a component with state
+that outlives one call (a queue, a worker, a cache), example-based tests only
+pin the sequences someone thought of. The reference for the other kind is
+[`tests/unit/test_service/test_memorize_queue_stateful.py`](../tests/unit/test_service/test_memorize_queue_stateful.py):
+[hypothesis](https://hypothesis.readthedocs.io/) generates operation
+sequences against the real repository and worker (only the LLM pipeline, the
+clock and a retry pause are replaced) and checks the spec's invariants after
+every step. Its module docstring explains the split that makes this work:
+rules are only what the outside world can do, the model is the spec's state
+machine written as assignments (never a copy of the implementation),
+invariants compare the real table with the model; a self-check injects one
+bug and pins that an invariant trips; a second, jittered test races real
+asyncio tasks as a scout. CI runs the small profile (about 15 s);
+`HYPOTHESIS_PROFILE=deep uv run pytest <file>` runs a thousand sequences
+locally, and `--hypothesis-show-statistics` shows which branches (crash,
+lost status write, restart, …) the run reached -- a branch at 0% was not
+exercised. Copy that file's structure when writing the next one. Two more
+follow it for the cascade worker:
+[`test_worker_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_stateful.py)
+(the `md_change_state` row cycle) and
+[`test_worker_maintenance_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_maintenance_stateful.py)
+(the optimize / prune / rebuild cycle); the latter found a bounded wait that
+cancelled the task it waited on, which the example-based tests around those
+waits had not reached.
+
 ## Continuous integration
 
 CI runs on GitHub Actions ([.github/workflows/](../.github/workflows/)). Every
