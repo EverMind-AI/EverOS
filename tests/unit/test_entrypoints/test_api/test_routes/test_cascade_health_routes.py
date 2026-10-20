@@ -31,6 +31,8 @@ def _healthy() -> CascadeHealth:
         unrecoverable_total=0,
         optimize_failure_streak=0,
         prune_stale_seconds=0.0,
+        index_rows={"episode": 1060, "atomic_fact": 4200},
+        index_emptied=False,
     )
 
 
@@ -45,6 +47,25 @@ def _degraded() -> CascadeHealth:
         unrecoverable_total=3,
         optimize_failure_streak=0,
         prune_stale_seconds=1200.0,
+        index_rows={"episode": 1060, "atomic_fact": 4200},
+        index_emptied=False,
+    )
+
+
+def _emptied() -> CascadeHealth:
+    """The #501 state: the pipeline is fine, the store it filled is gone."""
+    return CascadeHealth(
+        healthy=True,
+        reasons=[],
+        pending=0,
+        failed_permanent=0,
+        failed_retryable=0,
+        drain_consecutive_failures=0,
+        unrecoverable_total=0,
+        optimize_failure_streak=0,
+        prune_stale_seconds=0.0,
+        index_rows={"episode": 0, "atomic_fact": 0},
+        index_emptied=True,
     )
 
 
@@ -78,6 +99,28 @@ async def test_health_healthy_cascade() -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
+    assert body["cascade"]["healthy"] is True
+    assert body["cascade"]["reasons"] == []
+    assert body["cascade"]["index_rows"] == {"episode": 1060, "atomic_fact": 4200}
+    assert body["cascade"]["index_emptied"] is False
+
+
+async def test_health_reports_an_emptied_index_without_flipping_healthy() -> None:
+    """Issue #501 surfaces as a count and a flag, not as a readiness failure.
+
+    Deliberate, and the reason is in ``CascadeHealth``: the counts are a
+    startup snapshot, so a verdict derived from them could not clear after a
+    rebuild until the process restarted. Alerting keys off ``healthy``; this
+    gives an operator the two numbers that make the state obvious instead.
+    Asserting ``healthy is True`` here is the point -- it pins a choice that
+    would otherwise look like an oversight to the next reader.
+    """
+    async with _client(_orch(_emptied())) as c:
+        resp = await c.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cascade"]["index_emptied"] is True
+    assert body["cascade"]["index_rows"] == {"episode": 0, "atomic_fact": 0}
     assert body["cascade"]["healthy"] is True
     assert body["cascade"]["reasons"] == []
 

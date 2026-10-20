@@ -220,6 +220,21 @@ async def write_embedding_model(model: str) -> None:
     await _backend().write_embedding_model(model)
 
 
+async def count_business_rows() -> dict[str, int]:
+    """Rows currently held per business table, keyed by table name.
+
+    Backend-neutral: ``count`` is on the repository port, so this answers
+    for Milvus as well as LanceDB. Cheap on LanceDB (dataset metadata) and
+    one round trip per collection on Milvus -- which is why callers take it
+    as a snapshot rather than on every request.
+
+    The number it answers is "what the index actually holds", and the only
+    thing that can contradict a cascade ledger claiming every file is
+    indexed (issue #501).
+    """
+    return {repo.table_name: await repo.count() for repo in ALL_REPOS}
+
+
 def repo_for_schema(schema: type[Any]) -> IndexRepository[Any]:
     """Resolve a registered repository by its logical record model."""
     for repo in ALL_REPOS:
@@ -264,6 +279,7 @@ __all__ = [
     "compare",
     "connect",
     "contains",
+    "count_business_rows",
     "drop_business_tables",
     "ensure_business_indexes",
     "episode_repo",

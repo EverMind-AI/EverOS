@@ -70,6 +70,28 @@ class CascadeHealthBlock(BaseModel):
     unrecoverable_total: int
     optimize_failure_streak: int
     prune_stale_seconds: float
+    index_rows: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Rows per business index table, counted once when the process "
+            "started. A snapshot, not a live count: counting costs a round "
+            "trip per collection on a remote backend and this endpoint is "
+            "polled. `everos cascade status` counts live."
+        ),
+    )
+    index_emptied: bool = Field(
+        default=False,
+        description=(
+            "True when the cascade ledger says every file is indexed, "
+            "nothing is pending, and every index table is empty -- the "
+            "state left behind by deleting the index directory, which the "
+            "ledger in .index/sqlite survives. Searches return nothing "
+            "while every other signal here reads healthy. Recover with "
+            "`everos cascade rebuild`; markdown is untouched. Informational "
+            "like failed_permanent: it does not flip `healthy`, because it "
+            "is a startup snapshot that could not clear until a restart."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -138,6 +160,8 @@ async def health(request: Request) -> HealthResponse:
                 unrecoverable_total=ch.unrecoverable_total,
                 optimize_failure_streak=ch.optimize_failure_streak,
                 prune_stale_seconds=round(ch.prune_stale_seconds, 1),
+                index_rows=ch.index_rows,
+                index_emptied=ch.index_emptied,
             )
         except Exception as exc:
             # The probe reads SQLite (queue_summary runs aggregate counts).
