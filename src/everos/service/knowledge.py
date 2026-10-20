@@ -434,10 +434,7 @@ async def list_documents(
     )
 
     doc_ids = [r.doc_id for r in page_result.rows]
-    counts = await asyncio.gather(
-        *[knowledge_topic_sqlite_repo.count_by_doc_id(did) for did in doc_ids]
-    )
-    topic_counts = dict(zip(doc_ids, counts, strict=True))
+    topic_counts = await knowledge_topic_sqlite_repo.count_by_doc_ids(doc_ids)
 
     items = [
         DocumentOverviewItem(

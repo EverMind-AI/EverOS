@@ -256,6 +256,20 @@ class _KnowledgeTopicRepo(RepoBase[KnowledgeTopicRow]):
             )
             return int((await s.execute(stmt)).scalar_one())
 
+    async def count_by_doc_ids(self, doc_ids: list[str]) -> dict[str, int]:
+        """Count topics in one query; documents without topics are omitted."""
+        if not doc_ids:
+            return {}
+        async with session_scope(self._factory) as s:
+            stmt = (
+                select(KnowledgeTopicRow.doc_id, func.count())
+                .where(KnowledgeTopicRow.doc_id.in_(doc_ids))
+                .group_by(KnowledgeTopicRow.doc_id)
+            )
+            return {
+                doc_id: int(count) for doc_id, count in (await s.execute(stmt)).all()
+            }
+
     async def delete_by_md_path(self, md_path: str) -> int:
         """Delete all topic rows for ``md_path``; return the deleted count."""
         async with session_scope(self._factory) as s:
