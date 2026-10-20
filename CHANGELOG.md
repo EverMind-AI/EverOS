@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A hand-edited `entry_count` could make a daily-log writer reuse an entry
+  id.** The episode, atomic-fact, foresight and agent-case writers allocated
+  the next id from the frontmatter's `entry_count` alone, so lowering it by
+  hand made the next append produce an id the file already held (the index
+  keeps one of the two), and a non-numeric value raised a `TypeError`. The
+  next id is now allocated from the higher of `entry_count` and the highest
+  sequence number already in the file, and a frontmatter that disagrees is
+  logged.
 - **OME `wait_for_event` returned while a retry was still pending.** The
   runner records a failed attempt as `FAILED` before its backoff sleep and
   gives the retry a fresh run id, so during the backoff the event's only row

@@ -32,6 +32,7 @@ from typing import Any, ClassVar
 import anyio
 
 from everos.component.utils.datetime import today_with_timezone
+from everos.core.observability.logging import get_logger
 from everos.core.persistence import (
     BaseFrontmatter,
     EntryId,
@@ -40,6 +41,8 @@ from everos.core.persistence import (
     MemoryRoot,
     render_structured_entry,
 )
+
+logger = get_logger(__name__)
 
 
 class BaseDailyWriter:
@@ -259,6 +262,37 @@ class BaseDailyWriter:
             return 0
         parsed = await MarkdownReader.read(path)
         return len(parsed.entries)
+
+    async def _count_from_frontmatter(self, path: Path) -> int:
+        """``entry_count`` from the frontmatter, never behind the file's ids.
+
+        The next entry id is allocated from this number, so it must not
+        fall below the highest sequence already in the file: the file is
+        the user's, and a hand-lowered ``entry_count`` would otherwise make
+        the next append reuse an id (two entries with one id; the index
+        keeps one). A value that is not an integer counts as absent. Both
+        cases are logged, since they mean the frontmatter was edited by
+        hand.
+        """
+        if not await anyio.Path(path).is_file():
+            return 0
+        parsed = await MarkdownReader.read(path)
+        highest = 0
+        for entry in parsed.entries:
+            try:
+                highest = max(highest, EntryId.parse(entry.id).seq)
+            except ValueError:
+                continue  # a foreign marker; not part of this writer's sequence
+        raw = parsed.frontmatter.get("entry_count", 0)
+        count = raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+        if count != raw or count < highest:
+            logger.warning(
+                "daily_log_entry_count_behind_file",
+                path=str(path),
+                entry_count=raw,
+                highest_seq=highest,
+            )
+        return max(count, highest)
 
     def _frontmatter_updates(
         self,

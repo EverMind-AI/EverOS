@@ -14,13 +14,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import anyio
-
 from everos.component.utils.datetime import (
     get_now_with_timezone,
     to_iso_format,
 )
-from everos.core.persistence import MarkdownReader
 
 from ..mds import AgentCaseDailyFrontmatter
 from .base import BaseDailyWriter
@@ -57,7 +54,4 @@ class AgentCaseWriter(BaseDailyWriter):
         }
 
     async def _current_count(self, path: Path) -> int:
-        if not await anyio.Path(path).is_file():
-            return 0
-        parsed = await MarkdownReader.read(path)
-        return parsed.frontmatter.get("entry_count", 0)
+        return await self._count_from_frontmatter(path)
