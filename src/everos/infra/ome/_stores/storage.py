@@ -127,7 +127,8 @@ class OMEStorage:
         """Yield a connection for one write; commits on success.
 
         Writers queue on an in-process lock, served in the order they
-        reach it with nobody overtaking, and only then touch the file. SQLite itself admits one writer at a
+        reach it with nobody overtaking, and only then touch the file.
+        SQLite itself admits one writer at a
         time, but its busy handler waits by sleeping and retrying, so under
         several concurrent writers a late arrival can keep taking the lock
         ahead of an early one; on Windows, where a commit costs 30-80 ms,
