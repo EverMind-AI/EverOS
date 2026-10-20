@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo
 from pydantic import AfterValidator
 
 _MS_THRESHOLD = 1e12  # ts >= this is treated as milliseconds
+_EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
 
 
 @cache
@@ -270,5 +271,15 @@ def to_date_str(d: _dt.datetime | None) -> str | None:
 
 
 def to_timestamp_ms(d: _dt.datetime) -> int:
-    """Convert a datetime to a Unix timestamp in milliseconds."""
-    return int(d.timestamp() * 1000)
+    """Convert a datetime to a Unix timestamp in milliseconds (truncated).
+
+    Integer arithmetic on the timedelta since the epoch, not
+    ``int(d.timestamp() * 1000)``: the float product lands just below the
+    integer for a fraction of a percent of instants (1095954883735 came back
+    as 1095954883734), which broke the documented round trip with
+    :func:`from_timestamp_ms`. A naive input is read in the display zone,
+    as :func:`ensure_utc` would.
+    """
+    aware = ensure_utc(d)
+    assert aware is not None
+    return (aware - _EPOCH) // _dt.timedelta(milliseconds=1)
