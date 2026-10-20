@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cascade worker: a bounded wait between optimize and rebuild cancelled the
+  task it waited on.** The optimize runner waits up to 180 s for an in-flight
+  index rebuild of the same kind, and the rebuild loop waits for an in-flight
+  optimize, so the two never commit on one LanceDB manifest at once. Both
+  waits used `asyncio.timeout` around `await task`, which cancels the awaited
+  task when the deadline fires: a rebuild longer than the wait, with a write
+  landing on that table meanwhile, was killed mid-flight, and the rebuild loop
+  ended with it, silently, so no periodic rebuild ran again until restart and
+  that table's index UUID / FTS segment count grew unbounded. The mirror wait
+  cancelled the optimize beat it was meant to stay clear of. Both waits now
+  only stop waiting. Present since 1.2.2.
 - **`method="vector"` finds episodes when no atomic fact is in scope.**
   Vector search over episodes recalls through atomic facts, and it returned
   an empty list (HTTP 200, no log line) whenever none were in scope — fact

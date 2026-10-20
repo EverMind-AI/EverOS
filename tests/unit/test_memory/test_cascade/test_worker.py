@@ -1561,3 +1561,71 @@ async def test_optimize_does_not_park_forever_on_a_rebuild(
         "the runner must skip the beat, not compact under a live rebuild — "
         "both commit on the same manifest"
     )
+
+
+async def test_optimize_wait_timeout_leaves_the_rebuild_running(
+    patched_repo: _FakeRepo,
+) -> None:
+    """The runner's bounded wait on a rebuild must only stop the waiting.
+
+    ``asyncio.timeout`` around ``await task`` cancels the task when the
+    deadline fires. Here that killed the rebuild mid-flight, and because
+    ``_run_rebuild_once`` catches only ``Exception``, the ``CancelledError``
+    ended the rebuild loop too -- silently, since the done-callback reads a
+    cancelled task as ``stop()``. No 12 h rebuild ran again until restart.
+    Found by ``test_worker_maintenance_stateful.py``.
+    """
+    from everos.memory.cascade import worker as wmod
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
+    fake = _FakeLanceRepo(rebuild_delay=0.3)
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        poll_interval_seconds=3600.0,
+        optimize_min_interval_seconds=0.01,
+        optimize_heartbeat_seconds=3600.0,
+        optimize_rebuild_interval_seconds=3600.0,
+    )
+    try:
+        await w.start()  # the startup sweep's rebuild takes 0.3 s
+        await asyncio.sleep(0.05)
+        w._schedule_optimize("episode")  # a write lands during the rebuild
+        await asyncio.sleep(0.6)
+        assert len(fake.rebuild_calls) == 1, "the rebuild must run to completion"
+        assert w._rebuild_task is not None and not w._rebuild_task.done(), (
+            "the rebuild loop must survive the runner giving up its wait"
+        )
+    finally:
+        await w.stop()
+        monkeypatched.undo()
+
+
+async def test_rebuild_wait_timeout_leaves_the_optimize_running(
+    patched_repo: _FakeRepo,
+) -> None:
+    """Mirror of the above: the rebuild's bounded wait on the optimize runner
+    must skip the sweep, not cancel the beat it was staying clear of."""
+    from everos.memory.cascade import worker as wmod
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
+    # The same constant bounds each maintenance call, so one long call cannot
+    # outlive the wait: two short beats around the 0.2 s cooldown do.
+    fake = _FakeLanceRepo(optimize_delay=0.02)
+    w = CascadeWorker(
+        {"episode": _OkHandlerWithRepo(fake)},
+        retry_backoff_seconds=0,
+        optimize_min_interval_seconds=0.2,
+    )
+    try:
+        w._schedule_optimize("episode")
+        await asyncio.sleep(0.01)
+        w._schedule_optimize("episode")  # mid-beat: a second beat after cooldown
+        await w._run_rebuild_once("episode")  # waits 0.05 s, then skips
+        assert not fake.rebuild_calls, "must not rebuild under a live runner"
+        await w._flush_optimizers()
+        assert len(fake.beats) == 2, "both beats must run to completion"
+    finally:
+        monkeypatched.undo()
