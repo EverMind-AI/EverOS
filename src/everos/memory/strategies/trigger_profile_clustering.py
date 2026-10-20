@@ -92,43 +92,28 @@ async def trigger_profile_clustering(
             project_id=event.project_id,
         )
 
-        # 3. Build a size-1 cluster for the new episode.
-        new_cluster = AlgoCluster(
-            id=mint_cluster_id(),
-            centroid=vector,
-            count=1,
-            last_ts=event.episode_timestamp_ms,
-            preview=[event.episode_text],
-            members=[event.episode_entry_id],
+        # OME delivers at least once: a replay of this event (a crash after
+        # the upsert, a retry after the emit failed) must not fold the episode
+        # in a second time -- the cluster's count and centroid would drift
+        # and extract_user_profile's gate reads that count. An episode already
+        # among the owner's members is left where it is; the downstream event
+        # is still emitted so a run lost with the crash is not lost for good.
+        existing_ids = {c.id for c in existing}
+        already = next(
+            (c for c in existing if event.episode_entry_id in c.members), None
         )
-
-        # 4. Geometry-merge it into an existing cluster (or keep as-is).
-        # ``cluster_by_geometry`` is a pure synchronous CPU function (cosine +
-        # time-window math, no I/O) returning ``Cluster | None`` directly, so
-        # it must not be awaited (``await None`` raises when there is no
-        # existing cluster to merge into).
-        settings = load_settings()
-        merged = cluster_by_geometry(
-            new_cluster,
-            existing,
-            threshold=settings.clustering.threshold,
-            time_window_days=settings.clustering.time_window_days,
-        )
-        to_save = merged if merged is not None else new_cluster
-
-        # 5. Persist the (possibly-merged) cluster back to SQLite.
-        await cluster_repo.upsert_with_members(
-            to_save,
-            owner_id=event.owner_id,
-            owner_type="user",
-            kind="user_memory",
-            member_type="episode",
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
-
+        if already is not None:
+            to_save = already
+            logger.info(
+                "profile_cluster_replay_skipped",
+                episode_entry_id=event.episode_entry_id,
+                cluster_id=already.id,
+            )
+        else:
+            to_save = await _fold_in(event, vector, existing)
         # 6. Emit ProfileClusterUpdated → downstream extract_user_profile.
         assert to_save.id is not None  # both branches above set id
+
         await ctx.emit(
             ProfileClusterUpdated(
                 memcell_id=event.memcell_id,
@@ -143,6 +128,48 @@ async def trigger_profile_clustering(
         memcell_id=event.memcell_id,
         cluster_id=to_save.id,
         owner_id=event.owner_id,
-        merged=merged is not None,
+        merged=to_save.id in existing_ids,
+        replayed=already is not None,
         cluster_count=to_save.count,
     )
+
+
+async def _fold_in(
+    event: EpisodeExtracted, vector: np.ndarray, existing: list[AlgoCluster]
+) -> AlgoCluster:
+    """Merge the episode into the owner's clusters (or start one) and persist."""
+    # 3. Build a size-1 cluster for the new episode.
+    new_cluster = AlgoCluster(
+        id=mint_cluster_id(),
+        centroid=vector,
+        count=1,
+        last_ts=event.episode_timestamp_ms,
+        preview=[event.episode_text],
+        members=[event.episode_entry_id],
+    )
+    # 4. Geometry-merge it into an existing cluster (or keep as-is).
+    # ``cluster_by_geometry`` is a pure synchronous CPU function (cosine +
+    # time-window math, no I/O) returning ``Cluster | None`` directly, so
+    # it must not be awaited (``await None`` raises when there is no
+    # existing cluster to merge into).
+    settings = load_settings()
+    merged = cluster_by_geometry(
+        new_cluster,
+        existing,
+        threshold=settings.clustering.threshold,
+        time_window_days=settings.clustering.time_window_days,
+    )
+    to_save = merged if merged is not None else new_cluster
+
+    # 5. Persist the (possibly-merged) cluster back to SQLite.
+    await cluster_repo.upsert_with_members(
+        to_save,
+        owner_id=event.owner_id,
+        owner_type="user",
+        kind="user_memory",
+        member_type="episode",
+        app_id=event.app_id,
+        project_id=event.project_id,
+    )
+
+    return to_save

@@ -101,31 +101,45 @@ async def trigger_skill_clustering(
         )
 
         # 4. Build a size-1 cluster for the fresh case (id minted upfront).
-        new_cluster = AlgoCluster(
-            id=mint_cluster_id(),
-            centroid=vector,
-            count=1,
-            last_ts=event.case_timestamp_ms,
-            preview=[event.task_intent],
-            members=[event.case_entry_id],
-        )
+        # OME delivers at least once: a replay of this event must not fold
+        # the case in a second time (count and centroid would drift). A case
+        # already among the agent's members stays where it is; the downstream
+        # event is still emitted so a run lost with a crash is not lost.
+        existing_ids = {c.id for c in existing}
+        already = next((c for c in existing if event.case_entry_id in c.members), None)
+        if already is not None:
+            to_save = already
+            logger.info(
+                "skill_cluster_replay_skipped",
+                case_entry_id=event.case_entry_id,
+                cluster_id=already.id,
+            )
+        else:
+            new_cluster = AlgoCluster(
+                id=mint_cluster_id(),
+                centroid=vector,
+                count=1,
+                last_ts=event.case_timestamp_ms,
+                preview=[event.task_intent],
+                members=[event.case_entry_id],
+            )
 
-        # 5. Ask the LLM to merge it into an existing cluster (or keep as-is).
-        merged = await cluster_by_llm(new_cluster, existing, llm=get_llm_client())
-        to_save = merged if merged is not None else new_cluster
+            # 5. Ask the LLM to merge it into an existing cluster (or keep as-is).
+            merged = await cluster_by_llm(new_cluster, existing, llm=get_llm_client())
+            to_save = merged if merged is not None else new_cluster
 
-        # 6. Persist the (possibly-merged) cluster back to SQLite.
-        await cluster_repo.upsert_with_members(
-            to_save,
-            owner_id=event.agent_id,
-            owner_type="agent",
-            kind="agent_case",
-            member_type="case",
-            app_id=event.app_id,
-            project_id=event.project_id,
-        )
+            # 6. Persist the (possibly-merged) cluster back to SQLite.
+            await cluster_repo.upsert_with_members(
+                to_save,
+                owner_id=event.agent_id,
+                owner_type="agent",
+                kind="agent_case",
+                member_type="case",
+                app_id=event.app_id,
+                project_id=event.project_id,
+            )
 
-        # 7. Emit SkillClusterUpdated → downstream extract_agent_skill.
+            # 7. Emit SkillClusterUpdated → downstream extract_agent_skill.
         assert to_save.id is not None  # both branches above set id
         await ctx.emit(
             SkillClusterUpdated(
@@ -147,6 +161,7 @@ async def trigger_skill_clustering(
         case_entry_id=event.case_entry_id,
         cluster_id=to_save.id,
         agent_id=event.agent_id,
-        merged=merged is not None,
+        merged=to_save.id in existing_ids,
+        replayed=already is not None,
         cluster_count=to_save.count,
     )

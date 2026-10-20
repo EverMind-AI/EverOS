@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A replayed clustering run inflated the cluster's count.** OME delivers a
+  strategy run at least once; when `trigger_profile_clustering` or
+  `trigger_skill_clustering` ran again for an episode or case it had already
+  folded in (a crash after the upsert, a retry after the emit failed), it
+  folded it in a second time: the member row was deduplicated but `count`
+  rose and the centroid was re-weighted, and `extract_user_profile` gates on
+  that count. An entry already among the owner's members is now left where it
+  is; the downstream event is still emitted.
 - **OME `inspect` ignored the Counter gate's cooldown.** The dry run compared
   the bucket's counter with the threshold only, so during a cooldown window
   it reported `will_run: true` for an event `dispatch` would hold back. The
