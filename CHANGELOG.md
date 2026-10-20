@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Knowledge: a failed `PUT /knowledge/{doc_id}` could leave two
+  directories for one document, or bury the old one inside the new.** The
+  replace path backs the document's directory up, writes the new one and
+  restores the backup on failure; when the failure came *after* the writer
+  had created the new directory (the original-file step, for one), the
+  restore moved the backup inside it if the name was unchanged, or left it
+  next to the restored one if the title or category had changed. The
+  half-written directory is now removed before the backup comes back.
 - **A hand-edited `entry_count` could make a daily-log writer reuse an entry
   id.** The episode, atomic-fact, foresight and agent-case writers allocated
   the next id from the frontmatter's `entry_count` alone, so lowering it by

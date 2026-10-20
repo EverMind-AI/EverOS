@@ -634,6 +634,17 @@ async def replace_document(
             file_content=file_content,
         )
     except Exception:
+        # The failure may have come after the writer created the new
+        # directory (the original-file step, for one). Remove every
+        # directory that carries this doc_id before moving the backup back:
+        # with the same name still present, ``shutil.move`` would bury the
+        # backup inside the half-written directory, and with a new name the
+        # half-written directory would stay next to the restored one. The
+        # backup's own name ends in ``.backup``, so the suffix match leaves
+        # it alone.
+        await anyio.to_thread.run_sync(
+            _remove_unindexed_doc_dirs, knowledge_dir, doc_id
+        )
         await _restore_backup(backup, doc_id)
         raise
 
