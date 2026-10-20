@@ -1082,9 +1082,13 @@ def _merge_by_id_max(
 ) -> list[Candidate]:
     """Union by id, keep higher score. Folds bridged skills into the dense
     pool so downstream fusion doesn't double-count overlap.
+
+    One pass over both lists, primary first, so a duplicate id inside
+    ``primary`` also keeps its higher score (a dict comprehension kept the
+    last one) and a tie keeps the primary candidate.
     """
-    by_id: dict[str, Candidate] = {c.id: c for c in primary}
-    for c in extra:
+    by_id: dict[str, Candidate] = {}
+    for c in (*primary, *extra):
         existing = by_id.get(c.id)
         if existing is None or c.score > existing.score:
             by_id[c.id] = c

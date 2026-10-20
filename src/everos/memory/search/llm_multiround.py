@@ -422,6 +422,17 @@ def _parse_decision(text: str) -> dict:
             continue
         if isinstance(obj, dict):
             return obj
+    # A stray ``{`` *before* the object defeats both of the above: the greedy
+    # span starts at it, and the balanced scan opens at it and never closes.
+    # Decoding from every brace takes the first object that actually parses.
+    decoder = json.JSONDecoder()
+    for start in (i for i, ch in enumerate(text) if ch == "{"):
+        try:
+            obj, _ = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
     raise ValueError(f"no JSON object in decider reply: {text[:120]!r}")
 
 

@@ -47,6 +47,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`to_timestamp_ms` is now the exact inverse of `from_timestamp_ms`.** It
+  computed `int(timestamp() * 1000)`, and the float product sat just below
+  the integer for about 0.6 % of instants (1095954883735 came back as
+  1095954883734); integer arithmetic on the timedelta since the epoch
+  replaces it.
+- **The watcher classified md files the scanner never visits.** Its kind
+  matcher was anchored on the right only, so a path with extra leading
+  components (`x/app/project/users/u/episodes/episode-2026-01-01.md`) was
+  accepted and queued while the root-anchored scanner glob ignored it; the
+  match now requires the same number of path components.
+- **`default_app` / `default_project` are rejected as ids.** They are the
+  on-disk directory names of the default scope, so an app with that literal
+  id shared the default app's directory and its index rows were attributed
+  to `default`. The API now answers `422` for them.
+- **Search: a duplicate id inside the dense pool kept its last score, not
+  its highest**, and the multi-round decider's JSON parser gave up on a reply
+  with a stray `{` in the prose before the object (its docstring promised
+  otherwise); it now also decodes from every brace.
 - **`method="vector"` finds episodes when no atomic fact is in scope.**
   Vector search over episodes recalls through atomic facts, and it returned
   an empty list (HTTP 200, no log line) whenever none were in scope — fact
