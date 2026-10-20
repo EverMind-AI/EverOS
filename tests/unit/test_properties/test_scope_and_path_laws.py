@@ -5,11 +5,13 @@ it lands in, so a law that fails here is either a path escape or two scopes
 silently sharing a directory.
 
 1. ``app_id_from_dir(app_dir_name(x)) == x`` and the ``project_*`` pair
-   likewise, for every id the API accepts. Before this test the API also
-   accepted the literal ``default_app`` / ``default_project``: those are the
-   directory names of the default scope, so such an app shared the default
-   app's directory and its index rows were read back as ``default``. The
-   validator now rejects the two names.
+   likewise, for every id the API accepts in that field. Before this test
+   the API also accepted ``app_id="default_app"`` and
+   ``project_id="default_project"``: those are the directory names of the
+   default scope, so such an app shared the default app's directory and its
+   index rows were read back as ``default``. Each field now rejects its own
+   aliasing name and nothing else (a ``sender_id`` never goes through the
+   mapping).
 2. An accepted id joined under a root stays inside the root.
 3. ``sanitize_dirname`` is idempotent, returns exactly one path component,
    never ``""`` / ``.`` / ``..`` and never more than 50 characters; the
@@ -26,6 +28,7 @@ silently sharing a directory.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -34,40 +37,54 @@ from hypothesis import strategies as st
 
 from everos.core.persistence import memory_root as mr
 from everos.core.persistence.markdown.path_safety import sanitize_dirname
-from everos.entrypoints.api.routes.memorize import _reject_path_traversal
+from everos.entrypoints.api.routes.memorize import (
+    _reject_path_traversal,
+    _reject_reserved_scope_dir,
+)
 from everos.infra.persistence.markdown.mds.agent_skill import AgentSkillFrontmatter
 from everos.memory.cascade.handlers._common import content_sha256
 
 _candidate_ids = st.text("abcXYZ019_.@+-", min_size=1, max_size=20)
 
 
-def _accepted(value: str) -> bool:
-    try:
-        _reject_path_traversal(value)
-    except ValueError:
-        return False
-    return True
+_check_app = _reject_reserved_scope_dir("default_app")
+_check_project = _reject_reserved_scope_dir("default_project")
 
 
-accepted_ids = _candidate_ids.filter(_accepted)
+def _accepted(check: Callable[[str], str]) -> Callable[[str], bool]:
+    def ok(value: str) -> bool:
+        try:
+            check(value)
+        except ValueError:
+            return False
+        return True
+
+    return ok
+
+
+accepted_app_ids = _candidate_ids.filter(_accepted(_check_app))
+accepted_project_ids = _candidate_ids.filter(_accepted(_check_project))
+accepted_ids = _candidate_ids.filter(_accepted(_reject_path_traversal))
 free_text = st.text(max_size=80)
 
 
-@given(x=accepted_ids)
-def test_scope_dir_names_invert_for_every_accepted_id(x: str) -> None:
+@given(x=accepted_app_ids, y=accepted_project_ids)
+def test_scope_dir_names_invert_for_every_accepted_id(x: str, y: str) -> None:
     assert mr.app_id_from_dir(mr.app_dir_name(x)) == x
-    assert mr.project_id_from_dir(mr.project_dir_name(x)) == x
+    assert mr.project_id_from_dir(mr.project_dir_name(y)) == y
 
 
-@pytest.mark.parametrize("reserved", ["default_app", "default_project"])
-def test_the_default_scope_directory_names_are_rejected_as_ids(
-    reserved: str,
-) -> None:
-    with pytest.raises(ValueError, match="directory names of the default scope"):
-        _reject_path_traversal(reserved)
+def test_only_the_aliasing_pair_is_rejected() -> None:
+    with pytest.raises(ValueError, match="directory name of the default scope"):
+        _check_app("default_app")
+    with pytest.raises(ValueError, match="directory name of the default scope"):
+        _check_project("default_project")
+    assert _check_app("default_project") == "default_project"
+    assert _check_project("default_app") == "default_app"
+    assert _reject_path_traversal("default_app") == "default_app"  # sender ids
 
 
-@given(x=accepted_ids, y=accepted_ids)
+@given(x=accepted_app_ids, y=accepted_project_ids)
 def test_accepted_ids_stay_under_the_root(x: str, y: str) -> None:
     root = Path("/memory-root")  # resolution needs no real directory
     target = (root / mr.app_dir_name(x) / mr.project_dir_name(y)).resolve()

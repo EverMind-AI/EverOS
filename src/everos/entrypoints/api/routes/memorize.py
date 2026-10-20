@@ -11,6 +11,7 @@ exposes the same endpoint.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Request
@@ -40,11 +41,6 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 # final backstop regardless.
 _PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.@+-]+$"
 _PATH_TRAVERSAL_TOKENS = frozenset({".", ".."})
-# The on-disk directory names of the default scope. An id spelled like one
-# would share that directory with the default scope and be read back as
-# ``default`` by ``app_id_from_dir`` / ``project_id_from_dir``, so its index
-# rows would carry the wrong scope.
-_RESERVED_SCOPE_DIRS = frozenset({"default_app", "default_project"})
 
 
 _PATH_SAFE_RE = re.compile(_PATH_SAFE_CHARSET)
@@ -53,11 +49,6 @@ _PATH_SAFE_RE = re.compile(_PATH_SAFE_CHARSET)
 def _reject_path_traversal(value: str) -> str:
     if value in _PATH_TRAVERSAL_TOKENS:
         raise ValueError("'.' and '..' are reserved (path traversal)")
-    if value in _RESERVED_SCOPE_DIRS:
-        raise ValueError(
-            "'default_app' and 'default_project' are the directory names of "
-            "the default scope; use 'default'"
-        )
     if not _PATH_SAFE_RE.match(value):
         raise ValueError(
             "Only alphanumerics, underscore, dot, hyphen, @, and + are allowed"
@@ -65,7 +56,35 @@ def _reject_path_traversal(value: str) -> str:
     return value
 
 
+def _reject_reserved_scope_dir(reserved: str) -> Callable[[str], str]:
+    """Refuse the on-disk directory name of the default scope as that scope's id.
+
+    ``app_dir_name("default")`` is ``default_app`` and ``app_id_from_dir``
+    maps it back to ``default``; an app whose id is literally ``default_app``
+    would share the default app's directory and have its index rows
+    attributed to ``default``. The same for ``project_id`` and
+    ``default_project``. Only that field/name pair aliases, so only it is
+    refused: ``sender_id`` never goes through the scope mapping, and
+    ``app_id="default_project"`` round-trips unchanged.
+    """
+
+    def check(value: str) -> str:
+        _reject_path_traversal(value)
+        if value == reserved:
+            raise ValueError(
+                f"{reserved!r} is the directory name of the default scope; "
+                "use 'default'"
+            )
+        return value
+
+    return check
+
+
 PathSafeId = Annotated[str, AfterValidator(_reject_path_traversal)]
+AppScopeId = Annotated[str, AfterValidator(_reject_reserved_scope_dir("default_app"))]
+ProjectScopeId = Annotated[
+    str, AfterValidator(_reject_reserved_scope_dir("default_project"))
+]
 
 
 # DTOs ────────────────────────────────────────────────────────────────────────
@@ -132,13 +151,13 @@ class MessageItemDTO(BaseModel):
 
 class MemorizeAddRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=128)
-    app_id: PathSafeId = Field(
+    app_id: AppScopeId = Field(
         default="default",
         min_length=1,
         max_length=128,
         pattern=_PATH_SAFE_CHARSET,
     )
-    project_id: PathSafeId = Field(
+    project_id: ProjectScopeId = Field(
         default="default",
         min_length=1,
         max_length=128,
@@ -161,13 +180,13 @@ class AddResponseData(BaseModel):
 
 class MemorizeFlushRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=128)
-    app_id: PathSafeId = Field(
+    app_id: AppScopeId = Field(
         default="default",
         min_length=1,
         max_length=128,
         pattern=_PATH_SAFE_CHARSET,
     )
-    project_id: PathSafeId = Field(
+    project_id: ProjectScopeId = Field(
         default="default",
         min_length=1,
         max_length=128,
