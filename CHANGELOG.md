@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OME `wait_for_event` returned while a retry was still pending.** The
+  runner records a failed attempt as `FAILED` before its backoff sleep and
+  gives the retry a fresh run id, so during the backoff the event's only row
+  is `FAILED`; `wait_for_event` counted that as terminal and returned.
+  Reflection waits on it before deprecating what the extraction replaced, so
+  it could act on an outcome that was not final. `FAILED` now means "retry
+  pending"; a failure with no retry left is `DEAD_LETTER`, as before.
 - **`to_timestamp_ms` is now the exact inverse of `from_timestamp_ms`.** It
   computed `int(timestamp() * 1000)`, and the float product sat just below
   the integer for about 0.6 % of instants (1095954883735 came back as

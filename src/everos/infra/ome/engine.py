@@ -867,11 +867,38 @@ class OfflineEngine:
     _TERMINAL_STATUSES = frozenset(
         {
             RunStatus.SUCCESS,
-            RunStatus.FAILED,
             RunStatus.DEAD_LETTER,
             RunStatus.CRASHED,
         }
     )
+
+    @classmethod
+    def _event_settled(cls, runs: list[RunRecord]) -> bool:
+        """Whether every strategy's attempt chain for one event has ended.
+
+        Each attempt is its own row, so the chain's state is its newest
+        row: ``RUNNING`` or ``FAILED`` (retry pending) means more to come,
+        the terminal statuses mean the chain is over. Earlier ``FAILED``
+        rows stay in the table after their retry and must not hold the
+        wait open.
+        """
+        newest: dict[str, RunRecord] = {}
+        for r in runs:
+            cur = newest.get(r.strategy_name)
+            if cur is None or (r.started_at, r.attempt) > (cur.started_at, cur.attempt):
+                newest[r.strategy_name] = r
+        return all(r.status in cls._TERMINAL_STATUSES for r in newest.values())
+
+    """Statuses after which no further run follows for the same attempt chain.
+
+    ``FAILED`` is not one of them: the runner writes it *before* the backoff
+    sleep and gives the retry a fresh ``run_id``, so an event whose only row
+    is ``FAILED`` has a retry pending (a failure with no retry left is
+    written as ``DEAD_LETTER``). Treating it as terminal let
+    :meth:`wait_for_event` return during the backoff window with the retry
+    still to run -- Reflection, which waits on it before deprecating, would
+    have acted on an outcome that was not final.
+    """
 
     async def wait_for_event(
         self,
@@ -893,8 +920,12 @@ class OfflineEngine:
 
         Returns:
             All ``RunRecord`` instances for ``event_id`` once every run
-            has reached a terminal status (SUCCESS / FAILED / DEAD_LETTER
-            / CRASHED).
+            has reached a terminal status (SUCCESS / DEAD_LETTER /
+            CRASHED; a FAILED row is a retry pending, see
+            ``_TERMINAL_STATUSES``). A fan-out sibling whose job has not
+            started yet has no row, so the set can still grow in that
+            window; callers that need an exact count must know it from
+            the dispatch.
 
         Raises:
             TimeoutError: If any run is still non-terminal after ``timeout``.
@@ -905,7 +936,7 @@ class OfflineEngine:
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
             runs = await self._run_record_store.list_by_event_id(event_id)
-            if runs and all(r.status in self._TERMINAL_STATUSES for r in runs):
+            if runs and self._event_settled(runs):
                 return runs
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:

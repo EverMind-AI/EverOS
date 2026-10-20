@@ -80,3 +80,45 @@ async def test_wait_for_event_returns_on_terminal_failure() -> None:
         runs = await h._engine.wait_for_event(boom.event_id, timeout=5)
         assert len(runs) == 1
         assert runs[0].status == RunStatus.DEAD_LETTER
+
+
+class _Flaky(BaseEvent):
+    """Event whose strategy fails once, then succeeds."""
+
+
+_flaky_calls: dict[str, int] = {}
+
+
+@offline_strategy(
+    name="flaky_strategy",
+    trigger=Immediate(on=[_Flaky]),
+    emits=[],
+    max_retries=1,
+)
+async def _flaky_strategy(event: BaseEvent, ctx: object) -> None:
+    n = _flaky_calls.get(event.event_id, 0) + 1
+    _flaky_calls[event.event_id] = n
+    if n == 1:
+        raise RuntimeError("first attempt fails")
+
+
+@pytest.mark.asyncio
+async def test_wait_for_event_waits_out_a_pending_retry() -> None:
+    """A FAILED row is written *before* the backoff sleep, and the retry runs
+    under a fresh run_id; until it starts, the event's only row is FAILED.
+    ``wait_for_event`` must not report that as the event's outcome."""
+    async with StrategyTestHarness() as h:
+        h._engine._config.retry_backoff_base_seconds = 0.3  # a real backoff window
+        h.register(_flaky_strategy)
+        await h.start()
+        flaky = _Flaky()
+        await h.emit(flaky)
+        returned = await h._engine.wait_for_event(
+            flaky.event_id, timeout=5, poll_interval=0.02
+        )
+        await h.drain(timeout=5)
+        final = await h._engine.list_runs_by_event_id(flaky.event_id)
+        assert sorted(r.status for r in final) == [RunStatus.FAILED, RunStatus.SUCCESS]
+        assert sorted(r.status for r in returned) == sorted(r.status for r in final), (
+            "wait_for_event returned before the retry ran"
+        )
