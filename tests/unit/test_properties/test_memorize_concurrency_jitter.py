@@ -125,12 +125,12 @@ class _Run:
         n_cells = self.rng.randint(1, 2) if k else 0
         cells = []
         if k:
+            # The algo contract: the cells and the tail partition the input.
+            # (A first version let the last chunk run past ``k`` into the
+            # tail, and the deep run promptly reported a message in a cell
+            # and in the buffer -- the harness's bug, not the stage's.)
             cut = k // n_cells or 1
-            chunks = (
-                [messages[i : i + cut] for i in range(0, k, cut)]
-                if n_cells > 1
-                else [messages[:k]]
-            )
+            chunks = [messages[i : min(i + cut, k)] for i in range(0, k, cut)]
             cells = [
                 MemCell(items=list(c), timestamp=c[-1].timestamp) for c in chunks if c
             ]
@@ -280,13 +280,25 @@ async def _jittered(
                 if m.session_id == session
                 for mid in json.loads(m.message_ids_json)
             ]
-            assert len(set(cell_ids)) == len(cell_ids), (
+            dup = sorted(i for i in set(cell_ids) if cell_ids.count(i) > 1)
+            cells_of = {
+                m.memcell_id: json.loads(m.message_ids_json)
+                for m in memcells
+                if m.session_id == session
+            }
+            assert not dup, (
                 "a message in two memcells",
+                dup,
+                cells_of,
                 "\n".join(run.trace),
             )
             placed = set(buffer_ids) | set(cell_ids)
-            assert not (set(buffer_ids) & set(cell_ids)), (
+            both = sorted(set(buffer_ids) & set(cell_ids))
+            assert not both, (
                 "buffer and memcell",
+                both,
+                buffer_ids,
+                cells_of,
                 "\n".join(run.trace),
             )
             assert accepted[session] <= placed, (
