@@ -375,6 +375,14 @@ class EmbeddingSettings(BaseModel):
     with proper re-normalization. When ``None`` (default), the
     parameter is omitted and client-side truncation to ``dim``
     handles dimension alignment."""
+    dim: int = Field(default=1024, ge=1)
+    """Width of the ``vector`` column in every index table.
+
+    The embedding model must return **at least** this many dimensions; a
+    longer vector is truncated to this width, which only preserves recall
+    for Matryoshka-trained models. A shorter one is refused at startup.
+    Changing it invalidates every stored vector, so the index has to be
+    rebuilt (``everos cascade rebuild``)."""
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)

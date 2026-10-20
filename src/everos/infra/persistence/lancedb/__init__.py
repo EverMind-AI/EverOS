@@ -28,9 +28,11 @@ import contextlib
 import datetime as dt
 from typing import Any, ClassVar
 
+from everos.core.errors import IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import BaseLanceTable, MemoryRoot, memory_root_lock
 
+from ..records import EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY
 from ..records import AgentCase as AgentCase
 from ..records import AgentSkill as AgentSkill
 from ..records import AtomicFact as AtomicFact
@@ -65,7 +67,7 @@ _BUSINESS_SCHEMAS = (
 )
 
 
-class LanceDBSchemaMismatchError(RuntimeError):
+class LanceDBSchemaMismatchError(IndexSchemaMismatchError):
     """Raised at startup when an on-disk LanceDB table's columns drift
     from the corresponding Pydantic schema.
 
@@ -148,6 +150,16 @@ async def migrate_fts_indexes() -> None:
         marker.write_text(str(_FTS_INDEX_SCHEMA_VERSION), encoding="utf-8")
         logger.info("fts_index_migration_done", version=_FTS_INDEX_SCHEMA_VERSION)
 
+
+_PROVENANCE_COLUMN = "vector"
+"""Column the attestation hangs on.
+
+Six tables carry a vector column and ``Episode`` carries two, so writing all
+of them would raise "how many agreeing copies count as agreement" on the next
+schema change. ``episode.vector`` is the one column that exists in every
+deployment and is written first; ``subject_vector`` comes from the same model
+and is not recorded separately.
+"""
 
 _TABLE_SCHEMA_VERSION = 2
 """Bump when column nullability or presence changes on business tables.
@@ -413,12 +425,6 @@ class LanceIndexBackend:
     async def connect(self) -> Any:
         return await get_connection()
 
-    async def startup(self) -> Any:
-        connection = await self.connect()
-        await self.verify_business_schemas()
-        await self.ensure_business_indexes()
-        return connection
-
     async def shutdown(self) -> None:
         await dispose_connection()
 
@@ -430,6 +436,36 @@ class LanceIndexBackend:
 
     async def drop_business_tables(self) -> list[str]:
         return await drop_business_tables()
+
+    async def read_embedding_model(self) -> str | None:
+        """Model this index's vectors were built with, or ``None`` if unattested.
+
+        ``None`` is not an error: an index built before this field existed, or
+        one just recreated by ``cascade rebuild``, simply has not been
+        attested yet. The caller writes the current configuration in that
+        case; see :func:`write_embedding_model`.
+        """
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        metadata = (await table.schema()).field(_PROVENANCE_COLUMN).metadata or {}
+        raw = metadata.get(EMBEDDING_MODEL_KEY.encode())
+        return raw.decode() if raw else None
+
+    async def write_embedding_model(self, model: str) -> None:
+        """Record ``model`` on the episode table's vector column, in place.
+
+        Arrow field metadata is updated without rewriting data: the table
+        gains a version, its row count and column types are untouched. The
+        create path cannot carry this (``pydantic_to_schema`` builds fields
+        with no metadata), so every attestation goes through here.
+        """
+        table = await get_table(Episode.TABLE_NAME, Episode)
+        await table.update_field_metadata(
+            {
+                "path": _PROVENANCE_COLUMN,
+                "metadata": {EMBEDDING_MODEL_KEY: model},
+            }
+        )
+        get_logger(__name__).info("lancedb_embedding_model_recorded", model=model)
 
 
 index_backend = LanceIndexBackend()

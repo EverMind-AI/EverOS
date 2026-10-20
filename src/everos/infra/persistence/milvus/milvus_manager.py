@@ -7,7 +7,7 @@ import re
 from pymilvus import MilvusClient
 
 from everos.config import MilvusSettings, load_settings
-from everos.core.errors import ConfigurationError
+from everos.core.errors import ConfigurationError, IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 _client: MilvusClient | None = None
 
 
-class MilvusSchemaMismatchError(RuntimeError):
+class MilvusSchemaMismatchError(IndexSchemaMismatchError):
     """Raised when an existing Milvus collection does not match EverOS."""
 
 

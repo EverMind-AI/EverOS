@@ -11,6 +11,9 @@ import asyncio
 from typing import Any, ClassVar
 
 from everos.core.observability.logging import get_logger
+from everos.infra.persistence.records import (
+    EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY,
+)
 
 from .milvus_manager import MilvusConfigurationError as MilvusConfigurationError
 from .milvus_manager import MilvusSchemaMismatchError as MilvusSchemaMismatchError
@@ -77,14 +80,6 @@ class MilvusIndexBackend:
     async def connect(self) -> Any:
         return await get_client()
 
-    async def startup(self) -> Any:
-        client = await self.connect()
-        # ensure_collection creates a missing collection and drift-checks an
-        # existing one in a single round trip, so unlike the LanceDB backend
-        # there is no separate verify step to run first.
-        await self.ensure_business_indexes()
-        return client
-
     async def shutdown(self) -> None:
         await dispose_connection()
 
@@ -99,6 +94,31 @@ class MilvusIndexBackend:
 
     async def drop_business_tables(self) -> list[str]:
         return await drop_business_tables()
+
+    async def read_embedding_model(self) -> str | None:
+        """Model this index's vectors were built with, or ``None`` if unattested.
+
+        Lives on the episode collection as a property, mirroring what the
+        LanceDB backend hangs on its vector column's Arrow metadata: the
+        attestation belongs with the thing it describes, so a remote cluster
+        shared by several machines cannot disagree with itself about which
+        model built it.
+        """
+        client = await get_client()
+        described = await asyncio.to_thread(
+            client.describe_collection, episode_repo.collection_name
+        )
+        return (described.get("properties") or {}).get(EMBEDDING_MODEL_KEY)
+
+    async def write_embedding_model(self, model: str) -> None:
+        """Record ``model`` as a property of the episode collection."""
+        client = await get_client()
+        await asyncio.to_thread(
+            client.alter_collection_properties,
+            episode_repo.collection_name,
+            {EMBEDDING_MODEL_KEY: model},
+        )
+        logger.info("milvus_embedding_model_recorded", model=model)
 
 
 index_backend = MilvusIndexBackend()

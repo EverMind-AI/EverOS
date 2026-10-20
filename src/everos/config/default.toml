@@ -132,6 +132,11 @@ max_concurrency = 4
 model     = "Qwen/Qwen3-Embedding-4B"
 api_key   = ""
 base_url  = "https://api.deepinfra.com/v1/openai"
+# Width of the vector column in every index table. The model must return at
+# least this many dimensions; a longer vector is truncated (only lossless for
+# Matryoshka models), a shorter one is refused at startup. Changing it means
+# every stored vector is invalid: run `everos cascade rebuild`.
+dim       = 1024
 timeout_seconds = 30.0
 max_retries     = 3
 batch_size      = 10

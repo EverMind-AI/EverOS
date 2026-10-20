@@ -32,6 +32,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work while rows accepted earlier are still delivered. Synchronous calls
   without a backlog are unchanged.
 
+- **`[embedding] dim` sets the width of every vector column.** It used to be
+  hardcoded at 1024, so a model of any other width could not be used: a
+  narrower one failed every write, a wider one was truncated without saying
+  so. `dim` now drives the schema, and startup checks the configured model
+  against it. (#434)
+
+### Changed
+
+- **Startup refuses an index the configured embedding cannot have produced.**
+  Two cases stop a start that used to proceed and fail later: the model
+  returns fewer dimensions than `dim` (nothing could ever be stored), and the
+  index records a *different* model than the one configured (distances
+  between vectors from two models are meaningless, and searches just return
+  nothing useful). Both name the values involved and point at `everos cascade
+  rebuild`; the CLI exits 3 without a traceback. Deployments with no embedding
+  configured (keyword-only, an empty `api_key`) are unaffected — the check is
+  skipped whole.
+
+- **An index records which embedding model built it.** LanceDB keeps it in the
+  `episode` table's `vector` column metadata, Milvus as a collection property.
+  An index that predates this release has no such record: the first start
+  after upgrading writes one in place, without touching a row or a column
+  type, and logs that it did. `everos cascade rebuild` records the model it
+  rebuilt with.
+
+- **`/health` `capabilities.embed` reports the startup probe, not whether a
+  provider can be constructed.** It used to be true whenever `model`,
+  `api_key` and `base_url` were set, including against a dead endpoint. It is
+  now the result of the one embedding call made at startup, and does not flip
+  back without a restart.
+
+- **Every `everos` command makes one embedding call at startup** to measure
+  the model's real output width, with a 5-second budget and no retries. If it
+  fails, the start continues with a warning and the width check is skipped —
+  the model-change check does not depend on it.
+
 ### Fixed
 
 - **Cascade worker: a bounded wait between optimize and rebuild cancelled the
@@ -52,6 +88,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept answering. It now falls back to each episode's own vector, with
   `radius` applied, and logs `vector_recall_fact_pool_empty` at info.
   (#502, #509)
+
+### Upgrade
+
+`pip install --upgrade everos` is enough for most roots, and nothing in this
+release rewrites or re-embeds anything on its own. The first start records
+which model built the index and logs one line saying so.
+
+Two deployments need attention:
+
+- **A model narrower than `dim`** — the server now refuses to start instead of
+  accepting writes that could never be stored (this is #434). The error names
+  both numbers and the two steps: set `[embedding] dim` (or
+  `EVEROS_EMBEDDING__DIM`) to what the model returns, **then** run `everos
+  cascade rebuild` — the tables were already created at the old width, so
+  fixing the configuration alone is not enough. Your markdown is untouched
+  throughout.
+- **A model wider than `dim`** — unchanged behaviour, but the start now warns
+  that the extra dimensions are truncated. The shipped default is this case
+  (`Qwen/Qwen3-Embedding-4B` returns 2560, `dim` is 1024) and nothing is
+  wrong: that model is Matryoshka-trained, 1024 is one of its published
+  truncation points, and the index compares with cosine distance. Set
+  `dimensions = 1024` to silence it, if your endpoint accepts that parameter.
+
+**Changing `dim` or `model` later** stops the next start and requires `everos
+cascade rebuild`, which re-embeds every entry from markdown — budget for it.
+
+**Downgrading** to an earlier EverOS is safe as long as `dim` is still 1024:
+the older schema check compares column types only and ignores the new record.
+If you changed `dim`, set it back and rebuild before downgrading.
 
 ## [1.4.2] - 2026-10-14
 

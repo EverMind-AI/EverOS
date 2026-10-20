@@ -259,6 +259,21 @@ async def _tier_client(
     monkeypatch.setattr(
         embed_acc, "_capability", EmbeddingCapability(provider=stub_embedder)
     )
+    # `/health`'s `embed` reports the startup dimension probe, not whether a
+    # provider could be constructed -- that was the half of issue #434 that
+    # read `true` against a dead service. The probe builds its own provider
+    # from settings (it has to: the installed one truncates to its own `dim`,
+    # which would hide a model wider than the column), so it needs a stand-in
+    # here just like the LLM, the embedder and the reranker above. Patching
+    # the probe rather than its recorded result, because startup re-runs it.
+    provenance = importlib.import_module("everos.infra.persistence.index._provenance")
+
+    async def _stub_probe() -> int | None:
+        return StubEmbedder.dim if embed_available else None
+
+    monkeypatch.setattr(
+        provenance, "probe_embedding_dimension", _stub_probe, raising=False
+    )
     monkeypatch.setattr(
         rerank_acc, "_capability", RerankCapability(provider=stub_reranker)
     )

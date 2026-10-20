@@ -609,3 +609,87 @@ async def test_find_topk_relevant_in_cluster_hydrates_own_scope() -> None:
             primary_key("test_app", hit.project_id, hit.id)
         )
         assert same is not None and same.description == hit.description
+
+
+async def test_embedding_model_attestation_round_trips_on_the_collection() -> None:
+    """The model that built an index is recorded with the index, not beside it.
+
+    A local marker file would describe a remote cluster from one machine's
+    disk: several machines pointing at the same Milvus would each keep their
+    own answer and none of them would be wrong about their own file. Keeping
+    it as a collection property means there is one answer, and dropping the
+    collection takes it along.
+
+    Read back through a *new* client so the assertion cannot be satisfied by
+    something the writing client is holding in memory.
+    """
+    from everos.infra.persistence import milvus
+    from everos.infra.persistence.milvus import milvus_manager
+
+    backend = milvus.index_backend
+    assert await backend.read_embedding_model() is None, (
+        "a collection nobody attested must read as unattested, not as an error"
+    )
+
+    await backend.write_embedding_model("fake-768")
+    await milvus_manager.dispose_connection()
+    assert await backend.read_embedding_model() == "fake-768"
+
+    await backend.write_embedding_model("fake-1536")
+    await milvus_manager.dispose_connection()
+    assert await backend.read_embedding_model() == "fake-1536", (
+        "re-attesting must replace the previous value, not append to it"
+    )
+
+
+async def test_changed_model_is_refused_on_the_milvus_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal is backend-neutral: same check, same error, other store."""
+    import everos.component.embedding.accessor as embedding_accessor
+    from everos.component.embedding import EmbeddingCapability
+    from everos.core.errors import EmbeddingProvenanceError
+    from everos.infra.persistence import milvus
+    from everos.infra.persistence.index import _provenance
+
+    await milvus.index_backend.write_embedding_model("nomic-embed-text")
+
+    monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "Qwen/Qwen3-Embedding-4B")
+    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
+    monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
+    load_settings.cache_clear()
+
+    # Stand in for the capability and the probe: this case is about the model
+    # comparison, and neither a real provider nor a reachable service is
+    # needed to decide that two names differ.
+    class _Provider:
+        dim = 1024
+
+        async def embed(self, text: str) -> list[float]:  # pragma: no cover
+            raise AssertionError("the probe is stubbed here")
+
+        async def embed_query(self, text: str) -> list[float]:  # pragma: no cover
+            raise AssertionError("the probe is stubbed here")
+
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            raise AssertionError("the probe is stubbed here")
+
+    monkeypatch.setattr(
+        embedding_accessor, "_capability", EmbeddingCapability(provider=_Provider())
+    )
+
+    async def _probe() -> int | None:
+        return 1024
+
+    monkeypatch.setattr(_provenance, "probe_embedding_dimension", _probe)
+
+    with pytest.raises(EmbeddingProvenanceError) as excinfo:
+        await _provenance.verify_embedding_provenance(milvus.index_backend)
+    message = str(excinfo.value)
+    assert "nomic-embed-text" in message
+    assert "Qwen/Qwen3-Embedding-4B" in message
+    assert "cascade rebuild" in message
+
+    assert await milvus.index_backend.read_embedding_model() == "nomic-embed-text", (
+        "a refusal must not quietly adopt the new model"
+    )

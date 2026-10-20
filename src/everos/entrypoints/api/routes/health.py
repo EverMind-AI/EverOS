@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from everos import __version__
 from everos.component.capabilities import compute_disabled_features
@@ -15,6 +15,7 @@ from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
 from everos.core.observability.logging import get_logger
 from everos.entrypoints.api.utils import cascade_orchestrator, memorize_queue
+from everos.infra.persistence.index import last_probe
 
 logger = get_logger(__name__)
 
@@ -29,7 +30,23 @@ class HealthCapabilities(BaseModel):
     """
 
     llm: bool
-    embed: bool
+    embed: bool = Field(
+        description=(
+            "Whether the embedding service answered the startup dimension "
+            "probe. A snapshot taken when the process started, not a "
+            "liveness check: a service that recovers later still reads false "
+            "until the next restart."
+        )
+    )
+    """Whether the embedding service answered the dimension probe **at startup**.
+
+    A snapshot, not a liveness check: a service that recovers after the
+    process started still reads ``false`` until the next restart, because
+    re-probing here would put a network call behind an endpoint meant to be
+    polled. Before, this reported whether a provider could be *constructed*,
+    which never touches the network -- so an unreachable embedding service
+    read ``true`` while every write failed (issue #434).
+    """
     rerank: bool
     multimodal_llm: bool
     parser: bool
@@ -128,7 +145,7 @@ async def health(request: Request) -> HealthResponse:
     # rerank), swap this literal for a real probe.
     caps = HealthCapabilities(
         llm=True,
-        embed=get_embedding_capability().available,
+        embed=last_probe() is not None,
         rerank=get_rerank_capability().available,
         multimodal_llm=get_multimodal_llm_capability().available,
         parser=parser_available(),
@@ -193,7 +210,15 @@ async def health(request: Request) -> HealthResponse:
         status="ok",
         version=__version__,
         capabilities=caps,
-        disabled_features=compute_disabled_features(caps.model_dump()),
+        # `embed` reports the startup probe, but `disabled_features` is a
+        # client contract about what the server will actually refuse -- and
+        # every engine-side gate (search, the embed-dependent strategies,
+        # backfill) still asks whether a provider could be built. A service
+        # that was unreachable at startup and came back would otherwise have
+        # the server announcing vector search disabled while serving it.
+        disabled_features=compute_disabled_features(
+            {**caps.model_dump(), "embed": get_embedding_capability().available}
+        ),
         cascade=cascade,
         memorize_queue=queue_block,
     )

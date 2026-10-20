@@ -45,17 +45,24 @@ from sqlmodel import SQLModel
 from everos.component.embedding import get_embedding_capability
 from everos.component.tokenizer import build_tokenizer
 from everos.component.utils.datetime import to_display_tz
+from everos.config import load_settings
+from everos.core.errors import (
+    EmbeddingProvenanceError,
+    IndexSchemaMismatchError,
+)
 from everos.core.observability.logging import get_logger
 from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.infra.persistence.index import (
+    assert_record_dim_matches_settings,
     connect,
     drop_business_tables,
     ensure_business_indexes,
     shutdown,
-    verify_business_schemas,
+    verify_configuration,
+    write_embedding_model,
 )
 from everos.infra.persistence.sqlite import (
     dispose_engine,
@@ -190,9 +197,23 @@ async def _runtime(
         engine = get_engine()
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+        # Unconditional, including under `verify=False`: `rebuild` skips
+        # verification precisely because it is repairing the index, but it is
+        # also the one command that creates every table from scratch -- a
+        # disagreement between the two readers of `dim` would be baked into
+        # the new tables and only surface on the next `server start`.
+        assert_record_dim_matches_settings()
         await connect()
         if verify:
-            await verify_business_schemas()
+            # The rest of the facade's startup() sequence; the dim assertion
+            # above is hoisted out of it so `rebuild` gets it too.
+            # `_runtime` does not call it (it drives connect / verify /
+            # ensure separately so `rebuild` can skip the middle), so the
+            # dim guard and the provenance check have to be named here or
+            # they would be absent from every CLI phase.
+            # Attest only while holding the index lock -- `status`,
+            # `fix` and `backfill` are read-only phases.
+            await verify_configuration(may_attest=exclusive)
         if ensure:
             await ensure_business_indexes()
         try:
@@ -200,6 +221,14 @@ async def _runtime(
         finally:
             await shutdown()
             await dispose_engine()
+    except (IndexSchemaMismatchError, EmbeddingProvenanceError) as exc:
+        # Same shape as the lock message above: the operator has one thing to
+        # go and do, so say what drifted and stop. Without this the startup
+        # guards reach the user as a bare traceback and exit 1 -- and 1
+        # already means "no everos.toml here", so the two would be
+        # indistinguishable in a script.
+        typer.secho(str(exc), err=True)
+        raise typer.Exit(code=3) from None
     finally:
         lock.__exit__(None, None, None)
 
@@ -573,6 +602,13 @@ def rebuild(
             # Re-scan + drain: re-embed and re-insert every md entry.
             orchestrator = _build_orchestrator()
             processed = await orchestrator.drain_fully()
+            # Attest the model that just produced every one of those vectors.
+            # The create path cannot carry it: a table built from a pydantic
+            # model has no field metadata, so without this line the rebuilt
+            # index comes up unattested and the next start recommends the
+            # rebuild that was just done.
+            if get_embedding_capability().available:
+                await write_embedding_model(load_settings().embedding.model or "")
             typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
 
     try:

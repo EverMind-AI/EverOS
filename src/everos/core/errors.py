@@ -223,6 +223,29 @@ class ConfigurationError(AppError):
     """
 
 
+class IndexSchemaMismatchError(ConfigurationError):
+    """Base for "the stored index does not match the current configuration".
+
+    Each backend raises its own subclass with its own wording, but every
+    caller wants the same thing: tell the operator what drifted and stop,
+    because there is no online migration. The common base exists so the CLI
+    can render the message without importing a concrete backend -- importing
+    the Milvus one would drag in an optional extra.
+    """
+
+
+class EmbeddingProvenanceError(ConfigurationError):
+    """The configured embedding does not match what this index was built with.
+
+    Covers both halves of that check: a model whose output is narrower than
+    the configured vector column (nothing would ever be storable), and a
+    model name that differs from the one recorded when the index was built
+    (the stored vectors are not comparable to anything the new model
+    produces). Both are recoverable only by changing configuration back or
+    rebuilding, so this is raised before any index is opened for use.
+    """
+
+
 # TOML section name for each provider kind, keyed by the `provider` argument
 # passed to `ProviderNotConfiguredError`.
 _PROVIDER_SECTIONS: dict[str, str] = {

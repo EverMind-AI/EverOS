@@ -12,11 +12,12 @@ from typing import ClassVar
 
 from everos.core.persistence.lancedb import BaseLanceTable, Vector
 
+from ._dim import configured_dim
 from ._parent_type import ParentType
 
 # Vector dimension is settings-managed at runtime; the class-level
 # constant pins the schema dim used at table creation.
-_DIM = 1024
+_DIM = configured_dim()
 
 
 class Episode(BaseLanceTable):
