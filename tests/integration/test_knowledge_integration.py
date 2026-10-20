@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import anyio
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
 from sqlmodel import SQLModel
@@ -1202,6 +1203,84 @@ async def test_replace_failure_preserves_old_document(
 
     # After failure, the original md directory must be restored.
     assert doc_dir.exists(), "Original md must survive a failed PUT replacement"
+
+
+@pytest.mark.parametrize("failed_file", ["index.md", "1_Budget.md", "2_Venue.md"])
+async def test_replace_write_failure_restores_document_bytes(
+    cascade_runtime: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_file: str,
+) -> None:
+    """A failed PUT restores the old files even after recreating their directory."""
+    root = cascade_runtime
+    doc_id = "d_partial_replace"
+    result = await _create_test_document(root, doc_id=doc_id)
+    doc_dir = Path(result.md_path)
+    original_dir = doc_dir / "_original"
+    original_dir.mkdir()
+    (original_dir / "source.txt").write_bytes(b"original upload")
+    before = {
+        path.relative_to(doc_dir): await path.read_bytes()
+        async for path in anyio.Path(doc_dir).rglob("*")
+        if await path.is_file()
+    }
+    await knowledge_document_repo.upsert_from_handler(
+        DocumentUpsertPayload(
+            doc_id=doc_id,
+            app_id="default",
+            project_id="default",
+            category_id="Sports",
+            title="Olympics Plan",
+            summary="Original summary",
+            source_name="source.txt",
+            source_type="file",
+            md_path=(doc_dir / "index.md").relative_to(root.root).as_posix(),
+        )
+    )
+    memories = [
+        memory.model_copy(update={"summary": "Replacement", "content": "New"})
+        for memory in _make_memories(doc_id)
+    ]
+    failure = OSError("injected write failure")
+    write_text = anyio.Path.write_text
+
+    async def fail_write(
+        path: anyio.Path, data: str, *args: object, **kwargs: object
+    ) -> int:
+        if path.name == failed_file:
+            raise failure
+        return await write_text(path, data, *args, **kwargs)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(anyio.Path, "write_text", fail_write)
+        with pytest.raises(OSError) as caught:
+            await replace_document(
+                extractor=_build_mock_extractor(memories),
+                parsed=ParsedContent(text="replacement"),
+                title="Olympics Plan",
+                doc_id=doc_id,
+                knowledge_dir=root.knowledge_dir(),
+            )
+    assert caught.value is failure
+    after = {
+        path.relative_to(doc_dir): await path.read_bytes()
+        async for path in anyio.Path(doc_dir).rglob("*")
+        if await path.is_file()
+    }
+    assert after == before
+    assert not doc_dir.with_name(f".{doc_dir.name}.backup").exists()
+
+    # A subsequent successful replacement must still use the original path.
+    replaced = await replace_document(
+        extractor=_build_mock_extractor(memories),
+        parsed=ParsedContent(text="replacement"),
+        title="Olympics Plan",
+        doc_id=doc_id,
+        knowledge_dir=root.knowledge_dir(),
+    )
+    assert Path(replaced.md_path) == doc_dir
+    assert read_document_md(doc_dir)["body"] == "Replacement"
+    assert not doc_dir.with_name(f".{doc_dir.name}.backup").exists()
 
 
 async def test_dirname_collision_different_docs(cascade_runtime: MemoryRoot) -> None:

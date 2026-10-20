@@ -676,6 +676,11 @@ async def _restore_backup(
     if not await anyio.Path(backup_dir).is_dir():
         return
 
+    # A failed write may have recreated the destination. Remove its partial
+    # contents so shutil.move restores the directory instead of nesting it.
+    if await anyio.Path(original_dir).is_dir():
+        await anyio.to_thread.run_sync(shutil.rmtree, original_dir)
+
     await anyio.to_thread.run_sync(shutil.move, str(backup_dir), str(original_dir))
     logger.info("document_backup_restored", doc_id=doc_id)
 
