@@ -289,7 +289,10 @@ class MaintenanceMachine(RuleBasedStateMachine):
         self.run(self._start("ok"))
 
     def run(self, coro: Any) -> Any:
-        return self.loop.run_until_complete(coro)
+        # Bounded: the first deep run of this machine sat 85 minutes at 0 %
+        # CPU with no trace to read. A step that does not finish in a minute
+        # is a failure with the trace, not a hang.
+        return self.loop.run_until_complete(asyncio.wait_for(coro, timeout=60.0))
 
     def teardown(self) -> None:
         try:
