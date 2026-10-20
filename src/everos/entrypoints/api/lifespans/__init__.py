@@ -24,6 +24,7 @@ External usage::
 from .cascade import CascadeLifespanProvider as CascadeLifespanProvider
 from .lancedb import LanceDBLifespanProvider as LanceDBLifespanProvider
 from .llm import LLMLifespanProvider as LLMLifespanProvider
+from .memorize import MemorizeLifespanProvider as MemorizeLifespanProvider
 from .ome import OmeLifespanProvider as OmeLifespanProvider
 from .parser import ParserLifespanProvider as ParserLifespanProvider
 from .sqlite import SqliteLifespanProvider as SqliteLifespanProvider

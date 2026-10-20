@@ -33,6 +33,7 @@ from .lifespans import (
     CascadeLifespanProvider,
     LanceDBLifespanProvider,
     LLMLifespanProvider,
+    MemorizeLifespanProvider,
     OmeLifespanProvider,
     ParserLifespanProvider,
     SqliteLifespanProvider,
@@ -75,7 +76,8 @@ def create_app(
             ``[TracingLifespanProvider(), MetricsLifespanProvider(),
             LLMLifespanProvider(), ParserLifespanProvider(),
             SqliteLifespanProvider(), LanceDBLifespanProvider(),
-            CascadeLifespanProvider(), OmeLifespanProvider()]``.
+            CascadeLifespanProvider(), OmeLifespanProvider(),
+            MemorizeLifespanProvider()]``.
 
     Returns:
         FastAPI: Configured application instance.
@@ -92,6 +94,7 @@ def create_app(
             LanceDBLifespanProvider(),
             CascadeLifespanProvider(),
             OmeLifespanProvider(),
+            MemorizeLifespanProvider(),
         ]
 
     from everos import __version__
