@@ -128,9 +128,8 @@ class OmeRunMachine(RuleBasedStateMachine):
         self.h = StrategyTestHarness()
         self.h._engine._config.run_timeout_seconds = RUN_TIMEOUT
         # The ring-buffer trim is the store's own unit test's subject; keep
-        # it out of reach of anything one sequence can write (the default
-        # of 100 rows was crossed by a deep run and trimmed a row the model
-        # still expected).
+        # it out of reach of anything one sequence can write (a deep
+        # sequence writes a few hundred rows, the default cap is 100).
         self.h._engine._config.max_records_per_strategy = 100_000
         self.h.register(_scripted)
         self.run(self.h.start())
@@ -264,7 +263,14 @@ class OmeRunMachine(RuleBasedStateMachine):
 
     @invariant()
     def no_stray_rows(self) -> None:
-        rows = self.run(self.h.list_runs("scripted"))
+        # Straight from the store with an explicit limit: the harness's
+        # list_runs caps at 100 rows, which a deep run read as "a row went
+        # missing" once a sequence had written more than that.
+        rows = self.run(
+            self.engine._run_record_store.list_runs(
+                strategy_name="scripted", limit=1_000_000
+            )
+        )
         assert len(rows) == sum(len(c) for c in self.expected.values())
 
 
