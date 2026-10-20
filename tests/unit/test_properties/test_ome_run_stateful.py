@@ -150,6 +150,33 @@ class OmeRunMachine(RuleBasedStateMachine):
     def engine(self) -> Any:
         return self.h._engine
 
+    def _drain(self) -> None:
+        """Drain, and when that times out say what was still in flight.
+
+        Windows CI timed out here with one run in flight and only an APS log
+        line (``database is locked`` after the 5 s busy wait) to go on.
+        """
+        try:
+            self.run(self.h.drain(timeout=20))
+        except TimeoutError as e:
+            try:
+                running = self.run(self.engine._run_record_store.find_running())
+                rows = [
+                    (
+                        self.plan_of.get(r.event_id, "?"),
+                        r.run_id[:8],
+                        r.attempt,
+                        r.started_at,
+                    )
+                    for r in running
+                ]
+            except Exception as read_error:  # noqa: BLE001 - diagnostics only
+                rows = [f"find_running failed: {read_error!r}"]
+            raise TimeoutError(
+                f"{e}; active_runs={self.engine._active_runs}; running={rows}; "
+                f"trace={self.trace[-8:]}"
+            ) from e
+
     # ── rules ──────────────────────────────────────────────────────────────
 
     @rule(plans=st.lists(st.sampled_from(PLANS), min_size=1, max_size=4))
@@ -160,7 +187,7 @@ class OmeRunMachine(RuleBasedStateMachine):
             self.plan_of[job.event_id] = job.plan
             self.trace.append(f"emit {job.plan} {job.event_id[:8]}")
         self.run(self._emit_all(jobs))
-        self.run(self.h.drain(timeout=20))
+        self._drain()
         for p in plans:
             event(f"run: {p}")
 
@@ -177,7 +204,7 @@ class OmeRunMachine(RuleBasedStateMachine):
         returned = self.run(
             self.engine.wait_for_event(job.event_id, timeout=20, poll_interval=0.01)
         )
-        self.run(self.h.drain(timeout=20))
+        self._drain()
         final = self.run(self.engine.list_runs_by_event_id(job.event_id))
         got = sorted((r.status, r.attempt) for r in returned)
         want = sorted((r.status, r.attempt) for r in final)
@@ -197,7 +224,7 @@ class OmeRunMachine(RuleBasedStateMachine):
         self.trace.append(f"crash {plan} {job.event_id[:8]}")
         self.run(self.engine.stop())
         self.run(self.engine.start())
-        self.run(self.h.drain(timeout=20))
+        self._drain()
         event(f"crash: {plan}")
 
     async def _insert_stale_running(self, job: _Job, run_id: str, age: float) -> None:
