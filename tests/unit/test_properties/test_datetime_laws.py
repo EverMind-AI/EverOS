@@ -12,8 +12,9 @@ values:
    datetime and back returns the same integer.
 2. ``to_timestamp_ms`` truncates (never rounds) a sub-millisecond instant
    and is monotone in the instant.
-3. ``ensure_utc`` is idempotent and instant-preserving; a naive input gets
-   the display zone attached (the documented fallback).
+3. ``ensure_utc`` is idempotent and instant-preserving; a naive input is
+   read as UTC (the storage-boundary contract: SQLite hands timestamps back
+   naive, and they must not drift), whatever the display zone is.
 4. ``to_iso_format`` / ``from_iso_format`` preserve the instant, and the
    rendered string carries an explicit offset so it can never be re-read
    as naive.
@@ -78,12 +79,14 @@ def test_ensure_utc_is_idempotent_and_keeps_the_instant(
 
 
 @given(d=aware_instants)
-def test_ensure_utc_attaches_the_display_zone_to_naive_input(d: dt.datetime) -> None:
+def test_ensure_utc_reads_naive_input_as_utc(d: dt.datetime) -> None:
     naive = d.replace(tzinfo=None)
     got = dtu.ensure_utc(naive)
     assert got is not None and got.tzinfo == _UTC
-    # The naive wall clock was read in the display zone, then converted.
-    assert got == naive.replace(tzinfo=dtu._display_tz()).astimezone(_UTC)
+    # Not the display zone: a naive value crossing the storage boundary is
+    # already UTC (review on #521 caught the first version of this law,
+    # which only held because the default display zone is UTC).
+    assert got == naive.replace(tzinfo=_UTC)
 
 
 @given(d=aware_instants, offset_minutes=st.integers(-14 * 60, 14 * 60))

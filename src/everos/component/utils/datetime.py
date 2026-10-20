@@ -277,8 +277,8 @@ def to_timestamp_ms(d: _dt.datetime) -> int:
     ``int(d.timestamp() * 1000)``: the float product lands just below the
     integer for a fraction of a percent of instants (1095954883735 came back
     as 1095954883734), which broke the documented round trip with
-    :func:`from_timestamp_ms`. A naive input is read in the display zone,
-    as :func:`ensure_utc` would.
+    :func:`from_timestamp_ms`. A naive input is read as UTC, as
+    :func:`ensure_utc` reads it.
     """
     aware = ensure_utc(d)
     assert aware is not None
