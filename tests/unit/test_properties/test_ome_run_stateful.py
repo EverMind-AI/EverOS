@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from collections import defaultdict
 from datetime import timedelta
 from typing import Any
@@ -172,9 +173,10 @@ class OmeRunMachine(RuleBasedStateMachine):
                 ]
             except Exception as read_error:
                 rows = [f"find_running failed: {read_error!r}"]
+            threads = sorted(t.name for t in threading.enumerate())
             raise TimeoutError(
                 f"{e}; active_runs={self.engine._active_runs}; running={rows}; "
-                f"trace={self.trace[-8:]}"
+                f"threads={threads}; trace={self.trace[-8:]}"
             ) from e
 
     # ── rules ──────────────────────────────────────────────────────────────
