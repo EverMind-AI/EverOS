@@ -127,6 +127,11 @@ class OmeRunMachine(RuleBasedStateMachine):
         _calls.clear()
         self.h = StrategyTestHarness()
         self.h._engine._config.run_timeout_seconds = RUN_TIMEOUT
+        # The ring-buffer trim is the store's own unit test's subject; keep
+        # it out of reach of anything one sequence can write (the default
+        # of 100 rows was crossed by a deep run and trimmed a row the model
+        # still expected).
+        self.h._engine._config.max_records_per_strategy = 100_000
         self.h.register(_scripted)
         self.run(self.h.start())
         self.expected: dict[str, list[tuple[RunStatus, int]]] = {}
