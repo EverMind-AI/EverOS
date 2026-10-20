@@ -27,7 +27,7 @@ class IdleStore:
         # scan relies on stops being temporal order: ``to_iso_format`` keeps
         # the input's offset.
         at = ensure_utc(at) or at
-        async with self._storage.connect() as conn:
+        async with self._storage.write() as conn:
             await conn.execute(
                 "INSERT INTO idle_store "
                 "(strategy_name, bucket_key, last_activity_ts) "
@@ -36,7 +36,6 @@ class IdleStore:
                 "last_activity_ts = excluded.last_activity_ts",
                 (strategy_name, bucket_key, to_iso_format(at)),
             )
-            await conn.commit()
 
     async def scan_idle(
         self, strategy_name: str, *, idle_seconds: int, now: datetime

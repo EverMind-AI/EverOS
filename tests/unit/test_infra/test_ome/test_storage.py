@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import aiosqlite
@@ -142,3 +143,46 @@ async def test_storage_transaction_rolls_back_on_exception(tmp_path: Path) -> No
         )
         row = await cur.fetchone()
     assert row is None
+
+
+@pytest.mark.asyncio
+async def test_writes_queue_behind_the_holder(tmp_path: Path) -> None:
+    """Writers wait on the in-process queue while another write is open,
+    none runs before it ends, and every write commits when its block ends.
+    (Among the waiters the order is that in which their connections came
+    up, not strictly arrival, so it is not asserted.)"""
+    storage = OMEStorage(db_path=tmp_path / "ome.db")
+    await storage.init()
+    order: list[str] = []
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        async with storage.write() as conn:
+            order.append("holder")
+            await conn.execute(
+                "INSERT INTO idle_store (strategy_name, bucket_key, "
+                "last_activity_ts) VALUES ('s', 'holder', '2026')"
+            )
+            await release.wait()
+
+    async def write(name: str) -> None:
+        async with storage.write() as conn:
+            order.append(name)
+            await conn.execute(
+                "INSERT INTO idle_store (strategy_name, bucket_key, "
+                "last_activity_ts) VALUES ('s', ?, '2026')",
+                (name,),
+            )
+
+    tasks = [asyncio.create_task(hold())]
+    await asyncio.sleep(0.05)
+    for name in ("w1", "w2", "w3"):
+        tasks.append(asyncio.create_task(write(name)))
+        await asyncio.sleep(0)
+    assert order == ["holder"], "writers must wait while the holder writes"
+    release.set()
+    await asyncio.gather(*tasks)
+    assert order[0] == "holder" and sorted(order[1:]) == ["w1", "w2", "w3"]
+    async with storage.connect() as conn:
+        cur = await conn.execute("SELECT bucket_key FROM idle_store ORDER BY rowid")
+        assert [r[0] for r in await cur.fetchall()] == order

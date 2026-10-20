@@ -98,14 +98,13 @@ class RunRecordStore:
         finished_at: datetime,
         error: str | None,
     ) -> None:
-        async with self._storage.connect() as conn:
+        async with self._storage.write() as conn:
             await conn.execute(
                 "UPDATE run_record "
                 "SET status = ?, finished_at = ?, error = ? "
                 "WHERE run_id = ?",
                 (status.value, to_iso_format(finished_at), error, run_id),
             )
-            await conn.commit()
 
     async def get(self, run_id: str) -> RunRecord | None:
         """Return the record for ``run_id`` (``None`` if absent)."""

@@ -70,6 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OME: concurrent run-record writes could starve one another until the
+  busy timeout.** Every store write opened its own connection and left the
+  waiting to SQLite's busy handler, which sleeps and retries, so under
+  several writers a late arrival could keep taking the write lock ahead of
+  an early one. On Windows, where a commit costs 30-80 ms, a writer starved
+  that way hit the 5 s timeout and failed with `database is locked`
+  (measured on CI: 16 writers, p99 3.8 s, one failure in 30 s), which
+  silently drops the run when it lands on the RUNNING insert and leaves the
+  row RUNNING until a restart when it lands on a status update. Writers now
+  queue on an in-process lock that nobody overtakes before touching the
+  file. Found by the OME run state-machine test, which failed on Windows CI.
 - **A message the model can never segment no longer blocks its session.**
   Boundary detection retries an unusable reply three times per call; a
   message that always produced one stayed in the session's buffer, every
