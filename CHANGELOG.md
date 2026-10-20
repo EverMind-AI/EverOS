@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A message the model can never segment no longer blocks its session.**
+  Boundary detection retries an unusable reply three times per call; a
+  message that always produced one stayed in the session's buffer, every
+  later `/add` or `/flush` merged it back in and failed the same way, and the
+  session was stuck until someone cleared the buffer by hand (the async queue
+  marked that session's batches `failed` one after another). The third
+  consecutive call that ends this way now moves the session's buffer and the
+  call's own messages to the `quarantine` track of `unprocessed_buffer`,
+  answers `422 INVALID_INPUT` naming the session and the count, and the next
+  call starts from an empty buffer. Infrastructure failures (no quota,
+  network) are not counted and still propagate as `EXTERNAL_SERVICE_UNAVAILABLE`,
+  so a buffer waits out an outage.
 - **A session-lock timeout could cancel extraction after the memcell was
   written.** `memorize()` wrapped the whole call in
   `session_lock_timeout_seconds`; a timeout that landed after the boundary

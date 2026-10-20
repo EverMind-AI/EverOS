@@ -29,7 +29,11 @@ Invariants after every rule, from the module docstring and the repos:
 4. ``conversation_status.last_memcell_ts`` is the latest cell timestamp,
    ``last_message_ts`` the latest message the buffer paths saw;
 5. a boundary call that keeps failing leaves everything untouched, and the
-   stage returns the status the docstring assigns to each path.
+   stage returns the status the docstring assigns to each path;
+6. the third consecutive call on one session whose attempts all return
+   unusable replies moves the session's buffer and that call's messages to
+   the ``quarantine`` track (nothing dropped, the session starts over), and
+   the quarantine track holds exactly those ids.
 
 Timestamps are unique per message, so ids are unique. ``gen_message_id`` is
 deterministic in ``(session, timestamp_ms, index)`` by design (retries of
@@ -66,6 +70,7 @@ from sqlalchemy import select
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
+from everos.core.errors import SessionBufferQuarantinedError
 from everos.core.persistence import (
     MemoryRoot,
     create_session_factory,
@@ -105,6 +110,7 @@ settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 SESSIONS = ("s1", "s2")
 BASE_TS = 1_700_000_000_000  # above the seconds/ms threshold
 ATTEMPTS = boundary_mod._BOUNDARY_MAX_ATTEMPTS
+POISON_CALLS = boundary_mod._POISON_CALLS
 
 
 def event(label: str) -> None:
@@ -142,10 +148,13 @@ class BoundaryMachine(RuleBasedStateMachine):
         ]
         for p in self._patches:
             p.start()
+        boundary_mod._unusable_replies.clear()
         # the model
         self.accepted: dict[str, dict[str, Any]] = {}  # id -> message
         self.buffer: dict[str, list[str]] = defaultdict(list)  # session -> ids
         self.cells: dict[str, list[list[str]]] = defaultdict(list)
+        self.quarantined: dict[str, list[str]] = defaultdict(list)
+        self.unusable_calls: dict[str, int] = defaultdict(int)
         self.last_message_ts: dict[str, int] = {}
         self.last_memcell_ts: dict[str, int] = {}
         self.next_ts = 0
@@ -228,9 +237,19 @@ class BoundaryMachine(RuleBasedStateMachine):
         cut, n_cells, fails = script
         if fails >= ATTEMPTS:
             self.expected_detect_calls += ATTEMPTS
-            for m in fresh:  # the call failed: the service never kept them
-                del self.accepted[m["id"]]
-            return "", True
+            self.unusable_calls[session] += 1
+            if self.unusable_calls[session] < POISON_CALLS:
+                for m in fresh:  # the call failed: the service never kept them
+                    del self.accepted[m["id"]]
+                return "", True
+            # The session's buffer and this call's messages are set aside and
+            # the session starts over (spec: SessionBufferQuarantinedError).
+            self.unusable_calls[session] = 0
+            self.quarantined[session].extend(self.buffer[session])
+            self.quarantined[session].extend(m["id"] for m in fresh)
+            self.buffer[session] = []
+            return "", "quarantined"
+        self.unusable_calls[session] = 0
         self.expected_detect_calls += fails + 1
         k = len(merged) if final else round(cut * len(merged))
         if k == 0:
@@ -321,13 +340,41 @@ class BoundaryMachine(RuleBasedStateMachine):
         )
         try:
             got = self.run(self._call(session, fresh, defer=defer, final=False))
+        except SessionBufferQuarantinedError:
+            assert raises == "quarantined", "quarantined before the third failing call"
+            event("add: session buffer quarantined")
+            return
         except ValueError:
-            assert raises, "boundary raised but the script did not exhaust its retries"
+            assert raises is True, (
+                "boundary raised but the script did not exhaust its retries"
+            )
             event("add: boundary kept failing, nothing kept")
             return
         assert not raises, "the boundary should have exhausted its retries"
         assert got == want, (got, want, "\n".join(self.trace[-12:]))
         event(f"add: {'deferred' if defer else want}")
+
+    @rule(session=st.sampled_from(SESSIONS))
+    def model_cannot_segment_this_session(self, session: str) -> None:
+        """Enough consecutive unusable replies to reach the quarantine."""
+        for _ in range(POISON_CALLS):
+            fresh = self._fresh(session, [("user", "poison")])
+            self.script = (1.0, 1, ATTEMPTS)
+            self.trace.append(f"add {session} poison script={self.script}")
+            _, raises = self._apply(
+                session, fresh, defer=False, final=False, script=self.script
+            )
+            try:
+                self.run(self._call(session, fresh, defer=False, final=False))
+            except SessionBufferQuarantinedError:
+                assert raises == "quarantined", "quarantined before the third call"
+                event("add: session buffer quarantined")
+                return
+            except ValueError:
+                assert raises is True
+                continue
+            raise AssertionError("an unusable reply must raise")
+        raise AssertionError("the third consecutive failing call must quarantine")
 
     @rule(
         session=st.sampled_from(SESSIONS),
@@ -339,8 +386,12 @@ class BoundaryMachine(RuleBasedStateMachine):
         want, raises = self._apply(session, [], defer=False, final=True, script=script)
         try:
             got = self.run(self._call(session, [], defer=False, final=True))
+        except SessionBufferQuarantinedError:
+            assert raises == "quarantined"
+            event("flush: session buffer quarantined")
+            return
         except ValueError:
-            assert raises
+            assert raises is True
             event("flush: boundary kept failing, nothing kept")
             return
         assert not raises
@@ -358,10 +409,19 @@ class BoundaryMachine(RuleBasedStateMachine):
         placed: list[str] = []
         for session in SESSIONS:
             placed.extend(self.buffer[session])
+            placed.extend(self.quarantined[session])
             for cell in self.cells[session]:
                 placed.extend(cell)
         assert len(placed) == len(set(placed)), "an id is in two places"
         assert set(placed) == set(self.accepted), "\n".join(self.trace[-12:])
+
+    @invariant()
+    def quarantine_track_matches_model(self) -> None:
+        for session in SESSIONS:
+            rows = self.run(self.buffer_repo.list_for_track(session, "quarantine"))
+            assert sorted(r.message_id for r in rows) == sorted(
+                self.quarantined[session]
+            ), (session, "\n".join(self.trace[-12:]))
 
     @invariant()
     def buffer_table_matches_model(self) -> None:
@@ -379,7 +439,9 @@ class BoundaryMachine(RuleBasedStateMachine):
                     m["sender"],
                 )
         all_rows = self.run(self._rows(UnprocessedBuffer))
-        assert len(all_rows) == sum(len(self.buffer[s]) for s in SESSIONS)
+        assert len(all_rows) == sum(
+            len(self.buffer[s]) + len(self.quarantined[s]) for s in SESSIONS
+        )
 
     @invariant()
     def memcell_table_matches_model(self) -> None:

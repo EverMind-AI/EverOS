@@ -89,6 +89,19 @@ class FilterError(InvalidInputError):
     """A caller-supplied filter expression is invalid or malformed."""
 
 
+class SessionBufferQuarantinedError(InvalidInputError):
+    """The session's buffered messages were set aside after repeated failures.
+
+    Boundary detection answered, but with an unusable reply, on several
+    consecutive calls for one session: the buffer holds something the model
+    cannot segment. Rather than fail every later call on that session for
+    good, the stage moves the buffer (and this call's messages) to the
+    ``quarantine`` track and lets the session continue. Infrastructure
+    failures (no quota, network) are not counted: those are transient and
+    propagate as :class:`ExternalServiceError` instead.
+    """
+
+
 class EmbeddingInputError(InvalidInputError):
     """The embedding provider rejected the input itself, not the request.
 

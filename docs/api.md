@@ -231,7 +231,7 @@ parsing the human-readable `message` field.
 |---|---|---|---|
 | `NOT_FOUND` | `404` | No | Requested resource does not exist |
 | `CONFLICT` | `409` | No | Operation conflicts with existing state (e.g. duplicate document) |
-| `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` |
+| `INVALID_INPUT` | `422` | No | Request-body validation failure. Also covers `/search` / `/get` filter-DSL compile errors — the compile reason rides in `message` — and, on `/add` and `/flush`, a session whose buffered messages the model could not segment on three consecutive calls: the buffer is moved to the `quarantine` track of `unprocessed_buffer` so the session can continue, and `message` names the session and the number of messages set aside |
 | `EXTRACTION_EMPTY` | `422` | No | Knowledge document parsed but the extractor produced no topics. An empty or whitespace-only upload is rejected earlier as `INVALID_INPUT` (`"Uploaded file has no valid content."`) |
 | `BAD_REQUEST` | `400` | No | Path traversal attempt or other malformed input |
 | `UNSUPPORTED_FORMAT` | `415` | No | File format or modality not supported (e.g. unsupported `ContentItem` type, missing `ext` for `base64`) |

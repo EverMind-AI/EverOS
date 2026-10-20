@@ -14,7 +14,8 @@ Exposes:
 
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from everos.core.persistence.sqlite import RepoBase, session_scope
@@ -78,6 +79,51 @@ class _UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
             if rows:
                 s.add_all(rows)
             await s.commit()
+
+    async def quarantine(
+        self,
+        session_id: str,
+        from_track: str,
+        to_track: str,
+        extra_rows: list[UnprocessedBuffer],
+        *,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> int:
+        """Move the (session, from_track) slice to ``to_track`` and add ``extra_rows``.
+
+        One transaction: the rows already buffered change track in place, and
+        the rows of the call that triggered the move (not yet persisted) are
+        inserted under ``to_track``; an id already present is left as it is.
+        Returns the number of rows now set aside by this call.
+        """
+        async with session_scope(self._factory) as s:
+            moved = await s.execute(
+                update(UnprocessedBuffer)
+                .where(
+                    UnprocessedBuffer.app_id == app_id,
+                    UnprocessedBuffer.project_id == project_id,
+                    UnprocessedBuffer.session_id == session_id,
+                    UnprocessedBuffer.track == from_track,
+                )
+                .values(track=to_track)
+            )
+            inserted = 0
+            for row in extra_rows:
+                values = {
+                    c.name: getattr(row, c.name)
+                    for c in UnprocessedBuffer.__table__.columns  # type: ignore[attr-defined]
+                    if getattr(row, c.name) is not None
+                }
+                values["track"] = to_track
+                result = await s.execute(
+                    sqlite_insert(UnprocessedBuffer)
+                    .values(**values)
+                    .on_conflict_do_nothing()
+                )
+                inserted += result.rowcount
+            await s.commit()
+        return int(moved.rowcount) + inserted
 
 
 unprocessed_buffer_repo = _UnprocessedBufferRepo()

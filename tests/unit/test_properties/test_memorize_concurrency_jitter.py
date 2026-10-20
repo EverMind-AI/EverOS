@@ -17,7 +17,14 @@ once everything has settled:
    places;
 2. the buffer holds each id once, per session in ``(timestamp, id)`` order;
 3. every memcell row the table holds was handed to the pipeline exactly
-   once, and the pipeline never saw an id that is not in the table.
+   once, and the pipeline never saw an id that is not in the table;
+4. a poison message -- one the boundary stand-in can never segment, drawn
+   as "the k-th message created" -- costs a session at most
+   ``_POISON_CALLS`` consecutive failed calls before its buffer is set
+   aside on the ``quarantine`` track (bounded cost), after which the
+   session's later healthy messages are extracted again (exit), and other
+   sessions never notice (isolation). The quarantine track counts as a
+   place in law 1.
 
 What is real: ``memorize()`` end to end (ingest, lock, timeout, boundary
 stage, the three SQLite repositories on a temp file). What is replaced: the
@@ -50,6 +57,7 @@ from sqlalchemy import select
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings, load_settings
+from everos.core.errors import SessionBufferQuarantinedError
 from everos.core.persistence import (
     MemoryRoot,
     create_session_factory,
@@ -92,10 +100,16 @@ def event(label: str) -> None:
 
 
 class _Run:
-    def __init__(self, seed: int, slow_max: float, fail_rate: float) -> None:
+    def __init__(
+        self, seed: int, slow_max: float, fail_rate: float, poison: frozenset[int]
+    ) -> None:
         self.rng = random.Random(seed)
         self.slow_max = slow_max
         self.fail_rate = fail_rate
+        self.poison_positions = poison  # the k-th message created is poison
+        self.poison_ids: set[str] = set()
+        self.consecutive_failures: dict[str, int] = defaultdict(int)
+        self.worst_streak = 0
         self.pipeline_log: list[tuple[str, tuple[str, ...]]] = []
         self.unexpected: list[tuple[int, str, str]] = []
         self.pipelines_active = 0
@@ -118,6 +132,9 @@ class _Run:
         hard_msg_limit: int = 0,
     ) -> DetectionResult:
         await asyncio.sleep(self.rng.random() * self.slow_max)
+        if any(m.id in self.poison_ids for m in messages):
+            self.note("  boundary: ValueError (poison in the input)")
+            raise ValueError("cannot segment this")
         if self.rng.random() < self.fail_rate:
             self.note("  boundary: ValueError")
             raise ValueError("bad reply")
@@ -160,9 +177,11 @@ async def _jittered(
     lock_timeout: float,
     slow_max: float,
     fail_rate: float,
+    poison: frozenset[int] = frozenset(),
 ) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="memorize_jitter_"))
-    run = _Run(seed, slow_max, fail_rate)
+    run = _Run(seed, slow_max, fail_rate, poison)
+    boundary_mod._unusable_replies.clear()
     # The per-session locks are process-wide and bound to the loop that
     # first used them; every example runs on a fresh loop.
     session_lock_mod._session_locks.clear()
@@ -224,7 +243,10 @@ async def _jittered(
                         "role": "user",
                     }
                 )
-                ids.append(f"m_{session}_{ts}_{idx:03d}")
+                mid = f"m_{session}_{ts}_{idx:03d}"
+                ids.append(mid)
+                if next_ts[0] in run.poison_positions:
+                    run.poison_ids.add(mid)
             payload = {"session_id": session, "messages": msgs}
             run.note(f"call#{k} {kind} {session} n={len(msgs)}")
             try:
@@ -238,9 +260,19 @@ async def _jittered(
                 unknown[session].update(ids)
                 event("call: lock timeout")
                 return
+            except SessionBufferQuarantinedError:
+                run.note(f"call#{k} -> session buffer quarantined")
+                accepted[session].update(ids)  # persisted, on the quarantine track
+                run.consecutive_failures[session] = 0
+                event("call: session buffer quarantined")
+                return
             except ValueError:
                 run.note(f"call#{k} -> boundary failed")
                 unknown[session].update(ids)
+                run.consecutive_failures[session] += 1
+                run.worst_streak = max(
+                    run.worst_streak, run.consecutive_failures[session]
+                )
                 event("call: boundary failed")
                 return
             except Exception as exc:  # anything else is a finding in itself
@@ -251,6 +283,8 @@ async def _jittered(
                 return
             run.note(f"call#{k} -> {result.status}")
             accepted[session].update(ids)
+            if kind != "defer":
+                run.consecutive_failures[session] = 0
             event(f"call: {kind} -> {result.status}")
 
         await asyncio.gather(*(call(k, *item) for k, item in enumerate(plan)))
@@ -268,9 +302,21 @@ async def _jittered(
 
         async with factory() as s:
             memcells = list((await s.execute(select(Memcell))).scalars().all())
+        # Bounded cost: no session fails more than _POISON_CALLS calls in a row
+        # (the next one is the quarantine, which the model does not count).
+        assert run.worst_streak < boundary_mod._POISON_CALLS + 1, (
+            run.worst_streak,
+            "\n".join(run.trace),
+        )
         for session in SESSIONS:
             rows = await buffer_repo.list_for_track(session, "memorize")
             buffer_ids = [r.message_id for r in rows]
+            quarantine = {
+                r.message_id
+                for r in await buffer_repo.list_for_track(session, "quarantine")
+            }
+            if quarantine:
+                event("quarantine track holds messages")
             assert len(set(buffer_ids)) == len(buffer_ids), buffer_ids
             keys = [(r.timestamp, r.message_id) for r in rows]
             assert keys == sorted(keys), "\n".join(run.trace)
@@ -292,7 +338,10 @@ async def _jittered(
                 cells_of,
                 "\n".join(run.trace),
             )
-            placed = set(buffer_ids) | set(cell_ids)
+            placed = set(buffer_ids) | set(cell_ids) | quarantine
+            assert not (quarantine & set(cell_ids)) and not (
+                quarantine & set(buffer_ids)
+            ), ("quarantined and elsewhere", "\n".join(run.trace))
             both = sorted(set(buffer_ids) & set(cell_ids))
             assert not both, (
                 "buffer and memcell",
@@ -348,6 +397,7 @@ async def _jittered(
     lock_timeout=st.sampled_from((0.03, 0.1, 5.0)),
     slow_max=st.sampled_from((0.0, 0.02, 0.08)),
     fail_rate=st.sampled_from((0.0, 0.3)),
+    poison=st.frozensets(st.integers(1, 12), max_size=2),
 )
 def test_concurrent_memorize_keeps_every_message_in_one_place(
     plan: list[tuple[str, str, int, float]],
@@ -355,5 +405,6 @@ def test_concurrent_memorize_keeps_every_message_in_one_place(
     lock_timeout: float,
     slow_max: float,
     fail_rate: float,
+    poison: frozenset[int],
 ) -> None:
-    asyncio.run(_jittered(plan, seed, lock_timeout, slow_max, fail_rate))
+    asyncio.run(_jittered(plan, seed, lock_timeout, slow_max, fail_rate, poison))
