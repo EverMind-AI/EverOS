@@ -293,10 +293,16 @@ class CascadeOrchestrator:
         itself gets to enqueue first -- otherwise this would report an
         emptiness the next drain is already fixing.
 
-        The verdict needs all three facts: the ledger claims files are
-        indexed, it claims nothing is waiting, and every table is empty. A
-        fresh root has nothing done and a draining one has work pending, so
-        neither trips it.
+        The verdict needs all three facts: the ledger claims **live**
+        sources were indexed, it claims nothing is waiting, and every table
+        is empty. A fresh root has nothing done and a draining one has work
+        pending, so neither trips it.
+
+        "Live" is load-bearing. ``QueueSummary.done`` includes completed
+        deletions, which the reconciler keeps on purpose, so a user who
+        deleted their last markdown file would otherwise look identical to
+        a wiped index -- reported forever, and pointed at a rebuild that
+        could not add anything back.
         """
         try:
             self._index_rows = await count_business_rows()
@@ -306,15 +312,14 @@ class CascadeOrchestrator:
             logger.warning("cascade_index_row_count_failed", error=repr(exc))
             return
         summary = await md_change_state_repo.queue_summary()
+        live = await md_change_state_repo.count_done_live_sources()
         self._index_emptied = (
-            summary.done > 0
-            and summary.pending == 0
-            and not any(self._index_rows.values())
+            live > 0 and summary.pending == 0 and not any(self._index_rows.values())
         )
         if self._index_emptied:
             logger.warning(
                 "cascade_index_empty_but_ledger_done",
-                done=summary.done,
+                done=live,
                 rows=self._index_rows,
                 hint=(
                     "the ledger says every file is indexed but every index "

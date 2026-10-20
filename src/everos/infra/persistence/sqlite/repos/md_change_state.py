@@ -469,6 +469,25 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
             await s.commit()
             return int(result.rowcount or 0)
 
+    async def count_done_live_sources(self) -> int:
+        """``done`` rows that left something indexable behind.
+
+        ``QueueSummary.done`` counts completed **deletions** too: the
+        reconciler keeps a finished delete as ``status='done'`` with
+        ``change_type='deleted'`` so the file is not re-enqueued every scan
+        (:mod:`everos.memory.cascade.reconciler`). That makes ``done`` the
+        wrong evidence for "sources were indexed, so the tables should hold
+        rows" -- a user who deletes their last markdown file ends up with
+        ``done > 0``, nothing pending and empty tables, which is exactly
+        what a deleted index directory looks like (#501).
+        """
+        async with session_scope(self._factory) as s:
+            return await _count_where(
+                s,
+                (MdChangeState.status == "done")
+                & (MdChangeState.change_type != "deleted"),
+            )
+
     async def queue_summary(self) -> QueueSummary:
         """Aggregate the table for the ``cascade status`` CLI."""
         async with session_scope(self._factory) as s:

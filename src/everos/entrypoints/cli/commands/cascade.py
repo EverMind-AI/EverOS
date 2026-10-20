@@ -381,9 +381,13 @@ def status(
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
-            if summary.done > 0 and summary.pending == 0 and not any(rows.values()):
+            # `summary.done` would count completed deletions, so a user who
+            # removed their last markdown file would be warned that their
+            # index is missing and sent to rebuild it from nothing.
+            live = await md_change_state_repo.count_done_live_sources()
+            if live > 0 and summary.pending == 0 and not any(rows.values()):
                 typer.secho(
-                    f"\n  every file is marked done ({summary.done}) but every "
+                    f"\n  {live} source file(s) are indexed but every "
                     "index table is empty.\n"
                     "  Searches will return nothing. If the index directory was "
                     "removed, run `everos cascade rebuild`\n"

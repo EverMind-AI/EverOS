@@ -81,12 +81,27 @@ def _summary(*, pending: int, done: int) -> QueueSummary:
 
 
 async def _verdict(
-    memory_root: MemoryRoot, *, rows: dict[str, int], summary: QueueSummary
+    memory_root: MemoryRoot,
+    *,
+    rows: dict[str, int],
+    summary: QueueSummary,
+    live: int | None = None,
 ) -> tuple[bool, dict[str, int]]:
+    """Run the check against a stated ledger and index state.
+
+    ``live`` is the count of ``done`` rows that are **not** completed
+    deletions, which is the number the verdict is allowed to use. It
+    defaults to ``summary.done`` so a case that does not care about the
+    distinction reads as before; the deletion case sets them apart.
+    """
     orch = _orchestrator(memory_root)
     with (
         patch(f"{_ORCH}.count_business_rows", return_value=rows),
         patch(f"{_ORCH}.md_change_state_repo.queue_summary", return_value=summary),
+        patch(
+            f"{_ORCH}.md_change_state_repo.count_done_live_sources",
+            return_value=summary.done if live is None else live,
+        ),
     ):
         await orch._snapshot_index_rows()
     return orch._index_emptied, orch._index_rows
@@ -138,6 +153,26 @@ async def test_fresh_root_is_not_reported(runtime: MemoryRoot) -> None:
         runtime,
         rows={"episode": 0},
         summary=_summary(pending=0, done=0),
+    )
+    assert emptied is False
+
+
+async def test_all_sources_deleted_is_not_reported(runtime: MemoryRoot) -> None:
+    """The user deleted their last markdown file; the index is correctly empty.
+
+    ``QueueSummary.done`` still counts that file -- the reconciler keeps a
+    finished delete as ``done`` with ``change_type='deleted'`` so the scanner
+    does not re-enqueue it every pass. Reading ``done`` as "sources were
+    indexed" makes this state indistinguishable from a wiped index, and the
+    warning would stand forever while pointing at a rebuild that has nothing
+    to rebuild from. Only the live-source count separates the two, which is
+    why ``live`` is zero here while ``done`` is not.
+    """
+    emptied, _ = await _verdict(
+        runtime,
+        rows={"episode": 0},
+        summary=_summary(pending=0, done=7),
+        live=0,
     )
     assert emptied is False
 

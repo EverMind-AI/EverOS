@@ -624,3 +624,46 @@ async def test_partial_indexes_are_created(repo: _MdChangeStateRepo) -> None:
         "idx_md_change_kind",
     ):
         assert expected in names, f"missing index {expected!r}; got {names!r}"
+
+
+async def test_count_done_live_sources_excludes_completed_deletes(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """A finished delete is ``done`` but left nothing indexable behind.
+
+    The reconciler keeps completed deletions as ``status='done'`` with
+    ``change_type='deleted'`` so the scanner stops re-enqueueing a file that
+    is gone. ``queue_summary().done`` therefore cannot answer "how many
+    sources should be in the index" -- and reading it that way made a user
+    who deleted their last markdown file look exactly like a wiped index
+    (#501). This is the number that tells the two apart, so it is pinned
+    against the real table rather than through the caller that uses it.
+    """
+    for index, change_type in enumerate(["added", "modified", "deleted"]):
+        await repo.upsert(
+            f"users/u/episodes/episode-2026-05-1{index}.md",
+            kind="episode",
+            change_type=change_type,
+            mtime=float(index),
+        )
+        # `mark_done` is guarded by WHERE status='processing', so a row has
+        # to be claimed first -- the same path the worker takes.
+        await repo.claim_one(f"users/u/episodes/episode-2026-05-1{index}.md")
+        await repo.mark_done(f"users/u/episodes/episode-2026-05-1{index}.md")
+
+    summary = await repo.queue_summary()
+    assert summary.done == 3, "all three completed"
+    assert await repo.count_done_live_sources() == 2, "the delete is excluded"
+
+
+async def test_count_done_live_sources_ignores_unfinished_work(
+    repo: _MdChangeStateRepo,
+) -> None:
+    """Only completed rows count: a pending add has not produced a row yet."""
+    await repo.upsert(
+        "users/u/episodes/episode-2026-05-20.md",
+        kind="episode",
+        change_type="added",
+        mtime=1.0,
+    )
+    assert await repo.count_done_live_sources() == 0
