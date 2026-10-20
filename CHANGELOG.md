@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OME `inspect` ignored the Counter gate's cooldown.** The dry run compared
+  the bucket's counter with the threshold only, so during a cooldown window
+  it reported `will_run: true` for an event `dispatch` would hold back. The
+  store now answers the dry run with the same rule `dispatch` applies
+  (threshold and cooldown, one clock).
 - **Knowledge: a failed `PUT /knowledge/{doc_id}` could leave two
   directories for one document, or bury the old one inside the new.** The
   replace path backs the document's directory up, writes the new one and

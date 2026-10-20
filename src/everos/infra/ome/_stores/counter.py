@@ -13,7 +13,7 @@ Pass semantics:
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from everos.component.utils.datetime import (
     from_iso_format,
@@ -66,13 +66,13 @@ class CounterStore:
             row = await cur.fetchone()
             counter = (row[0] if row else 0) + 1
             last_passed = from_iso_format(row[1]) if row and row[1] else None
-
-            cooldown_ok = (
-                cooldown_seconds == 0
-                or last_passed is None
-                or now - last_passed >= timedelta(seconds=cooldown_seconds)
+            passed = _passes(
+                counter,
+                last_passed,
+                threshold=threshold,
+                cooldown_seconds=cooldown_seconds,
+                now=now,
             )
-            passed = counter >= threshold and cooldown_ok
 
             new_counter = 0 if passed else counter
             new_last_passed_ts = (
@@ -97,11 +97,69 @@ class CounterStore:
         Read-only; does not increment. Used by dispatcher inspect-mode
         to report progress without mutating state.
         """
+        counter, _ = await self.get_state(strategy_name, bucket_key)
+        return counter
+
+    async def peek(
+        self,
+        strategy_name: str,
+        bucket_key: str,
+        *,
+        threshold: int,
+        cooldown_seconds: int,
+    ) -> tuple[bool, int]:
+        """What :meth:`incr_and_check` would answer now, without writing.
+
+        Returns ``(would_pass, next_counter)``. The dispatcher's dry run uses
+        it so that inspect and dispatch apply one rule -- threshold *and*
+        cooldown -- on one clock.
+        """
+        counter, last_passed = await self.get_state(strategy_name, bucket_key)
+        next_counter = counter + 1
+        return (
+            _passes(
+                next_counter,
+                last_passed,
+                threshold=threshold,
+                cooldown_seconds=cooldown_seconds,
+                now=get_utc_now(),
+            ),
+            next_counter,
+        )
+
+    async def get_state(
+        self, strategy_name: str, bucket_key: str
+    ) -> tuple[int, datetime | None]:
+        """Return ``(counter, last_passed)`` for this bucket, read-only.
+
+        What :meth:`incr_and_check` would start from: the counter (0 if the
+        bucket is absent) and the time of the bucket's last pass (``None`` if
+        it never passed), so a dry run can apply the cooldown rule too.
+        """
         async with self._storage.connect() as conn:
             cur = await conn.execute(
-                "SELECT counter FROM counter_store "
+                "SELECT counter, last_passed_ts FROM counter_store "
                 "WHERE strategy_name = ? AND bucket_key = ?",
                 (strategy_name, bucket_key),
             )
             row = await cur.fetchone()
-            return row[0] if row else 0
+        if not row:
+            return 0, None
+        return row[0], (from_iso_format(row[1]) if row[1] else None)
+
+
+def _passes(
+    counter: int,
+    last_passed: datetime | None,
+    *,
+    threshold: int,
+    cooldown_seconds: int,
+    now: datetime,
+) -> bool:
+    """The gate rule: the counter reached the threshold and the cooldown elapsed."""
+    cooldown_ok = (
+        cooldown_seconds == 0
+        or last_passed is None
+        or now - last_passed >= timedelta(seconds=cooldown_seconds)
+    )
+    return counter >= threshold and cooldown_ok

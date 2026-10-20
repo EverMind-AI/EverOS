@@ -119,7 +119,7 @@ class EventDispatcher:
 
         Returns one :class:`StrategyRouteInfo` per matched strategy with
         per-gate pass flags and a counter snapshot (read-only via
-        ``get_progress``). Same exception policy as :meth:`dispatch`:
+        ``CounterStore.peek``). Same exception policy as :meth:`dispatch`:
         a strategy's faulty ``applies_to`` callable is logged and that
         strategy reports ``applies_to_pass=False`` rather than tanking
         the whole inspection.
@@ -134,15 +134,20 @@ class EventDispatcher:
             progress: CounterProgress | None = None
             if applies_pass and meta.gate is not None:
                 bucket = _bucket_key(event, meta.gate.event_field)
-                cur = await self._counter_store.get_progress(
+                # One rule for inspect and dispatch: the store answers what
+                # incr_and_check would, threshold and cooldown, without
+                # writing. Comparing the counter with the threshold here
+                # ignored the cooldown, so a dry run during a cooldown window
+                # said the strategy would run when dispatch held it back.
+                counter_pass, next_cur = await self._counter_store.peek(
                     meta.name,
                     bucket,
+                    threshold=meta.gate.threshold,
+                    cooldown_seconds=meta.gate.cooldown_seconds,
                 )
-                next_cur = cur + 1
                 progress = CounterProgress(
                     current=next_cur, threshold=meta.gate.threshold
                 )
-                counter_pass = next_cur >= meta.gate.threshold
             out.append(
                 StrategyRouteInfo(
                     strategy_name=meta.name,
