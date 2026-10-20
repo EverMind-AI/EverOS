@@ -170,7 +170,7 @@ class OmeRunMachine(RuleBasedStateMachine):
                     )
                     for r in running
                 ]
-            except Exception as read_error:  # noqa: BLE001 - diagnostics only
+            except Exception as read_error:
                 rows = [f"find_running failed: {read_error!r}"]
             raise TimeoutError(
                 f"{e}; active_runs={self.engine._active_runs}; running={rows}; "
