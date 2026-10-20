@@ -42,6 +42,7 @@ from .repos import knowledge_document_repo as knowledge_document_repo
 from .repos import knowledge_topic_sqlite_repo as knowledge_topic_sqlite_repo
 from .repos import md_change_state_repo as md_change_state_repo
 from .repos import memcell_repo as memcell_repo
+from .repos import memorized_message_repo as memorized_message_repo
 from .repos import mint_cluster_id as mint_cluster_id
 from .repos import reflection_report_repo as reflection_report_repo
 from .repos import unprocessed_buffer_repo as unprocessed_buffer_repo
@@ -82,6 +83,7 @@ __all__ = [
     "knowledge_topic_sqlite_repo",
     "md_change_state_repo",
     "memcell_repo",
+    "memorized_message_repo",
     "mint_cluster_id",
     "reflection_report_repo",
     "unprocessed_buffer_repo",
