@@ -572,9 +572,14 @@ class MaintenanceMachine(RuleBasedStateMachine):
 
     @invariant()
     def beats_are_throttled(self) -> None:
+        # The worker's clock is ``time.monotonic``; on a coarse clock
+        # (Windows, 15.6 ms ticks) a timer may fire one tick early and a gap
+        # may read one tick short, so the slack is two ticks on top of half
+        # the interval. On a fine clock that is half the interval.
+        slack = MIN_INTERVAL / 2 + 2 * time.get_clock_info("monotonic").resolution
         for kind, repo in self.repos.items():
             for a, b in itertools.pairwise(repo.beat_starts):
-                assert b - a >= MIN_INTERVAL / 2, (kind, b - a, self._tail())
+                assert b - a >= MIN_INTERVAL - slack, (kind, b - a, self._tail())
 
 
 TestMaintenanceMachine = MaintenanceMachine.TestCase
@@ -917,10 +922,12 @@ async def _jittered_maintenance(
 
         assert not run.violations, "\n".join(run.violations) + "\n" + run.dump()
         for kind, repo in run.repos.items():
-            # Throttle, per worker life.
+            # Throttle, per worker life (slack for coarse clocks, see the
+            # machine's invariant of the same name).
+            slack = 0.02 + 2 * time.get_clock_info("monotonic").resolution
             starts = [t for life, t in repo.beat_starts if life == run.life]
             for a, b in itertools.pairwise(starts):
-                assert b - a >= _J_MIN_INTERVAL - 0.02, (kind, b - a, run.dump())
+                assert b - a >= _J_MIN_INTERVAL - slack, (kind, b - a, run.dump())
             # The streak health reports is what this life's beats imply.
             beats: list[str] = []
             calls = [(op, o) for life, op, o in repo.calls if life == run.life]
