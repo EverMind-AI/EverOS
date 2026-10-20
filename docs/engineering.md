@@ -102,7 +102,14 @@ asyncio tasks as a scout. CI runs the small profile (about 15 s);
 `HYPOTHESIS_PROFILE=deep uv run pytest <file>` runs a thousand sequences
 locally, and `--hypothesis-show-statistics` shows which branches (crash,
 lost status write, restart, …) the run reached -- a branch at 0% was not
-exercised. Copy that file's structure when writing the next one.
+exercised. Copy that file's structure when writing the next one. Two more
+follow it for the cascade worker:
+[`test_worker_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_stateful.py)
+(the `md_change_state` row cycle) and
+[`test_worker_maintenance_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_maintenance_stateful.py)
+(the optimize / prune / rebuild cycle); the latter found a bounded wait that
+cancelled the task it waited on, which the example-based tests around those
+waits had not reached.
 
 ## Continuous integration
 
