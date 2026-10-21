@@ -205,6 +205,27 @@ async def test_deprecate_lance_facts_is_scoped_to_the_project() -> None:
     assert "(parent_id IN ('ep_20260601_0001'))" in rendered
 
 
+async def test_detect_orphans_is_capped_per_run(monkeypatch) -> None:
+    """Orphans are retired outside the source cap, so they have their own."""
+    monkeypatch.setattr(orchestrator_module, "_MAX_ORPHANS_PER_RUN", 2)
+    episode_store = MagicMock()
+    rows = [
+        _make_episode_row(
+            entry_id=f"ep_20260601_000{i}", parent_id="cl_abc", owner_id="u_alice"
+        )
+        for i in range(1, 5)
+    ]
+    episode_store.find_where = AsyncMock(return_value=rows)
+    orch = _build_orchestrator(episode_store=episode_store)
+
+    orphans = await orch._detect_orphans(
+        "cl_abc", "u_alice", "claude-code", "alpha", exclude={"ep_20260601_0001"}
+    )
+
+    assert [o.entry_id for o in orphans] == ["ep_20260601_0002", "ep_20260601_0003"]
+    assert episode_store.find_where.await_args.kwargs["limit"] == 3
+
+
 async def test_run_init_mode_merges_and_deprecates() -> None:
     """Full INIT flow: 2 episode members -> merge -> write -> deprecate."""
     cluster_repo = MagicMock()

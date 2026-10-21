@@ -45,6 +45,10 @@ _MAX_CLUSTERS_PER_RUN = 10
 # in by later runs in update mode. Keeps the merged narrative, and the
 # cascade upsert it triggers, inside the LanceDB write-lock budget.
 _MAX_SOURCES_PER_MERGE = 50
+# Orphaned merged episodes are retired on top of the source cap. A cluster
+# that piled up failed runs keeps at most this many per run, and like a
+# capped merge it converges over the following runs.
+_MAX_ORPHANS_PER_RUN = 10
 
 # Entry ids per LanceDB ``update`` when deprecating sources. One update per
 # batch instead of one per row keeps the number of write-lock acquisitions
@@ -592,8 +596,12 @@ class ReflectionOrchestrator:
             eq("app_id", app_id),
             eq("project_id", project_id),
         )
-        rows = await self._episode_store.find_where(where)
-        orphans = [row for row in rows if row.entry_id not in exclude]
+        rows = await self._episode_store.find_where(
+            where, limit=_MAX_ORPHANS_PER_RUN + len(exclude)
+        )
+        orphans = [row for row in rows if row.entry_id not in exclude][
+            :_MAX_ORPHANS_PER_RUN
+        ]
         if orphans:
             logger.warning(
                 "reflection_orphan_detected",
