@@ -131,7 +131,14 @@ jobs:
                   None,
               )
 
-          body += "\n## Upgrade\n\n```bash\npip install --upgrade everos   # or: uv sync\n```\n"
+          # pip skips pre-releases unless asked, so the plain upgrade line on an
+          # rc page silently installs the previous stable release instead.
+          install = (
+              f"pip install --upgrade --pre everos=={version}   # pip skips pre-releases without --pre"
+              if prerelease
+              else "pip install --upgrade everos   # or: uv sync"
+          )
+          body += f"\n## Upgrade\n\n```bash\n{install}\n```\n"
           if upgrade:
               body += f"\n{upgrade}\n"
           if previous is not None:
