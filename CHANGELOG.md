@@ -20,7 +20,8 @@ accepting writes that are truncated or searches that quietly return nothing,
 and an emptied index is reported instead of looking healthy. The rest is
 reliability: OME writes no longer starve one another on Windows, a session
 lock timeout no longer strands a memcell without its episode, a message the
-model can never segment no longer blocks its session, and a dozen smaller
+model can never segment no longer blocks its session, resolving a cluster's
+members no longer reads two embedding vectors per member, and a dozen smaller
 faults found by property-based tests are fixed.
 
 ### Added
@@ -203,6 +204,19 @@ faults found by property-based tests are fixed.
   that table's index UUID / FTS segment count grew unbounded. The mirror wait
   cancelled the optimize beat it was meant to stay clear of. Both waits now
   only stop waiting. Present since 1.2.2.
+- **Cascade: the handler limit held per drain pass, not per worker.** A worker
+  runs at most four handlers of a batch at once, but the limit was created
+  inside each drain pass, so two passes running together each got their own:
+  `POST /cascade/quiesce` drains while the background loop is still draining,
+  and that overlap peaked at eight concurrent handlers. The limit is now
+  shared by the worker. (#492)
+- **Resolving a cluster's members read each member's full row, vectors
+  included.** The profile path maps a fresh cluster's episodes back to their
+  parents and needed two fields per member, yet fetched every member's whole
+  episode row with both embedding vectors; a cluster can hold thousands of
+  members, so that read dominated the path's memory. LanceDB now reads only
+  `parent_type` and `parent_id` (Milvus still loads full rows), and the
+  reflection path's bulk read skips the vector columns. (#490)
 - **`method="vector"` finds episodes when no atomic fact is in scope.**
   Vector search over episodes recalls through atomic facts, and it returned
   an empty list (HTTP 200, no log line) whenever none were in scope — fact
