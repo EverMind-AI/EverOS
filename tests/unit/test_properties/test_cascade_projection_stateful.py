@@ -257,8 +257,10 @@ class CascadeProjectionMachine(RuleBasedStateMachine):
         old = self.entries[(owner, eid)]
         self.seq += 1
         new = f"edited {self.seq}"
-        assert text.count(old) == 1, (old, text.count(old))
-        path.write_text(text.replace(old, new))
+        # Match the whole Content line: "content 1" is a prefix of "content 10".
+        old_line, new_line = f"\n{old}\n", f"\n{new}\n"
+        assert text.count(old_line) == 1, (old, text.count(old_line))
+        path.write_text(text.replace(old_line, new_line))
         self.entries[(owner, eid)] = new
         self.settled = False
         self.trace.append(f"user edits {owner}/{eid}")
