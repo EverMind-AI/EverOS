@@ -3,7 +3,10 @@
 Triggered by :class:`SkillClusterUpdated` after ``trigger_skill_clustering``
 has assigned the fresh case to its cluster. The strategy:
 
-1. Reconstructs the target case directly from the event payload
+1. Skips legacy events whose ``approach`` is absent (``None``), warning
+   without invoking the extractor or writing skills. An explicitly empty
+   approach is valid and is not skipped. Reconstructs the target case
+   directly from the event payload
    (:func:`_to_algo_case_from_event`) — no LanceDB read. This is the
    cascade-lag rescue: the previous implementation probed
    ``agent_case_repo.find_by_owner_entry`` for the freshly-written case
@@ -168,6 +171,17 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
         logger.debug(
             "strategy_gated_off_embedding_unavailable",
             strategy_name="extract_agent_skill",
+            agent_id=event.agent_id,
+        )
+        return
+
+    # A queued pre-1.2.3 AgentCaseExtracted can carry a real quality score
+    # but no case body. Never let that incomplete input replace a SKILL.md.
+    if event.approach is None:
+        logger.warning(
+            "agent_skill_extraction_skipped_missing_approach",
+            case_entry_id=event.case_entry_id,
+            cluster_id=event.cluster_id,
             agent_id=event.agent_id,
         )
         return
@@ -428,10 +442,10 @@ def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
     """Reconstruct the target case from event fields.
 
     Strong-consistency: the case body travels on the event bus, so the
-    strategy never races cascade indexing. Pre-1.2.3 events default
-    missing fields to empty — those runs won't have useful data but also
-    won't crash.
+    strategy never races cascade indexing. The caller skips legacy events
+    with a missing approach before reaching this projection.
     """
+    assert event.approach is not None
     return AlgoAgentCase(
         id=event.case_entry_id,
         timestamp=event.case_timestamp_ms,

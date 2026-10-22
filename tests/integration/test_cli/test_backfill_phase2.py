@@ -221,6 +221,7 @@ async def test_episodes_and_cases_synthesize_matching_events(
     assert {e.owner_id for e in episode_events} == {"u1"}
     assert case_events[0].agent_id == "agent1"
     assert case_events[0].task_intent == "task intent ac1"
+    assert case_events[0].approach == "approach ac1"
     assert case_events[0].quality_score == pytest.approx(0.8)
 
     assert "phase 2 complete" in out

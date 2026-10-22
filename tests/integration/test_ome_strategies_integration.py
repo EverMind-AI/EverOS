@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import hashlib
+import json
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -368,9 +369,11 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("approach", [None, "", "read + condense"])
 async def test_skill_chain_e2e(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    approach: str | None,
 ) -> None:
     """Chain: AgentCaseExtracted → trigger_skill_clustering (sqlite) →
     SkillClusterUpdated → extract_agent_skill → SUCCESS.
@@ -381,7 +384,9 @@ async def test_skill_chain_e2e(
     branch — but the recall + skip-threshold + prompt-render + JSON-parse
     pipeline is all real. Only mocked: LanceDB reads (case + skill),
     ``AgentSkillExtractor`` (downstream extractor; out of scope), and
-    the markdown writer.
+    the markdown writer. A missing legacy approach must survive the SQLite
+    queue without reaching the extractor; an explicitly empty modern approach
+    is still valid.
     """
     import importlib
     from unittest.mock import MagicMock
@@ -480,15 +485,18 @@ async def test_skill_chain_e2e(
         engine = svc._get_engine()
         await engine.start()
         try:
+            payload = {
+                "memcell_id": "mc_a",
+                "case_entry_id": "ac_20260517_0001",
+                "task_intent": "summarise the doc",
+                "quality_score": 0.8,
+                "case_timestamp_ms": 1_700_000_001_000,
+                "agent_id": "agent_42",
+            }
+            if approach is not None:
+                payload["approach"] = approach
             await engine.emit(
-                AgentCaseExtracted(
-                    memcell_id="mc_a",
-                    case_entry_id="ac_20260517_0001",
-                    task_intent="summarise the doc",
-                    quality_score=0.8,
-                    case_timestamp_ms=1_700_000_001_000,
-                    agent_id="agent_42",
-                )
+                AgentCaseExtracted.model_validate_json(json.dumps(payload))
             )
 
             clu_rows: list = []
@@ -513,7 +521,25 @@ async def test_skill_chain_e2e(
     cluster_logs = [r for r in logs if r.get("event") == "skill_cluster_updated"]
     skill_logs = [r for r in logs if r.get("event") == "agent_skills_extracted"]
     assert cluster_logs, "expected skill_cluster_updated log line"
+    queued = json.loads(skill_rows[0].event_payload)
+    assert queued["quality_score"] == 0.8
+    if approach is None:
+        mock_extractor_cls.assert_not_called()
+        mock_writer_cls.assert_not_called()
+        assert queued["approach"] is None
+        assert not skill_logs
+        assert any(
+            r.get("event") == "agent_skill_extraction_skipped_missing_approach"
+            for r in logs
+        )
+        return
+
+    assert queued["approach"] == approach
+    mock_extractor_cls.return_value.aextract.assert_awaited_once()
+    target = mock_extractor_cls.return_value.aextract.call_args.args[0]
+    assert target.approach == approach
     assert skill_logs, "expected agent_skills_extracted log line"
+    mock_writer_cls.return_value.write_main.assert_awaited_once()
     # Writer received exactly one SKILL.md write call with cluster_id stamped.
     write_args = mock_writer_cls.return_value.write_main.call_args
     fm = write_args.kwargs["frontmatter"]

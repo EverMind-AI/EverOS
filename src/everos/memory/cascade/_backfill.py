@@ -987,6 +987,8 @@ def _agent_case_row_to_event(raw: dict[str, Any]) -> AgentCaseExtracted:
         memcell_id=raw["parent_id"],
         case_entry_id=raw["entry_id"],
         task_intent=raw["task_intent"],
+        approach=raw.get("approach"),
+        key_insight=raw.get("key_insight"),
         quality_score=raw["quality_score"],
         case_timestamp_ms=to_timestamp_ms(raw["timestamp"]),
         agent_id=raw["owner_id"],
@@ -1475,9 +1477,24 @@ async def _scan_skill_source() -> list[_SkillSourceRow]:
     return rows
 
 
-def _skill_source_to_event(row: _SkillSourceRow) -> SkillClusterUpdated:
-    """Synthesize the ``SkillClusterUpdated`` Phase 2's clustering pass
-    emitted into a void — see :func:`_scan_skill_source`."""
+async def _skill_source_to_event(row: _SkillSourceRow) -> SkillClusterUpdated | None:
+    """Snapshot the indexed case for replay, without a live cascade race.
+
+    Backfill operates on already-indexed cases. Carry their bodies on the
+    event just like the live pipeline; skip a stale cluster member whose
+    case no longer exists rather than extracting from incomplete input.
+    """
+    case = await agent_case_repo.find_by_owner_entry(
+        row.agent_id, row.case_entry_id, app_id=row.app_id, project_id=row.project_id
+    )
+    if case is None:
+        logger.warning(
+            "cascade_backfill_skill_case_missing",
+            case_entry_id=row.case_entry_id,
+            cluster_id=row.cluster_id,
+            agent_id=row.agent_id,
+        )
+        return None
     return SkillClusterUpdated(
         event_id=f"backfill_{uuid4().hex}",
         case_entry_id=row.case_entry_id,
@@ -1485,6 +1502,12 @@ def _skill_source_to_event(row: _SkillSourceRow) -> SkillClusterUpdated:
         agent_id=row.agent_id,
         app_id=row.app_id,
         project_id=row.project_id,
+        task_intent=case.task_intent,
+        approach=case.approach,
+        key_insight=case.key_insight,
+        quality_score=case.quality_score,
+        case_timestamp_ms=to_timestamp_ms(case.timestamp),
+        case_vector=case.vector,
     )
 
 
@@ -1622,10 +1645,12 @@ async def _run_phase_skills(
         return _SkillPhaseResult(aborted=True, blocked_by_server=True)
     try:
         emitted = 0
-        for row in source_rows:
-            await engine.emit(_skill_source_to_event(row))
-            emitted += 1
-            _report_emit_progress(presenter, emitted, len(source_rows))
+        for done, row in enumerate(source_rows, start=1):
+            event = await _skill_source_to_event(row)
+            if event is not None:
+                await engine.emit(event)
+                emitted += 1
+            _report_emit_progress(presenter, done, len(source_rows))
         drained = await engine.wait_idle(timeout=_SKILLS_WAIT_TIMEOUT_SECONDS)
         if not drained:
             logger.warning(

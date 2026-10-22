@@ -54,7 +54,7 @@ def _event(
     agent_id: str = "agent_42",
     task_intent: str = "summarise the doc",
     case_timestamp_ms: int = 1_700_000_001_000,
-    approach: str = "",
+    approach: str | None = "",
     key_insight: str | None = None,
 ) -> AgentCaseExtracted:
     return AgentCaseExtracted(
@@ -174,8 +174,10 @@ async def test_creates_new_cluster_when_no_existing(
     assert emitted[0].agent_id == "agent_42"
 
 
+@pytest.mark.parametrize("approach", [None, "", "stop, resync, verify"])
 async def test_emit_passes_through_case_body_and_vector(
     monkeypatch: pytest.MonkeyPatch,
+    approach: str | None,
 ) -> None:
     """1.2.3+ trigger_skill_clustering passes case body verbatim and includes
     the embedding it just computed so extract_agent_skill doesn't need to
@@ -189,7 +191,7 @@ async def test_emit_passes_through_case_body_and_vector(
 
     incoming = _event(
         task_intent="restore replica",
-        approach="stop, resync, verify",
+        approach=approach,
         key_insight="watch oplog",
         quality_score=0.8,
         case_timestamp_ms=1_700_000_000_000,
@@ -223,7 +225,8 @@ async def test_emit_passes_through_case_body_and_vector(
     assert len(emitted) == 1
     ev = emitted[0]
     assert ev.task_intent == "restore replica"
-    assert ev.approach == "stop, resync, verify"
+    ev = SkillClusterUpdated.model_validate_json(ev.model_dump_json())
+    assert ev.approach == approach
     assert ev.key_insight == "watch oplog"
     assert ev.quality_score == 0.8
     assert ev.case_timestamp_ms == 1_700_000_000_000
