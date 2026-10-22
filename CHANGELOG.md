@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-22
+
+**Hybrid and vector search keep up with 10 requests a second out of the box.**
+Each of those searches embeds its query first, and the slots reserved for
+those calls were the limit: with 4 of them and a remote embedding endpoint
+answering in about 0.45 s, search topped out near 9 requests a second and a
+steady 10 queued without bound. The default is now 16, which held the same
+load at a p50 of 0.42 s and a p95 of 1.45 s.
+
 ### Changed
 
 - **`[embedding].query_max_concurrent` defaults to 16 instead of 4.** Every
@@ -18,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held p50 0.42 s, p95 1.45 s, p99 2.11 s, all 3,000 requests served at
   9.99/s. In-flight requests to the endpoint can now reach
   `max_concurrent + 16`; set it lower if the endpoint is rate-limited.
+
+### Upgrade
+
+Nothing to migrate. One thing to check: requests in flight to the embedding
+endpoint can now reach `max_concurrent + 16` (26 with the shipped values)
+instead of 14. If your endpoint is rate-limited or a small self-hosted model,
+set `[embedding] query_max_concurrent` (or `EVEROS_EMBEDDING__QUERY_MAX_CONCURRENT`)
+back to what it can take. Roughly, the searches per second it can serve is
+this value divided by the endpoint's per-call latency.
 
 ## [1.5.0] - 2026-10-21
 
