@@ -387,7 +387,7 @@ class EmbeddingSettings(BaseModel):
     max_retries: int = Field(default=3, ge=0)
     batch_size: int = Field(default=10, ge=1)
     max_concurrent: int = Field(default=10, ge=1)
-    query_max_concurrent: int = Field(default=4, ge=1)
+    query_max_concurrent: int = Field(default=16, ge=1)
     """Concurrency budget reserved for interactive query embeds, separate
     from ``max_concurrent``, which the cascade's background writes draw on.
 
@@ -396,7 +396,15 @@ class EmbeddingSettings(BaseModel):
     search p50 48 s on the shared budget, against 0.49 s for the keyword
     leg, which needs no embedding at all (issue #473). Total in-flight
     requests to the endpoint are ``max_concurrent + query_max_concurrent``;
-    lower this if the endpoint is rate-limited."""
+    lower this if the endpoint is rate-limited.
+
+    Each hybrid or vector search holds one slot for one embedding call,
+    so the sustainable search rate is about this value divided by the
+    endpoint's per-call latency: at 4 and a remote endpoint answering in
+    ~0.45 s, hybrid search capped near 9 requests/s and a steady 10/s
+    queued without bound (p50 64 s); at 16 the same load held p50 0.42 s,
+    p95 1.45 s. Size it as searches per second x per-call latency, with
+    headroom."""
 
 
 class RerankSettings(BaseModel):

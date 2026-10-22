@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`[embedding].query_max_concurrent` defaults to 16 instead of 4.** Every
+  hybrid or vector search makes one query embedding call, and the budget
+  reserved for those calls bounded search throughput: with a remote
+  endpoint answering in about 0.45 s, 4 slots capped hybrid search near 9
+  requests/s, so a steady 10 requests/s queued without bound (10,020
+  indexed entries, 5 minutes: p50 64 s, p95 101 s). At 16 the same load
+  held p50 0.42 s, p95 1.45 s, p99 2.11 s, all 3,000 requests served at
+  9.99/s. In-flight requests to the endpoint can now reach
+  `max_concurrent + 16`; set it lower if the endpoint is rate-limited.
+
 ## [1.5.0] - 2026-10-21
 
 **`/add` no longer has to wait for extraction, and an index can no longer be

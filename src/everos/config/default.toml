@@ -142,8 +142,9 @@ max_retries     = 3
 batch_size      = 10
 max_concurrent  = 10
 # Reserved budget for interactive query embeds, so a search is not queued
-# behind the cascade's background writes (issue #473).
-query_max_concurrent = 4
+# behind the cascade's background writes (issue #473). Searches per second
+# the endpoint can serve is about this value / per-call latency.
+query_max_concurrent = 16
 
 [rerank]
 # Rerank provider. Override via env:

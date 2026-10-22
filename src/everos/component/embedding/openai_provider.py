@@ -88,7 +88,7 @@ class OpenAIEmbeddingProvider:
         max_retries: int = 3,
         batch_size: int = 10,
         max_concurrent: int = 5,
-        query_max_concurrent: int = 4,
+        query_max_concurrent: int = 16,
     ) -> None:
         self.dim = dim
         self._dimensions = dimensions
