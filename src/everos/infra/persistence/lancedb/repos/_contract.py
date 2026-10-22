@@ -255,6 +255,18 @@ class LanceIndexContract[T]:
         rows = await builder.to_list()
         return [self.schema.model_validate(row) for row in rows]
 
+    async def count_duplicate_keys(self) -> int:
+        """Rows whose ``PRIMARY_KEY`` repeats one already counted.
+
+        LanceDB has no constraints: ``upsert`` keeps the key unique only as
+        long as it is the sole write path. Reads just the key columns, so
+        the O(N) scan stays cheap on an embedded root.
+        """
+        key = list(self.schema.PRIMARY_KEY)
+        table = await self._table()
+        keys = await table.query().select(key).to_arrow()
+        return keys.num_rows - keys.group_by(key).aggregate([]).num_rows
+
     # The daily-log chassis base has these four; the single-file tables do not,
     # and the contract asks every table for them. One predicate-based copy
     # serves all seven (the mixin sits first in the MRO).

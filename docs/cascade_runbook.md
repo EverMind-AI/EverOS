@@ -52,6 +52,10 @@ lsn:
 - `failed (retryable=FALSE)` is always user-actionable. Cascade will
   never auto-clear these — they represent malformed md the user must
   edit.
+- A yellow `rows sharing a primary key` block lists index tables where
+  two rows carry the same `(app_id, project_id, id)`. LanceDB has no
+  constraints, so this only happens when a write bypassed `upsert`;
+  `everos cascade rebuild` re-indexes those tables from markdown.
 
 ### Machine-readable: the `cascade` block on `GET /health`
 

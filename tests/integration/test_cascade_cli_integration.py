@@ -177,6 +177,50 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     assert "pending:                  1" in result.stdout
 
 
+def test_status_reports_rows_sharing_a_primary_key(cli_runtime: Path) -> None:
+    """A write that bypassed ``upsert`` shows up in status (issue #479)."""
+    from everos.infra.persistence.index import Episode
+    from everos.infra.persistence.lancedb import episode_repo as lance_episode_repo
+
+    row = Episode(
+        id="u1_ep_0001",
+        entry_id="ep_0001",
+        owner_id="u1",
+        owner_type="user",
+        session_id="session",
+        timestamp=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
+        parent_id="memcell",
+        sender_ids=["u1"],
+        subject="subject",
+        summary="summary",
+        episode="episode",
+        episode_tokens="episode",
+        md_path="users/u1/episodes/episode-2026-01-01.md",
+        content_sha256="0" * 64,
+    )
+
+    async def seed(*, bypass: bool) -> None:
+        async with cascade_mod._runtime():
+            if bypass:
+                # Plain insert, no merge on the key: what a bypassing write does.
+                await lance_episode_repo.add([row])
+            else:
+                await lance_episode_repo.upsert([row])
+
+    asyncio.run(seed(bypass=False))
+    clean = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert clean.exit_code == 0, clean.stdout
+    assert "sharing a primary key" not in clean.stdout
+
+    asyncio.run(seed(bypass=True))
+    result = CliRunner().invoke(cascade_mod.app, ["status"])
+    assert result.exit_code == 0, result.stdout
+    output = _strip_ansi(result.stdout)
+    assert "rows sharing a primary key (app_id, project_id, id)" in output
+    assert re.search(r"^  episode:\s+1$", output, re.MULTILINE)
+    assert "everos cascade rebuild" in output
+
+
 def _fake_orchestrator_factory():  # type: ignore[no-untyped-def]
     from everos.component.tokenizer import build_tokenizer
     from everos.core.persistence import MemoryRoot
