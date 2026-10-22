@@ -107,7 +107,7 @@ async def backfill_runtime(
 @pytest.fixture
 def stub_llm_extraction(
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[list[AlgoAgentSkill]]:
+) -> Iterator[AsyncMock]:
     """Mock the one non-deterministic seam: the LLM-backed extractor.
 
     Everything downstream of ``AgentSkillExtractor.aextract`` (writer,
@@ -136,7 +136,7 @@ def stub_llm_extraction(
     monkeypatch.setattr(skill_mod, "get_llm_client", lambda: object())
     with patch.object(skill_mod, "AgentSkillExtractor") as mock_extractor_cls:
         mock_extractor_cls.return_value.aextract = AsyncMock(return_value=emitted)
-        yield emitted
+        yield mock_extractor_cls.return_value.aextract
 
 
 def _agent_case(entry_id: str, *, agent_id: str = "agent1") -> AgentCase:
@@ -231,7 +231,7 @@ async def test_missing_embedding_capability_returns_exit_two(
 
 async def test_skills_phase_grows_agent_skill_count(
     backfill_runtime: Path,
-    stub_llm_extraction: list[AlgoAgentSkill],
+    stub_llm_extraction: AsyncMock,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """End-to-end: cluster with no skill yet → Phase 3 replays the event
@@ -250,6 +250,11 @@ async def test_skills_phase_grows_agent_skill_count(
     assert code == 0
     assert skills_after == skills_before + 1
     assert "phase 3 complete" in out
+    stub_llm_extraction.assert_awaited_once()
+    target = stub_llm_extraction.call_args.args[0]
+    assert target.task_intent == "task intent ac1"
+    assert target.approach == "approach ac1"
+    assert target.quality_score == 0.8
 
     rows = await agent_skill_repo.find_where("owner_id = 'agent1'", limit=10)
     assert len(rows) == 1

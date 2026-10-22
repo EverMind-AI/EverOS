@@ -1,3 +1,5 @@
+"""Domain events preserve payloads and distinguish missing legacy case bodies."""
+
 from __future__ import annotations
 
 import pydantic
@@ -101,7 +103,7 @@ def test_agent_case_extracted_new_fields_default() -> None:
         "agent_id": "a1",
     }
     event = AgentCaseExtracted.model_validate(payload)
-    assert event.approach == ""
+    assert event.approach is None
     assert event.key_insight is None
 
 
@@ -110,11 +112,48 @@ def test_skill_cluster_updated_new_fields_default() -> None:
     payload = {"case_entry_id": "c1", "cluster_id": "cl1", "agent_id": "a1"}
     event = SkillClusterUpdated.model_validate(payload)
     assert event.task_intent == ""
-    assert event.approach == ""
+    assert event.approach is None
     assert event.key_insight is None
     assert event.quality_score == 0.0
     assert event.case_timestamp_ms == 0
     assert event.case_vector is None
+
+
+@pytest.mark.parametrize("event_type", [AgentCaseExtracted, SkillClusterUpdated])
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ({}, None),
+        ({"approach": None}, None),
+        ({"approach": ""}, ""),
+        ({"approach": "read + condense"}, "read + condense"),
+    ],
+)
+def test_case_approach_preserves_absence_through_json_replay(
+    event_type: type[AgentCaseExtracted] | type[SkillClusterUpdated],
+    body: dict[str, str | None],
+    expected: str | None,
+) -> None:
+    """Repeated queue serialization must not turn a missing body into valid input."""
+    payload = {
+        "case_entry_id": "c1",
+        "agent_id": "a1",
+        "quality_score": 0.8,
+        **body,
+    }
+    if event_type is AgentCaseExtracted:
+        payload.update(
+            memcell_id="m1",
+            task_intent="summarise",
+            case_timestamp_ms=1_700_000_000_000,
+        )
+    else:
+        payload["cluster_id"] = "cl1"
+    event = event_type.model_validate(payload)
+    for _ in range(3):
+        event = event_type.model_validate_json(event.model_dump_json())
+        assert event.approach == expected
+        assert event.quality_score == 0.8
 
 
 def test_skill_cluster_updated_carries_case_vector() -> None:
