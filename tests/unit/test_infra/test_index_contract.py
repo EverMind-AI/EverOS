@@ -26,6 +26,7 @@ from everos.infra.persistence.index import (
     Predicate,
     all_of,
     any_of,
+    count_duplicate_keys,
     drop_business_tables,
     episode_repo,
     eq,
@@ -279,6 +280,28 @@ async def test_repository_port_crud_count_and_uncapped_scan(
 
     await episode_repo.delete(eq("id", rows[0].id))
     assert await episode_repo.count_where(owner) == 100
+
+
+async def test_count_duplicate_keys_counts_rows_that_bypassed_upsert(
+    index_backend: str,
+) -> None:
+    """Upsert keeps the key unique; only a bypassing write can break it."""
+    rows = [_episode(number) for number in range(3)]
+    await episode_repo.upsert(rows)
+    await episode_repo.upsert(rows[:1])
+    assert await episode_repo.count_duplicate_keys() == 0
+
+    if index_backend != "lancedb":
+        return
+    from everos.infra.persistence.lancedb import episode_repo as lance_episode_repo
+
+    await lance_episode_repo.add([rows[0], rows[0], rows[1]])
+
+    assert await episode_repo.count() == 6
+    assert await episode_repo.count_duplicate_keys() == 3
+    counts = await count_duplicate_keys()
+    assert counts["episode"] == 3
+    assert sum(counts.values()) == 3
 
 
 async def test_find_by_owner_entries_projects_requested_columns(

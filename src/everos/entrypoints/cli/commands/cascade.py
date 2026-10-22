@@ -59,6 +59,7 @@ from everos.infra.persistence.index import (
     assert_record_dim_matches_settings,
     connect,
     count_business_rows,
+    count_duplicate_keys,
     drop_business_tables,
     ensure_business_indexes,
     shutdown,
@@ -381,6 +382,25 @@ def status(
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
+            duplicates = {
+                table: count
+                for table, count in (await count_duplicate_keys()).items()
+                if count
+            }
+            if duplicates:
+                typer.secho(
+                    "\n  rows sharing a primary key (app_id, project_id, id) "
+                    "with another row:",
+                    fg=typer.colors.YELLOW,
+                )
+                for table, count in duplicates.items():
+                    typer.secho(f"  {table + ':':<24} {count}", fg=typer.colors.YELLOW)
+                typer.secho(
+                    "  A write bypassed upsert; search may return doubled or "
+                    "stale rows.\n"
+                    "  Run `everos cascade rebuild` to re-index from markdown.",
+                    fg=typer.colors.YELLOW,
+                )
             # `summary.done` would count completed deletions, so a user who
             # removed their last markdown file would be warned that their
             # index is missing and sent to rebuild it from nothing.

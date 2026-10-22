@@ -235,6 +235,17 @@ async def count_business_rows() -> dict[str, int]:
     return {repo.table_name: await repo.count() for repo in ALL_REPOS}
 
 
+async def count_duplicate_keys() -> dict[str, int]:
+    """Rows per business table whose ``(app_id, project_id, id)`` repeats.
+
+    LanceDB has no constraints, so the declared ``PRIMARY_KEY`` stays
+    unique only while every write goes through ``upsert``. This is how a
+    write that bypassed it shows up, instead of as missing or doubled
+    search results (issue #479). O(N) per table.
+    """
+    return {repo.table_name: await repo.count_duplicate_keys() for repo in ALL_REPOS}
+
+
 def repo_for_schema(schema: type[Any]) -> IndexRepository[Any]:
     """Resolve a registered repository by its logical record model."""
     for repo in ALL_REPOS:
@@ -280,6 +291,7 @@ __all__ = [
     "connect",
     "contains",
     "count_business_rows",
+    "count_duplicate_keys",
     "drop_business_tables",
     "ensure_business_indexes",
     "episode_repo",
