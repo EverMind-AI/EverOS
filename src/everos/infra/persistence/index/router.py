@@ -60,9 +60,6 @@ class RoutedIndexRepository[T: BaseModel]:
     async def find_one_where(self, where: Predicate) -> T | None:
         return await self._repo().find_one_where(where)
 
-    async def find_by_owner(self, owner_id: str, *, limit: int = 100) -> list[T]:
-        return await self._repo().find_by_owner(owner_id, limit=limit)
-
     async def find_by_md_path(self, md_path: str) -> T | None:
         return await self._repo().find_by_md_path(md_path)
 

@@ -3,7 +3,7 @@
 Each repo is a module-level singleton — the table connection is
 resolved lazily on first call via :func:`..lancedb_manager.get_table`.
 Subclassing :class:`LanceRepoBase` lets each repo carry table-specific
-helpers later (e.g. ``find_by_owner``, ``search_for_owner``) without
+helpers later (e.g. ``find_by_owner_entry``, ``search_for_owner``) without
 needing a separate factory.
 
 External usage::
