@@ -305,7 +305,9 @@ async def test_list_documents_returns_paginated_result() -> None:
         patch(f"{_MOD}.knowledge_topic_sqlite_repo") as mock_topic_repo,
     ):
         mock_doc_repo.list_documents = AsyncMock(return_value=page_result)
-        mock_topic_repo.count_by_doc_id = AsyncMock(return_value=4)
+        mock_topic_repo.count_by_doc_ids = AsyncMock(
+            return_value={"d_doc1": 4, "d_doc2": 4}
+        )
 
         result = await list_documents(
             "app1",
@@ -325,6 +327,7 @@ async def test_list_documents_returns_paginated_result() -> None:
     assert result.documents[0].doc_id == "d_doc1"
     assert result.documents[0].topic_count == 4
     assert result.documents[1].doc_id == "d_doc2"
+    mock_topic_repo.count_by_doc_ids.assert_awaited_once_with(["d_doc1", "d_doc2"])
     mock_doc_repo.list_documents.assert_awaited_once_with(
         app_id="app1",
         project_id="proj1",
