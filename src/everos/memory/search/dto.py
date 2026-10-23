@@ -25,7 +25,7 @@ import datetime as _dt
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class SearchMethod(StrEnum):
@@ -215,6 +215,13 @@ class SearchAgentCaseItem(BaseModel):
     key_insight: str | None = None
     timestamp: _dt.datetime
     score: float
+
+    _entry_id: str | None = PrivateAttr(default=None)
+    """md-side entry id (``ac_<date>_<seq>``), carried only for the internal
+    case→skill bridge. Not serialized: the public response keeps ``id`` as
+    the index row id, and the bridge needs the entry id that
+    ``source_case_ids`` stores.
+    """
 
 
 class SearchAgentSkillItem(BaseModel):
