@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from everos.core.errors import (
+    DatabaseBusyError,
     DocumentNotFoundError,
     DuplicateDocumentError,
     EmbeddingServiceError,
@@ -69,6 +70,10 @@ def _make_app() -> FastAPI:
     @app.get("/raise/storage")
     async def _storage() -> None:
         raise StorageError("disk full")
+
+    @app.get("/raise/database-busy")
+    async def _database_busy() -> None:
+        raise DatabaseBusyError("SQLite is busy; retry the request")
 
     @app.get("/raise/embedding")
     async def _embedding() -> None:
@@ -223,7 +228,26 @@ async def test_storage_error_returns_503(client: AsyncClient) -> None:
     assert resp.status_code == 503
     data = resp.json()
     assert data["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
+    # Generic storage failures are not automatically retryable: a full disk
+    # does not get better by retrying. Only DatabaseBusyError carries the hint.
+    assert "retry-after" not in resp.headers
     _assert_envelope(data, path="/raise/storage")
+
+
+async def test_database_busy_returns_503_with_retry_after(
+    client: AsyncClient,
+) -> None:
+    """DatabaseBusyError → HTTP 503, code=DATABASE_BUSY, Retry-After present.
+
+    Pins the contract from issue #498: a caller that lost a race for SQLite's
+    write lock must be told to retry, not handed a generic 500.
+    """
+    resp = await client.get("/raise/database-busy")
+    assert resp.status_code == 503
+    assert resp.headers["retry-after"] == "1"
+    data = resp.json()
+    assert data["error"]["code"] == "DATABASE_BUSY"
+    _assert_envelope(data, path="/raise/database-busy")
 
 
 # ---------------------------------------------------------------------------

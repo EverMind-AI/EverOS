@@ -33,6 +33,7 @@ class ErrorCode(StrEnum):
     BAD_REQUEST = "BAD_REQUEST"
     UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
     EXTERNAL_SERVICE_UNAVAILABLE = "EXTERNAL_SERVICE_UNAVAILABLE"
+    DATABASE_BUSY = "DATABASE_BUSY"
     CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -167,6 +168,19 @@ class InfrastructureError(AppError):
 
 class StorageError(InfrastructureError):
     """A markdown or SQLite persistence operation failed."""
+
+
+class DatabaseBusyError(StorageError):
+    """SQLite refused a write because another writer held the lock.
+
+    Raised when ``PRAGMA busy_timeout`` elapses on a write. The condition is
+    transient: retrying shortly is the correct caller behaviour, so the API
+    maps this to HTTP 503 with ``Retry-After`` instead of the generic 500.
+
+    Deliberately a subclass of :class:`StorageError` rather than a sibling:
+    it is still a storage failure, and the existing ``StorageError``
+    handling keeps covering it if the specific handler is ever removed.
+    """
 
 
 class VectorStoreError(InfrastructureError):
