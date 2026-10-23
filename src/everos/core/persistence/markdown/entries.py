@@ -228,9 +228,10 @@ def _strip_one_newline(text: str) -> str:
 # H2 line: ``## <header>``.
 _H2_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 # Inline field: ``**key**: value``. Anchored to line start so a stray
-# ``**emphasis**`` mid-paragraph isn't mistaken for a field.
+# ``**emphasis**`` mid-paragraph isn't mistaken for a field. Keep both whitespace
+# and values on one line so an empty field cannot absorb the next field.
 _INLINE_RE = re.compile(
-    r"^\*\*(?P<key>[^*\n]+?)\*\*:\s*(?P<value>.*?)\s*$",
+    r"^\*\*(?P<key>[^*\r\n]+?)\*\*:[^\S\r\n]*(?P<value>[^\r\n]*)\r?$",
     re.MULTILINE,
 )
 # H3 line: ``### Title``.

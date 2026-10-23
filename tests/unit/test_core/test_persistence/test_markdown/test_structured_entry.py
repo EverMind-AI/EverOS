@@ -100,6 +100,40 @@ def test_parse_inline_value_with_colon_kept_verbatim() -> None:
     assert entry.inline == {"timestamp": "2026-04-22T10:03:11Z"}
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("value", [None, "", " \t"])
+def test_empty_inline_value_preserves_following_fields(
+    newline: str, value: str | None
+) -> None:
+    """An empty optional field cannot consume the next metadata line."""
+    src = render_structured_entry(
+        inline={
+            "session_id": value,
+            "timestamp": "2026-04-22T10:03:11Z",
+            "parent_id": "mc_1",
+        },
+        sections={"Content": "A memory without a session."},
+    ).replace("\n", newline)
+
+    entry = parse_structured_entry(src)
+
+    assert entry.inline == {
+        "session_id": "",
+        "timestamp": "2026-04-22T10:03:11Z",
+        "parent_id": "mc_1",
+    }
+    assert entry.sections == {"Content": "A memory without a session."}
+
+
+def test_empty_inline_values_do_not_consume_blank_lines_or_prose() -> None:
+    src = "**first**: \n\n**second**:\nstray prose\n**third**: value"
+    assert parse_structured_entry(src).inline == {
+        "first": "",
+        "second": "",
+        "third": "value",
+    }
+
+
 def test_parse_list_value_kept_as_string() -> None:
     """Type-agnostic by design — bracket notation is preserved as text."""
     src = "**participants**: [u_jason, u_sarah]"
