@@ -79,9 +79,9 @@ class AgentCaseExtracted(BaseEvent):
     memcell_id: str
     case_entry_id: str
     task_intent: str
-    approach: str = ""
-    """Case's Approach section verbatim. Defaults empty for back-compat with
-    pending 1.2.2 events in the OME run_record queue."""
+    approach: str | None = None
+    """Case's Approach section verbatim. None marks a missing body in pending
+    pre-1.2.3 OME events, distinct from a legitimately empty Approach section."""
     key_insight: str | None = None
     """Case's optional KeyInsight section. Defaults None for the same
     back-compat reason as ``approach``."""
@@ -126,7 +126,9 @@ class SkillClusterUpdated(BaseEvent):
     task_intent: str = ""
     """Case task_intent for algo-side rendering. Default empty for back-compat
     with 1.2.2 payloads in the OME run_record queue; 1.2.3+ emitters populate it."""
-    approach: str = ""
+    approach: str | None = None
+    """None preserves a missing legacy body through clustering and queue replay;
+    extract_agent_skill skips it rather than risking an incomplete skill update."""
     key_insight: str | None = None
     quality_score: float = 0.0
     case_timestamp_ms: int = 0

@@ -265,6 +265,42 @@ async def test_returns_without_side_effects_when_embedding_unavailable() -> None
     assert gated[0]["agent_id"] == "agent_42"
 
 
+async def test_missing_approach_skips_before_reads_extraction_or_writes(
+    embed_available: None,
+) -> None:
+    """Legacy SkillClusterUpdated replay is safe even with a real quality score."""
+    event = SkillClusterUpdated.model_validate_json(
+        _event(quality_score=0.8).model_dump_json(exclude={"approach"})
+    )
+    with (
+        patch("everos.memory.strategies.extract_agent_skill.cluster_repo") as repo,
+        patch("everos.memory.strategies.extract_agent_skill._get_reader") as reader,
+        patch("everos.memory.strategies.extract_agent_skill._get_writer") as writer,
+        patch("everos.memory.strategies.extract_agent_skill.get_llm_client") as llm,
+        patch(
+            "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
+        ) as extractor,
+        structlog.testing.capture_logs() as logs,
+    ):
+        await extract_agent_skill(event, FakeStrategyContext())
+
+    repo.get_with_members.assert_not_called()
+    reader.assert_not_called()
+    writer.assert_not_called()
+    llm.assert_not_called()
+    extractor.assert_not_called()
+    skipped = [
+        log
+        for log in logs
+        if log.get("event") == "agent_skill_extraction_skipped_missing_approach"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0]["log_level"] == "warning"
+    assert skipped[0]["case_entry_id"] == event.case_entry_id
+    assert skipped[0]["cluster_id"] == event.cluster_id
+    assert skipped[0]["agent_id"] == event.agent_id
+
+
 async def test_raises_when_cluster_missing_for_retry(embed_available: None) -> None:
     """No cluster row yet — OME will retry the run."""
     with patch(
