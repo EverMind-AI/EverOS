@@ -142,6 +142,15 @@ class IndexRepository(Protocol[T]):
 
     async def scan(self, where: Predicate | None = None) -> list[T]: ...
 
+    async def count_duplicate_keys(self) -> int:
+        """Rows whose ``PRIMARY_KEY`` repeats one already counted.
+
+        ``upsert`` cannot create a duplicate, so a non-zero answer means a
+        write bypassed it. A full O(N) scan of the key columns: meant for
+        health checks, not request paths.
+        """
+        ...
+
     async def update(self, updates: dict[str, Any], *, where: Predicate) -> None: ...
 
     async def delete(self, predicate: Predicate) -> None: ...

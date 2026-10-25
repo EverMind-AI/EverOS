@@ -203,6 +203,9 @@ class RoutedIndexRepository[T: BaseModel]:
     async def scan(self, where: Predicate | None = None) -> list[T]:
         return await self._repo().scan(where)
 
+    async def count_duplicate_keys(self) -> int:
+        return await self._repo().count_duplicate_keys()
+
     async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
         await self._repo().update(updates, where=where)
 
