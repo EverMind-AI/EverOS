@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -76,6 +78,28 @@ def test_radius_out_of_range_rejected() -> None:
         SearchRequest(**_minimal_request_kwargs(), radius=1.5)
     with pytest.raises(ValidationError):
         SearchRequest(**_minimal_request_kwargs(), radius=-0.1)
+
+
+@pytest.mark.parametrize("top_k", [-1, 10])
+@pytest.mark.parametrize("radius_fields", [{}, {"radius": None}, {"radius": 0}])
+def test_radius_json_round_trip_preserves_zero_and_default(
+    top_k: int,
+    radius_fields: dict,
+) -> None:
+    from everos.memory.search.radius import effective_radius
+
+    payload = {**_minimal_request_kwargs(), "top_k": top_k, **radius_fields}
+    req = SearchRequest.model_validate_json(json.dumps(payload))
+    assert req.radius == radius_fields.get("radius")
+    assert ("radius" in req.model_fields_set) == ("radius" in radius_fields)
+    expected = (
+        0.0 if radius_fields.get("radius") == 0 else (0.5 if top_k == -1 else None)
+    )
+    assert effective_radius(req) == expected
+    # SDK-style omission of unset/null fields must never discard explicit zero.
+    serialized = req.model_dump_json(exclude_unset=True, exclude_none=True)
+    assert ("radius" in json.loads(serialized)) == (radius_fields.get("radius") == 0)
+    assert effective_radius(SearchRequest.model_validate_json(serialized)) == expected
 
 
 def test_min_score_out_of_range_rejected() -> None:
