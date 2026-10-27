@@ -195,6 +195,9 @@ scan_interval_seconds = 5.0
 # unless duplicate memcells after a partial failure are acceptable: the
 # memorize pipeline is not atomic, so a re-run is not a clean retry.
 max_attempts = 1
+# Boundary LLM calls run before any state is written, so retrying them cannot
+# duplicate a memcell. Other failures keep the single attempt above.
+boundary_max_attempts = 3
 retry_backoff_seconds = 2.0
 # A row in flight when the process died is replayed on the next start; after
 # this many replays without finishing it is marked failed (poison-pill guard).

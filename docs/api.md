@@ -748,13 +748,14 @@ Limits are configured under `[memorize.async_queue]`, see
 
 **Failure.** A batch whose delivery raises is marked `failed` and skipped
 so its session keeps moving; `GET /tasks/{request_id}` shows `error`.
-There is no automatic retry by default (`max_attempts = 1`), because the
-memorize pipeline is not atomic: boundary detection writes the memcell and
-consumes the session buffer before extraction runs. A failure before that
-point (the common one: the boundary LLM call failed) leaves nothing behind,
-and re-sending the batch is safe. A failure after it leaves the memcell
-without its episode; re-sending then cuts a second memcell, and a `/flush`
-finds an empty buffer. `last_error` does not say which step failed. The
+There is no automatic retry for a general failure by default
+(`max_attempts = 1`), because the memorize pipeline is not atomic: boundary
+detection writes the memcell and consumes the session buffer before
+extraction runs. A failure after that point leaves the memcell without its
+episode; re-sending then cuts a second memcell, and a `/flush` finds an empty
+buffer. A failure before it (the common one: the boundary LLM call failed)
+leaves nothing behind, so the worker retries only that typed failure up to
+`boundary_max_attempts` (default 3); re-sending the batch is also safe. `last_error` does not say which step failed. The
 server never re-drives a failed batch and deletes its row with the others
 after seven days. Synchronous calls have the same property; they just hand
 the decision to the client as a 5xx.

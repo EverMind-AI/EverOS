@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from everalgo.agent_memory import AgentBoundaryDetector
 from everalgo.boundary import detect_boundaries
+from everalgo.llm import LLMError
 from everalgo.types import (
     ChatMessage,
     ConversationItem,
@@ -43,7 +44,7 @@ from everalgo.types import (
 from everalgo.types import ToolCall as AlgoToolCall
 
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
-from everos.core.errors import SessionBufferQuarantinedError
+from everos.core.errors import BoundaryLLMError, SessionBufferQuarantinedError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import (
     Memcell,
@@ -349,6 +350,12 @@ async def _detect(
                     "error": str(err),
                 },
             )
+        except LLMError as err:
+            # A provider failure before boundary detection has written
+            # anything. The memorize queue may retry this safely; wrapping
+            # it makes that decision explicit instead of retrying every
+            # LLM failure (downstream stages are not replay-safe).
+            raise BoundaryLLMError(str(err)) from err
     assert last_err is not None
     raise last_err
 
