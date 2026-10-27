@@ -193,6 +193,16 @@ class LLMServiceError(ExternalServiceError):
     """The configured LLM provider returned an error or timed out."""
 
 
+class BoundaryLLMError(LLMServiceError):
+    """The boundary detector's LLM call failed before any state was written.
+
+    Boundary detection is the only memorization stage that runs before the
+    memcell and session buffer are persisted, so retrying just this step
+    cannot duplicate a memcell. Downstream LLM failures are not safe to
+    replay and must not be retried this way (issue #516).
+    """
+
+
 class EmbeddingServiceError(ExternalServiceError):
     """The configured embedding provider returned an error or timed out."""
 
