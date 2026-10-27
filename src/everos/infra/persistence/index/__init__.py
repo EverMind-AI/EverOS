@@ -8,6 +8,7 @@ do not branch on physical storage.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
@@ -235,6 +236,27 @@ async def count_business_rows() -> dict[str, int]:
     return {repo.table_name: await repo.count() for repo in ALL_REPOS}
 
 
+async def count_duplicate_keys() -> dict[str, int]:
+    """Duplicate ``(app_id, project_id, id)`` rows per business table.
+
+    LanceDB has no unique constraint, so a write path that bypasses the
+    merge/upsert helper can leave two rows with the same logical primary key.
+    The next cascade write may then pick one arbitrarily, and searches silently
+    lose the other. This is an O(N) scan per table, which is why only the
+    opt-in ``cascade status --duplicates`` check calls it (issue #479).
+
+    Milvus enforces its own primary key, so its counts should always be zero;
+    keeping the check backend-neutral makes the CLI output comparable.
+    """
+    out: dict[str, int] = {}
+    for repo in ALL_REPOS:
+        counts = Counter(
+            (row.app_id, row.project_id, row.id) for row in await repo.scan()
+        )
+        out[repo.table_name] = sum(n - 1 for n in counts.values() if n > 1)
+    return out
+
+
 def repo_for_schema(schema: type[Any]) -> IndexRepository[Any]:
     """Resolve a registered repository by its logical record model."""
     for repo in ALL_REPOS:
@@ -280,6 +302,7 @@ __all__ = [
     "connect",
     "contains",
     "count_business_rows",
+    "count_duplicate_keys",
     "drop_business_tables",
     "ensure_business_indexes",
     "episode_repo",

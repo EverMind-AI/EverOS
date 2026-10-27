@@ -39,6 +39,12 @@ def test_help_exits_zero() -> None:
     assert "rebuild" in result.stdout
 
 
+def test_status_help_lists_duplicates_flag() -> None:
+    result = CliRunner().invoke(cascade_mod.app, ["status", "--help"])
+    assert result.exit_code == 0
+    assert "--duplicates" in result.stdout
+
+
 def test_resolve_relative_under_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
