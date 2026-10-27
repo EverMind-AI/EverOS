@@ -59,6 +59,7 @@ from everos.infra.persistence.index import (
     assert_record_dim_matches_settings,
     connect,
     count_business_rows,
+    count_duplicate_keys,
     drop_business_tables,
     ensure_business_indexes,
     shutdown,
@@ -342,6 +343,15 @@ def status(
         bool | None,
         typer.Option("--verbose", "-v", help=_VERBOSE_OPTION_HELP),
     ] = None,
+    duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--duplicates",
+            help=(
+                "Scan every business table for duplicate (app_id, project_id, id) rows."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Print the queue / LSN summary."""
     _apply_root_env(root)
@@ -381,6 +391,11 @@ def status(
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
+            if duplicates:
+                dupes = await count_duplicate_keys()
+                typer.echo("duplicate primary keys:")
+                for table, count in dupes.items():
+                    typer.echo(f"  {table + ':':<24} {count}")
             # `summary.done` would count completed deletions, so a user who
             # removed their last markdown file would be warned that their
             # index is missing and sent to rebuild it from nothing.
