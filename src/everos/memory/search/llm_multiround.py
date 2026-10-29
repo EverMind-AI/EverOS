@@ -50,7 +50,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
-from everalgo.llm.types import ChatMessage as LLMChatMessage
+from everalgo.llm import LLMMessage as LLMChatMessage
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 

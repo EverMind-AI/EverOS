@@ -60,6 +60,11 @@ def resolve_root(explicit: str | None = None) -> Path:
     return _DEFAULT_ROOT.expanduser().resolve()
 
 
+ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
+"""How an LLM section asks its endpoint for JSON; see
+:attr:`LLMSettings.response_format_mode`."""
+
+
 class MemorySettings(BaseModel):
     """Memory configuration."""
 
@@ -159,6 +164,8 @@ class LLMSettings(BaseModel):
         EVEROS_LLM__BASE_URL
         EVEROS_LLM__TIMEOUT_SECONDS
         EVEROS_LLM__EXTRA
+        EVEROS_LLM__RESPONSE_FORMAT_MODE
+        EVEROS_LLM__INVALID_REPLY_RETRIES
     """
 
     model: str = "gpt-4.1-mini"
@@ -200,6 +207,23 @@ class LLMSettings(BaseModel):
 
     Merged under the per-call ``extra``, so a caller can still override a key.
     """
+
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested from the endpoint.
+
+    ``json_schema`` sends the strict schema of the operator's reply model,
+    ``json_object`` sends JSON mode, ``prompt_only`` sends neither and relies on
+    the prompt (the reply is still JSON, and is still validated locally). It is
+    a deployment choice because endpoint support differs: everalgo's contract
+    (``llm-contract.md`` §7.2) measured 24 of 32 OpenRouter endpoints for one
+    model accepting a strict schema, 29 accepting JSON mode, and all 32 with
+    neither -- and sending a format the provider lacks reroutes the request.
+    """
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts of the identical request after a reply that fails
+    validation against the operator's model, has no choice, or was aborted by
+    the server. Bounded here, cheaply, rather than by rerunning the whole
+    operator; ``0`` hands the first failure straight to the caller."""
 
 
 class DeciderSettings(BaseModel):
@@ -270,6 +294,14 @@ class DeciderSettings(BaseModel):
     Bounded at zero: the SDK reads it as a count, so a negative value is not "fewer
     retries" but a misconfiguration that would reach ``AsyncOpenAI`` unexamined."""
 
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested. See
+    :attr:`LLMSettings.response_format_mode`. Inherited from ``[llm]``
+    together with the model when ``model`` is empty."""
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after an unusable reply. See
+    :attr:`LLMSettings.invalid_reply_retries`."""
+
     # ── multi-round loop tuning ──────────────────────────────────────────
     max_rounds: int = Field(default=3, ge=1)
     """Hard cap on retrieval rounds. The cost bound: each round is one decider call
@@ -337,6 +369,12 @@ class MultimodalSettings(BaseModel):
     api_key: SecretStr | None = None
     base_url: str | None = None
     max_concurrency: int = 4
+    response_format_mode: ResponseFormatMode = "json_schema"
+    """How the reply format is requested. See
+    :attr:`LLMSettings.response_format_mode`."""
+    invalid_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after an unusable reply. See
+    :attr:`LLMSettings.invalid_reply_retries`."""
 
     # ``file://`` content-item support (read locally by EverOS, not everalgo).
     file_uri_allow_dirs: list[str] = []

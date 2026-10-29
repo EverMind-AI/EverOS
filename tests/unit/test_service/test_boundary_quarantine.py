@@ -22,7 +22,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from everalgo.boundary.chat import DetectionResult
+from everalgo.boundary import DetectionResult
 from everalgo.types import MemCell
 from sqlmodel import SQLModel
 

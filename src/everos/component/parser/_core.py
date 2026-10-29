@@ -64,17 +64,16 @@ async def aparse_file(raw_file: RawFile) -> ParsedContent:
         MultimodalNotEnabledError: Parser not installed or system dep missing.
         UnsupportedModalityError: File format not supported by the parser.
     """
-    from everalgo.llm import LLMError
     from everalgo.parser import aparse  # Deferred: optional dep
 
-    from everos.component.llm import get_multimodal_llm_client
+    from everos.component.llm import LLMCallError, get_multimodal_llm_client
     from everos.core.errors import LLMServiceError
 
     try:
         return await aparse(raw_file, llm=get_multimodal_llm_client())
     except NotImplementedError as exc:
         raise UnsupportedModalityError(f"modality not supported: {exc}") from exc
-    except LLMError as exc:
+    except LLMCallError as exc:
         raise LLMServiceError(str(exc)) from exc
     except ValueError as exc:
         raise UnsupportedModalityError(str(exc)) from exc

@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
-from everalgo.types import Candidate, FactCandidate
+from everalgo.types import Candidate
 
 from everos.infra.persistence.index import (
     AtomicFact,
@@ -28,6 +28,7 @@ from everos.infra.persistence.index import (
     atomic_fact_repo,
     one_of,
 )
+from everos.memory.search._candidates import FactCandidate
 
 from .base import (
     RecallerDeps,

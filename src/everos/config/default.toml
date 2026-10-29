@@ -72,6 +72,12 @@ collection_prefix = "everos"
 model = "openai/gpt-4.1-mini"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
+# How the reply format is requested: "json_schema" (strict schema, default),
+# "json_object" (JSON mode) or "prompt_only" (prompt alone). Not every endpoint
+# accepts a strict schema -- on OpenRouter, sending one can reroute the request.
+# response_format_mode = "json_schema"
+# Extra attempts of the identical request after a reply that fails validation.
+# invalid_reply_retries = 1
 
 # LLM for the multi-round retrieval decider. Separate from [llm] because the jobs
 # differ: [llm] extracts memories during ingestion, this one decides -- inside the search
@@ -94,6 +100,10 @@ base_url = "https://openrouter.ai/api/v1"
 model = ""
 api_key = ""
 base_url = ""
+# See [llm]. response_format_mode follows the model: with `model` empty it is
+# inherited from [llm] along with it.
+# response_format_mode = "json_schema"
+# invalid_reply_retries = 1
 
 # Multi-round loop tuning. Every one of these is a real field, so `everos config`
 # prints it and a TOML can set it; the legacy EVEROS_LLMMR_* env names still take
@@ -119,6 +129,9 @@ model = "google/gemini-3.8-flash"
 api_key = ""
 base_url = "https://openrouter.ai/api/v1"
 max_concurrency = 4
+# See [llm].
+# response_format_mode = "json_schema"
+# invalid_reply_retries = 1
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.

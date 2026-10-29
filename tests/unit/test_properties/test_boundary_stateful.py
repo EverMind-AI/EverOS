@@ -60,7 +60,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from everalgo.boundary.chat import DetectionResult
+from everalgo.boundary import DetectionResult
 from everalgo.types import ChatMessage, MemCell
 from hypothesis import HealthCheck, currently_in_test_context, settings
 from hypothesis import event as _hypothesis_event

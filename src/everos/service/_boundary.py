@@ -9,7 +9,7 @@ Mode dispatch:
 
 - ``"chat"``  → :func:`everalgo.boundary.detect_boundaries` on a filtered
   ``ChatMessage`` list (tool rows / assistant-with-tool_calls dropped).
-- ``"agent"`` → :class:`everalgo.agent_memory.AgentBoundaryDetector` on the
+- ``"agent"`` → :class:`everalgo.boundary.BoundaryDetector` on the
   full ``ConversationItem`` list (tool rows preserved).
 
 Both paths share a single unprocessed-buffer track (``"memorize"``) because
@@ -30,8 +30,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from everalgo.agent_memory import AgentBoundaryDetector
-from everalgo.boundary import detect_boundaries
+from everalgo.boundary import BoundaryDetector, detect_boundaries
 from everalgo.types import (
     ChatMessage,
     ConversationItem,
@@ -331,11 +330,10 @@ async def _detect(
                         hard_msg_limit=hard_msg_limit,
                     )
                     return list(result.cells), list(result.tail)
-                # Agent mode — facade does filter→detect→remap to preserve
-                # tool items. AgentBoundaryDetector intentionally does not
-                # expose hard limits; the boundary primitive's defaults apply.
+                # Agent mode keeps tool items; hard limits stay at the
+                # detector's defaults.
                 items = [_to_conversation_item(m) for m in merged]
-                detector = AgentBoundaryDetector(llm=llm_client)
+                detector = BoundaryDetector(llm=llm_client)
                 result = await detector.adetect(items, is_final=is_final, prompt=prompt)
                 return list(result.cells), list(result.tail)
         except ValueError as err:

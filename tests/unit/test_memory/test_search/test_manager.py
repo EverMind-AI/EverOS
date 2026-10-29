@@ -22,13 +22,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
 import pytest
-from everalgo.types import Candidate, FactCandidate
+from everalgo.types import Candidate
 
 import everos.component.embedding.accessor as embedding_accessor
 import everos.component.rerank.accessor as rerank_accessor
 from everos.component.embedding import EmbeddingCapability
 from everos.component.rerank import RerankCapability
 from everos.core.errors import ProviderNotConfiguredError
+from everos.memory.search._candidates import FactCandidate
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
 

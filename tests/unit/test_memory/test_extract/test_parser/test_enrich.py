@@ -9,10 +9,10 @@ import pytest
 
 pytest.importorskip("everalgo.parser")
 
-from everalgo.llm import LLMError
 from everalgo.types import ParsedContent
 
 from everos.component import parser as _parser_mod
+from everos.component.llm import LLMCallError
 from everos.core.errors import UnsupportedModalityError
 from everos.memory.extract.parser import enrich_content_items
 
@@ -81,7 +81,7 @@ async def test_enrich_transient_llm_error_degrades(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_aparse(raw_file: Any) -> ParsedContent:
-        raise LLMError("provider down")
+        raise LLMCallError("provider down", reason="transport")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_img_item()]

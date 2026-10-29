@@ -45,9 +45,7 @@ def _fresh_clients(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def _sdk_of(client: Any) -> Any:
-    """Unwrap the logging / usage decorators down to the ``AsyncOpenAI`` instance."""
-    while hasattr(client, "_inner"):
-        client = client._inner
+    """The ``AsyncOpenAI`` instance inside the provider."""
     return client._client
 
 
@@ -163,8 +161,12 @@ class _StopError(Exception):
 
 async def test_client_level_extra_and_per_call_kwargs_both_reach_the_request() -> None:
     """Per-call wins on a collision, matching everalgo's own merge order."""
-    from everos.component.llm.openai_provider import OpenAIProvider
-    from everos.component.llm.protocol import ChatMessage
+    from everalgo.llm import LLMMessage, StrictOutputModel
+
+    from everos.component.llm import OpenAIProvider
+
+    class _Reply(StrictOutputModel):
+        text: str
 
     provider = OpenAIProvider(
         model="m", api_key="k", base_url="http://gw.invalid/v1", extra=NO_THINK_PARSED
@@ -180,8 +182,11 @@ async def test_client_level_extra_and_per_call_kwargs_both_reach_the_request() -
         "_C", (), {"chat": type("_Chat", (), {"completions": _Completions()})()}
     )()
     with pytest.raises(_StopError):
-        await provider.chat(
-            [ChatMessage(role="user", content="hi")], max_tokens=512, top_p=0.9
+        await provider.achat(
+            [LLMMessage(role="user", content="hi")],
+            response_format=_Reply,
+            max_tokens=512,
+            top_p=0.9,
         )
 
     assert seen["max_tokens"] == 512

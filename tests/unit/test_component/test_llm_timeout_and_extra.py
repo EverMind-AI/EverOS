@@ -1,8 +1,8 @@
 """The extraction client's deadline and provider-specific fields are configurable.
 
 Regression cover for a silent misconfiguration: ``LLMSettings`` had no timeout
-and no passthrough, so ``LLMConfig`` was built with three arguments and took the
-algo defaults for the rest. A benchmark harness exported
+and no passthrough, so the client was built with three arguments and took the
+library defaults for the rest. A benchmark harness exported
 ``EVEROS_LLM__TIMEOUT_SECONDS=300`` for months and it did nothing, and there was
 no way at all to reach a gateway's own request fields.
 
@@ -19,13 +19,14 @@ with the knob in place the same fleet ran 981 extractions at 0 failures and a
 2.3s mean.
 
 The knob's *shape* is the second trap, and the reason
-:func:`test_only_extra_body_survives_the_sdk_signature` exists: everalgo merges
-``extra`` into the kwargs it hands the OpenAI SDK, and the SDK rejects unknown
-top-level names. Nesting under ``extra_body`` is not a style choice.
+:func:`test_only_extra_body_survives_the_sdk_signature` exists: the provider
+merges ``extra`` into the kwargs it hands the OpenAI SDK, and the SDK rejects
+unknown top-level names. Nesting under ``extra_body`` is not a style choice.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -79,15 +80,14 @@ def test_timeout_must_be_positive() -> None:
         LLMSettings(timeout_seconds=0)
 
 
-def test_client_passes_both_through_to_the_algo_config(
+def test_client_passes_both_through_to_the_provider_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The settings must reach ``LLMConfig`` -- the step that was missing.
+    """The settings must reach the provider's config -- the step that was missing.
 
-    Asserted against the object handed to ``build_client``, because that is the
-    boundary where the values were being dropped: the settings were correct and
-    the algo client honoured what it was given, but nothing carried one to the
-    other.
+    Asserted against the config handed to ``build_llm_provider``, because that is
+    the boundary where the values were being dropped: the settings were correct and
+    the client honoured what it was given, but nothing carried one to the other.
     """
     import everos.component.llm.client as client_mod
 
@@ -100,7 +100,9 @@ def test_client_passes_both_through_to_the_algo_config(
     seen: list[Any] = []
     monkeypatch.setattr(client_mod, "_llm_client", None)
     monkeypatch.setattr(
-        client_mod, "build_client", lambda cfg: seen.append(cfg) or object()
+        client_mod,
+        "build_llm_provider",
+        lambda cfg, **_: seen.append(cfg) or object(),
     )
     client_mod.get_llm_client()
 
@@ -112,10 +114,8 @@ def test_client_passes_both_through_to_the_algo_config(
 def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """The decider needs it too: it runs the same model inside every search.
 
-    Asserted on the resolved config rather than on ``build_client``: the decider is not
-    built through everalgo any more, because ``LLMConfig`` has no ``max_retries`` and
-    the decider has to be able to turn the SDK's own retries off. A test pinned to the
-    old construction call would pass while asserting about a client nobody uses.
+    Asserted on the resolved config, the one object both the decider client and the
+    benchmark's pre-flight probe are built from.
     """
     import everos.component.llm.client as client_mod
 
@@ -131,48 +131,74 @@ def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> 
     assert cfg.extra == NO_THINK_PARSED
 
 
-def test_config_extra_reaches_the_request_kwargs() -> None:
+async def _sent_body(**call_extra: Any) -> dict[str, Any]:
+    """Send one call through a provider configured with ``NO_THINK_PARSED``.
+
+    Returns the JSON body that reached the transport.
+    """
+    import httpx
+    from everalgo.llm import LLMMessage, StrictOutputModel
+
+    from everos.component.llm import OpenAIProvider
+
+    class _Reply(StrictOutputModel):
+        text: str
+
+    bodies: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        message = {"role": "assistant", "content": '{"text": "ok"}'}
+        choice = {"index": 0, "message": message, "finish_reason": "stop"}
+        return httpx.Response(
+            200,
+            json={
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "m",
+                "choices": [choice],
+            },
+        )
+
+    provider = OpenAIProvider(
+        model="qwen3.8-27b",
+        api_key="k",
+        base_url="http://gw.invalid/v1",
+        extra=NO_THINK_PARSED,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    )
+    await provider.achat(
+        [LLMMessage(role="user", content="hi")], response_format=_Reply, **call_extra
+    )
+    (body,) = bodies
+    return body
+
+
+async def test_config_extra_reaches_the_request() -> None:
     """``extra`` is only worth configuring if it lands in the outgoing request.
 
-    Calls the algo provider's own kwargs assembly rather than re-implementing
-    the merge here, so the assertion still means something if that merge
-    changes: an upstream that stopped forwarding ``config_extra`` would make
-    every setting above inert while all the tests above still passed.
+    Read off the wire rather than off the provider's merge, so the assertion still
+    means something if that merge or the SDK's ``extra_body`` handling changes: a
+    provider that stopped forwarding the configured ``extra`` would make every
+    setting above inert while all the tests above still passed.
     """
-    from everalgo.llm.providers.openai_compat import _build_request_kwargs
-    from everalgo.llm.types import ChatMessage
-
-    kwargs = _build_request_kwargs(
-        messages=[ChatMessage(role="user", content="hi")],
-        model="qwen3.8-27b",
-        temperature=0.0,
-        max_tokens=4096,
-        config_extra=NO_THINK_PARSED,
-        extra={},
-    )
-    assert kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    body = await _sent_body()
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
-def test_per_call_extra_overrides_the_config() -> None:
+async def test_per_call_extra_overrides_the_config() -> None:
     """A caller can opt back into what the config disables."""
-    from everalgo.llm.providers.openai_compat import _build_request_kwargs
-    from everalgo.llm.types import ChatMessage
-
-    kwargs = _build_request_kwargs(
-        messages=[ChatMessage(role="user", content="hi")],
-        model="qwen3.8-27b",
-        temperature=0.0,
-        max_tokens=None,
-        config_extra=NO_THINK_PARSED,
-        extra={"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}},
+    body = await _sent_body(
+        extra_body={"chat_template_kwargs": {"enable_thinking": True}}
     )
-    assert kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True}}
+    assert body["chat_template_kwargs"] == {"enable_thinking": True}
 
 
 def test_only_extra_body_survives_the_sdk_signature() -> None:
     """A gateway-specific name must be nested, not passed at the top level.
 
-    ``_build_request_kwargs`` is a ``dict.update``, so it accepts any key and
+    The provider's request merge is a dict merge, so it accepts any key and
     cannot catch this -- the rejection happens one layer down, where the kwargs
     are splatted into the SDK call. Asserting against the SDK's own signature is
     what makes the nesting requirement a checked fact rather than a comment: a

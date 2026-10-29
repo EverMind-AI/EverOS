@@ -10,8 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from everalgo.llm import LLMError
-
+from everos.component.llm import LLMCallError
 from everos.core.errors import UnsupportedModalityError
 from everos.core.observability.logging import get_logger
 
@@ -54,7 +53,7 @@ async def enrich_content_items(
                 raise UnsupportedModalityError(str(exc)) from exc
             try:
                 parsed = await aparse_file(raw)
-            except LLMError:
+            except LLMCallError:
                 item["parse_status"] = "failed"
                 item["parse_error"] = "LLMError"
                 logger.warning(

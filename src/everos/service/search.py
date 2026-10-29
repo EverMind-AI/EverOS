@@ -43,7 +43,7 @@ from everos.memory.search.recall import (
 )
 
 if TYPE_CHECKING:
-    from everos.component.llm import LLMClient
+    from everalgo.llm import LLMClient
 
 logger = get_logger(__name__)
 
@@ -57,8 +57,8 @@ def _get_llm_client() -> LLMClient | None:
 
     Delegates to :func:`everos.component.llm.get_llm_client` (which
     caches its own singleton, validates ``api_key`` / ``base_url``, and
-    already wraps the client with ``UsageRecordingClient`` when
-    observability is enabled — see ``component/llm/client.py``) instead
+    already attaches the tracing observer when observability is enabled
+    — see ``component/llm/client.py``) instead
     of maintaining a parallel module-level singleton here. LLM is
     optional for search — ``KEYWORD`` works without it — so
     :class:`LLMNotConfiguredError` is swallowed into ``None`` and the

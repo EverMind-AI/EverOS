@@ -88,29 +88,25 @@ dependencies = [
     "anyio>=4.0",                  # Async file I/O (anyio.Path, to_thread.run_sync) for the markdown layer
 
     # Algorithm library (everalgo monorepo, published on PyPI).
-    "everalgo-user-memory==0.4.0",
-    "everalgo-agent-memory==0.4.0",
-    "everalgo-rank==0.4.1",
-    "everalgo-knowledge==0.1.1",
-
-    # everalgo's own transitive layer, pinned to what this repo's uv.lock —
-    # and therefore the whole test suite — actually resolves. The packages
-    # above declare it as `>=0.2.0,<2.0.0`, treating a 0.x line as if a major
-    # bump were the only breaking one, so a fresh `pip install everos` picks
-    # up releases the suite has never run against. That is not theoretical:
-    # everalgo-boundary 0.3.0 added a third required field to the public
-    # `DetectionResult` NamedTuple while everalgo-agent-memory 0.4.0 still
-    # builds it with two, so `POST /add` answered 500 on a default
-    # (`memorize.mode = "agent"`) install of 1.2.3 while every local suite
-    # stayed green on the locked 0.2.1. Raise these deliberately, together
-    # with a run of the release smoke against a PyPI-resolved install.
-    "everalgo-boundary==0.2.1",
-    "everalgo-core==0.3.0",
-    "everalgo-clustering==0.2.1",
+    #
+    # All eight everalgo packages (the four below, the three transitive ones
+    # after them, and everalgo-parser in the `multimodal` extra) ship on one
+    # contract line -- currently the 2026-10-13 line, built on everalgo-core
+    # 0.6.0's `LLMClient.achat` contract. The packages declare loose ranges on
+    # one another, so a fresh `pip install everos` would otherwise mix lines
+    # the suite has never run together. Pin every one with `==` and raise them
+    # together, with a run of the release smoke against a PyPI-resolved install.
+    "everalgo-user-memory==0.9.0rc4",
+    "everalgo-agent-memory==0.6.0rc3",
+    "everalgo-rank==0.5.0rc3",
+    "everalgo-knowledge==0.3.0rc2",
+    "everalgo-boundary==0.4.0",
+    "everalgo-core==0.6.0",
+    "everalgo-clustering==0.3.0rc2",
 ]
 
 [project.optional-dependencies]
-multimodal = ["everalgo-parser[svg]>=0.2.1"]  # [svg] bundles cairosvg → SVG works by default
+multimodal = ["everalgo-parser[svg]==0.3.0rc2"]  # [svg] bundles cairosvg → SVG works by default
 # Native OpenTelemetry tracing export. Optional — EverOS never imports these
 # unless [observability] is enabled. Install with: pip install everos[otel]
 otel = [
