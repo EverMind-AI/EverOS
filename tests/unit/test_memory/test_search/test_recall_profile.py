@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from everos.infra.persistence.index.adapters import ProfileIndexAdapter
 from everos.infra.persistence.lancedb import (
     UserProfile,
-    lancedb_manager,
-    user_profile_repo,
 )
 from everos.memory.search.recall.profile import ProfileRecaller
+from tests.fakes.storage import Storage
 
 
 def _profile_row(
@@ -47,14 +47,11 @@ def _profile_row(
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
     yield
-    await lancedb_manager.dispose_connection()
 
 
-async def test_fetch_returns_dto_when_row_exists() -> None:
-    await user_profile_repo.upsert(
+async def test_fetch_returns_dto_when_row_exists(storage: Storage) -> None:
+    await storage.repos.user_profile.upsert(
         [
             _profile_row(
                 owner_id="u_alice",
@@ -66,9 +63,9 @@ async def test_fetch_returns_dto_when_row_exists() -> None:
         ]
     )
 
-    items = await ProfileRecaller().fetch(
-        "u_alice", app_id="default", project_id="default"
-    )
+    items = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("u_alice", app_id="default", project_id="default")
     assert len(items) == 1
     item = items[0]
     assert item.id == "u_alice"
@@ -81,39 +78,41 @@ async def test_fetch_returns_dto_when_row_exists() -> None:
     assert item.profile_data["profile_timestamp_ms"] == 1_700_000_001_000
 
 
-async def test_fetch_returns_empty_when_row_missing() -> None:
-    items = await ProfileRecaller().fetch(
-        "u_cold_start", app_id="default", project_id="default"
-    )
+async def test_fetch_returns_empty_when_row_missing(storage: Storage) -> None:
+    items = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("u_cold_start", app_id="default", project_id="default")
     assert items == []
 
 
-async def test_fetch_returns_empty_for_blank_owner() -> None:
+async def test_fetch_returns_empty_for_blank_owner(storage: Storage) -> None:
     """Blank ``owner_id`` short-circuits — never hit LanceDB with an
     empty-string PK (which would otherwise return any row whose id was
     persisted as the empty string)."""
-    items = await ProfileRecaller().fetch("", app_id="default", project_id="default")
+    items = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("", app_id="default", project_id="default")
     assert items == []
 
 
-async def test_fetch_isolates_by_owner() -> None:
-    await user_profile_repo.upsert(
+async def test_fetch_isolates_by_owner(storage: Storage) -> None:
+    await storage.repos.user_profile.upsert(
         [
             _profile_row(owner_id="u_alice", summary="Alice"),
             _profile_row(owner_id="u_bob", summary="Bob"),
         ]
     )
-    bob_items = await ProfileRecaller().fetch(
-        "u_bob", app_id="default", project_id="default"
-    )
+    bob_items = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("u_bob", app_id="default", project_id="default")
     assert len(bob_items) == 1
     assert bob_items[0].profile_data["summary"] == "Bob"
 
 
-async def test_fetch_tolerates_malformed_json_columns() -> None:
+async def test_fetch_tolerates_malformed_json_columns(storage: Storage) -> None:
     """A column with corrupted JSON should not blow up the recall path —
     the bucket falls back to ``[]`` and the rest of the DTO survives."""
-    await user_profile_repo.upsert(
+    await storage.repos.user_profile.upsert(
         [
             UserProfile(
                 id="u_broken",
@@ -129,30 +128,34 @@ async def test_fetch_tolerates_malformed_json_columns() -> None:
         ]
     )
 
-    items = await ProfileRecaller().fetch(
-        "u_broken", app_id="default", project_id="default"
-    )
+    items = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("u_broken", app_id="default", project_id="default")
     assert len(items) == 1
     assert items[0].profile_data["explicit_info"] == []
     assert items[0].profile_data["implicit_traits"] == []
     assert items[0].profile_data["summary"] == "ok"
 
 
-async def test_fetch_isolates_by_project() -> None:
+async def test_fetch_isolates_by_project(storage: Storage) -> None:
     """Same owner, two projects: each project gets its own profile row."""
-    await user_profile_repo.upsert(
+    await storage.repos.user_profile.upsert(
         [
             _profile_row(owner_id="u_same", summary="alpha person", project_id="alpha"),
             _profile_row(owner_id="u_same", summary="beta person", project_id="beta"),
         ]
     )
-    alpha = await ProfileRecaller().fetch(
-        "u_same", app_id="default", project_id="alpha"
+    alpha = await ProfileRecaller(
+        ProfileIndexAdapter(storage.repos.user_profile)
+    ).fetch("u_same", app_id="default", project_id="alpha")
+    beta = await ProfileRecaller(ProfileIndexAdapter(storage.repos.user_profile)).fetch(
+        "u_same", app_id="default", project_id="beta"
     )
-    beta = await ProfileRecaller().fetch("u_same", app_id="default", project_id="beta")
     assert [i.profile_data["summary"] for i in alpha] == ["alpha person"]
     assert [i.profile_data["summary"] for i in beta] == ["beta person"]
     assert (
-        await ProfileRecaller().fetch("u_same", app_id="default", project_id="gamma")
+        await ProfileRecaller(ProfileIndexAdapter(storage.repos.user_profile)).fetch(
+            "u_same", app_id="default", project_id="gamma"
+        )
         == []
     )

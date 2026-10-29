@@ -28,12 +28,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.routes.cascade import router as cascade_router
-from everos.memory.cascade import CascadeOrchestrator
+from everos.infra.cascade import CascadeOrchestrator
+from tests.fakes import make_application
+from tests.fakes.application import make_ops
 
 
 @dataclass
 class _Summary:
-    """Shape of ``md_change_state_repo.queue_summary()``."""
+    """Shape of ``storage.sqlite.md_change_state.queue_summary()``."""
 
     pending: int = 0
     done: int = 0
@@ -55,7 +57,7 @@ def _orch(*, before: int, after: int, drained: int) -> mock.MagicMock:
 def _client(orch: object | None) -> AsyncClient:
     app = FastAPI()
     app.include_router(cascade_router, prefix="/api/v1")
-    app.state.lifespan_data = {"cascade": orch} if orch is not None else {}
+    app.state.application = make_application(ops=make_ops(cascade=orch))
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

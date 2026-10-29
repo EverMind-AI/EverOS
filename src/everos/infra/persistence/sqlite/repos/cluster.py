@@ -19,29 +19,23 @@ so calls are idempotent even if a strategy retries.
 from __future__ import annotations
 
 import json
-import uuid
 
 import numpy as np
 from everalgo.clustering import Cluster as AlgoCluster
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from everos.component.utils.datetime import get_utc_now
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import Cluster, ClusterMember
 
 _CENTROID_DTYPE = np.float32
 
 
-def mint_cluster_id() -> str:
-    """Mint a fresh cluster id (mirrors ``_mint_memcell_id``: ``cl_<12hex>``)."""
-    return f"cl_{uuid.uuid4().hex[:12]}"
-
-
-class _ClusterRepo(RepoBase[Cluster]):
+class ClusterRepo(RepoBase[Cluster]):
     """CRUD repository for the ``cluster`` + ``cluster_member`` table pair.
 
     Bridges between the SQLite row shape and the algo-side
@@ -50,9 +44,6 @@ class _ClusterRepo(RepoBase[Cluster]):
     """
 
     model = Cluster
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     # ── Reads ──────────────────────────────────────────────────────────────
 
@@ -123,7 +114,7 @@ class _ClusterRepo(RepoBase[Cluster]):
 
         ``member_id`` (e.g. episode ``entry_id`` like
         ``ep_20260517_00000001``) is only per-owner unique — see
-        ``core/persistence/markdown/entries.py``: "Cross-user uniqueness
+        ``infra/persistence/markdown/base/entries.py``: "Cross-user uniqueness
         is handled at the database layer via a composite
         ``<user_id>_<entry_id>`` field; it is not encoded into the
         EntryId string itself." Without the scope filter, two owners
@@ -308,7 +299,7 @@ class _ClusterRepo(RepoBase[Cluster]):
         """Persist one algo cluster snapshot + its membership rows.
 
         ``algo_cluster.id`` must be non-None (caller-minted via
-        :func:`mint_cluster_id` for a brand-new cluster, or carried
+        :func:`everos.memory.models.mint_cluster_id` for a brand-new cluster, or carried
         through from a merge return). ``algo_cluster.members`` is the
         full member list — the repo diffs against existing membership
         and inserts only the new rows so the call is idempotent under
@@ -406,6 +397,3 @@ async def _load_members_by_cluster(
     for cluster_id, member_id in (await session.execute(stmt)).all():
         buckets.setdefault(cluster_id, []).append(member_id)
     return buckets
-
-
-cluster_repo = _ClusterRepo()

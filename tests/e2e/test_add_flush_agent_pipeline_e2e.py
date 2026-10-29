@@ -39,17 +39,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import httpx
 import pytest
 
-import everos.component.embedding.accessor as _embedding_accessor
 from everos.infra.ome.records import RunStatus
-from everos.infra.persistence.index import agent_case_repo, agent_skill_repo, eq
+from everos.infra.persistence.index import eq
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
-from everos.service.memorize import _get_engine
+from everos.service import Application
+from tests.fakes.storage import StorageView
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "agent_trajectories"
 
@@ -73,41 +73,6 @@ _AGENT_DJANGO = "agent_django"
 _DRAIN_ROUNDS = 4
 _DRAIN_TIMEOUT_SECONDS = 300.0
 _DRAIN_INTER_ROUND_SLEEP_SECONDS = 5.0
-
-
-@pytest.fixture(autouse=True)
-def _opt_in_real_embedding(
-    _reset_embedding_capability_singleton: None,
-) -> Iterator[None]:
-    """Opt this module's test into a real embedding capability.
-
-    ``tests/conftest.py``'s ``_reset_embedding_capability_singleton``
-    autouse fixture pins the capability to unavailable for every test
-    (hermeticity); its docstring says a test may "explicitly opt in by
-    re-assigning ``acc._capability``". This test needs it:
-    ``trigger_skill_clustering`` and ``extract_agent_skill`` both
-    body-guard on ``get_embedding_capability().available`` and return
-    early when it is false, so without opting in here the skill chain
-    would never run — exactly the coverage gap this fixture closes.
-    Scoped to this file only (not the global fixture) so every other
-    test keeps its hermetic default.
-
-    Requesting ``_reset_embedding_capability_singleton`` as a parameter
-    — rather than relying on collection/declaration order between this
-    file's conftest chain and the root conftest — makes pytest's
-    dependency graph guarantee this fixture's setup runs after it and its
-    teardown before it. Rerank is left untouched (see the module
-    docstring): this fixture reads and writes only the embedding
-    capability, so there is nothing to order it against.
-
-    Setting ``_capability = None`` (rather than constructing a capability
-    object directly) makes the accessor rebuild lazily from
-    ``load_settings()`` on next call, picking up the real ``.env``
-    credentials ``tests/e2e/conftest.py`` loads at import time.
-    """
-    _embedding_accessor._capability = None
-    yield
-    _embedding_accessor._capability = None
 
 
 def _load_fixture(session_id: str) -> dict:
@@ -144,9 +109,11 @@ async def _drive_session(
 @pytest.mark.live_llm
 async def test_agent_pipeline_e2e_mixed_tenancy(
     async_client: httpx.AsyncClient,
+    e2e_application: Application,
     core_pipeline_runtime: Path,
     pipeline_done_poll: Callable[..., Awaitable[None]],
     memcell_count: Callable[..., Awaitable[int]],
+    storage_view: StorageView,
 ) -> None:
     """5 SWE-bench trajectories → agent_case + agent_skill on three agents."""
     memory_root = core_pipeline_runtime
@@ -188,9 +155,15 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         assert md_files, f"no agent_case md under {case_dir!s}"
 
     # 4.3 LanceDB agent_case rows per owner
-    pytest_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_PYTEST))
-    sympy_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_SYMPY))
-    django_cases = await agent_case_repo.find_where(eq("owner_id", _AGENT_DJANGO))
+    pytest_cases = await storage_view.repos.agent_case.find_where(
+        eq("owner_id", _AGENT_PYTEST)
+    )
+    sympy_cases = await storage_view.repos.agent_case.find_where(
+        eq("owner_id", _AGENT_SYMPY)
+    )
+    django_cases = await storage_view.repos.agent_case.find_where(
+        eq("owner_id", _AGENT_DJANGO)
+    )
 
     assert len(pytest_cases) >= 1, (
         f"no agent_pytest rows in LanceDB (got {len(pytest_cases)})"
@@ -230,9 +203,15 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     # SKILL.md (extract_agent_skill status "success", no retries); driving
     # 5 trajectories across 3 agents should clear an aggregate floor of 1
     # even if any single agent's cluster is quality-gated to 0.
-    pytest_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_PYTEST))
-    sympy_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_SYMPY))
-    django_skills = await agent_skill_repo.find_where(eq("owner_id", _AGENT_DJANGO))
+    pytest_skills = await storage_view.repos.agent_skill.find_where(
+        eq("owner_id", _AGENT_PYTEST)
+    )
+    sympy_skills = await storage_view.repos.agent_skill.find_where(
+        eq("owner_id", _AGENT_SYMPY)
+    )
+    django_skills = await storage_view.repos.agent_skill.find_where(
+        eq("owner_id", _AGENT_DJANGO)
+    )
     total_skills = len(pytest_skills) + len(sympy_skills) + len(django_skills)
     assert total_skills >= 1, (
         "agent-skill chain produced nothing — the strategy chain "
@@ -253,7 +232,7 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     # looks like. Assert (any status) runs exist first, so the dead-letter
     # assertion below is only non-vacuous because of this check, not
     # because the skill-count floor in 4.5 happened to run first.
-    engine = _get_engine()
+    engine = e2e_application._engine
     all_skill_runs = await engine.list_runs("extract_agent_skill")
     assert all_skill_runs, (
         "extract_agent_skill never ran at all — the dead-letter check "
@@ -283,5 +262,6 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
 
     await assert_md_lance_strict_consistent(
         memory_root,
+        storage_view.repos,
         expect_at_least={"agent_case": 1},
     )

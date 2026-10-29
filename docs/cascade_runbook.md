@@ -247,7 +247,7 @@ deleting it does not clear this record.
 
 ### LanceDB schema drift on startup
 
-`LanceDBLifespanProvider.startup` calls `verify_business_schemas`. If
+The server startup (`Application.start`) calls `verify_business_schemas`. If
 an on-disk table has columns the current Pydantic schema does not
 declare (or vice versa), the boot fails with:
 
@@ -319,7 +319,7 @@ Workarounds:
 process dies before `mark_done` / `mark_failed`, those rows stay in
 `processing` until the next boot. **The orchestrator auto-recovers**
 on startup: `CascadeOrchestrator.start` calls
-`md_change_state_repo.recover_orphan_processing()` before launching
+its ledger's `recover_orphan_processing()` before launching
 the watcher / scanner / worker, which resets every `processing` row
 back to `pending`. Single-process cascade means no race — at boot
 time no other worker could legitimately own a `processing` row.
@@ -368,8 +368,8 @@ place.
 
 ### Cascade scheduler knobs
 
-All defaults live in `everos.memory.cascade.orchestrator.CascadeConfig`
-and `everos.memory.cascade.worker.CascadeWorker`:
+All defaults live in `everos.infra.cascade.orchestrator.CascadeConfig`
+and `everos.infra.cascade.worker.CascadeWorker`:
 
 | Knob | Default | Effect |
 |---|---|---|

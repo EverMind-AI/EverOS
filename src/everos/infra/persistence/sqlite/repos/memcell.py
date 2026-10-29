@@ -1,4 +1,4 @@
-"""Repository for ``memcell`` table — singleton bound to ``sqlite_manager``.
+"""Repository for ``memcell`` table.
 
 Pure persistence: callers build the SQLModel ``Memcell`` rows (including
 ``message_ids_json`` / ``sender_ids_json``) and hand them in. The pipeline
@@ -10,15 +10,14 @@ identifiers.
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import Memcell
 
 _SQLITE_IN_CHUNK = 500
-"""SQL ``IN (?, ?, ...)`` parameter cap for :meth:`_MemcellRepo.find_by_ids`.
+"""SQL ``IN (?, ?, ...)`` parameter cap for :meth:`MemcellRepo.find_by_ids`.
 
 SQLite's ``SQLITE_MAX_VARIABLE_NUMBER`` defaults to 999 on the shipped
 amalgamation and rises to 32766 on ≥3.32; 500 stays well under the older
@@ -29,11 +28,8 @@ in-memory — see the direct-path selector in
 ``last_profile_ts=0`` can pull an owner's entire episode history."""
 
 
-class _MemcellRepo(RepoBase[Memcell]):
+class MemcellRepo(RepoBase[Memcell]):
     model = Memcell
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def insert_many(self, rows: list[Memcell]) -> list[Memcell]:
         """Insert MemCell rows in one transaction; rows are constructed by caller."""
@@ -67,6 +63,3 @@ class _MemcellRepo(RepoBase[Memcell]):
                 rows = (await s.execute(stmt)).scalars().all()
                 by_id.update((r.memcell_id, r) for r in rows)
         return [by_id[mid] for mid in memcell_ids if mid in by_id]
-
-
-memcell_repo = _MemcellRepo()

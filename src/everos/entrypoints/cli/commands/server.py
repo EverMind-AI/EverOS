@@ -8,7 +8,6 @@ factory.
 
 from __future__ import annotations
 
-import logging
 import os
 import sys
 
@@ -94,11 +93,11 @@ def start(
     port_resolved = port if port is not None else settings.api.port
     log_level_resolved = (log_level or os.getenv("EVEROS_LOG_LEVEL", "INFO")).upper()
 
-    from everos.core.observability.logging import configure_logging
+    from everos.core.observability.logging import configure_logging, get_logger
 
     configure_logging(level=log_level_resolved)
 
-    bootstrap_logger = logging.getLogger("everos.cli.server")
+    bootstrap_logger = get_logger("everos.cli.server")
     bootstrap_logger.info("starting everos on %s:%d", host_resolved, port_resolved)
     bootstrap_logger.info(
         "once up, MCP clients connect with: uvx everos-mcp, "

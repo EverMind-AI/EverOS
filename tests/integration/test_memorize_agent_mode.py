@@ -15,6 +15,7 @@ conftest.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import json
 import sqlite3
@@ -28,10 +29,23 @@ import pytest_asyncio
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
-from sqlmodel import SQLModel
 
-from everos.core.persistence import MemoryRoot
-from everos.service.memorize import MemorizeResult, memorize
+from everos.infra.persistence import MemoryRoot
+from everos.service import (
+    MemorizeResult,
+    MemoryService,
+    build_application,
+    build_providers,
+)
+from tests.fakes.storage import Storage
+
+_under_test: dict[str, MemoryService] = {}
+"""The memory facade of the application the ``memorize_env`` fixture built."""
+
+
+async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
+    """``MemoryService.memorize`` of the application under test."""
+    return await _under_test["memory"].memorize(payload, **kwargs)
 
 
 def _boundary_response(boundaries: list[int]) -> str:
@@ -99,32 +113,19 @@ def _memcell_rows(tmp_path: Path) -> list[sqlite3.Row]:
 
 @pytest_asyncio.fixture
 async def memorize_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[Callable[..., Any]]:
     """Same shape as the chat-baseline fixture; ``mode`` defaults to ``agent``."""
     monkeypatch.setattr(
         MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
     ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-    client_mod = importlib.import_module("everos.component.llm.client")
-
-    for attr in (
-        "_episode_writer",
-        "_prompt_loader",
-        "_user_pipeline",
-        "_agent_pipeline",
-        "_ome_engine",
-    ):
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
     started: dict[str, Any] = {"engine": None}
 
@@ -137,14 +138,7 @@ async def memorize_env(
 
         load_settings.cache_clear()
 
-        monkeypatch.setattr(client_mod, "_llm_client", fake_llm)
-
-        from everos.infra.persistence.sqlite import dispose_engine, get_engine
-
-        db_engine = get_engine()
-        async with db_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        started["dispose"] = dispose_engine
+        await storage.create_schema()
 
         # Silence OME strategies so agent_case / atomic / foresight don't
         # try real extraction logic during these tests.
@@ -160,7 +154,13 @@ async def memorize_env(
                     lambda *a, **k: type("M", (), {"aextract": noop})(),
                 )
 
-        engine = svc._get_engine()
+        settings = load_settings()
+        application = build_application(
+            settings,
+            providers=dataclasses.replace(build_providers(settings), llm=fake_llm),
+        )
+        _under_test["memory"] = application.memory
+        engine = application._engine
         await engine.start()
         started["engine"] = engine
 
@@ -168,8 +168,6 @@ async def memorize_env(
 
     if started.get("engine") is not None:
         await started["engine"].stop()
-    if started.get("dispose") is not None:
-        await started["dispose"]()
 
 
 # ── Tests ────────────────────────────────────────────────────────────

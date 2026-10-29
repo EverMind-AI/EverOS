@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import ReflectionReport
 
 
-class _ReflectionReportRepo(RepoBase[ReflectionReport]):
+class ReflectionReportRepo(RepoBase[ReflectionReport]):
     """CRUD repository for the ``reflection_report`` audit table.
 
     Provides creation, latest-by-cluster lookup, and reflected-cluster
@@ -19,9 +18,6 @@ class _ReflectionReportRepo(RepoBase[ReflectionReport]):
     """
 
     model = ReflectionReport
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def create(self, report: ReflectionReport) -> None:
         """Persist a new reflection report row.
@@ -73,6 +69,3 @@ class _ReflectionReportRepo(RepoBase[ReflectionReport]):
             )
             rows = (await s.execute(stmt)).scalars().all()
             return set(rows)
-
-
-reflection_report_repo = _ReflectionReportRepo()

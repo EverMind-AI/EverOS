@@ -12,23 +12,21 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from everalgo.types import CategorySpec, KnowledgeMemory, ParsedContent
 
 from everos.core.errors import PathTraversalError
+from everos.infra.persistence import MemoryRoot
 from everos.service.knowledge import (
     CategoryOverview,
     DocumentDetail,
     DocumentOverviewItem,
     _resolve_original_file_path,
     _write_original_file,
-    create_document,
-    get_document,
-    list_categories,
-    replace_document,
 )
+from tests.fakes import make_knowledge_service
 
 _MOD = "everos.service.knowledge"
 _ORIGINAL_DIR = "_original"
@@ -63,9 +61,14 @@ def _make_memories(doc_id: str, category_id: str = "Sports") -> list[KnowledgeMe
 
 @pytest.fixture
 def knowledge_dir(tmp_path: Path) -> Path:
-    d = tmp_path / "knowledge"
-    d.mkdir()
+    d = MemoryRoot(tmp_path).knowledge_dir()
+    d.mkdir(parents=True)
     return d
+
+
+def _root_of(knowledge_dir: Path) -> Path:
+    """The memory root a default-scope ``knowledge_dir`` fixture lives under."""
+    return knowledge_dir.parents[2]
 
 
 # ── TC-1: create_document full chain writes _original/ ──────────────────────
@@ -79,6 +82,7 @@ async def test_create_document_writes_original_file(
     Only the extractor is mocked. KnowledgeWriter and filesystem are real.
     This catches path wiring bugs between _write_document and _write_original_file.
     """
+    mock_repo = MagicMock()
     doc_id = "d_test00000001"
     file_content = b"original PDF binary data"
     memories = _make_memories(doc_id)
@@ -86,16 +90,15 @@ async def test_create_document_writes_original_file(
     mock_ext.aextract.return_value = memories
 
     with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
         patch(f"{_MOD}._mint_doc_id", return_value=doc_id),
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_ext,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+        ).create_document(
             parsed=ParsedContent(text="some content"),
             title="Test Doc",
-            knowledge_dir=knowledge_dir,
             source_name="report.pdf",
             source_type="file",
             doc_id=doc_id,
@@ -123,22 +126,22 @@ async def test_create_document_without_file_content_no_original(
     knowledge_dir: Path,
 ) -> None:
     """No file_content → no _original/ directory created."""
+    mock_repo = MagicMock()
     doc_id = "d_test00000002"
     memories = _make_memories(doc_id)
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = memories
 
     with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
         patch(f"{_MOD}._mint_doc_id", return_value=doc_id),
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await create_document(
-            extractor=mock_ext,
+        result = await make_knowledge_service(
+            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+        ).create_document(
             parsed=ParsedContent(text="some content"),
             title="No Original",
-            knowledge_dir=knowledge_dir,
             source_name="test.txt",
             source_type="file",
             doc_id=doc_id,
@@ -158,9 +161,11 @@ async def test_get_document_returns_original_file_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_document derives original_file_path from md_path + source_name."""
+    mock_doc_repo = MagicMock()
+    mock_topic_repo = MagicMock()
     from everos.component.utils.datetime import get_utc_now
     from everos.config import load_settings
-    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
     )
@@ -193,14 +198,13 @@ async def test_get_document_returns_original_file_path(
         updated_at=now,
     )
 
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo,
-        patch(f"{_MOD}.knowledge_topic_sqlite_repo") as mock_topic_repo,
-    ):
-        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=row)
-        mock_topic_repo.get_topics_by_doc_id = AsyncMock(return_value=[])
+    mock_doc_repo.get_by_doc_id = AsyncMock(return_value=row)
+    mock_topic_repo.get_topics_by_doc_id = AsyncMock(return_value=[])
 
-        detail = await get_document("d_test00000003", "app", "proj")
+    detail = await make_knowledge_service(
+        documents=mock_doc_repo,
+        topics=mock_topic_repo,
+    ).get_document("d_test00000003", "app", "proj")
 
     assert isinstance(detail, DocumentDetail)
     assert detail.original_file_path is not None
@@ -218,9 +222,11 @@ async def test_get_document_returns_none_for_legacy_doc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Legacy documents without _original/ get original_file_path=None."""
+    mock_doc_repo = MagicMock()
+    mock_topic_repo = MagicMock()
     from everos.component.utils.datetime import get_utc_now
     from everos.config import load_settings
-    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
     )
@@ -248,14 +254,13 @@ async def test_get_document_returns_none_for_legacy_doc(
         updated_at=now,
     )
 
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_doc_repo,
-        patch(f"{_MOD}.knowledge_topic_sqlite_repo") as mock_topic_repo,
-    ):
-        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=row)
-        mock_topic_repo.get_topics_by_doc_id = AsyncMock(return_value=[])
+    mock_doc_repo.get_by_doc_id = AsyncMock(return_value=row)
+    mock_topic_repo.get_topics_by_doc_id = AsyncMock(return_value=[])
 
-        detail = await get_document("d_legacy000001", "app", "proj")
+    detail = await make_knowledge_service(
+        documents=mock_doc_repo,
+        topics=mock_topic_repo,
+    ).get_document("d_legacy000001", "app", "proj")
 
     assert detail.original_file_path is None
 
@@ -270,6 +275,7 @@ async def test_replace_document_writes_new_original(
     knowledge_dir: Path,
 ) -> None:
     """replace_document writes new original file after atomic replacement."""
+    mock_repo = MagicMock()
     from everos.component.utils.datetime import get_utc_now
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
@@ -284,20 +290,17 @@ async def test_replace_document_writes_new_original(
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = old_memories
 
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
-    ):
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
-        old_result = await create_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="old content"),
-            title="Old Doc",
-            knowledge_dir=knowledge_dir,
-            source_name="v1.pdf",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=b"old version binary",
-        )
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    old_result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="old content"),
+        title="Old Doc",
+        source_name="v1.pdf",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=b"old version binary",
+    )
 
     old_dir = Path(old_result.md_path)
     assert (old_dir / _ORIGINAL_DIR / "v1.pdf").read_bytes() == b"old version binary"
@@ -319,20 +322,17 @@ async def test_replace_document_writes_new_original(
     )
 
     mock_ext.aextract.return_value = new_memories
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
-    ):
-        mock_repo.get_by_doc_id = AsyncMock(return_value=existing_row)
-        new_result = await replace_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="new content"),
-            title="New Doc",
-            doc_id=doc_id,
-            knowledge_dir=knowledge_dir,
-            source_name="v2.pdf",
-            category_id="Sports",
-            file_content=new_file,
-        )
+    mock_repo.get_by_doc_id = AsyncMock(return_value=existing_row)
+    new_result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).replace_document(
+        parsed=ParsedContent(text="new content"),
+        title="New Doc",
+        doc_id=doc_id,
+        source_name="v2.pdf",
+        category_id="Sports",
+        file_content=new_file,
+    )
 
     new_dir = Path(new_result.md_path)
     assert (new_dir / _ORIGINAL_DIR / "v2.pdf").read_bytes() == new_file
@@ -345,25 +345,23 @@ async def test_delete_removes_original_with_doc_dir(
     knowledge_dir: Path,
 ) -> None:
     """rmtree on doc dir clears _original/ naturally."""
+    mock_repo = MagicMock()
     doc_id = "d_del000000001"
     memories = _make_memories(doc_id)
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = memories
 
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
-    ):
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
-        result = await create_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="content"),
-            title="To Delete",
-            knowledge_dir=knowledge_dir,
-            source_name="file.pdf",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=b"data",
-        )
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="content"),
+        title="To Delete",
+        source_name="file.pdf",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=b"data",
+    )
 
     doc_dir = Path(result.md_path)
     assert (doc_dir / _ORIGINAL_DIR / "file.pdf").is_file()
@@ -377,26 +375,24 @@ async def test_delete_removes_original_with_doc_dir(
 
 async def test_move_preserves_original(knowledge_dir: Path) -> None:
     """PATCH category move (shutil.move) keeps _original/ intact."""
+    mock_repo = MagicMock()
     doc_id = "d_move00000001"
     memories = _make_memories(doc_id)
     file_content = b"important data"
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = memories
 
-    with (
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
-    ):
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
-        result = await create_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="content"),
-            title="To Move",
-            knowledge_dir=knowledge_dir,
-            source_name="file.pdf",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=file_content,
-        )
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="content"),
+        title="To Move",
+        source_name="file.pdf",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=file_content,
+    )
 
     old_dir = Path(result.md_path)
     new_dir = knowledge_dir / "Finance" / old_dir.name
@@ -421,25 +417,25 @@ async def test_create_document_absolute_filename_stays_in_original(
     ``/tmp/pwned.txt`` would otherwise plant attacker bytes at an arbitrary
     writable path (e.g. ``~/.bashrc``) rather than under the document dir.
     """
+    mock_repo = MagicMock()
     doc_id = "d_sec000000001"
     sentinel = tmp_path / "pwned.txt"  # sibling of knowledge_dir, i.e. outside it
     payload = b"owned"
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = _make_memories(doc_id)
 
-    with patch(f"{_MOD}.knowledge_document_repo") as mock_repo:
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
-        result = await create_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="content"),
-            title="Traversal",
-            knowledge_dir=knowledge_dir,
-            source_name=str(sentinel),  # absolute path as filename
-            source_type="file",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=payload,
-        )
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="content"),
+        title="Traversal",
+        source_name=str(sentinel),  # absolute path as filename
+        source_type="file",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=payload,
+    )
 
     # The attacker-chosen absolute path must NOT have been written.
     assert not sentinel.exists(), "absolute filename escaped _original/"
@@ -455,24 +451,24 @@ async def test_create_document_dotdot_filename_stays_in_original(
     knowledge_dir: Path,
 ) -> None:
     """A relative-traversal filename keeps only a contained basename."""
+    mock_repo = MagicMock()
     doc_id = "d_sec000000002"
     payload = b"traverse"
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = _make_memories(doc_id)
 
-    with patch(f"{_MOD}.knowledge_document_repo") as mock_repo:
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
-        result = await create_document(
-            extractor=mock_ext,
-            parsed=ParsedContent(text="content"),
-            title="Dotdot",
-            knowledge_dir=knowledge_dir,
-            source_name="../../../../etc/cron.d/pwned",
-            source_type="file",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=payload,
-        )
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="content"),
+        title="Dotdot",
+        source_name="../../../../etc/cron.d/pwned",
+        source_type="file",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=payload,
+    )
 
     doc_dir = Path(result.md_path)
     # Only the basename survives, contained in _original/.
@@ -510,7 +506,7 @@ async def test_resolve_original_file_path_rejects_traversal(
     caller via ``original_file_path``.
     """
     from everos.config import load_settings
-    from everos.core.persistence import MemoryRoot
+    from everos.infra.persistence import MemoryRoot
 
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
@@ -521,7 +517,9 @@ async def test_resolve_original_file_path_rejects_traversal(
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"top secret")
 
-    resolved = await _resolve_original_file_path(str(doc_rel / "index.md"), str(secret))
+    resolved = await _resolve_original_file_path(
+        str(doc_rel / "index.md"), str(secret), MemoryRoot(tmp_path)
+    )
     assert resolved is None
 
     load_settings.cache_clear()
@@ -551,6 +549,7 @@ def test_document_overview_item_slim_fields() -> None:
 
 async def test_list_categories_document_count() -> None:
     """list_categories merges taxonomy specs with SQLite counts."""
+    mock_repo = MagicMock()
     specs = [
         CategorySpec(id="Tech", description="Technology"),
         CategorySpec(id="Empty", description="No docs"),
@@ -558,13 +557,13 @@ async def test_list_categories_document_count() -> None:
     counts = {"Tech": 3}
 
     with (
-        patch(f"{_MOD}.MemoryRoot"),
         patch(f"{_MOD}.ensure_taxonomy", new_callable=AsyncMock),
         patch(f"{_MOD}.parse_taxonomy", new_callable=AsyncMock, return_value=specs),
-        patch(f"{_MOD}.knowledge_document_repo") as mock_repo,
     ):
         mock_repo.count_by_category = AsyncMock(return_value=counts)
-        result = await list_categories("app", "proj")
+        result = await make_knowledge_service(
+            documents=mock_repo, root=Path("/unused")
+        ).list_categories("app", "proj")
 
     assert len(result) == 2
     assert all(isinstance(c, CategoryOverview) for c in result)

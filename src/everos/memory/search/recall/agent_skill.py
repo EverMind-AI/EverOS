@@ -14,14 +14,7 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import (
-    AgentSkill,
-    Predicate,
-    agent_skill_repo,
-    all_of,
-    any_of,
-    contains,
-)
+from everos.memory.ports import AgentSkillIndex, Filter, all_of, any_of, contains
 
 from .base import (
     RecallerDeps,
@@ -31,17 +24,23 @@ from .base import (
 
 
 class AgentSkillRecaller:
-    """BM25 + vector recall over the LanceDB ``agent_skill`` table."""
+    """BM25 + vector recall over the agent-skill index.
+
+    Args:
+        deps: Shared recaller dependencies (tokenizer).
+        index: The agent-skill index port.
+    """
 
     kind: ClassVar[str] = "agent_skill"
     everalgo_memory_type: ClassVar[str] = "skill"
     text_field: ClassVar[str] = "description"
 
-    def __init__(self, deps: RecallerDeps) -> None:
+    def __init__(self, deps: RecallerDeps, index: AgentSkillIndex) -> None:
         self._deps = deps
+        self._index = index
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
+        self, query: str, where: Filter, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -52,31 +51,28 @@ class AgentSkillRecaller:
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return []
-        merged_rows = await agent_skill_repo.sparse_search(
-            terms, where, columns=AgentSkill.BM25_FIELDS, limit=limit
-        )
+        hits = await self._index.sparse_search(terms, where, limit=limit)
         return [
-            row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
-            for r in merged_rows
+            row_to_candidate(h, source="keyword", score=h.score or 0.0) for h in hits
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
+        self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[Candidate]:
         if not vector:
             return []
-        rows = await agent_skill_repo.dense_search(vector, where, limit=limit)
+        hits = await self._index.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
-                r,
+                h,
                 source="vector",
-                score=cosine_score_from_distance(r.get("_distance")),
+                score=cosine_score_from_distance(h.fields.get("_distance")),
             )
-            for r in rows
+            for h in hits
         ]
 
     async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: Predicate, *, limit: int
+        self, case_ids: Sequence[str], where: Filter, *, limit: int
     ) -> list[Candidate]:
         """Skills whose ``source_case_ids`` intersect ``case_ids``.
         Filter is ``array_has`` OR-ed per id (same as
@@ -92,5 +88,5 @@ class AgentSkillRecaller:
             where,
             any_of(*(contains("source_case_ids", case_id) for case_id in case_ids)),
         )
-        rows = await agent_skill_repo.search(where=full_where, limit=limit)
-        return [row_to_candidate(r, source="vector", score=0.0) for r in rows]
+        hits = await self._index.find(full_where, limit=limit)
+        return [row_to_candidate(h, source="vector", score=0.0) for h in hits]

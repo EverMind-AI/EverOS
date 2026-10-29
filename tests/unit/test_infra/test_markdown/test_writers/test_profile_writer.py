@@ -7,11 +7,11 @@ from typing import ClassVar, Literal
 
 import pytest
 
-from everos.core.persistence import (
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
     AgentScopedFrontmatter,
     BaseFrontmatter,
     MarkdownReader,
-    MemoryRoot,
     UserScopedFrontmatter,
 )
 from everos.infra.persistence.markdown.writers import ProfileWriter

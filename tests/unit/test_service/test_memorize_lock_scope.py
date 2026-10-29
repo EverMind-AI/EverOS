@@ -8,17 +8,13 @@ two calls on the very same scope still serialise.
 from __future__ import annotations
 
 import asyncio
-import importlib
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
-from everos.config import Settings
-from everos.service import _session_lock
-from everos.service.memorize import MemorizeResult
-
-mm = importlib.import_module("everos.service.memorize")
+from everos.service import MemorizeResult, MemoryService, _session_lock
+from tests.fakes import make_memory_service
 
 
 class _Gate:
@@ -38,9 +34,13 @@ class _Gate:
         return MemorizeResult(message_count=1, status="extracted")
 
 
+@pytest.fixture
+def mm() -> MemoryService:
+    return make_memory_service()
+
+
 @pytest.fixture(autouse=True)
-def _patch(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Gate]:
-    monkeypatch.setattr(mm, "load_settings", lambda: Settings())
+def _patch(mm: MemoryService, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Gate]:
     gate = _Gate()
     monkeypatch.setattr(mm, "_memorize_locked", gate)
     _session_lock._reset_for_tests()
@@ -49,7 +49,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Gate]:
 
 
 async def test_same_session_in_different_projects_runs_side_by_side(
-    _patch: _Gate,
+    mm: MemoryService, _patch: _Gate
 ) -> None:
     a = asyncio.create_task(
         mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
@@ -63,7 +63,7 @@ async def test_same_session_in_different_projects_runs_side_by_side(
     await asyncio.gather(a, b)
 
 
-async def test_same_scope_still_serialises(_patch: _Gate) -> None:
+async def test_same_scope_still_serialises(mm: MemoryService, _patch: _Gate) -> None:
     a = asyncio.create_task(
         mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )

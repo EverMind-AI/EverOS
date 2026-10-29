@@ -1,6 +1,6 @@
 """Repository for ``memorize_inbox`` — the async memorize queue.
 
-Singleton bound to the process-wide ``sqlite_manager`` session factory.
+Bound to the session factory it is built with.
 
 Exposes the queue primitives the worker and the route need:
 
@@ -20,18 +20,14 @@ import datetime as dt
 from collections.abc import Collection
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
+from everos.memory.ports import LOST_STATUS_WRITE, REPLAYS_EXHAUSTED_PREFIX
 
-from ..sqlite_manager import get_session_factory
 from ..tables import MemorizeInbox
 
 PENDING_STATUSES: tuple[str, ...] = ("queued", "processing")
-# ``last_error`` of a row the sweep failed because its status write was lost.
-LOST_STATUS_WRITE = "status write lost; outcome unknown"
-# ``last_error`` prefix of a row start() gave up on after too many replays.
-REPLAYS_EXHAUSTED_PREFIX = "replayed "
 
 
 def replays_exhausted(n: int) -> str:
@@ -42,11 +38,8 @@ def replays_exhausted(n: int) -> str:
 _SCOPE_SEP = "\x1f"
 
 
-class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
+class MemorizeInboxRepo(RepoBase[MemorizeInbox]):
     model = MemorizeInbox
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def claim_next(
         self, *, exclude_sessions: Collection[tuple[str, str, str]] = ()
@@ -256,6 +249,3 @@ class _MemorizeInboxRepo(RepoBase[MemorizeInbox]):
             await s.commit()
             queued = int(undelivered.rowcount or 0)
             return queued + int(terminal.rowcount or 0), queued
-
-
-memorize_inbox_repo = _MemorizeInboxRepo()

@@ -15,18 +15,12 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlmodel import SQLModel
 
-from everos.config import AsyncQueueSettings, load_settings
+from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.entrypoints.api.routes import memorize as route_mod
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    memorize_inbox_repo,
-)
+from everos.service import MemorizeResult, MemoryService, build_application
 from everos.service import memorize_queue as mq
-from everos.service.memorize import MemorizeResult
+from tests.fakes.storage import Storage
 
 
 class _FakeMemorize:
@@ -49,26 +43,26 @@ class _FakeMemorize:
 
 @pytest.fixture
 async def setup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[tuple[AsyncClient, mq.MemorizeQueueWorker, _FakeMemorize]]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
+    monkeypatch.setenv("EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS", "0")
     load_settings.cache_clear()
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    await storage.create_schema()
 
     fake = _FakeMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)  # worker path
-    monkeypatch.setattr(route_mod, "memorize", fake)  # inline path
+    # Set on the class before the application is built, so both the worker
+    # (which binds ``memorize`` when it is built) and the inline route path
+    # reach the fake.
+    monkeypatch.setattr(MemoryService, "memorize", fake)
 
-    worker = mq.MemorizeQueueWorker(AsyncQueueSettings(retry_backoff_seconds=0))
-    app = create_app(lifespan_providers=[])
-    app.state.lifespan_data = {"memorize_queue": worker}
+    application = build_application(load_settings())
+    worker = application.memory._queue
+    app = create_app(application=application)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client, worker, fake
-    await dispose_engine()
     load_settings.cache_clear()
 
 
@@ -90,7 +84,7 @@ def _add(session_id: str, text: str, *, async_mode: bool = False) -> dict[str, A
 
 
 async def test_sync_add_queues_behind_async_batch_and_runs_after_it(
-    setup: tuple[AsyncClient, mq.MemorizeQueueWorker, _FakeMemorize],
+    setup: tuple[AsyncClient, mq.MemorizeQueueWorker, _FakeMemorize], storage: Storage
 ) -> None:
     client, worker, fake = setup
 
@@ -112,7 +106,9 @@ async def test_sync_add_queues_behind_async_batch_and_runs_after_it(
 
     assert delivered == 2
     assert fake.calls == [("s2", "other"), ("s1", "first"), ("s1", "second")]
-    statuses = {r.request_id: r.status for r in await memorize_inbox_repo.list_all()}
+    statuses = {
+        r.request_id: r.status for r in await storage.sqlite.memorize_inbox.list_all()
+    }
     assert statuses == {
         first.json()["request_id"]: "success",
         second.json()["request_id"]: "success",

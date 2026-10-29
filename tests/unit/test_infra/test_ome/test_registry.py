@@ -5,29 +5,36 @@ from typing import Any
 import pytest
 
 from everos.infra.ome._dispatch.registry import StrategyRegistry
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.events import BaseEvent, CronTick, IdleTick, ManualTick
 from everos.infra.ome.exceptions import StartupValidationError
-from everos.infra.ome.triggers import Cron, Idle, Immediate
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import (
+    Cron,
+    CronTick,
+    Event,
+    Idle,
+    IdleTick,
+    Immediate,
+    ManualTick,
+)
+from tests.helpers.ome import ome_strategy
 
 
-class _A(BaseEvent):
+class _A(Event):
     pass
 
 
-class _B(BaseEvent):
+class _B(Event):
     pass
 
 
 def _make(
     name: str,
-    on: list[type[BaseEvent]],
-    emits: list[type[BaseEvent]],
+    on: list[type[Event]],
+    emits: list[type[Event]],
 ):
-    @offline_strategy(name=name, trigger=Immediate(on=on), emits=emits)
-    async def _f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name=name, trigger=Immediate(on=on), emits=emits)
+    async def _f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return _f
 
@@ -46,8 +53,8 @@ def test_register_duplicate_raises() -> None:
 
 
 def test_register_non_decorated_raises() -> None:
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg = StrategyRegistry()
     with pytest.raises(StartupValidationError):
@@ -103,9 +110,9 @@ def test_validate_passes_dag() -> None:
 def test_lookup_by_event_finds_cron_strategy_for_cron_tick() -> None:
     reg = StrategyRegistry()
 
-    @offline_strategy(name="cron_s", trigger=Cron(expr="0 * * * *"), emits=[])
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="cron_s", trigger=Cron(expr="0 * * * *"), emits=[])
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     metas = reg.lookup_by_event(CronTick)
@@ -115,13 +122,13 @@ def test_lookup_by_event_finds_cron_strategy_for_cron_tick() -> None:
 def test_lookup_by_event_finds_idle_strategy_for_idle_tick() -> None:
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="idle_s",
         trigger=Idle(on=[_A], event_field="event_id", idle_seconds=900),
         emits=[],
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     metas = reg.lookup_by_event(IdleTick)
@@ -131,54 +138,54 @@ def test_lookup_by_event_finds_idle_strategy_for_idle_tick() -> None:
 def test_lookup_by_event_returns_empty_for_manual_tick() -> None:
     reg = StrategyRegistry()
 
-    @offline_strategy(name="manual_s", trigger=Immediate(on=[_A]), emits=[])
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="manual_s", trigger=Immediate(on=[_A]), emits=[])
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     metas = reg.lookup_by_event(ManualTick)
     assert metas == []
 
 
-class _EventWithUid(BaseEvent):
+class _EventWithUid(Event):
     user_id: str
 
 
-class _EventWithoutUid(BaseEvent):
+class _EventWithoutUid(Event):
     other: str
 
 
 def test_validate_passes_when_gate_event_field_present() -> None:
-    from everos.infra.ome.gates import Counter
+    from everos.memory.ports import Counter
 
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="s",
         trigger=Immediate(on=[_EventWithUid]),
         emits=[],
         gate=Counter(threshold=3, event_field="user_id"),
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     reg.validate()  # must not raise
 
 
 def test_validate_raises_when_gate_event_field_missing_on_immediate() -> None:
-    from everos.infra.ome.gates import Counter
+    from everos.memory.ports import Counter
 
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="s",
         trigger=Immediate(on=[_EventWithoutUid]),
         emits=[],
         gate=Counter(threshold=3, event_field="user_id"),
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     with pytest.raises(StartupValidationError) as exc:
@@ -190,18 +197,18 @@ def test_validate_raises_when_gate_event_field_missing_on_immediate() -> None:
 
 
 def test_validate_raises_when_gate_event_field_missing_in_one_of_multiple() -> None:
-    from everos.infra.ome.gates import Counter
+    from everos.memory.ports import Counter
 
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="s",
         trigger=Immediate(on=[_EventWithUid, _EventWithoutUid]),
         emits=[],
         gate=Counter(threshold=3, event_field="user_id"),
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     with pytest.raises(StartupValidationError):
@@ -210,18 +217,18 @@ def test_validate_raises_when_gate_event_field_missing_in_one_of_multiple() -> N
 
 def test_validate_passes_when_gate_event_field_is_none() -> None:
     """gate.event_field=None means global bucket; no field-existence check."""
-    from everos.infra.ome.gates import Counter
+    from everos.memory.ports import Counter
 
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="s",
         trigger=Immediate(on=[_EventWithoutUid]),
         emits=[],
         gate=Counter(threshold=3),  # event_field defaults to None
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     reg.validate()  # must not raise
@@ -230,13 +237,13 @@ def test_validate_passes_when_gate_event_field_is_none() -> None:
 def test_validate_passes_when_no_gate() -> None:
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="s",
         trigger=Immediate(on=[_EventWithoutUid]),
         emits=[],
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     reg.validate()  # must not raise
@@ -244,18 +251,18 @@ def test_validate_passes_when_no_gate() -> None:
 
 def test_validate_raises_when_gate_event_field_missing_on_cron_tick() -> None:
     """Cron strategy: gate.event_field must exist on CronTick."""
-    from everos.infra.ome.gates import Counter
+    from everos.memory.ports import Counter
 
     reg = StrategyRegistry()
 
-    @offline_strategy(
+    @ome_strategy(
         name="cron_s",
         trigger=Cron(expr="0 3 * * *"),
         emits=[],
         gate=Counter(threshold=3, event_field="user_id"),  # not in CronTick
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     reg.register(f)
     with pytest.raises(StartupValidationError):

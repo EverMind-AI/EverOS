@@ -23,7 +23,13 @@ from everalgo.types import (
     Foresight as AlgoForesight,
 )
 
-from everos.memory.models import AgentCase, AtomicFact, Episode, Foresight
+from everos.memory.models import (
+    AgentCase,
+    AtomicFact,
+    Episode,
+    Foresight,
+    mint_cluster_id,
+)
 
 
 def test_atomic_fact_from_algo_carries_business_fields_and_metadata() -> None:
@@ -194,3 +200,9 @@ def test_episode_from_algo_owner_id_caller_supplied() -> None:
     assert ep_alice.episode == ep_bob.episode == "hello"
     assert ep_alice.parent_id == ep_bob.parent_id == "mc_a"
     assert ep_alice.session_id == ep_bob.session_id == "s1"
+
+
+def test_mint_cluster_id_shape() -> None:
+    cid = mint_cluster_id()
+    assert cid.startswith("cl_")
+    assert len(cid) == 3 + 12  # ``cl_`` + 12 hex chars

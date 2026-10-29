@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from everos.infra.ome.events import BaseEvent
+from everos.memory.ports import Event
 
 
 class OMEError(Exception):
@@ -32,8 +32,8 @@ class StrategyContractError(OMEError):
 class EngineCallFromStrategyError(StrategyContractError):
     """A strategy called a public OfflineEngine method directly.
 
-    The convention is: strategy code interacts with the engine only via
-    the ``(event, ctx)`` parameters Runner supplies. Engine methods
+    The convention is: a strategy never touches the engine — it returns
+    its follow-up events and OME publishes them. Engine methods
     (``emit``, ``trigger_manual``, ``inspect_dispatch``, ``list_runs``,
     ``get_run_status``, ``reschedule_*``) are for external callers —
     strategies invoking them bypass the framework's contracts.
@@ -44,15 +44,15 @@ class EngineCallFromStrategyError(StrategyContractError):
         self.method = method
         super().__init__(
             f"strategy {strategy!r} called engine.{method}() directly; "
-            "strategies must interact with the engine only via the "
-            "(event, ctx) parameters"
+            "strategies return their follow-up events instead of calling "
+            "the engine"
         )
 
 
 class EmitNotDeclaredError(StrategyContractError):
-    """Raised when a strategy emits an event not listed in its decorator's emits."""
+    """Raised when a strategy returns an event its spec does not declare."""
 
-    def __init__(self, strategy: str, event: BaseEvent) -> None:
+    def __init__(self, strategy: str, event: Event) -> None:
         self.strategy = strategy
         self.event = event
         super().__init__(

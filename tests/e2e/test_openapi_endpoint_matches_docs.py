@@ -11,7 +11,7 @@ miss it, but this test wouldn't.
 How:
 
 1. Force ``ENV=DEV`` so the ``openapi_url`` route is enabled.
-2. Construct the app via ``create_app(lifespan_providers=[])`` to skip
+2. Construct the app over a stub application (``tests.fakes``) to skip
    SQLite / LanceDB / OME (the schema is route-driven, not state-
    driven) — but *do* run the lifespan context, so any startup hook
    that mutates ``app.openapi_schema`` is exercised.
@@ -35,6 +35,7 @@ _COMMITTED_OPENAPI = _REPO_ROOT / "docs" / "openapi.json"
 
 async def test_dev_mode_openapi_endpoint_matches_committed_docs(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Runtime ``GET /openapi.json`` (dev mode) must equal ``docs/openapi.json``."""
     # The gate's own committed snapshot must exist — otherwise the dev
@@ -47,8 +48,9 @@ async def test_dev_mode_openapi_endpoint_matches_committed_docs(
     monkeypatch.setenv("ENV", "DEV")
 
     from everos.entrypoints.api.app import create_app
+    from tests.fakes import make_application
 
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application(root=tmp_path))
     transport = httpx.ASGITransport(app=app)
     async with (
         app.router.lifespan_context(app),

@@ -19,7 +19,7 @@ Forbidden patterns (with a small allowlist):
 Allowlist (legitimate uses):
 
 * ``src/everos/component/utils/datetime.py`` — the helper module itself.
-* ``src/everos/core/persistence/sqlite/base.py`` — the SQLAlchemy ``load``
+* ``src/everos/infra/persistence/sqlite/base/base.py`` — the SQLAlchemy ``load``
   event listener that re-attaches UTC on hydrate.
 
 Run::
@@ -40,7 +40,7 @@ _SRC = _ROOT / "src"
 
 _ALLOWLIST: set[Path] = {
     _ROOT / "src/everos/component/utils/datetime.py",
-    _ROOT / "src/everos/core/persistence/sqlite/base.py",
+    _ROOT / "src/everos/infra/persistence/sqlite/base/base.py",
 }
 
 # (regex, message) pairs. Each regex must match on a single line.

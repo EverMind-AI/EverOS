@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.predicate import eq
+from everos.infra.persistence.index import Episode
+from everos.infra.persistence.index.adapters import EpisodeIndexAdapter
+from everos.memory.ports.query import eq
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.recall.episode import EpisodeRecaller
 
@@ -54,12 +56,15 @@ def _mock_records(rows: list[dict[str, Any]]) -> list[MagicMock]:
 
 _ALICE_WHERE = eq("owner_id", "alice")
 
+_REPO = MagicMock(schema=Episode)
+"""Stand-in episode repository behind the real index adapter."""
+
 
 @pytest.fixture()
 def recaller() -> EpisodeRecaller:
     tok = MagicMock(spec=Tokenizer)
     tok.tokenize.return_value = ["hi"]
-    return EpisodeRecaller(RecallerDeps(tokenizer=tok))
+    return EpisodeRecaller(RecallerDeps(tokenizer=tok), EpisodeIndexAdapter(_REPO))
 
 
 async def test_fetch_all_for_owner_returns_entry_id_keyed_candidates(
@@ -70,8 +75,9 @@ async def test_fetch_all_for_owner_returns_entry_id_keyed_candidates(
         _make_row("ep_1", "mc_1"),
         _make_row("ep_2", "mc_2"),
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
+    with patch.object(
+        _REPO,
+        "scan",
         new_callable=AsyncMock,
         return_value=_mock_records(rows),
     ):
@@ -87,8 +93,9 @@ async def test_fetch_all_for_owner_stores_episode_id_in_metadata(
 ) -> None:
     """metadata['episode_id'] carries the real LanceDB episode id for final shaping."""
     rows = [_make_row("ep_abc", "mc_xyz")]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
+    with patch.object(
+        _REPO,
+        "scan",
         new_callable=AsyncMock,
         return_value=_mock_records(rows),
     ):
@@ -116,8 +123,9 @@ async def test_fetch_all_for_owner_skips_rows_without_entry_id(
             "parent_id": "mc_x",
         },
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
+    with patch.object(
+        _REPO,
+        "scan",
         new_callable=AsyncMock,
         return_value=_mock_records(rows),
     ):
@@ -143,8 +151,9 @@ async def test_fetch_all_for_owner_merged_episode_uses_entry_id(
             entry_id="entry_xyz",
         ),
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
+    with patch.object(
+        _REPO,
+        "scan",
         new_callable=AsyncMock,
         return_value=_mock_records(rows),
     ):
@@ -168,8 +177,9 @@ async def test_fetch_all_for_owner_mixed_regular_and_merged(
             entry_id="entry_42",
         ),
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.scan",
+    with patch.object(
+        _REPO,
+        "scan",
         new_callable=AsyncMock,
         return_value=_mock_records(rows),
     ):
@@ -192,8 +202,9 @@ async def test_fetch_by_entry_ids_returns_candidates(
             entry_id="entry_xyz",
         ),
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.search",
+    with patch.object(
+        _REPO,
+        "search",
         new_callable=AsyncMock,
         return_value=rows,
     ):
@@ -234,8 +245,9 @@ async def test_sparse_recall_as_child_injects_parent_id(
     rows = [
         {**_make_row("ep_1", "mc_1", entry_id="entry_1"), "_score": 1.0},
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.sparse_search",
+    with patch.object(
+        _REPO,
+        "sparse_search",
         new_callable=AsyncMock,
         return_value=rows,
     ):
@@ -262,8 +274,9 @@ async def test_sparse_recall_as_child_falls_back_to_id_when_no_entry_id(
         "parent_id": "mc_x",
         "_score": 0.5,
     }
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.sparse_search",
+    with patch.object(
+        _REPO,
+        "sparse_search",
         new_callable=AsyncMock,
         return_value=[row],
     ):
@@ -290,8 +303,9 @@ async def test_dense_recall_as_child_injects_parent_id(
     rows = [
         {**_make_row("ep_3", "mc_3", entry_id="entry_3"), "_distance": 0.1},
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
+    with patch.object(
+        _REPO,
+        "dense_search",
         new_callable=AsyncMock,
         return_value=rows,
     ):
@@ -330,8 +344,9 @@ async def test_dense_recall_subject_returns_subject_vector_source(
     rows = [
         {**_make_row("ep_s1", "mc_s1", entry_id="entry_s1"), "_distance": 0.2},
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
+    with patch.object(
+        _REPO,
+        "dense_search",
         new_callable=AsyncMock,
         return_value=rows,
     ) as dense_search:
@@ -365,8 +380,9 @@ async def test_dense_recall_subject_as_child_injects_parent_id(
     rows = [
         {**_make_row("ep_s2", "mc_s2", entry_id="entry_s2"), "_distance": 0.15},
     ]
-    with patch(
-        "everos.memory.search.recall.episode.episode_repo.dense_search",
+    with patch.object(
+        _REPO,
+        "dense_search",
         new_callable=AsyncMock,
         return_value=rows,
     ):

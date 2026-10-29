@@ -11,6 +11,7 @@ the ``from everos.memory import MemCell, Episode`` convenience.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -22,7 +23,7 @@ from everalgo.types import MemCell as MemCell
 from pydantic import BaseModel, ConfigDict, Field
 
 _Role = Literal["user", "assistant", "tool"]
-_Track = Literal["user_memory", "agent_memory"]
+EpisodeParentType = Literal["memcell", "cluster"]
 
 
 class ToolCall(BaseModel):
@@ -82,15 +83,6 @@ class IngestResult(BaseModel):
     unparsed_non_text_count: int = 0
 
 
-class PipelineOutcome(BaseModel):
-    """Return type of every pipeline's ``run()``."""
-
-    track: _Track
-    status: Literal["accumulated", "extracted", "skipped"]
-    message_count: int
-    extracted_md_paths: list[str] = Field(default_factory=list)
-
-
 class Episode(BaseModel):
     """Domain Episode — algo-emitted business fields + everos context.
 
@@ -105,17 +97,22 @@ class Episode(BaseModel):
     ``parent_id`` is the source memcell id. The new everalgo types no
     longer carry ``parent_id`` on Episode / Foresight / AtomicFact, so
     everos fills it from the memcell currently being processed (the
-    pipeline knows the id — it created the memcell).
+    pipeline knows the id — it created the memcell). ``parent_type`` is
+    ``"cluster"`` for an episode Reflection merged out of a cluster, in
+    which case ``parent_id`` is that cluster's id.
     """
 
     owner_id: str
     episode: str
     timestamp: int
+    subject: str | None = None
+    summary: str | None = None
 
     # everos engineering metadata.
     session_id: str | None = None
     sender_ids: list[str] = Field(default_factory=list)
     parent_id: str
+    parent_type: EpisodeParentType = "memcell"
 
     model_config = ConfigDict(extra="allow")
 
@@ -324,8 +321,142 @@ class AgentCase(BaseModel):
         return cls.model_validate(data)
 
 
+class Profile(BaseModel):
+    """Domain user profile — one per owner, rewritten on every synthesis.
+
+    Mirrors the fields of everalgo-core 0.6 ``Profile`` without its item
+    validators; stage 3/4 converges the two. ``explicit_info`` /
+    ``implicit_traits`` stay loosely typed because stored profiles carry
+    plain strings as well as item dicts.
+    """
+
+    owner_id: str
+    summary: str
+    timestamp: int
+    explicit_info: list[Any] = Field(default_factory=list)
+    implicit_traits: list[Any] = Field(default_factory=list)
+
+
+class AgentSkill(BaseModel):
+    """Domain agent skill — a reusable procedure aggregated from cases.
+
+    Mirrors the fields of everalgo-core 0.6 ``AgentSkill``; stage 3/4
+    converges the two. ``id`` survives a rename, which is how a renamed
+    skill is told apart from a new one.
+    """
+
+    id: str
+    cluster_id: str = ""
+    name: str = ""
+    description: str = ""
+    content: str = ""
+    confidence: float = 0.0
+    maturity_score: float = 0.6
+    source_case_ids: list[str] = Field(default_factory=list)
+
+
+class Cluster(BaseModel):
+    """Domain cluster snapshot — a group of related memories of one owner.
+
+    Mirrors the fields of everalgo-core 0.6 ``clustering.Cluster`` with the
+    centroid as a plain float tuple, so the domain carries no numpy; stage
+    3/4 converges the two.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str | None = None
+    centroid: tuple[float, ...]
+    count: int = 1
+    last_ts: int
+    preview: list[str] = Field(default_factory=list)
+    members: list[str] = Field(default_factory=list)
+
+
+ClusterKind = Literal["user_memory", "agent_case"]
+ClusterMemberType = Literal["episode", "case"]
+
+
+def mint_cluster_id() -> str:
+    """Mint a fresh cluster id (``cl_<12hex>``)."""
+    return f"cl_{uuid.uuid4().hex[:12]}"
+
+
+class MemcellRecord(BaseModel):
+    """One boundary-detected slice of a conversation, ready to persist.
+
+    Attributes:
+        memcell_id: everos-minted identifier of the slice.
+        cell: The algorithm-side cell (items + timestamp).
+        raw_type: Source shape of the slice (conversation / agent trace).
+        message_ids: Ids of the buffered messages the slice consumed.
+        sender_ids: Distinct senders in the slice, first-seen order.
+    """
+
+    memcell_id: str
+    cell: MemCell
+    raw_type: str
+    message_ids: list[str]
+    sender_ids: list[str]
+
+
+class MemorizeTask(BaseModel):
+    """One accepted asynchronous memorize request in the durable queue.
+
+    ``id`` orders a session's requests; ``status`` is one of ``queued`` /
+    ``processing`` / ``success`` / ``failed``. ``payload_json`` is emptied
+    once the request is delivered.
+    """
+
+    id: int
+    request_id: str
+    app_id: str
+    project_id: str
+    session_id: str
+    is_final: bool
+    defer_extraction: bool
+    payload_json: str
+    message_count: int
+    status: str
+    attempt: int
+    last_error: str | None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class ReflectionReport(BaseModel):
+    """Audit record of one completed Reflection merge.
+
+    Attributes:
+        id: Report identifier.
+        cluster_id: Cluster that was reflected.
+        owner_id: Owner of the cluster.
+        app_id: Application scope.
+        project_id: Project scope.
+        mode: ``"init"`` or ``"update"``.
+        source_members: ``(member_id, member_type)`` pairs consumed.
+        merged_entry_id: Entry id of the merged episode.
+        deprecated_fact_count: Atomic facts marked deprecated.
+    """
+
+    id: str
+    cluster_id: str
+    owner_id: str
+    app_id: str
+    project_id: str
+    mode: Literal["init", "update"]
+    source_members: list[tuple[str, str]]
+    merged_entry_id: str
+    deprecated_fact_count: int
+
+    @property
+    def source_count(self) -> int:
+        return len(self.source_members)
+
+
 __all__ = [
     "AgentCase",
+    "AgentSkill",
     "AlgoAgentCase",
     "AlgoAtomicFact",
     "AlgoEpisode",
@@ -333,10 +464,18 @@ __all__ = [
     "AlgoMessage",
     "AtomicFact",
     "CanonicalMessage",
+    "Cluster",
+    "ClusterKind",
+    "ClusterMemberType",
     "Episode",
+    "EpisodeParentType",
     "Foresight",
     "IngestResult",
     "MemCell",
-    "PipelineOutcome",
+    "MemcellRecord",
+    "MemorizeTask",
+    "Profile",
+    "ReflectionReport",
     "ToolCall",
+    "mint_cluster_id",
 ]

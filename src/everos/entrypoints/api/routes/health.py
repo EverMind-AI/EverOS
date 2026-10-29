@@ -9,13 +9,8 @@ from pydantic import BaseModel, Field
 
 from everos import __version__
 from everos.component.capabilities import compute_disabled_features
-from everos.component.embedding import get_embedding_capability
-from everos.component.multimodal import get_multimodal_llm_capability
-from everos.component.parser import parser_available
-from everos.component.rerank import get_rerank_capability
 from everos.core.observability.logging import get_logger
-from everos.entrypoints.api.utils import cascade_orchestrator, memorize_queue
-from everos.infra.persistence.index import last_probe
+from everos.entrypoints.api.utils import application
 
 logger = get_logger(__name__)
 
@@ -135,10 +130,10 @@ class HealthResponse(BaseModel):
     capabilities: HealthCapabilities
     disabled_features: list[str]
     cascade: CascadeHealthBlock | None = None
-    """Present when the cascade lifespan is running; ``None`` for a
-    minimal app built without it."""
+    """Present while the started application runs the cascade; ``None``
+    otherwise (disabled, or the application was never started)."""
     memorize_queue: MemorizeQueueHealthBlock | None = None
-    """Present when the memorize queue lifespan is running."""
+    """Present while the started application runs the memorize queue."""
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -157,26 +152,24 @@ async def health(request: Request) -> HealthResponse:
     """
     # ``llm`` is hardcoded ``True`` — kept for symmetry with the caps
     # dict rather than probed live. Rationale: LLM is a Tier-1 hard
-    # requirement enforced at startup by ``LLMLifespanProvider``
-    # (lifespans/llm.py), which eagerly calls ``get_llm_client()`` and
-    # raises ``LLMNotConfiguredError`` if credentials are missing —
-    # FastAPI startup then fails, so ``/health`` is unreachable
-    # without a working LLM. Any code path that reaches this handler
-    # therefore has ``get_llm_client()`` returning a real client. If
-    # the LLM capability is ever downgraded to soft (like embed /
-    # rerank), swap this literal for a real probe.
+    # requirement enforced by ``Application.start``, which raises
+    # ``LLMNotConfiguredError`` if credentials are missing — FastAPI
+    # startup then fails, so ``/health`` is unreachable without a
+    # working LLM. If the LLM capability is ever downgraded to soft
+    # (like embed / rerank), swap this literal for a real probe.
+    app = application(request)
+    snapshot = app.capabilities
     caps = HealthCapabilities(
         llm=True,
-        embed=last_probe() is not None,
-        rerank=get_rerank_capability().available,
-        multimodal_llm=get_multimodal_llm_capability().available,
-        parser=parser_available(),
+        embed=app.ops.embedding_probed(),
+        rerank=snapshot.rerank,
+        multimodal_llm=snapshot.multimodal_llm,
+        parser=snapshot.parser,
     )
     cascade: CascadeHealthBlock | None = None
-    orch = cascade_orchestrator(request)
-    if orch is not None:
-        try:
-            ch = await orch.health()
+    try:
+        ch = await app.ops.cascade_health()
+        if ch is not None:
             cascade = CascadeHealthBlock(
                 healthy=ch.healthy,
                 reasons=ch.reasons,
@@ -190,46 +183,45 @@ async def health(request: Request) -> HealthResponse:
                 index_rows=ch.index_rows,
                 index_emptied=ch.index_emptied,
             )
-        except Exception as exc:
-            # The probe reads SQLite (queue_summary runs aggregate counts).
-            # A locked / full / mid-migration DB must NOT turn /health into a
-            # 500 — that flips the liveness signal and makes k8s restart the
-            # container, which fixes neither a stuck DB nor disk bloat (see
-            # the handler docstring). Surface it as unhealthy *readiness*
-            # with a reason and keep HTTP 200.
-            logger.warning("cascade_health_probe_failed", error=repr(exc))
-            cascade = CascadeHealthBlock(
-                healthy=False,
-                reasons=[f"cascade health probe failed: {exc!r}"],
-                pending=0,
-                failed_permanent=0,
-                failed_retryable=0,
-                drain_consecutive_failures=0,
-                unrecoverable_total=0,
-                optimize_failure_streak=0,
-                prune_stale_seconds=0.0,
-            )
+    except Exception as exc:
+        # The probe reads SQLite (queue_summary runs aggregate counts).
+        # A locked / full / mid-migration DB must NOT turn /health into a
+        # 500 — that flips the liveness signal and makes k8s restart the
+        # container, which fixes neither a stuck DB nor disk bloat (see
+        # the handler docstring). Surface it as unhealthy *readiness*
+        # with a reason and keep HTTP 200.
+        logger.warning("cascade_health_probe_failed", error=repr(exc))
+        cascade = CascadeHealthBlock(
+            healthy=False,
+            reasons=[f"cascade health probe failed: {exc!r}"],
+            pending=0,
+            failed_permanent=0,
+            failed_retryable=0,
+            drain_consecutive_failures=0,
+            unrecoverable_total=0,
+            optimize_failure_streak=0,
+            prune_stale_seconds=0.0,
+        )
     queue_block: MemorizeQueueHealthBlock | None = None
-    worker = memorize_queue(request)
-    if worker is not None:
-        try:
-            qh = await worker.health()
+    try:
+        qh = await app.memory.queue_health()
+        if qh is not None:
             queue_block = MemorizeQueueHealthBlock(**qh.model_dump())
-        except Exception as exc:
-            # Same rule as the cascade block: a locked DB must not turn the
-            # liveness probe into a 500.
-            logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
-            queue_block = MemorizeQueueHealthBlock(
-                healthy=False,
-                reasons=[f"memorize queue health probe failed: {exc!r}"],
-                loop_alive=False,
-                accepting=False,
-                pending=0,
-                oldest_pending_age_s=None,
-                failed=0,
-                loop_restarts=0,
-                last_loop_error_at=None,
-            )
+    except Exception as exc:
+        # Same rule as the cascade block: a locked DB must not turn the
+        # liveness probe into a 500.
+        logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
+        queue_block = MemorizeQueueHealthBlock(
+            healthy=False,
+            reasons=[f"memorize queue health probe failed: {exc!r}"],
+            loop_alive=False,
+            accepting=False,
+            pending=0,
+            oldest_pending_age_s=None,
+            failed=0,
+            loop_restarts=0,
+            last_loop_error_at=None,
+        )
     return HealthResponse(
         status="ok",
         version=__version__,
@@ -241,7 +233,7 @@ async def health(request: Request) -> HealthResponse:
         # that was unreachable at startup and came back would otherwise have
         # the server announcing vector search disabled while serving it.
         disabled_features=compute_disabled_features(
-            {**caps.model_dump(), "embed": get_embedding_capability().available}
+            {**caps.model_dump(), "embed": snapshot.embedding}
         ),
         cascade=cascade,
         memorize_queue=queue_block,

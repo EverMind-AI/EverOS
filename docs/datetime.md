@@ -92,7 +92,7 @@ All helpers live in [`everos.component.utils.datetime`](../src/everos/component/
 
 ```python
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
-from everos.core.persistence.sqlite import BaseTable, Field
+from everos.infra.persistence.sqlite import BaseTable, Field
 
 class MyRow(BaseTable, table=True):
     happened_at: UtcDatetime = Field(default_factory=get_utc_now)
@@ -106,7 +106,7 @@ normalised to UTC before persistence.
 SQLModel's ORM hydrate path (rows from `select(...)`) **bypasses**
 the Pydantic validator — SQLAlchemy assigns column values straight
 to instance attributes. To close that gap,
-[core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py)
+[infra/persistence/sqlite/base/base.py](../src/everos/infra/persistence/sqlite/base/base.py)
 defines a `TypeDecorator` column type, `UtcDateTimeColumn`, whose
 `process_result_value` re-attaches `tzinfo=UTC` on read (and
 `process_bind_param` normalises to UTC on write). Net effect:
@@ -155,8 +155,8 @@ event payload.
 
 | Backend | Defense | Where |
 |---|---|---|
-| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [core/persistence/sqlite/base.py](../src/everos/core/persistence/sqlite/base.py) |
-| **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites **every** `timestamp[us]` column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [core/persistence/lancedb/base.py](../src/everos/core/persistence/lancedb/base.py) |
+| **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/base/base.py](../src/everos/infra/persistence/sqlite/base/base.py) |
+| **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites **every** `timestamp[us]` column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/records/table_chassis.py](../src/everos/infra/persistence/records/table_chassis.py) |
 | **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `component/utils/datetime` | wired into `make lint` |
 
 These defenses replace what used to be an "every consumer must call

@@ -12,9 +12,9 @@ from typing import ClassVar, Literal
 
 import pytest
 
-from everos.core.persistence import (
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
     EntryId,
-    MemoryRoot,
     StructuredEntry,
     UserScopedFrontmatter,
     render_structured_entry,

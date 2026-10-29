@@ -1,4 +1,4 @@
-"""LanceDB repo singleton for the ``episode`` table."""
+"""LanceDB repository for the ``episode`` table."""
 
 from __future__ import annotations
 
@@ -6,21 +6,14 @@ import datetime as dt
 from collections.abc import Sequence
 from typing import Any
 
-from lancedb import AsyncTable
-
-from everos.core.persistence.lancedb import LanceDailyLogRepoBase
-from everos.core.persistence.lancedb.repository import _q
+from everos.infra.persistence.lancedb.base.repository import LanceDailyLogRepoBase, _q
 
 from ...records.episode import Episode
-from ..lancedb_manager import get_table
 from ._contract import LanceIndexContract
 
 
 class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
     schema = Episode
-
-    async def _table_lookup(self) -> AsyncTable:
-        return await get_table(self.schema.TABLE_NAME, self.schema)
 
     async def count_by_owner(
         self,
@@ -162,6 +155,3 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
         if projected:
             return rows
         return [self.schema.model_validate(r) for r in rows]
-
-
-episode_repo = _EpisodeRepo()

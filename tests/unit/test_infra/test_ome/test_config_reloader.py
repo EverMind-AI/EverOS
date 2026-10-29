@@ -14,40 +14,38 @@ from everos.infra.ome._background.config_reloader import (
 )
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome.config import CounterOverride, StrategyOverride, TomlRoot
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
 from everos.infra.ome.engine import OfflineEngine
-from everos.infra.ome.events import BaseEvent
-from everos.infra.ome.gates import Counter
-from everos.infra.ome.triggers import Cron, Idle, Immediate
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Counter, Cron, Event, Idle, Immediate
+from tests.helpers.ome import ome_strategy
 
 
-class _E(BaseEvent):
+class _E(Event):
     pass
 
 
-class _EventUid(BaseEvent):
+class _EventUid(Event):
     user_id: str
 
 
 def _make(name: str, **kw: Any) -> Any:
-    @offline_strategy(name=name, trigger=Immediate(on=[_E]), emits=[], **kw)
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name=name, trigger=Immediate(on=[_E]), emits=[], **kw)
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return f
 
 
 def _make_cron(name: str, expr: str = "0 3 * * *", **kw: Any) -> Any:
-    @offline_strategy(name=name, trigger=Cron(expr=expr), emits=[], **kw)
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name=name, trigger=Cron(expr=expr), emits=[], **kw)
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return f
 
 
 def _make_idle(name: str, **kw: Any) -> Any:
-    @offline_strategy(
+    @ome_strategy(
         name=name,
         trigger=Idle(
             on=[_EventUid],
@@ -58,8 +56,8 @@ def _make_idle(name: str, **kw: Any) -> Any:
         emits=[],
         **kw,
     )
-    async def f(event: Any, ctx: StrategyContext) -> None:
-        return None
+    async def f(event: Any, deps: MemoryDeps) -> list[Event]:
+        return []
 
     return f
 

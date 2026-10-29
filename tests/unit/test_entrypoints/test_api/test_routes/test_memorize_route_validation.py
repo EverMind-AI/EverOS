@@ -23,16 +23,17 @@ from everos.entrypoints.api.routes.memorize import (
     MemorizeAddRequest,
     MessageItemDTO,
 )
+from tests.fakes import make_application
 
 
 @pytest.fixture
 async def client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; nothing past DTO validation is reached."""
+    """FastAPI app over a stub application; nothing past DTO validation is reached."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application())
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:

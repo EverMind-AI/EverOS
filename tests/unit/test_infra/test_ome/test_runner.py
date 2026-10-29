@@ -2,22 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 from everos.infra.ome._dispatch.runner import Runner
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import StrategyMeta, offline_strategy
-from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.records import RunStatus
-from everos.infra.ome.triggers import Immediate
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Event, Immediate
+from tests.helpers.ome import ome_strategy
 
 
-class _E(BaseEvent):
+class _E(Event):
     user_id: str = "u1"
 
 
@@ -35,19 +34,18 @@ async def setup(tmp_path: Path):
 async def test_runner_success_marks_record(setup) -> None:
     rec_store, sem, config = setup
 
-    @offline_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        return []
 
     runner = Runner(
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
     await runner.run(
-        s.meta,
+        s,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,
@@ -72,26 +70,26 @@ async def test_runner_retries_on_failure(
     rec_store, sem, config = setup
     calls = {"n": 0}
 
-    @offline_strategy(
+    @ome_strategy(
         name="flaky",
         trigger=Immediate(on=[_E]),
         emits=[],
         max_retries=2,
     )
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         calls["n"] += 1
         if calls["n"] < 3:
             raise RuntimeError("boom")
+        return []
 
     runner = Runner(
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
     await runner.run(
-        s.meta,
+        s,
         _E(),
         run_id="r1",
         max_retries_snapshot=2,
@@ -117,13 +115,13 @@ async def test_runner_dead_letter_after_exhaust(
     )
     rec_store, sem, config = setup
 
-    @offline_strategy(
+    @ome_strategy(
         name="bad",
         trigger=Immediate(on=[_E]),
         emits=[],
         max_retries=1,
     )
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         raise RuntimeError("always-fail")
 
     dl_calls: list = []
@@ -134,10 +132,9 @@ async def test_runner_dead_letter_after_exhaust(
         emit_hook=_no_emit,
         config=config,
         on_dead_letter=lambda r: dl_calls.append(r),
-        engine=MagicMock(),
     )
     await runner.run(
-        s.meta,
+        s,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,
@@ -154,26 +151,25 @@ async def test_runner_dead_letter_after_exhaust(
 async def test_runner_emit_must_be_declared(setup) -> None:
     rec_store, sem, config = setup
 
-    class _Other(BaseEvent):
+    class _Other(Event):
         pass
 
-    @offline_strategy(
+    @ome_strategy(
         name="emit_undeclared",
         trigger=Immediate(on=[_E]),
         emits=[],
     )
-    async def s(event: _E, ctx: StrategyContext) -> None:
-        await ctx.emit(_Other())  # not declared
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        return [_Other()]  # not declared
 
     runner = Runner(
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
     await runner.run(
-        s.meta,
+        s,
         _E(),
         run_id="r1",
         max_retries_snapshot=0,
@@ -191,20 +187,19 @@ async def test_runner_negative_max_retries_raises(setup) -> None:
     """
     rec_store, sem, config = setup
 
-    @offline_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        return []
 
     runner = Runner(
         run_record_store=rec_store,
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
     with pytest.raises(ValueError, match=r"max_retries_snapshot must be >= 0"):
         await runner.run(
-            s.meta,
+            s,
             _E(),
             run_id="r1",
             max_retries_snapshot=-1,
@@ -224,9 +219,10 @@ async def test_runner_aborts_silently_when_mark_running_fails(
     rec_store, sem, config = setup
     called = {"n": 0}
 
-    @offline_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    @ome_strategy(name="ok", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         called["n"] += 1
+        return []
 
     async def _boom(**_: object) -> None:
         raise RuntimeError("disk_full")
@@ -238,11 +234,10 @@ async def test_runner_aborts_silently_when_mark_running_fails(
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
     # Must NOT raise; the framework swallows + logs.
     await runner.run(
-        s.meta,
+        s,
         _E(),
         run_id="r1",
         max_retries_snapshot=1,
@@ -250,7 +245,7 @@ async def test_runner_aborts_silently_when_mark_running_fails(
     assert called["n"] == 0
 
 
-async def _no_emit(event: BaseEvent) -> None:
+async def _no_emit(event: Event) -> None:
     return None
 
 
@@ -266,9 +261,9 @@ async def test_runner_emits_ome_agent_span(setup) -> None:
     (its own trace — runs in an APScheduler task, no request context)."""
     rec_store, sem, config = setup
 
-    @offline_strategy(name="traced_strat", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="traced_strat", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        return []
 
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -294,9 +289,8 @@ async def test_runner_emits_ome_agent_span(setup) -> None:
             engine_sem=sem,
             emit_hook=_no_emit,
             config=config,
-            engine=MagicMock(),
         )
-        await runner.run(s.meta, _E(), run_id="r_trace", max_retries_snapshot=1)
+        await runner.run(s, _E(), run_id="r_trace", max_retries_snapshot=1)
         force_flush()
     finally:
         shutdown_tracing()
@@ -315,9 +309,9 @@ async def test_runner_ome_span_links_to_upstream_traceparent(setup) -> None:
     everos.ome.<name> span nests under that upstream trace, not a new root."""
     rec_store, sem, config = setup
 
-    @offline_strategy(name="linked_strat", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
-        return None
+    @ome_strategy(name="linked_strat", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        return []
 
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -350,10 +344,9 @@ async def test_runner_ome_span_links_to_upstream_traceparent(setup) -> None:
             engine_sem=sem,
             emit_hook=_no_emit,
             config=config,
-            engine=MagicMock(),
         )
         await runner.run(
-            s.meta, _E(), run_id="r_link", max_retries_snapshot=1, traceparent=tp
+            s, _E(), run_id="r_link", max_retries_snapshot=1, traceparent=tp
         )
         force_flush()
     finally:
@@ -391,13 +384,13 @@ async def _make_runner_with_transient_failing_strategy(
         retry_jitter_seconds=jitter,
     )
 
-    @offline_strategy(
+    @ome_strategy(
         name="transient_failing",
         trigger=Immediate(on=[_E]),
         emits=[],
         max_retries=max_retries,
     )
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         raise RuntimeError("transient")
 
     runner = Runner(
@@ -405,9 +398,8 @@ async def _make_runner_with_transient_failing_strategy(
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
-    return runner, s.meta
+    return runner, s
 
 
 @pytest.mark.asyncio
@@ -481,13 +473,13 @@ async def test_runner_releases_engine_sem_across_backoff_sleep(
 
     monkeypatch.setattr("everos.infra.ome._dispatch.runner.asyncio.sleep", fake_sleep)
 
-    @offline_strategy(
+    @ome_strategy(
         name="sem_probe_failing",
         trigger=Immediate(on=[_E]),
         emits=[],
         max_retries=2,
     )
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         raise RuntimeError("transient")
 
     runner = Runner(
@@ -495,9 +487,8 @@ async def test_runner_releases_engine_sem_across_backoff_sleep(
         engine_sem=sem,
         emit_hook=_no_emit,
         config=config,
-        engine=MagicMock(),
     )
-    await runner.run(s.meta, _E(), run_id="r1", max_retries_snapshot=2)
+    await runner.run(s, _E(), run_id="r1", max_retries_snapshot=2)
 
     assert held_during_sleep == [False, False]
     assert acquired_during_sleep == [True, True]

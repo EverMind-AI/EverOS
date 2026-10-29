@@ -21,6 +21,12 @@ from typing import Any
 
 import pytest
 
+from everos.infra.persistence.index.adapters import (
+    AgentCaseIndexAdapter,
+    AgentSkillIndexAdapter,
+    EpisodeIndexAdapter,
+    ProfileIndexAdapter,
+)
 from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
@@ -76,7 +82,7 @@ class _StubRepo:
 
 @dataclass
 class _ProfileStubRepo:
-    """Stub ``user_profile_repo`` — returns its configured row by id."""
+    """Stub ``storage.repos.user_profile`` — returns its configured row by id."""
 
     row: Any = None
     last_key: tuple[str, str, str] | None = None
@@ -190,10 +196,10 @@ def manager(
     ac = _StubRepo()
     sk = _StubRepo()
     mgr = GetManager(
-        episode_repo=ep,  # type: ignore[arg-type]
-        agent_case_repo=ac,  # type: ignore[arg-type]
-        agent_skill_repo=sk,  # type: ignore[arg-type]
-        user_profile_repo=profile_repo,  # type: ignore[arg-type]
+        episode_index=EpisodeIndexAdapter(ep),  # type: ignore[arg-type]
+        agent_case_index=AgentCaseIndexAdapter(ac),  # type: ignore[arg-type]
+        agent_skill_index=AgentSkillIndexAdapter(sk),  # type: ignore[arg-type]
+        profile_index=ProfileIndexAdapter(profile_repo),  # type: ignore[arg-type]
     )
     return mgr, ep, ac, sk
 

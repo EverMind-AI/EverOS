@@ -16,7 +16,6 @@ from everos.component.utils.datetime import (
     from_timestamp_ms,
     to_timestamp_ms,
 )
-from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index.schema import (
     IndexField,
@@ -24,14 +23,18 @@ from everos.infra.persistence.index.schema import (
     IndexSchema,
     schema_for,
 )
-from everos.infra.persistence.predicate import (
-    Predicate,
+from everos.memory.ports.query import (
+    Filter,
     all_of,
     eq,
     one_of,
 )
 
-from .milvus_manager import MilvusSchemaMismatchError, collection_name, get_client
+from .milvus_manager import (
+    MilvusConnection,
+    MilvusSchemaMismatchError,
+    collection_name,
+)
 from .predicate import render_predicate
 
 logger = get_logger(__name__)
@@ -215,7 +218,11 @@ def _metric_name(metric: Any) -> str | None:
 
 
 class MilvusRepoBase[T: BaseModel]:
-    """Generic Milvus repository backed by one neutral index schema."""
+    """Generic Milvus repository backed by one neutral index schema.
+
+    Args:
+        connection: The application's Milvus connection.
+    """
 
     schema: type[T]
     _write_locks: ClassVar[dict[str, asyncio.Lock]] = {}
@@ -230,9 +237,12 @@ class MilvusRepoBase[T: BaseModel]:
     def table_name(self) -> str:
         return self.index_schema.table_name
 
+    def __init__(self, connection: MilvusConnection) -> None:
+        self._connection = connection
+
     @property
     def collection_name(self) -> str:
-        return collection_name(self.table_name)
+        return collection_name(self.table_name, self._connection.settings)
 
     @classmethod
     def _write_lock(cls, name: str) -> asyncio.Lock:
@@ -264,7 +274,7 @@ class MilvusRepoBase[T: BaseModel]:
         async with self._collection_lock(name):
             if name in self._ready_collections:
                 return
-            client = await get_client()
+            client = await self._connection.client()
             if await _run(client.has_collection, name):
                 await self.verify_collection()
             else:
@@ -294,7 +304,7 @@ class MilvusRepoBase[T: BaseModel]:
                 index_type="AUTOINDEX",
                 metric_type="BM25",
             )
-        settings = load_settings().milvus
+        settings = self._connection.settings
         await _run(
             client.create_collection,
             collection_name=self.collection_name,
@@ -319,7 +329,7 @@ class MilvusRepoBase[T: BaseModel]:
         physical shape, BM25 function mapping, and field-matched vector index
         metrics turns it back into a startup error with a recovery path.
         """
-        client = await get_client()
+        client = await self._connection.client()
         description = await _run(client.describe_collection, self.collection_name)
         reported = {
             field["name"]: field
@@ -444,11 +454,11 @@ class MilvusRepoBase[T: BaseModel]:
             return
         await self.ensure_collection()
         payload = [self._to_milvus_record(record) for record in records]
-        client = await get_client()
+        client = await self._connection.client()
         async with self._write_lock(self.collection_name):
             await _run(client.upsert, self.collection_name, payload)
 
-    async def update(self, updates: dict[str, Any], *, where: Predicate) -> None:
+    async def update(self, updates: dict[str, Any], *, where: Filter) -> None:
         """Read-modify-write the matching rows.
 
         Milvus has no partial-column update, so the whole row is read back and
@@ -466,7 +476,7 @@ class MilvusRepoBase[T: BaseModel]:
                 f"update() cannot change primary-key column(s) {clash} of "
                 f"{self.collection_name}; delete the row and upsert it instead"
             )
-        client = await get_client()
+        client = await self._connection.client()
         async with self._write_lock(self.collection_name):
             rows = await self._scan_raw(where, include_vectors=True)
             if not rows:
@@ -496,12 +506,12 @@ class MilvusRepoBase[T: BaseModel]:
     async def count(self) -> int:
         return await self._count_where(None)
 
-    async def count_where(self, where: Predicate | None = None) -> int:
+    async def count_where(self, where: Filter | None = None) -> int:
         return await self._count_where(where)
 
-    async def _count_where(self, where: Predicate | None) -> int:
+    async def _count_where(self, where: Filter | None) -> int:
         await self.ensure_collection()
-        client = await get_client()
+        client = await self._connection.client()
         rows = await _run(
             client.query,
             self.collection_name,
@@ -511,25 +521,25 @@ class MilvusRepoBase[T: BaseModel]:
         return int(rows[0].get("count(*)", 0)) if rows else 0
 
     async def find_where(
-        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+        self, where: Filter, *, limit: int = 100, skip_vectors: bool = False
     ) -> list[T]:
         rows = await self._query_raw(
             where, limit=limit, include_vectors=not skip_vectors
         )
         return [self._model_from_milvus(row) for row in rows]
 
-    async def find_one_where(self, where: Predicate) -> T | None:
+    async def find_one_where(self, where: Filter) -> T | None:
         rows = await self.find_where(where, limit=1)
         return rows[0] if rows else None
 
-    async def scan(self, where: Predicate | None = None) -> list[T]:
+    async def scan(self, where: Filter | None = None) -> list[T]:
         """Stream every matching row without a fixed query-window cap."""
         rows = await self._scan_raw(where, include_vectors=True)
         return [self._model_from_milvus(row) for row in rows]
 
     async def _scan_raw(
         self,
-        where: Predicate | None,
+        where: Filter | None,
         *,
         include_vectors: bool,
         max_rows: int | None = None,
@@ -542,7 +552,7 @@ class MilvusRepoBase[T: BaseModel]:
         use the iterator API.
         """
         await self.ensure_collection()
-        client = await get_client()
+        client = await self._connection.client()
         iterator = await _run(
             client.query_iterator,
             self.collection_name,
@@ -564,7 +574,7 @@ class MilvusRepoBase[T: BaseModel]:
 
     async def find_where_paginated(
         self,
-        where: Predicate,
+        where: Filter,
         *,
         sort_by: str,
         descending: bool = True,
@@ -603,7 +613,7 @@ class MilvusRepoBase[T: BaseModel]:
         self,
         *,
         vector: Sequence[float] | None = None,
-        where: Predicate | None = None,
+        where: Filter | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         if vector is None:
@@ -613,7 +623,7 @@ class MilvusRepoBase[T: BaseModel]:
     async def sparse_search(
         self,
         query_terms: Sequence[str],
-        where: Predicate | None,
+        where: Filter | None,
         *,
         columns: Sequence[str] | None = None,
         limit: int,
@@ -627,7 +637,7 @@ class MilvusRepoBase[T: BaseModel]:
         unknown = set(fields) - set(self.index_schema.bm25_fields)
         if unknown:
             raise ValueError(f"unknown BM25 fields: {sorted(unknown)}")
-        client = await get_client()
+        client = await self._connection.client()
         query = " ".join(term for term in query_terms if term)
         best: dict[str, dict[str, Any]] = {}
         for field in fields:
@@ -658,7 +668,7 @@ class MilvusRepoBase[T: BaseModel]:
     async def dense_search(
         self,
         vector: Sequence[float],
-        where: Predicate | None,
+        where: Filter | None,
         *,
         limit: int,
         vector_field: str = "vector",
@@ -670,7 +680,7 @@ class MilvusRepoBase[T: BaseModel]:
             raise ValueError(f"{vector_field!r} is not a dense-vector field")
         self._validate_vector(field, vector)
         await self.ensure_collection()
-        client = await get_client()
+        client = await self._connection.client()
         present = eq(_present_field(vector_field), True)
         results = await _run(
             client.search,
@@ -687,9 +697,9 @@ class MilvusRepoBase[T: BaseModel]:
             for row in _first_result_set(results)
         ]
 
-    async def delete(self, predicate: Predicate) -> None:
+    async def delete(self, predicate: Filter) -> None:
         await self.ensure_collection()
-        client = await get_client()
+        client = await self._connection.client()
         async with self._write_lock(self.collection_name):
             await _run(
                 client.delete,
@@ -1059,13 +1069,13 @@ class MilvusRepoBase[T: BaseModel]:
 
     async def _query_raw(
         self,
-        where: Predicate | None,
+        where: Filter | None,
         *,
         limit: int,
         include_vectors: bool,
     ) -> list[dict[str, Any]]:
         await self.ensure_collection()
-        client = await get_client()
+        client = await self._connection.client()
         return await _run(
             client.query,
             self.collection_name,
@@ -1075,15 +1085,15 @@ class MilvusRepoBase[T: BaseModel]:
         )
 
     async def _query_candidate_rows(
-        self, where: Predicate | None, *, limit: int
+        self, where: Filter | None, *, limit: int
     ) -> list[dict[str, Any]]:
         rows = await self._query_raw(where, limit=limit, include_vectors=False)
         return [self._restore_row(row) for row in rows]
 
-    def _expr(self, where: Predicate | None) -> str:
-        if where is not None and not isinstance(where, Predicate):
+    def _expr(self, where: Filter | None) -> str:
+        if where is not None and not isinstance(where, Filter):
             raise TypeError(
-                "Milvus repository predicates must use the neutral Predicate AST, "
+                "Milvus repository predicates must use the neutral Filter AST, "
                 f"got {type(where).__name__}"
             )
         return render_predicate(

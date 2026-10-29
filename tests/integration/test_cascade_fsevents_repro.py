@@ -23,24 +23,14 @@ from pathlib import Path
 
 import anyio
 import pytest
-from sqlmodel import SQLModel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
-from everos.core.persistence import MarkdownReader, MemoryRoot
-from everos.infra.persistence.lancedb import (
-    dispose_connection,
-    ensure_business_indexes,
-)
-from everos.infra.persistence.lancedb.lancedb_manager import get_table
-from everos.infra.persistence.markdown import AtomicFactWriter
+from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import AtomicFactWriter, MarkdownReader
 from everos.infra.persistence.records.atomic_fact import AtomicFact
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +39,7 @@ def _reset_lancedb_write_locks() -> None:
     unit-test fixture in test_repository.py. Without this, the second
     test in this module hits "Lock bound to a different event loop"
     because LanceRepoBase stashes locks in a ClassVar dict."""
-    from everos.core.persistence.lancedb.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 
@@ -66,48 +56,30 @@ class _StubEmbedder(EmbeddingProvider):
 
 @pytest.fixture
 async def cascade_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[MemoryRoot]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
-    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
-    # rather than through ``CascadeOrchestrator`` — patch the process-wide
-    # singleton so cascade never hits the fake network target above.
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
-
-    await dispose_connection()
-    await dispose_engine()
-
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await ensure_business_indexes()
+    await storage.create_schema()
+    await storage.index.ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.resolve()
-
-    await dispose_connection()
-    await dispose_engine()
+    yield storage.root
 
 
-async def _wait_drain(deadline: float = 15.0) -> None:
+async def _wait_drain(storage: Storage, deadline: float = 15.0) -> None:
     async with asyncio.timeout(deadline):
         while True:
-            summary = await md_change_state_repo.queue_summary()
+            summary = await storage.sqlite.md_change_state.queue_summary()
             if summary.pending == 0:
                 return
             await asyncio.sleep(0.05)
 
 
-async def _count_lance_rows(md_path: str) -> int:
-    table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
+async def _count_lance_rows(storage: Storage, md_path: str) -> int:
+    table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
     return await table.count_rows(filter=f"md_path = '{md_path}'")
 
 
@@ -132,11 +104,15 @@ async def test_high_freq_atomic_fact_append_no_loss(
     n_calls: int,
     items_per_call: int,
     inter_call_sleep_ms: float,
+    storage: Storage,
 ) -> None:
     memory_root = cascade_runtime
     orchestrator = CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_StubEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
             worker_batch_size=20,
@@ -172,14 +148,14 @@ async def test_high_freq_atomic_fact_append_no_loss(
             if inter_call_sleep_ms > 0:
                 await asyncio.sleep(inter_call_sleep_ms / 1000.0)
 
-        await _wait_drain(deadline=15.0)
+        await _wait_drain(storage, deadline=15.0)
         # FSEvents has ~30-100ms kernel-to-userspace delivery latency,
         # so the watcher's `on_*` callbacks for the LAST few
         # os.replace() bursts may arrive AFTER sqlite first reads
         # `pending == 0`. Absorb that tail: settle 500ms, then drain
         # again until truly quiescent.
         await asyncio.sleep(0.5)
-        await _wait_drain(deadline=15.0)
+        await _wait_drain(storage, deadline=15.0)
 
         md_path = (
             f"default_app/default_project/users/{owner_id}/.atomic_facts/"
@@ -187,8 +163,8 @@ async def test_high_freq_atomic_fact_append_no_loss(
         )
         absolute = memory_root.root / md_path
         md_entries = await _count_md_entries(absolute)
-        lance_rows = await _count_lance_rows(md_path)
-        state_row = await md_change_state_repo.get_by_id(md_path)
+        lance_rows = await _count_lance_rows(storage, md_path)
+        state_row = await storage.sqlite.md_change_state.get_by_id(md_path)
 
         assert md_entries == total, (
             f"writer self-check failed: total={total} md={md_entries}"

@@ -14,10 +14,14 @@ import pytest
 
 from everos.component.utils.datetime import get_utc_now
 from everos.config import LanceDBSettings
-from everos.core.persistence import BaseLanceTable, LanceRepoBase, MemoryRoot
-from everos.core.persistence.lancedb import open_lancedb_connection
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import KnowledgeTopic, primary_key
-from everos.infra.persistence.lancedb import LanceIndexContract
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
+    LanceRepoBase,
+    open_lancedb_connection,
+)
+from everos.infra.persistence.records import BaseLanceTable
 
 
 class _Scoped(BaseLanceTable):

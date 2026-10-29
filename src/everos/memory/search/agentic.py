@@ -34,8 +34,8 @@ from everalgo.types import Candidate
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
-from everos.infra.persistence.index import Predicate
-from everos.infra.persistence.sqlite import cluster_repo
+from everos.memory.mappers import cluster as cluster_mapper
+from everos.memory.ports import ClusterStore, Filter, Scope
 from everos.memory.search.callbacks import build_rerank_fn
 from everos.memory.search.shaper import shape_episode_from_candidate
 
@@ -44,7 +44,6 @@ from .dto import SearchEpisodeItem
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from everalgo.clustering import Cluster
     from everalgo.llm.protocols import LLMClient
 
     from everos.component.rerank import RerankProvider
@@ -81,11 +80,12 @@ async def search_episodes_agentic(
     query: str,
     *,
     owner_id: str,
-    where: Predicate,
+    where: Filter,
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
     atomic_fact_recaller: AtomicFactRecaller,
+    cluster_store: ClusterStore,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,
     llm: LLMClient,
@@ -96,9 +96,10 @@ async def search_episodes_agentic(
     Args:
         query: User search query.
         owner_id: Owner whose memories are searched.
-        where: Pre-compiled LanceDB filter string (owner + any request filters).
+        where: Compiled filter (owner + any request filters).
         episode_recaller: Episode-table sparse + dense + fetch callbacks.
         atomic_fact_recaller: AtomicFact-table sparse + dense callbacks.
+        cluster_store: Source of the owner's user-memory clusters.
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
         llm: LLM client for sufficiency check + multi-query generation.
@@ -189,12 +190,13 @@ async def search_episodes_agentic(
     #    Reshape metadata to the everalgo doc contract so the sufficiency /
     #    multi-query LLM prompt (rendered by ``_format_docs``) sees the episode
     #    body and a ms-epoch date instead of the memcell id.
-    clusters: list[Cluster] = await cluster_repo.list_for_owner(
-        owner_id,
-        "user_memory",
-        app_id=app_id,
-        project_id=project_id,
+    owner_scope = Scope(
+        app_id=app_id, project_id=project_id, owner_id=owner_id, owner_type="user"
     )
+    clusters = [
+        cluster_mapper.to_algo(c)
+        for c in await cluster_store.list_for_owner(owner_scope, "user_memory")
+    ]
     raw_all_docs = await episode_recaller.fetch_all_for_owner(where)
     all_docs: list[Candidate] = [
         c.model_copy(update={"metadata": _to_everalgo_doc_metadata(c.metadata)})

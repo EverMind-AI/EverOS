@@ -8,59 +8,55 @@ the startup banner should log a warning message pointing users to
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
-import pytest
 import structlog.testing
 
 from everos.component.utils.datetime import get_utc_now
+from everos.config import load_settings
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.entrypoints.api.lifespans.lancedb import (
-    LanceDBLifespanProvider,
-    _log_unbackfilled_hint,
-)
+from everos.infra.cascade import CascadeAdmin
+from everos.infra.persistence.index import EmbeddingProvenance
 from everos.infra.persistence.lancedb import Episode
-from everos.infra.persistence.lancedb.repos import episode_repo
+from everos.service.bootstrap import _log_unbackfilled_hint
+from tests.fakes import Storage
 
 
-@pytest.fixture
-def _isolated_memory_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate each test with its own temporary MemoryRoot."""
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
+def _keyword_only() -> EmbeddingProvenance:
+    """No embedding provider: the index opens without a provenance check."""
+    return EmbeddingProvenance(load_settings().embedding, configured=False)
+
+
+def _admin(storage: Storage) -> CascadeAdmin:
+    """The admin over the test's storage, as the bootstrap wires it."""
+    return CascadeAdmin(
+        database=storage.database,
+        ledger=storage.sqlite.md_change_state,
+        index=storage.index,
+        provenance=_keyword_only(),
     )
-    (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
 
 
-async def test_no_warning_when_empty(_isolated_memory_root: None) -> None:
+async def test_no_warning_when_empty(storage: Storage) -> None:
     """No warning is logged when the database is empty."""
-    from fastapi import FastAPI
-
-    app = FastAPI()
-    provider = LanceDBLifespanProvider()
-    await provider.startup(app)
+    admin = _admin(storage)
+    await admin.start_index()
 
     # When database is empty, no warning should be logged
     with structlog.testing.capture_logs() as captured:
-        await _log_unbackfilled_hint()
+        await _log_unbackfilled_hint(admin)
 
     matching = [e for e in captured if e.get("event") == "unbackfilled_memory_rows"]
     assert len(matching) == 0, "expected no warning when database is empty"
 
-    await provider.shutdown(app)
+    await admin.close_index()
 
 
-async def test_warns_when_unbackfilled_rows_exist(
-    _isolated_memory_root: None,
-) -> None:
+async def test_warns_when_unbackfilled_rows_exist(storage: Storage) -> None:
     """_log_unbackfilled_hint warns with correct count when vector=NULL rows exist."""
-    from fastapi import FastAPI
 
-    # Setup: initialize provider (connects to temp LanceDB)
-    app = FastAPI()
-    provider = LanceDBLifespanProvider()
-    await provider.startup(app)
+    # Setup: open the index (connects to temp LanceDB)
+    admin = _admin(storage)
+    await admin.start_index()
 
     # Seed: insert one Episode row with vector=None
     def _make_unvectorized_episode() -> Episode:
@@ -87,11 +83,11 @@ async def test_warns_when_unbackfilled_rows_exist(
             vector=None,  # explicitly unvectorized
         )
 
-    await episode_repo.add([_make_unvectorized_episode()])
+    await storage.repos.episode.add([_make_unvectorized_episode()])
 
     # Capture logs and call the hint function
     with structlog.testing.capture_logs() as captured:
-        await _log_unbackfilled_hint()
+        await _log_unbackfilled_hint(admin)
 
     # Assert: the warning is logged with the correct count
     matching = [e for e in captured if e.get("event") == "unbackfilled_memory_rows"]
@@ -101,22 +97,18 @@ async def test_warns_when_unbackfilled_rows_exist(
     warning = matching[0]
     assert warning.get("count") == 1, f"expected count=1, got {warning.get('count')}"
 
-    await provider.shutdown(app)
+    await admin.close_index()
 
 
-async def test_log_unbackfilled_hint_runs_on_startup(
-    _isolated_memory_root: None,
-) -> None:
+async def test_log_unbackfilled_hint_runs_on_startup(storage: Storage) -> None:
     """Startup should call _log_unbackfilled_hint after ensuring indexes."""
-    from fastapi import FastAPI
-
-    app = FastAPI()
-    provider = LanceDBLifespanProvider()
+    admin = _admin(storage)
 
     # This startup should not raise - _log_unbackfilled_hint should be called
-    await provider.startup(app)
+    await admin.start_index()
+    await _log_unbackfilled_hint(admin)
 
-    await provider.shutdown(app)
+    await admin.close_index()
 
 
 async def test_startup_banner_logger_configuration() -> None:

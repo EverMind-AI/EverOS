@@ -26,7 +26,6 @@ insert its own row per cell.
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -44,14 +43,9 @@ from everalgo.types import ToolCall as AlgoToolCall
 from everos.component.utils.datetime import from_timestamp, to_timestamp_ms
 from everos.core.errors import SessionBufferQuarantinedError
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.sqlite import (
-    Memcell,
-    UnprocessedBuffer,
-    conversation_status_repo,
-    memcell_repo,
-    unprocessed_buffer_repo,
-)
-from everos.memory import CanonicalMessage, IngestResult, ToolCall
+from everos.memory import CanonicalMessage, IngestResult
+from everos.memory.models import MemcellRecord
+from everos.memory.ports import MemcellStore, SessionBufferStore, SessionKey
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
@@ -60,9 +54,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_TRACK = "memorize"
-_TRACK_QUARANTINE = "quarantine"
-"""Where a session's buffer goes when the model keeps failing to segment it."""
 _POISON_CALLS = 3
 """Consecutive calls whose boundary attempts all returned unusable replies
 before the session's buffer is quarantined (each call retries the model
@@ -70,9 +61,6 @@ before the session's buffer is quarantined (each call retries the model
 _unusable_replies: dict[tuple[str, str, str], int] = {}
 """Consecutive unusable-reply calls per (app, project, session); in memory,
 so a restart simply starts the count again."""
-"""Shared track used for both the unprocessed-buffer and the memcell
-ledger — boundary detection is mode-dispatched but single-pass, so it
-does not need per-pipeline separation."""
 
 _RAW_TYPE_BY_MODE: dict[str, str] = {
     "chat": "Conversation",
@@ -103,26 +91,24 @@ class BoundaryOutcome(NamedTuple):
     message_count: int
 
 
-async def buffer_messages(ingested: IngestResult, *, mode: Mode) -> BoundaryOutcome:
+async def buffer_messages(
+    ingested: IngestResult, *, mode: Mode, session_buffer: SessionBufferStore
+) -> BoundaryOutcome:
     """Durably merge fresh messages into the session buffer without an LLM call.
 
     This is the low-cost half of deferred memorize. It deliberately stops before
     boundary detection, memcell creation, and pipeline dispatch; a later flush
     processes the complete buffer under the same per-session service lock.
     """
-    app_id = ingested.app_id
-    project_id = ingested.project_id
     fresh = _filter_for_mode(ingested.messages, mode)
     if not fresh:
         return _empty_outcome(status="skipped", message_count=0)
 
-    buffer_rows = await unprocessed_buffer_repo.list_for_track(
-        ingested.session_id, _TRACK, app_id=app_id, project_id=project_id
-    )
-    buffered = [_row_to_canonical(row) for row in buffer_rows]
+    session = _session_of(ingested)
+    buffered = await session_buffer.list(session)
     merged = _merge_dedupe_sort(buffered, fresh)
-    await _replace_buffer(ingested.session_id, merged, app_id, project_id)
-    await _touch_last_message_ts(ingested.session_id, merged, app_id, project_id)
+    await session_buffer.replace(session, merged)
+    await _touch_last_message_ts(session_buffer, session, merged)
     return _empty_outcome(status="accumulated", message_count=len(fresh))
 
 
@@ -135,6 +121,8 @@ async def prepare_cells(
     prompt_loader: PromptLoader,
     hard_token_limit: int,
     hard_msg_limit: int,
+    session_buffer: SessionBufferStore,
+    memcell_store: MemcellStore,
     timeout_seconds: float | None = None,
 ) -> BoundaryOutcome:
     """Run the boundary stage end-to-end and persist tail back to buffer.
@@ -144,16 +132,12 @@ async def prepare_cells(
     any write, so a timeout leaves the buffer and the memcell table exactly
     as they were.
     """
-    app_id = ingested.app_id
-    project_id = ingested.project_id
+    session = _session_of(ingested)
     fresh = _filter_for_mode(ingested.messages, mode)
     if not fresh and not is_final:
         return _empty_outcome(status="skipped", message_count=0)
 
-    buffer_rows = await unprocessed_buffer_repo.list_for_track(
-        ingested.session_id, _TRACK, app_id=app_id, project_id=project_id
-    )
-    buffered = [_row_to_canonical(r) for r in buffer_rows]
+    buffered = await session_buffer.list(session)
     merged = _merge_dedupe_sort(buffered, fresh)
     if not merged:
         return _empty_outcome(status="accumulated", message_count=0)
@@ -161,12 +145,12 @@ async def prepare_cells(
     # Need a role=user anchor for downstream episode extraction; assistant-
     # only / tool-only batches sit in the buffer until a user message lands.
     if not is_final and not any(m.role == "user" for m in merged):
-        await _replace_buffer(ingested.session_id, merged, app_id, project_id)
-        await _touch_last_message_ts(ingested.session_id, merged, app_id, project_id)
+        await session_buffer.replace(session, merged)
+        await _touch_last_message_ts(session_buffer, session, merged)
         return _empty_outcome(status="accumulated", message_count=len(fresh))
 
     if llm_client is None:
-        await _replace_buffer(ingested.session_id, merged, app_id, project_id)
+        await session_buffer.replace(session, merged)
         logger.warning(
             "memorize_no_llm_client",
             extra={"session_id": ingested.session_id, "buffered": len(merged)},
@@ -174,7 +158,7 @@ async def prepare_cells(
         return _empty_outcome(status="skipped", message_count=len(fresh))
 
     boundary_prompt = prompt_loader.load("boundary_detection")
-    scope = (app_id, project_id, ingested.session_id)
+    scope = (session.app_id, session.project_id, session.session_id)
     try:
         cells, tail = await _detect(
             merged,
@@ -197,26 +181,16 @@ async def prepare_cells(
         if _unusable_replies[scope] < _POISON_CALLS:
             raise
         _unusable_replies.pop(scope, None)
-        buffered_ids = {r.message_id for r in buffer_rows}
-        fresh_rows = [
-            _canonical_to_row(m, app_id, project_id)
-            for m in merged
-            if m.message_id not in buffered_ids
-        ]
-        moved = await unprocessed_buffer_repo.quarantine(
-            ingested.session_id,
-            _TRACK,
-            _TRACK_QUARANTINE,
-            fresh_rows,
-            app_id=app_id,
-            project_id=project_id,
+        buffered_ids = {m.message_id for m in buffered}
+        moved = await session_buffer.quarantine(
+            session, [m for m in merged if m.message_id not in buffered_ids]
         )
         logger.error(
             "memorize_session_buffer_quarantined",
             extra={
                 "session_id": ingested.session_id,
-                "app_id": app_id,
-                "project_id": project_id,
+                "app_id": session.app_id,
+                "project_id": session.project_id,
                 "messages": moved,
                 "failed_calls": _POISON_CALLS,
             },
@@ -224,15 +198,15 @@ async def prepare_cells(
         raise SessionBufferQuarantinedError(
             f"boundary detection failed on {_POISON_CALLS} consecutive calls "
             f"for session {ingested.session_id!r}; {moved} buffered messages were "
-            f"moved to the {_TRACK_QUARANTINE!r} track so the session can continue"
+            "moved to the 'quarantine' track so the session can continue"
         ) from None
     _unusable_replies.pop(scope, None)
 
     if not cells:
         # boundary returned an empty cells set → roll the merged slice
         # back into the buffer (algo says it's still mid-conversation).
-        await _replace_buffer(ingested.session_id, merged, app_id, project_id)
-        await _touch_last_message_ts(ingested.session_id, merged, app_id, project_id)
+        await session_buffer.replace(session, merged)
+        await _touch_last_message_ts(session_buffer, session, merged)
         return _empty_outcome(status="accumulated", message_count=len(fresh))
 
     memcell_ids = [_mint_memcell_id() for _ in cells]
@@ -244,33 +218,24 @@ async def prepare_cells(
     # agnostic. Per-user fan-out (Episode / AtomicFact / Foresight / Profile)
     # happens downstream via ``sender_ids``.
     raw_type = _RAW_TYPE_BY_MODE[mode]
-    rows = [
-        _build_memcell_row(
-            cell=cell,
+    records = [
+        MemcellRecord(
             memcell_id=memcell_id,
-            session_id=ingested.session_id,
-            app_id=app_id,
-            project_id=project_id,
+            cell=cell,
             raw_type=raw_type,
             message_ids=per_cell_message_ids[i],
             sender_ids=per_cell_all_senders[i],
         )
         for i, (cell, memcell_id) in enumerate(zip(cells, memcell_ids, strict=True))
     ]
-    await memcell_repo.insert_many(rows)
+    await memcell_store.insert_many(session, records)
 
     last_cell_ts = max((cell.timestamp for cell in cells), default=0)
     if last_cell_ts:
-        await conversation_status_repo.touch_last_memcell_ts(
-            ingested.session_id,
-            _TRACK,
-            from_timestamp(last_cell_ts),
-            app_id=app_id,
-            project_id=project_id,
-        )
+        await session_buffer.touch_last_memcell(session, from_timestamp(last_cell_ts))
 
     tail_canonical = _slice_tail(merged, tail)
-    await _replace_buffer(ingested.session_id, tail_canonical, app_id, project_id)
+    await session_buffer.replace(session, tail_canonical)
 
     return BoundaryOutcome(
         cells=cells,
@@ -424,79 +389,19 @@ def _to_conversation_item(m: CanonicalMessage) -> ConversationItem:
 # ── Buffer + status helpers ───────────────────────────────────────────────
 
 
-async def _replace_buffer(
-    session_id: str,
-    rows: list[CanonicalMessage],
-    app_id: str,
-    project_id: str,
-) -> None:
-    await unprocessed_buffer_repo.replace(
-        session_id,
-        _TRACK,
-        [_canonical_to_row(m, app_id, project_id) for m in rows],
-        app_id=app_id,
-        project_id=project_id,
-    )
-
-
 async def _touch_last_message_ts(
-    session_id: str,
+    session_buffer: SessionBufferStore,
+    session: SessionKey,
     merged: list[CanonicalMessage],
-    app_id: str,
-    project_id: str,
 ) -> None:
-    await conversation_status_repo.touch_last_message_ts(
-        session_id,
-        _TRACK,
-        max(m.timestamp for m in merged),
-        app_id=app_id,
-        project_id=project_id,
-    )
+    await session_buffer.touch_last_message(session, max(m.timestamp for m in merged))
 
 
-def _canonical_to_row(
-    m: CanonicalMessage, app_id: str, project_id: str
-) -> UnprocessedBuffer:
-    return UnprocessedBuffer(
-        message_id=m.message_id,
-        app_id=app_id,
-        project_id=project_id,
-        session_id=m.session_id,
-        track=_TRACK,
-        sender_id=m.sender_id,
-        sender_name=m.sender_name,
-        role=m.role,
-        timestamp=m.timestamp,
-        content_items_json=json.dumps(m.content_items),
-        text=m.text,
-        tool_calls_json=(
-            json.dumps([tc.model_dump() for tc in m.tool_calls])
-            if m.tool_calls
-            else None
-        ),
-        tool_call_id=m.tool_call_id,
-    )
-
-
-def _row_to_canonical(r: UnprocessedBuffer) -> CanonicalMessage:
-    tool_calls: list[ToolCall] | None = None
-    if r.tool_calls_json:
-        tool_calls = [ToolCall.model_validate(d) for d in json.loads(r.tool_calls_json)]
-    content_items = json.loads(r.content_items_json) if r.content_items_json else []
-    # ``r.timestamp`` is UtcDatetime — the BaseTable load-event hook
-    # re-attaches ``tzinfo=UTC`` on ORM hydrate, so no defensive coercion
-    # is needed here.
-    return CanonicalMessage(
-        message_id=r.message_id,
-        session_id=r.session_id,
-        sender_id=r.sender_id,
-        sender_name=r.sender_name,
-        role=r.role,  # type: ignore[arg-type]
-        timestamp=r.timestamp,
-        content_items=content_items,
-        text=r.text,
-        tool_calls=tool_calls,
-        tool_call_id=r.tool_call_id,
+def _session_of(ingested: IngestResult) -> SessionKey:
+    return SessionKey(
+        app_id=ingested.app_id,
+        project_id=ingested.project_id,
+        session_id=ingested.session_id,
     )
 
 
@@ -556,31 +461,6 @@ def _unique_all_senders(cell: MemCell) -> list[str]:
         if sid and sid not in senders:
             senders.append(sid)
     return senders
-
-
-def _build_memcell_row(
-    *,
-    cell: MemCell,
-    memcell_id: str,
-    session_id: str,
-    app_id: str,
-    project_id: str,
-    raw_type: str,
-    message_ids: list[str],
-    sender_ids: list[str],
-) -> Memcell:
-    return Memcell(
-        memcell_id=memcell_id,
-        app_id=app_id,
-        project_id=project_id,
-        session_id=session_id,
-        track=_TRACK,
-        raw_type=raw_type,
-        message_ids_json=json.dumps(message_ids),
-        sender_ids_json=json.dumps(sender_ids),
-        payload_json=cell.model_dump_json(),
-        timestamp=from_timestamp(cell.timestamp),
-    )
 
 
 def _mint_memcell_id() -> str:

@@ -1,6 +1,6 @@
 """Repository for ``unprocessed_buffer`` — chat message accumulator.
 
-Singleton bound to the process-wide ``sqlite_manager`` session factory.
+Bound to the session factory it is built with.
 
 Pure SQLModel persistence: row ↔ domain conversion lives in
 ``everos.memory.extract.pipeline`` (the only caller that needs it).
@@ -16,19 +16,15 @@ from __future__ import annotations
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import UnprocessedBuffer
 
 
-class _UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
+class UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
     model = UnprocessedBuffer
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def list_for_track(
         self,
@@ -124,6 +120,3 @@ class _UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
                 inserted += result.rowcount
             await s.commit()
         return int(moved.rowcount) + inserted
-
-
-unprocessed_buffer_repo = _UnprocessedBufferRepo()

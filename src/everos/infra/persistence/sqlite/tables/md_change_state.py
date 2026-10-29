@@ -13,10 +13,10 @@ status / fix queries (see ``docs/cascade_runbook.md``).
 from __future__ import annotations
 
 from sqlalchemy import Index, text
+from sqlmodel import Field
 
 from everos.component.utils.datetime import UtcDatetime, get_utc_now
-from everos.core.persistence.sqlite import BaseTable, Field
-from everos.core.persistence.sqlite.base import UtcDateTimeColumn
+from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
 
 
 class MdChangeState(BaseTable, table=True):

@@ -19,16 +19,14 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
+from everos.infra.persistence.index.adapters import AgentSkillIndexAdapter
 from everos.infra.persistence.lancedb import (
     AgentSkill as LanceAgentSkill,
 )
-from everos.infra.persistence.lancedb import (
-    agent_skill_repo,
-    lancedb_manager,
-)
-from everos.infra.persistence.predicate import all_of, eq
+from everos.memory.ports.query import all_of, eq
 from everos.memory.search.recall.agent_skill import AgentSkillRecaller
 from everos.memory.search.recall.base import RecallerDeps
+from tests.fakes.storage import Storage
 
 
 class _WhitespaceTokenizer(Tokenizer):
@@ -67,23 +65,23 @@ def _skill_row(
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Isolate LanceDB under tmp memory root per test."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
     yield
-    await lancedb_manager.dispose_connection()
 
 
-def _recaller() -> AgentSkillRecaller:
-    return AgentSkillRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
+def _recaller(storage: Storage) -> AgentSkillRecaller:
+    return AgentSkillRecaller(
+        RecallerDeps(tokenizer=_WhitespaceTokenizer()),
+        AgentSkillIndexAdapter(storage.repos.agent_skill),
+    )
 
 
 _OWNER_WHERE = all_of(eq("owner_id", "agt"), eq("owner_type", "agent"))
 
 
-async def test_fetch_by_case_ids_matches_any_lineage_case() -> None:
+async def test_fetch_by_case_ids_matches_any_lineage_case(storage: Storage) -> None:
     """OR over case ids: a skill surfaces when its ``source_case_ids``
     contains at least one queried case."""
-    await agent_skill_repo.upsert(
+    await storage.repos.agent_skill.upsert(
         [
             _skill_row(name="s1", owner_id="agt", source_case_ids=["c_a", "c_b"]),
             _skill_row(name="s2", owner_id="agt", source_case_ids=["c_c"]),
@@ -91,56 +89,62 @@ async def test_fetch_by_case_ids_matches_any_lineage_case() -> None:
         ]
     )
 
-    got = await _recaller().fetch_by_case_ids(["c_a", "c_c"], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).fetch_by_case_ids(
+        ["c_a", "c_c"], _OWNER_WHERE, limit=10
+    )
 
     assert sorted(c.id for c in got) == ["agt_s1", "agt_s2"]
 
 
-async def test_fetch_by_case_ids_respects_owner_partition() -> None:
+async def test_fetch_by_case_ids_respects_owner_partition(storage: Storage) -> None:
     """The ``where`` clause is AND-composed with ``array_has(...)`` — a
     skill in a different owner partition must not leak through."""
-    await agent_skill_repo.upsert(
+    await storage.repos.agent_skill.upsert(
         [
             _skill_row(name="s1", owner_id="agt", source_case_ids=["c_a"]),
             _skill_row(name="s1", owner_id="other", source_case_ids=["c_a"]),
         ]
     )
 
-    got = await _recaller().fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
 
     assert [c.id for c in got] == ["agt_s1"]
 
 
-async def test_fetch_by_case_ids_returns_empty_for_no_ids() -> None:
+async def test_fetch_by_case_ids_returns_empty_for_no_ids(storage: Storage) -> None:
     """Empty input short-circuits — no LanceDB query is issued."""
-    got = await _recaller().fetch_by_case_ids([], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).fetch_by_case_ids([], _OWNER_WHERE, limit=10)
     assert got == []
 
 
-async def test_fetch_by_case_ids_escapes_single_quotes() -> None:
+async def test_fetch_by_case_ids_escapes_single_quotes(storage: Storage) -> None:
     """A case id with a single quote must not break the SQL literal.
 
     The ``_q`` escaper turns ``'`` into ``''`` (SQL standard); without it
     the where-clause would close the string literal prematurely.
     """
     quoted_id = "ac_o'brien_0001"
-    await agent_skill_repo.upsert(
+    await storage.repos.agent_skill.upsert(
         [_skill_row(name="s1", owner_id="agt", source_case_ids=[quoted_id])]
     )
 
-    got = await _recaller().fetch_by_case_ids([quoted_id], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).fetch_by_case_ids(
+        [quoted_id], _OWNER_WHERE, limit=10
+    )
 
     assert [c.id for c in got] == ["agt_s1"]
 
 
-async def test_fetch_by_case_ids_carries_source_case_ids_in_metadata() -> None:
+async def test_fetch_by_case_ids_carries_source_case_ids_in_metadata(
+    storage: Storage,
+) -> None:
     """The full ``source_case_ids`` list must ride back in metadata so the
     manager's max-pool can score against the caller's case_score map."""
-    await agent_skill_repo.upsert(
+    await storage.repos.agent_skill.upsert(
         [_skill_row(name="s1", owner_id="agt", source_case_ids=["c_a", "c_b", "c_c"])]
     )
 
-    got = await _recaller().fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
 
     assert len(got) == 1
     assert sorted(got[0].metadata["source_case_ids"]) == ["c_a", "c_b", "c_c"]

@@ -32,7 +32,7 @@ import asyncio
 # Plain dict (not WeakValueDictionary): a Lock with pending waiters must
 # outlive the dict entry, otherwise GC racing with waiters can drop a
 # lock mid-flight (CPython bpo-28427). Same rationale as
-# ``everos.core.persistence.markdown.writer.MarkdownWriter._path_locks``.
+# ``everos.infra.persistence.markdown.base.writer.MarkdownWriter._path_locks``.
 _session_locks: dict[str, asyncio.Lock] = {}
 
 

@@ -1,6 +1,6 @@
 """Markdown business persistence layer.
 
-Sits on top of :mod:`everos.core.persistence.markdown` (atomic write +
+Sits on top of :mod:`.base` (atomic write +
 parse + frontmatter chassis) and provides:
 
     * concrete frontmatter schemas under :mod:`.mds`
@@ -28,6 +28,28 @@ Outer layers MUST go through this top-level package because
 layers by import-linter.
 """
 
+from .base import AgentScopedFrontmatter as AgentScopedFrontmatter
+from .base import BaseFrontmatter as BaseFrontmatter
+from .base import DailyLogPathMixin as DailyLogPathMixin
+from .base import Entry as Entry
+from .base import EntryId as EntryId
+from .base import KnowledgeDocumentPathMixin as KnowledgeDocumentPathMixin
+from .base import KnowledgeScopedMixin as KnowledgeScopedMixin
+from .base import KnowledgeTopicPathMixin as KnowledgeTopicPathMixin
+from .base import MarkdownReader as MarkdownReader
+from .base import MarkdownWriter as MarkdownWriter
+from .base import ParsedMarkdown as ParsedMarkdown
+from .base import ProfilePathMixin as ProfilePathMixin
+from .base import SkillPathMixin as SkillPathMixin
+from .base import StructuredEntry as StructuredEntry
+from .base import UserScopedFrontmatter as UserScopedFrontmatter
+from .base import dump_frontmatter as dump_frontmatter
+from .base import find_entry as find_entry
+from .base import parse_frontmatter as parse_frontmatter
+from .base import parse_structured_entry as parse_structured_entry
+from .base import render_structured_entry as render_structured_entry
+from .base import sanitize_dirname as sanitize_dirname
+from .base import split_entries as split_entries
 from .mds import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
 from .mds import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .mds import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
@@ -45,6 +67,12 @@ from .readers import ForesightReader as ForesightReader
 from .readers import ProfileReader as ProfileReader
 from .readers import ensure_taxonomy as ensure_taxonomy
 from .readers import parse_taxonomy as parse_taxonomy
+from .stores import MarkdownAgentCaseStore as MarkdownAgentCaseStore
+from .stores import MarkdownAgentSkillStore as MarkdownAgentSkillStore
+from .stores import MarkdownAtomicFactStore as MarkdownAtomicFactStore
+from .stores import MarkdownEpisodeStore as MarkdownEpisodeStore
+from .stores import MarkdownForesightStore as MarkdownForesightStore
+from .stores import MarkdownProfileStore as MarkdownProfileStore
 from .writers import AgentCaseWriter as AgentCaseWriter
 from .writers import AgentSkillWriter as AgentSkillWriter
 from .writers import AtomicFactWriter as AtomicFactWriter
@@ -58,6 +86,7 @@ __all__ = [
     "AgentCaseDailyFrontmatter",
     "AgentCaseReader",
     "AgentCaseWriter",
+    "AgentScopedFrontmatter",
     "AgentSkillFrontmatter",
     "AgentSkillReader",
     "AgentSkillWriter",
@@ -66,6 +95,10 @@ __all__ = [
     "AtomicFactWriter",
     "BaseDailyReader",
     "BaseDailyWriter",
+    "BaseFrontmatter",
+    "DailyLogPathMixin",
+    "Entry",
+    "EntryId",
     "EpisodeDailyFrontmatter",
     "EpisodeReader",
     "EpisodeWriter",
@@ -73,11 +106,34 @@ __all__ = [
     "ForesightReader",
     "ForesightWriter",
     "KnowledgeDocumentFrontmatter",
+    "KnowledgeDocumentPathMixin",
+    "KnowledgeScopedMixin",
     "KnowledgeTopicFrontmatter",
+    "KnowledgeTopicPathMixin",
     "KnowledgeWriter",
+    "MarkdownAgentCaseStore",
+    "MarkdownAgentSkillStore",
+    "MarkdownAtomicFactStore",
+    "MarkdownEpisodeStore",
+    "MarkdownForesightStore",
+    "MarkdownProfileStore",
+    "MarkdownReader",
+    "MarkdownWriter",
+    "ParsedMarkdown",
+    "ProfilePathMixin",
     "ProfileReader",
     "ProfileWriter",
+    "SkillPathMixin",
+    "StructuredEntry",
     "UserProfileFrontmatter",
+    "UserScopedFrontmatter",
+    "dump_frontmatter",
     "ensure_taxonomy",
+    "find_entry",
+    "parse_frontmatter",
+    "parse_structured_entry",
     "parse_taxonomy",
+    "render_structured_entry",
+    "sanitize_dirname",
+    "split_entries",
 ]

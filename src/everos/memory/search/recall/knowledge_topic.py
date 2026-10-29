@@ -17,11 +17,7 @@ from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import (
-    KnowledgeTopic,
-    Predicate,
-    knowledge_topic_repo,
-)
+from everos.memory.ports import Filter, KnowledgeTopicIndex
 
 from .base import (
     RecallerDeps,
@@ -31,21 +27,23 @@ from .base import (
 
 
 class KnowledgeTopicRecaller:
-    """BM25 (dual-column) + vector recall over the LanceDB ``knowledge_topic`` table.
+    """BM25 (dual-column) + vector recall over the knowledge-topic index.
 
     Args:
-        deps: Shared recaller dependencies (tokenizer, embedding provider).
+        deps: Shared recaller dependencies (tokenizer).
+        index: The knowledge-topic index port.
     """
 
     kind: ClassVar[str] = "knowledge_topic"
     everalgo_memory_type: ClassVar[str] = "knowledge"
     text_field: ClassVar[str] = "summary"
 
-    def __init__(self, deps: RecallerDeps) -> None:
+    def __init__(self, deps: RecallerDeps, index: KnowledgeTopicIndex) -> None:
         self._deps = deps
+        self._index = index
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
+        self, query: str, where: Filter, *, limit: int
     ) -> list[Candidate]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
@@ -58,29 +56,23 @@ class KnowledgeTopicRecaller:
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return []
-        merged_rows = await knowledge_topic_repo.sparse_search(
-            terms,
-            where,
-            columns=KnowledgeTopic.BM25_FIELDS,
-            limit=limit,
-        )
+        hits = await self._index.sparse_search(terms, where, limit=limit)
         return [
-            row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
-            for r in merged_rows
+            row_to_candidate(h, source="keyword", score=h.score or 0.0) for h in hits
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
+        self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[Candidate]:
         """Cosine ANN over the ``summary`` vector (1024-d)."""
         if not vector:
             return []
-        rows = await knowledge_topic_repo.dense_search(vector, where, limit=limit)
+        hits = await self._index.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
-                r,
+                h,
                 source="vector",
-                score=cosine_score_from_distance(r.get("_distance")),
+                score=cosine_score_from_distance(h.fields.get("_distance")),
             )
-            for r in rows
+            for h in hits
         ]

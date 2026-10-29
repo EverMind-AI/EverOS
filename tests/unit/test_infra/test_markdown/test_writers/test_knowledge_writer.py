@@ -222,7 +222,7 @@ async def test_decomposed_accent_survives_in_directory_name(tmp_path: Path) -> N
     """A decomposed (NFD) title keeps its accent in the directory name.
 
     Pins a deliberate behavior change: this writer's private sanitizer was
-    replaced by the shared ``core.persistence.markdown.path_safety``
+    replaced by the shared ``infra.persistence.markdown.base.path_safety``
     primitive, which NFC-normalizes before filtering. The character class
     (``[^\\w\\-.]``, Unicode-aware) is unchanged, so precomposed input —
     including CJK — resolved identically before and after; NFD input did

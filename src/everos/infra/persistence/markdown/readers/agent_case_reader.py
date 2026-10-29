@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as _dt
 from pathlib import Path
 
-from everos.core.persistence import MemoryRoot
+from everos.infra.persistence.memory_root import MemoryRoot
 
 from ..mds import AgentCaseDailyFrontmatter
 from .base import BaseDailyReader

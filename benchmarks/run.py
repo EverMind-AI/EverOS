@@ -3034,9 +3034,10 @@ def _assert_clean_decider_trace(output_dir: Path, methods: Sequence[str]) -> Non
 def resolve_decider_endpoint(config: BenchmarkConfig) -> tuple[str, str, str]:
     """``(model, base_url, api_key)`` the servers' decider will actually use.
 
-    The same ``[decider]`` -> ``[llm]`` fallback ``everos.component.llm.client``
-    applies, expressed against the fields this harness pushes into the servers it
-    starts (see ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
+    The same ``[decider]`` -> ``[llm]`` fallback
+    ``everos.component.llm.resolve_decider_config`` applies, expressed against the
+    fields this harness pushes into the servers it starts (see
+    ``EverOSFleet.start``: ``decider_*`` becomes ``EVEROS_DECIDER__*``,
     ``backbone_*`` becomes ``EVEROS_LLM__*``, and anything unset falls through to this
     process's own environment).
 

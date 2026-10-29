@@ -6,8 +6,9 @@ EpisodeWriter (md files), a ``FakeLLMClient``-backed
 ``EpisodeReflector``, and a stub embedder. Verifies the full flow:
 
     select candidates → merge episodes (FakeLLM) → write merged md →
-    emit EpisodeExtracted + wait (no-op via FakeStrategyContext) →
-    deprecate originals → update cluster membership → write report
+    return EpisodeExtracted (the fact extraction it triggers is not run
+    here) → finish: deprecate originals → update cluster membership →
+    write report
 
 White-box surfaces: sqlite cluster_member / reflection_report tables,
 LanceDB episode.deprecated_by column, md file existence + frontmatter.
@@ -18,6 +19,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import numpy as np
@@ -25,22 +27,35 @@ import pytest
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.user_memory.reflect import EpisodeReflector
-from sqlmodel import SQLModel
 
 from everos.config import LanceDBSettings, load_settings
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.index.adapters import (
+    AtomicFactIndexAdapter,
+    EpisodeIndexAdapter,
+)
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
+    LanceRepoBase,
     open_lancedb_connection,
 )
-from everos.core.persistence.lancedb import LanceDailyLogRepoBase, LanceRepoBase
-from everos.infra.ome.testing import FakeStrategyContext
-from everos.infra.persistence.lancedb import LanceIndexContract
-from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
+from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
+from everos.infra.persistence.markdown import (
+    MarkdownAtomicFactStore,
+    MarkdownEpisodeStore,
+)
 from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.records.episode import Episode as LanceEpisode
-from everos.infra.persistence.sqlite import cluster_repo, reflection_report_repo
+from everos.infra.persistence.sqlite import (
+    SqliteClusterStore,
+    SqliteReflectionReportStore,
+)
 from everos.memory._partition_locks import _reset_for_tests
-from everos.memory.reflection.orchestrator import ReflectionOrchestrator
+from everos.memory.events import EpisodeExtracted
+from everos.memory.models import ReflectionReport
+from everos.memory.ports import Scope
+from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
+from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
 # Stub embedder
@@ -60,6 +75,62 @@ class _StubEmbedder:
         norm = float(np.linalg.norm(vec)) or 1.0
         vec /= norm
         return vec.tolist()
+
+
+type _Reflect = Callable[
+    [Scope], Awaitable[tuple[list[EpisodeExtracted], list[ReflectionReport]]]
+]
+
+
+def _reflection(
+    storage: Storage,
+    memory_root: MemoryRoot,
+    ep_repo: object,
+    af_repo: object,
+    reflector: object,
+) -> _Reflect:
+    """Run both Reflection steps the way the two strategies chain them.
+
+    ``reflect_episodes`` merges and returns ``EpisodeExtracted``; after the
+    merged episode's facts are extracted (not run here), ``finish_reflection``
+    retires the members. Returns the merge events and the finish reports.
+    """
+    clusters = SqliteClusterStore(storage.sqlite.cluster)
+    episodes = MarkdownEpisodeStore(memory_root)
+    reports_store = SqliteReflectionReportStore(storage.sqlite.reflection_report)
+    orchestrator = ReflectionOrchestrator(
+        cluster_store=clusters,
+        episode_store=episodes,
+        episode_index=EpisodeIndexAdapter(ep_repo),
+        report_store=reports_store,
+        reflector=reflector,
+    )
+    finisher = ReflectionFinisher(
+        cluster_store=clusters,
+        episode_store=episodes,
+        atomic_fact_store=MarkdownAtomicFactStore(memory_root),
+        atomic_fact_index=AtomicFactIndexAdapter(af_repo),
+        report_store=reports_store,
+        embedder=_StubEmbedder(),
+    )
+
+    async def run(
+        scope: Scope,
+    ) -> tuple[list[EpisodeExtracted], list[ReflectionReport]]:
+        merged = await orchestrator.run(scope=scope)
+        reports = []
+        for event in merged:
+            assert event.reflection is not None
+            report = await finisher.finish(
+                scope=scope,
+                merged_entry_id=event.episode_entry_id,
+                context=event.reflection,
+            )
+            if report is not None:
+                reports.append(report)
+        return merged, reports
+
+    return run
 
 
 # ---------------------------------------------------------------------------
@@ -91,27 +162,6 @@ def _reset_locks() -> None:
     _reset_for_tests()
 
 
-@pytest.fixture(autouse=True)
-def _embed_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force embedding capability to ``available=True`` for the whole file.
-
-    ``ReflectionOrchestrator.run()`` reads
-    ``get_embedding_capability().available`` at body entry and no-ops when
-    the capability is unavailable. The autouse fixture in
-    ``tests/conftest.py`` seeds a ``Capability(provider=None)`` for
-    hermeticity; every test here needs the orchestrator body to execute,
-    so override with a real (stub) provider — the orchestrator itself is
-    constructed with the same ``_StubEmbedder`` for its actual embed
-    calls.
-    """
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.embedding import accessor as acc
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
-
-
 @pytest.fixture
 def memory_root(tmp_path: Path) -> MemoryRoot:
     mr = MemoryRoot(tmp_path)
@@ -124,6 +174,12 @@ def memory_root(tmp_path: Path) -> MemoryRoot:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _user_scope(owner_id: str) -> Scope:
+    return Scope(
+        app_id="default", project_id="default", owner_id=owner_id, owner_type="user"
+    )
 
 
 def _make_lance_episode(
@@ -204,26 +260,6 @@ def _make_lance_fact(
     )
 
 
-async def _setup_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reset the sqlite_manager singleton and create_all tables."""
-    from everos.infra.persistence.sqlite import sqlite_manager
-
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
-    monkeypatch.setattr(sqlite_manager, "_engine", None, raising=False)
-    monkeypatch.setattr(sqlite_manager, "_session_factory", None, raising=False)
-    engine = sqlite_manager.get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
-
-async def _teardown_sqlite() -> None:
-    from everos.infra.persistence.sqlite import sqlite_manager
-
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
-
-
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
@@ -234,6 +270,7 @@ async def test_reflection_init_merges_cluster_episodes(
     tmp_path: Path,
     memory_root: MemoryRoot,
     monkeypatch: pytest.MonkeyPatch,
+    storage: Storage,
 ) -> None:
     """Full INIT Reflection cycle: 3 episodes in a cluster -> merge -> verify.
 
@@ -256,7 +293,7 @@ async def test_reflection_init_merges_cluster_episodes(
 
     load_settings.cache_clear()
 
-    await _setup_sqlite(monkeypatch)
+    await storage.create_schema()
 
     try:
         # -- LanceDB setup: create tables + insert test episodes.
@@ -332,7 +369,7 @@ async def test_reflection_init_merges_cluster_episodes(
             preview=["Andrew has no pets", "Andrew adopted Toby"],
             members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
         )
-        await cluster_repo.upsert_with_members(
+        await storage.sqlite.cluster.upsert_with_members(
             algo_cluster,
             owner_id=owner_id,
             owner_type="user",
@@ -341,7 +378,7 @@ async def test_reflection_init_merges_cluster_episodes(
         )
 
         # Verify cluster members are created.
-        members_before = await cluster_repo.get_members_with_type(cluster_id)
+        members_before = await storage.sqlite.cluster.get_members_with_type(cluster_id)
         assert len(members_before) == 3
 
         # -- Build the EpisodeReflector with FakeLLM.
@@ -356,23 +393,11 @@ async def test_reflection_init_merges_cluster_episodes(
         fake_llm = FakeLLMClient(responses=[reflect_response])
         reflector = EpisodeReflector(llm=fake_llm)
 
-        # -- Build the EpisodeWriter.
-        episode_writer = EpisodeWriter(memory_root)
-
         # -- Build the orchestrator with real repos.
-        orchestrator = ReflectionOrchestrator(
-            cluster_repo=cluster_repo,
-            episode_store=ep_repo,
-            atomic_fact_store=af_repo,
-            episode_writer=episode_writer,
-            report_repo=reflection_report_repo,
-            reflector=reflector,
-            embedder=_StubEmbedder(),
-        )
+        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
 
         # -- Run the orchestrator.
-        fake_ctx = FakeStrategyContext()
-        reports = await orchestrator.run(ctx=fake_ctx, owner_id=owner_id)
+        emitted, reports = await orchestrator(_user_scope(owner_id))
 
         # -- Verify: exactly one report created.
         assert len(reports) == 1
@@ -405,7 +430,7 @@ async def test_reflection_init_merges_cluster_episodes(
             )
 
         # -- Verify: cluster membership updated.
-        members_after = await cluster_repo.get_members_with_type(cluster_id)
+        members_after = await storage.sqlite.cluster.get_members_with_type(cluster_id)
         assert len(members_after) == 1, (
             f"expected 1 member after merge, got {len(members_after)}"
         )
@@ -424,22 +449,24 @@ async def test_reflection_init_merges_cluster_episodes(
         assert "parent_type" in md_text
         assert "cluster" in md_text
 
-        # -- Verify: FakeStrategyContext received an EpisodeExtracted event.
-        assert len(fake_ctx.emitted) == 1
-        emitted_event = fake_ctx.emitted[0]
+        # -- Verify: the merge returned its EpisodeExtracted event.
+        assert len(emitted) == 1
+        emitted_event = emitted[0]
         assert emitted_event.episode_entry_id == merged_entry_id
         assert emitted_event.owner_id == owner_id
         assert emitted_event.source == "reflection"
 
         # -- Verify: report in sqlite matches.
-        db_report = await reflection_report_repo.get_latest_for_cluster(cluster_id)
+        db_report = await storage.sqlite.reflection_report.get_latest_for_cluster(
+            cluster_id
+        )
         assert db_report is not None
         assert db_report.merged_entry_id == merged_entry_id
         assert db_report.mode == "init"
 
     finally:
         conn.close()
-        await _teardown_sqlite()
+        await storage.database.dispose()
 
 
 @pytest.mark.asyncio
@@ -447,6 +474,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
     tmp_path: Path,
     memory_root: MemoryRoot,
     monkeypatch: pytest.MonkeyPatch,
+    storage: Storage,
 ) -> None:
     """INIT -> add 4th episode -> UPDATE cycle: verify incremental merge.
 
@@ -468,7 +496,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
 
     load_settings.cache_clear()
 
-    await _setup_sqlite(monkeypatch)
+    await storage.create_schema()
 
     try:
         # -- LanceDB setup.
@@ -543,7 +571,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
             preview=["Andrew has no pets", "Andrew adopted Toby"],
             members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
         )
-        await cluster_repo.upsert_with_members(
+        await storage.sqlite.cluster.upsert_with_members(
             algo_cluster,
             owner_id=owner_id,
             owner_type="user",
@@ -564,28 +592,17 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         fake_llm = FakeLLMClient(responses=[init_response, update_response])
         reflector = EpisodeReflector(llm=fake_llm)
 
-        episode_writer = EpisodeWriter(memory_root)
+        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
 
-        orchestrator = ReflectionOrchestrator(
-            cluster_repo=cluster_repo,
-            episode_store=ep_repo,
-            atomic_fact_store=af_repo,
-            episode_writer=episode_writer,
-            report_repo=reflection_report_repo,
-            reflector=reflector,
-            embedder=_StubEmbedder(),
-        )
-
-        fake_ctx = FakeStrategyContext()
-        reports_init = await orchestrator.run(ctx=fake_ctx, owner_id=owner_id)
+        _, reports_init = await orchestrator(_user_scope(owner_id))
 
         assert len(reports_init) == 1
         report_init = reports_init[0]
         assert report_init.mode == "init"
         merged_v1_entry_id = report_init.merged_entry_id
 
-        # FakeStrategyContext is a no-op, so the merged episode is not
-        # inserted into LanceDB by the extraction pipeline.  Simulate the
+        # The extraction the merge triggers is not run here, so the merged
+        # episode is not inserted into LanceDB.  Simulate the
         # real pipeline by inserting the merged v1 episode manually.
         merged_v1_ep = _make_lance_episode(
             entry_id=merged_v1_entry_id,
@@ -609,20 +626,13 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         )
         await ep_repo.add([ep4])
 
-        await cluster_repo.add_member(cluster_id, "ep_20260610_0004", "episode")
+        await storage.sqlite.cluster.add_member(
+            cluster_id, "ep_20260610_0004", "episode"
+        )
 
         # Fresh orchestrator, same FakeLLM (next pop = update_response).
-        orchestrator2 = ReflectionOrchestrator(
-            cluster_repo=cluster_repo,
-            episode_store=ep_repo,
-            atomic_fact_store=af_repo,
-            episode_writer=episode_writer,
-            report_repo=reflection_report_repo,
-            reflector=reflector,
-            embedder=_StubEmbedder(),
-        )
-        fake_ctx2 = FakeStrategyContext()
-        reports_update = await orchestrator2.run(ctx=fake_ctx2, owner_id=owner_id)
+        orchestrator2 = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
+        _, reports_update = await orchestrator2(_user_scope(owner_id))
 
         # -- Verify: second report is UPDATE with source_count=2.
         assert len(reports_update) == 1
@@ -647,7 +657,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         assert mc4_rows[0].deprecated_by == merged_v2_entry_id
 
         # -- Verify: new merged episode (v2) written to markdown.
-        #    (FakeStrategyContext does not run the extraction pipeline, so v2
+        #    (the extraction the merge triggers is not run here, so v2
         #    is not yet in LanceDB — verify via the md file instead.)
         users_dir = memory_root.users_dir("default", "default")
         episode_files = sorted(
@@ -660,7 +670,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
         assert "parent_type" in all_md and "cluster" in all_md
 
         # -- Verify: cluster members = exactly 1, type=episode, id=v2.
-        members_final = await cluster_repo.get_members_with_type(cluster_id)
+        members_final = await storage.sqlite.cluster.get_members_with_type(cluster_id)
         assert len(members_final) == 1
         final_mid, final_mtype = members_final[0]
         assert final_mtype == "episode"
@@ -679,7 +689,7 @@ async def test_reflection_update_merges_new_episodes_with_existing_merged(
 
     finally:
         conn.close()
-        await _teardown_sqlite()
+        await storage.database.dispose()
 
 
 @pytest.mark.asyncio
@@ -687,6 +697,7 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
     tmp_path: Path,
     memory_root: MemoryRoot,
     monkeypatch: pytest.MonkeyPatch,
+    storage: Storage,
 ) -> None:
     """After INIT Reflection, search filters correctly include/exclude episodes.
 
@@ -705,7 +716,7 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
 
     load_settings.cache_clear()
 
-    await _setup_sqlite(monkeypatch)
+    await storage.create_schema()
 
     try:
         # -- LanceDB setup.
@@ -780,7 +791,7 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
             preview=["Andrew has no pets", "Andrew adopted Toby"],
             members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
         )
-        await cluster_repo.upsert_with_members(
+        await storage.sqlite.cluster.upsert_with_members(
             algo_cluster,
             owner_id=owner_id,
             owner_type="user",
@@ -799,25 +810,15 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
         )
         fake_llm = FakeLLMClient(responses=[reflect_response])
         reflector = EpisodeReflector(llm=fake_llm)
-        episode_writer = EpisodeWriter(memory_root)
 
-        orchestrator = ReflectionOrchestrator(
-            cluster_repo=cluster_repo,
-            episode_store=ep_repo,
-            atomic_fact_store=af_repo,
-            episode_writer=episode_writer,
-            report_repo=reflection_report_repo,
-            reflector=reflector,
-            embedder=_StubEmbedder(),
-        )
+        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
 
-        fake_ctx = FakeStrategyContext()
-        reports = await orchestrator.run(ctx=fake_ctx, owner_id=owner_id)
+        _, reports = await orchestrator(_user_scope(owner_id))
         assert len(reports) == 1
         merged_entry_id = reports[0].merged_entry_id
 
-        # FakeStrategyContext is a no-op, so the merged episode is not
-        # inserted into LanceDB by the extraction pipeline.  Simulate the
+        # The extraction the merge triggers is not run here, so the merged
+        # episode is not inserted into LanceDB.  Simulate the
         # real pipeline by inserting the merged episode manually.
         merged_ep = _make_lance_episode(
             entry_id=merged_entry_id,
@@ -849,4 +850,4 @@ async def test_reflected_episodes_visible_in_search_deprecated_excluded(
 
     finally:
         conn.close()
-        await _teardown_sqlite()
+        await storage.database.dispose()

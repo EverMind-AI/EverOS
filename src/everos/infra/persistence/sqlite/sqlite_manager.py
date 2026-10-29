@@ -1,63 +1,50 @@
-"""SQLite engine + session-factory singletons (lazy + process-wide).
+"""The system database: one engine and session factory per application.
 
-The single place that owns the SQLite **runtime state**: the async
-SQLAlchemy engine and the session factory bound to it. Built lazily on
-first :func:`get_engine` / :func:`get_session_factory` call from
-:func:`everos.config.load_settings` + :meth:`MemoryRoot.resolve`. The
-:class:`SqliteLifespanProvider` calls :func:`dispose_engine` on shutdown
-to drain the connection pool; in scripts you can call it manually.
+:class:`SqliteDatabase` is built by the application bootstrap and handed to
+every repository; nothing in the process reaches for a global engine.
+Building it opens nothing and writes nothing -- the engine connects, and the
+database directory is created, on first use.
 """
 
 from __future__ import annotations
 
+__all__ = ["SqliteDatabase"]
+
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from everos.config import load_settings
+from everos.config import SqliteSettings
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import (
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
+from everos.infra.persistence.memory_root import MemoryRoot
+from everos.infra.persistence.sqlite.base.engine import create_system_engine
+from everos.infra.persistence.sqlite.base.session import create_session_factory
 
 logger = get_logger(__name__)
 
-_engine: AsyncEngine | None = None
-_session_factory: async_sessionmaker[AsyncSession] | None = None
 
+class SqliteDatabase:
+    """The ``system.db`` under one memory root.
 
-def get_engine() -> AsyncEngine:
-    """Return the process-wide async SQLAlchemy engine.
-
-    Built on first call from ``MemoryRoot.resolve()`` and ``Settings.sqlite``.
-    Subsequent calls return the same instance.
+    Args:
+        root: Memory root whose ``system_db`` this is.
+        settings: The ``[sqlite]`` tunables.
     """
-    global _engine
-    if _engine is None:
-        settings = load_settings()
-        memory_root = MemoryRoot.resolve()
-        memory_root.ensure()
-        _engine = create_system_engine(memory_root.system_db, settings.sqlite)
-        logger.info(
-            "sqlite_engine_built",
-            db_path=str(memory_root.system_db),
-        )
-    return _engine
 
+    def __init__(self, root: MemoryRoot, settings: SqliteSettings) -> None:
+        self._root = root
+        self._engine = create_system_engine(root.system_db, settings)
+        self._session_factory = create_session_factory(self._engine)
 
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the process-wide async session factory."""
-    global _session_factory
-    if _session_factory is None:
-        _session_factory = create_session_factory(get_engine())
-    return _session_factory
+    @property
+    def engine(self) -> AsyncEngine:
+        """The async engine; it connects lazily, on the first statement."""
+        return self._engine
 
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Opens sessions bound to :attr:`engine`."""
+        return self._session_factory
 
-async def dispose_engine() -> None:
-    """Dispose the engine + connection pool. Idempotent."""
-    global _engine, _session_factory
-    if _engine is not None:
-        await _engine.dispose()
-        logger.info("sqlite_engine_disposed")
-    _engine = None
-    _session_factory = None
+    async def dispose(self) -> None:
+        """Close every pooled connection. Idempotent; the engine stays usable."""
+        await self._engine.dispose()
+        logger.info("sqlite_engine_disposed", db_path=str(self._root.system_db))

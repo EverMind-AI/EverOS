@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from everos.config import load_settings
+from tests.fakes.storage import StorageView
 
 _URI = os.environ.get("EVEROS_TEST_MILVUS_URI", "")
 
@@ -29,6 +30,11 @@ pytestmark = pytest.mark.skipif(
 
 @pytest_asyncio.fixture(autouse=True)
 async def _remote_milvus(monkeypatch: pytest.MonkeyPatch):
+    """Point the index at the remote server under a disposable prefix.
+
+    Autouse, so it runs before ``storage_view``: the view the tests read and
+    write through is built on the backend selected here.
+    """
     prefix = os.environ.get(
         "EVEROS_TEST_MILVUS_PREFIX", f"everos_e2e_{uuid.uuid4().hex}"
     )
@@ -48,23 +54,26 @@ async def _remote_milvus(monkeypatch: pytest.MonkeyPatch):
     print(f"EVEROS_E2E_PREFIX={prefix}")
 
     from everos.core.observability.logging import configure_logging
-    from everos.infra.persistence.index import episode_repo, startup
+    from everos.infra.persistence import MemoryRoot
+    from everos.infra.persistence.factories import build_derived_index
+    from everos.infra.persistence.index import EmbeddingProvenance
 
     configure_logging(level="WARNING")
+    index = build_derived_index(load_settings(), MemoryRoot.resolve())
     try:
         if os.environ.get("EVEROS_TEST_MILVUS_FULL_STARTUP") == "1":
-            await startup()
+            await index.startup(
+                EmbeddingProvenance(load_settings().embedding, configured=False)
+            )
         else:
-            await episode_repo._repo().ensure_collection()  # type: ignore[attr-defined]
+            await index.repositories.episode.ensure_collection()  # type: ignore[attr-defined]
         yield
     finally:
-        from everos.infra.persistence.index import drop_business_tables, shutdown
-
         try:
-            await drop_business_tables()
+            await index.drop_business_tables()
         finally:
             try:
-                await shutdown()
+                await index.shutdown()
             finally:
                 load_settings.cache_clear()
 
@@ -106,15 +115,15 @@ def _episode(
     )
 
 
-async def test_remote_milvus_matches_derived_index_contract() -> None:
+async def test_remote_milvus_matches_derived_index_contract(
+    storage_view: StorageView,
+) -> None:
     from everos.infra.persistence.index import (
         Episode,
         UserProfile,
-        episode_repo,
         eq,
         is_null,
         primary_key,
-        user_profile_repo,
     )
     from everos.memory.search import FilterNode
     from everos.memory.search.filters import compile_filters
@@ -122,7 +131,7 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
     first_vector = [1.0] + [0.0] * 1023
     first_subject = [0.0, 1.0] + [0.0] * 1022
     now = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode(
                 row_id="u1_ep1",
@@ -152,9 +161,9 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         app_id="test_app",
         project_id="test_project",
     )
-    rows = await episode_repo.find_where(where, limit=10)
+    rows = await storage_view.repos.episode.find_where(where, limit=10)
     assert {row.id for row in rows} == {"u1_ep1", "u1_ep2"}
-    assert await episode_repo.count() == 2
+    assert await storage_view.repos.episode.count() == 2
 
     equals_filter = compile_filters(
         FilterNode.model_validate({"session_id": "abc="}),
@@ -163,20 +172,20 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         app_id="test_app",
         project_id="test_project",
     )
-    equals_rows = await episode_repo.find_where(equals_filter, limit=10)
+    equals_rows = await storage_view.repos.episode.find_where(equals_filter, limit=10)
     assert [row.id for row in equals_rows] == ["u1_ep1"]
 
-    sparse = await episode_repo.sparse_search(
+    sparse = await storage_view.repos.episode.sparse_search(
         ["apple"], where, columns=Episode.BM25_FIELDS, limit=5
     )
     assert sparse[0]["id"] == "u1_ep1"
     assert sparse[0]["_score"] > 0
 
-    dense = await episode_repo.dense_search(first_vector, where, limit=5)
+    dense = await storage_view.repos.episode.dense_search(first_vector, where, limit=5)
     assert dense[0]["id"] == "u1_ep1"
     assert dense[0]["_distance"] == pytest.approx(0.0, abs=1e-5)
 
-    by_subject = await episode_repo.dense_search(
+    by_subject = await storage_view.repos.episode.dense_search(
         first_subject,
         where,
         limit=5,
@@ -185,7 +194,7 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
     assert by_subject[0]["id"] == "u1_ep1"
     assert by_subject[0]["_distance"] == pytest.approx(0.0, abs=1e-5)
 
-    page, total = await episode_repo.find_where_paginated(
+    page, total = await storage_view.repos.episode.find_where_paginated(
         where,
         sort_by="timestamp",
         page=1,
@@ -195,7 +204,7 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
     assert len(page) == 1
 
     concurrent = await asyncio.gather(
-        *(episode_repo.find_where(where, limit=10) for _ in range(4))
+        *(storage_view.repos.episode.find_where(where, limit=10) for _ in range(4))
     )
     assert all(len(result) == 2 for result in concurrent)
 
@@ -213,11 +222,11 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
             md_path="test_app/test_project/users/u1/user.md",
             content_sha256="profile-v1",
         )
-        await user_profile_repo.upsert([profile])
-        await user_profile_repo.update(
+        await storage_view.repos.user_profile.upsert([profile])
+        await storage_view.repos.user_profile.update(
             {"summary": "updated profile"}, where=eq("id", "u1")
         )
-        updated_profile = await user_profile_repo.find_one_where(
+        updated_profile = await storage_view.repos.user_profile.find_one_where(
             primary_key("test_app", "test_project", "u1")
         )
         assert updated_profile is not None
@@ -240,38 +249,44 @@ async def test_remote_milvus_matches_derived_index_contract() -> None:
         null_vector_rows.append(
             row.model_copy(update={"vector": None, "subject_vector": None})
         )
-    await episode_repo.upsert(null_vector_rows)
-    assert await episode_repo.count_where(is_null("vector")) == 101
-    assert len(await episode_repo.scan()) == 103
+    await storage_view.repos.episode.upsert(null_vector_rows)
+    assert await storage_view.repos.episode.count_where(is_null("vector")) == 101
+    assert len(await storage_view.repos.episode.scan()) == 103
 
     assert (
-        await episode_repo.delete_by_md_path(
+        await storage_view.repos.episode.delete_by_md_path(
             "test_app/test_project/users/u1/episodes/day.md"
         )
         == 103
     )
-    assert await episode_repo.count() == 0
+    assert await storage_view.repos.episode.count() == 0
 
 
-async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
+async def test_episode_only_probe_covers_metadata_search_and_http(
+    storage_view: StorageView,
+) -> None:
     """One collection covers metadata, dense/BM25 search, and HTTP ``/get``."""
-    from importlib import import_module
-
     from httpx import ASGITransport, AsyncClient
 
+    from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.infra.persistence.index import Episode, episode_repo
-    from everos.infra.persistence.milvus.milvus_manager import get_client
+    from everos.infra.persistence.index import Episode
+    from everos.infra.persistence.milvus import MilvusConnection
     from everos.memory.search import FilterNode
     from everos.memory.search.filters import compile_filters
+    from everos.service import build_application
 
-    milvus_repo = episode_repo._repo()  # type: ignore[attr-defined]
+    milvus_repo = storage_view.repos.episode
     await milvus_repo.verify_collection()
 
-    client = await get_client()
-    description = await asyncio.to_thread(
-        client.describe_collection, milvus_repo.collection_name
-    )
+    connection = MilvusConnection(load_settings().milvus)
+    try:
+        client = await connection.client()
+        description = await asyncio.to_thread(
+            client.describe_collection, milvus_repo.collection_name
+        )
+    finally:
+        await connection.close()
     analyzers = [
         {
             "field_name": field["name"],
@@ -324,7 +339,7 @@ async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
     ]
 
     now = dt.datetime(2026, 6, 1, tzinfo=dt.UTC)
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode(
                 row_id="probe_ep1",
@@ -354,8 +369,8 @@ async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
         project_id="test_project",
     )
     dense_query = [1.0] + [0.0] * 1023
-    dense = await episode_repo.dense_search(dense_query, where, limit=2)
-    sparse = await episode_repo.sparse_search(
+    dense = await storage_view.repos.episode.dense_search(dense_query, where, limit=2)
+    sparse = await storage_view.repos.episode.sparse_search(
         ["apple"], where, columns=Episode.BM25_FIELDS, limit=2
     )
     assert dense[0]["id"] == "probe_ep1"
@@ -363,9 +378,7 @@ async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
     assert sparse[0]["id"] == "probe_ep1"
     assert sparse[0]["_score"] > 0
 
-    get_service = import_module("everos.service.get")
-    get_service._manager = None
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=build_application(load_settings()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         response = await http.post(
@@ -396,14 +409,16 @@ async def test_episode_only_probe_covers_metadata_search_and_http() -> None:
     print(f"EVEROS_E2E_EVIDENCE={json.dumps(evidence, sort_keys=True)}")
 
 
-async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
+async def test_update_preserves_vectors_on_a_row_that_has_them(
+    storage_view: StorageView,
+) -> None:
     """Milvus has no partial-column update, so update() re-upserts whole rows.
 
     The only prior coverage ran against ``user_profile``, which carries no
     vector column — so the read-back-and-re-upsert of a 1024-d vector (the
     path backfill and reflection both take) was never exercised remotely.
     """
-    from everos.infra.persistence.index import episode_repo, eq, primary_key
+    from everos.infra.persistence.index import eq, primary_key
 
     now = dt.datetime(2026, 3, 1, 12, 0, tzinfo=dt.UTC)
     row = _episode(
@@ -415,13 +430,13 @@ async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
         subject_axis=11,
         timestamp=now,
     )
-    await episode_repo.upsert([row])
+    await storage_view.repos.episode.upsert([row])
 
-    await episode_repo.update(
+    await storage_view.repos.episode.update(
         {"deprecated_by": "u1_replacement"}, where=eq("id", "u1_vec_update")
     )
 
-    stored = await episode_repo.find_one_where(
+    stored = await storage_view.repos.episode.find_one_where(
         primary_key("test_app", "test_project", "u1_vec_update")
     )
     assert stored is not None
@@ -435,19 +450,21 @@ async def test_update_preserves_vectors_on_a_row_that_has_them() -> None:
     assert stored.sender_ids == ["user"]
     assert stored.episode == "vector bearing episode"
 
-    await episode_repo.delete_by_md_path(
+    await storage_view.repos.episode.delete_by_md_path(
         "test_app/test_project/users/u1/episodes/day.md"
     )
 
 
-async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
+async def test_datetime_round_trip_survives_pre_2001_instants(
+    storage_view: StorageView,
+) -> None:
     """Epoch-ms values below 1e12 must not be re-read as epoch seconds.
 
     ``to_timestamp_ms`` always writes milliseconds, so the read side has to
     parse milliseconds unconditionally. A seconds-vs-ms heuristic sends any
     pre-2001-09-09 instant into the year 30000 and raises on the way back.
     """
-    from everos.infra.persistence.index import episode_repo, eq, primary_key
+    from everos.infra.persistence.index import eq, primary_key
 
     old = dt.datetime(1999, 1, 1, tzinfo=dt.UTC)
     row = _episode(
@@ -459,22 +476,24 @@ async def test_datetime_round_trip_survives_pre_2001_instants() -> None:
         subject_axis=5,
         timestamp=old,
     )
-    await episode_repo.upsert([row])
+    await storage_view.repos.episode.upsert([row])
 
-    stored = await episode_repo.find_one_where(
+    stored = await storage_view.repos.episode.find_one_where(
         primary_key("test_app", "test_project", "u1_pre2001")
     )
     assert stored is not None
     assert stored.timestamp == old
 
-    assert await episode_repo.count_where(eq("timestamp", old)) == 1
+    assert await storage_view.repos.episode.count_where(eq("timestamp", old)) == 1
 
-    await episode_repo.delete_by_md_path(
+    await storage_view.repos.episode.delete_by_md_path(
         "test_app/test_project/users/u1/episodes/day.md"
     )
 
 
-async def test_verify_accepts_collection_schema_functions_and_indexes() -> None:
+async def test_verify_accepts_collection_schema_functions_and_indexes(
+    storage_view: StorageView,
+) -> None:
     """The decisive check for physical metadata verification.
 
     Every offline test builds its fake ``describe_collection`` reply from the
@@ -488,10 +507,9 @@ async def test_verify_accepts_collection_schema_functions_and_indexes() -> None:
     never runs during setup; dropping the process-local readiness cache forces
     the existing-collection path.
     """
-    from everos.infra.persistence.index import ALL_REPOS, episode_repo
     from everos.infra.persistence.milvus.repository import MilvusRepoBase
 
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode(
                 row_id="u1_verify",
@@ -505,25 +523,25 @@ async def test_verify_accepts_collection_schema_functions_and_indexes() -> None:
         ]
     )
 
-    for repo in ALL_REPOS:
-        milvus_repo = repo._repo()  # type: ignore[attr-defined]
+    for repo in storage_view.repos.all():
+        milvus_repo = repo
         await milvus_repo.ensure_collection()
 
     MilvusRepoBase._reset_collection_cache()
 
-    for repo in ALL_REPOS:
+    for repo in storage_view.repos.all():
         # Raises MilvusSchemaMismatchError if fields, BM25 functions, or
         # vector index metrics disagree with our declaration.
-        await repo._repo().verify_collection()  # type: ignore[attr-defined]
+        await repo.verify_collection()  # type: ignore[attr-defined]
 
-    await episode_repo.delete_by_md_path(
+    await storage_view.repos.episode.delete_by_md_path(
         "test_app/test_project/users/u1/episodes/day.md"
     )
 
 
-async def test_cross_project_rows_share_an_id() -> None:
+async def test_cross_project_rows_share_an_id(storage_view: StorageView) -> None:
     """A12 / A1 on Milvus: the same ``id`` in two projects is two rows."""
-    from everos.infra.persistence.index import episode_repo, eq, primary_key
+    from everos.infra.persistence.index import eq, primary_key
 
     now = dt.datetime(2026, 9, 14, 10, 0, tzinfo=dt.UTC)
     alpha = _episode(
@@ -542,27 +560,30 @@ async def test_cross_project_rows_share_an_id() -> None:
             "md_path": "test_app/beta/users/u1/episodes/day.md",
         }
     )
-    await episode_repo.upsert([alpha])
-    await episode_repo.upsert([beta])
-    assert await episode_repo.count_where(eq("owner_id", "u1")) == 2
-    got_alpha = await episode_repo.find_one_where(
+    await storage_view.repos.episode.upsert([alpha])
+    await storage_view.repos.episode.upsert([beta])
+    assert await storage_view.repos.episode.count_where(eq("owner_id", "u1")) == 2
+    got_alpha = await storage_view.repos.episode.find_one_where(
         primary_key("test_app", "test_project", "u1_ep_1")
     )
-    got_beta = await episode_repo.find_one_where(
+    got_beta = await storage_view.repos.episode.find_one_where(
         primary_key("test_app", "beta", "u1_ep_1")
     )
     assert got_alpha is not None and got_alpha.episode == "rust"
     assert got_beta is not None and got_beta.episode == "go"
     # same key again is an update, not a third row
-    await episode_repo.upsert([beta.model_copy(update={"episode": "go v2"})])
-    assert await episode_repo.count_where(eq("owner_id", "u1")) == 2
+    await storage_view.repos.episode.upsert(
+        [beta.model_copy(update={"episode": "go v2"})]
+    )
+    assert await storage_view.repos.episode.count_where(eq("owner_id", "u1")) == 2
 
 
-async def test_find_topk_relevant_in_cluster_hydrates_own_scope() -> None:
+async def test_find_topk_relevant_in_cluster_hydrates_own_scope(
+    storage_view: StorageView,
+) -> None:
     """A24: the by-id hydration after dense search stays inside the caller's space."""
     from everos.infra.persistence.index import (
         AgentSkill,
-        agent_skill_repo,
         eq,
         primary_key,
     )
@@ -592,12 +613,14 @@ async def test_find_topk_relevant_in_cluster_hydrates_own_scope() -> None:
             vector=vector,
         )
 
-    repo = agent_skill_repo._repo()  # type: ignore[attr-defined]
+    repo = storage_view.repos.agent_skill
     await repo.ensure_collection()
-    await agent_skill_repo.upsert(
+    await storage_view.repos.agent_skill.upsert(
         [skill("alpha", "alpha flavour"), skill("beta", "beta flavour")]
     )
-    assert await agent_skill_repo.count_where(eq("owner_id", "agent")) == 2
+    assert (
+        await storage_view.repos.agent_skill.count_where(eq("owner_id", "agent")) == 2
+    )
     query = [0.0] * 1024
     query[3] = 1.0
     hits = await repo.find_topk_relevant_in_cluster(
@@ -605,13 +628,15 @@ async def test_find_topk_relevant_in_cluster_hydrates_own_scope() -> None:
     )
     assert {h.project_id for h in hits} == {"alpha", "beta"}
     for hit in hits:
-        same = await agent_skill_repo.find_one_where(
+        same = await storage_view.repos.agent_skill.find_one_where(
             primary_key("test_app", hit.project_id, hit.id)
         )
         assert same is not None and same.description == hit.description
 
 
-async def test_embedding_model_attestation_round_trips_on_the_collection() -> None:
+async def test_embedding_model_attestation_round_trips_on_the_collection(
+    storage_view: StorageView,
+) -> None:
     """The model that built an index is recorded with the index, not beside it.
 
     A local marker file would describe a remote cluster from one machine's
@@ -623,73 +648,50 @@ async def test_embedding_model_attestation_round_trips_on_the_collection() -> No
     Read back through a *new* client so the assertion cannot be satisfied by
     something the writing client is holding in memory.
     """
-    from everos.infra.persistence import milvus
-    from everos.infra.persistence.milvus import milvus_manager
-
-    backend = milvus.index_backend
+    backend = storage_view.index
     assert await backend.read_embedding_model() is None, (
         "a collection nobody attested must read as unattested, not as an error"
     )
 
     await backend.write_embedding_model("fake-768")
-    await milvus_manager.dispose_connection()
+    await backend.shutdown()
     assert await backend.read_embedding_model() == "fake-768"
 
     await backend.write_embedding_model("fake-1536")
-    await milvus_manager.dispose_connection()
+    await backend.shutdown()
     assert await backend.read_embedding_model() == "fake-1536", (
         "re-attesting must replace the previous value, not append to it"
     )
 
 
 async def test_changed_model_is_refused_on_the_milvus_backend(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> None:
     """The refusal is backend-neutral: same check, same error, other store."""
-    import everos.component.embedding.accessor as embedding_accessor
-    from everos.component.embedding import EmbeddingCapability
     from everos.core.errors import EmbeddingProvenanceError
-    from everos.infra.persistence import milvus
-    from everos.infra.persistence.index import _provenance
+    from everos.infra.persistence.index import EmbeddingProvenance
 
-    await milvus.index_backend.write_embedding_model("nomic-embed-text")
+    await storage_view.index.write_embedding_model("nomic-embed-text")
 
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "Qwen/Qwen3-Embedding-4B")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
     load_settings.cache_clear()
 
-    # Stand in for the capability and the probe: this case is about the model
-    # comparison, and neither a real provider nor a reachable service is
-    # needed to decide that two names differ.
-    class _Provider:
-        dim = 1024
+    # Stand in for the probe: this case is about the model comparison, and no
+    # reachable service is needed to decide that two names differ.
+    class _Probed(EmbeddingProvenance):
+        async def probe_dimension(self) -> int | None:
+            return 1024
 
-        async def embed(self, text: str) -> list[float]:  # pragma: no cover
-            raise AssertionError("the probe is stubbed here")
-
-        async def embed_query(self, text: str) -> list[float]:  # pragma: no cover
-            raise AssertionError("the probe is stubbed here")
-
-        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-            raise AssertionError("the probe is stubbed here")
-
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=_Provider())
-    )
-
-    async def _probe() -> int | None:
-        return 1024
-
-    monkeypatch.setattr(_provenance, "probe_embedding_dimension", _probe)
-
+    provenance = _Probed(load_settings().embedding, configured=True)
     with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        await _provenance.verify_embedding_provenance(milvus.index_backend)
+        await provenance.verify(storage_view.index)
     message = str(excinfo.value)
     assert "nomic-embed-text" in message
     assert "Qwen/Qwen3-Embedding-4B" in message
     assert "cascade rebuild" in message
 
-    assert await milvus.index_backend.read_embedding_model() == "nomic-embed-text", (
+    assert await storage_view.index.read_embedding_model() == "nomic-embed-text", (
         "a refusal must not quietly adopt the new model"
     )

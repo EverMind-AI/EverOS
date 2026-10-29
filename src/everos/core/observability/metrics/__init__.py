@@ -3,7 +3,7 @@
 External usage:
     from everos.core.observability.metrics import (
         Counter, Gauge, Histogram, HistogramBuckets,
-        get_metrics_registry, generate_metrics_response,
+        configure_metrics, get_metrics_registry, generate_metrics_response,
     )
 """
 
@@ -14,10 +14,9 @@ from .gauge import LabeledGauge as LabeledGauge
 from .histogram import Histogram as Histogram
 from .histogram import HistogramBuckets as HistogramBuckets
 from .histogram import LabeledHistogram as LabeledHistogram
+from .registry import configure_metrics as configure_metrics
 from .registry import generate_metrics_response as generate_metrics_response
 from .registry import get_metrics_registry as get_metrics_registry
-from .registry import reset_metrics_registry as reset_metrics_registry
-from .registry import set_metrics_registry as set_metrics_registry
 
 __all__ = [
     "Counter",
@@ -27,8 +26,7 @@ __all__ = [
     "LabeledCounter",
     "LabeledGauge",
     "LabeledHistogram",
+    "configure_metrics",
     "generate_metrics_response",
     "get_metrics_registry",
-    "reset_metrics_registry",
-    "set_metrics_registry",
 ]

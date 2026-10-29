@@ -73,9 +73,9 @@ everos server start \
 | `--root` | `EVEROS_ROOT` | `~/.everos` |
 | `--reload` | — | off (use in development) |
 
-Lifespan startup wires the storage backends (SQLite engine + LanceDB
-connection) on app boot; see
-[`entrypoints/api/lifespans/`](../src/everos/entrypoints/api/lifespans/).
+App boot builds the application and starts it (SQLite schema, index
+connection, cascade, OME, the memorize queue); see
+[`service/bootstrap.py`](../src/everos/service/bootstrap.py).
 
 ## Configuration via env vars
 

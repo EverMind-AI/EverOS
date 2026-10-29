@@ -23,31 +23,25 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import functools
 import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 import anyio
 import pytest
-from sqlmodel import SQLModel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
-from everos.core.persistence import MarkdownReader, MarkdownWriter, MemoryRoot
-from everos.infra.persistence.lancedb import (
-    atomic_fact_repo,
-    dispose_connection,
-    ensure_business_indexes,
+from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
+    AtomicFactWriter,
+    MarkdownReader,
+    MarkdownWriter,
 )
-from everos.infra.persistence.lancedb.lancedb_manager import get_table
-from everos.infra.persistence.markdown import AtomicFactWriter
 from everos.infra.persistence.records.atomic_fact import AtomicFact
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +54,7 @@ def _reset_lancedb_write_locks() -> None:
     bound to a different event loop". Mirrors the unit-test fixture in
     test_repository.py.
     """
-    from everos.core.persistence.lancedb.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 
@@ -77,50 +71,28 @@ class _StubEmbedder(EmbeddingProvider):
 
 @pytest.fixture
 async def cascade_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[MemoryRoot]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
-    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
-    # rather than through ``CascadeOrchestrator`` — patch the process-wide
-    # singleton so cascade never hits the fake network target above.
-    # ``test_lap_append_during_handler_no_loss`` re-patches with a slow
-    # variant to force a handler-in-flight race.
-    _patch_embedding_capability(monkeypatch, _StubEmbedder())
-
-    await dispose_connection()
-    await dispose_engine()
-
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await ensure_business_indexes()
+    await storage.create_schema()
+    await storage.index.ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    yield MemoryRoot.resolve()
-
-    await dispose_connection()
-    await dispose_engine()
-
-
-def _patch_embedding_capability(
-    monkeypatch: pytest.MonkeyPatch, embedder: EmbeddingProvider
-) -> None:
-    """Patch the process-wide embedding capability singleton to *embedder*."""
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=embedder))
+    yield storage.root
 
 
 def _build_orchestrator(
-    memory_root: MemoryRoot, *, scan_interval: float = 60.0
+    storage: Storage, memory_root: MemoryRoot, *, scan_interval: float = 60.0
 ) -> CascadeOrchestrator:
     return CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_StubEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=scan_interval,
             worker_batch_size=20,
@@ -131,7 +103,9 @@ def _build_orchestrator(
     )
 
 
-async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
+async def _wait_path_done(
+    storage: Storage, md_path: str, *, deadline: float = 15.0
+) -> None:
     """Wait until ``md_path`` lands in state AND *stably* reaches a terminal
     status (``done``/``failed``).
 
@@ -147,14 +121,14 @@ async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
     """
     async with asyncio.timeout(deadline):
         while True:
-            if await md_change_state_repo.get_by_id(md_path) is not None:
+            if await storage.sqlite.md_change_state.get_by_id(md_path) is not None:
                 break
             await asyncio.sleep(0.05)
         while True:
-            row = await md_change_state_repo.get_by_id(md_path)
+            row = await storage.sqlite.md_change_state.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
                 await asyncio.sleep(0.1)  # settle
-                row = await md_change_state_repo.get_by_id(md_path)
+                row = await storage.sqlite.md_change_state.get_by_id(md_path)
                 if row is not None and row.status in ("done", "failed"):
                     return  # stably terminal
                 # flipped back to processing (re-enqueue) — keep waiting
@@ -162,6 +136,7 @@ async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
 
 
 async def _wait_projection_quiescent(
+    storage: Storage,
     md_path: str,
     *,
     counter: Callable[[str], Awaitable[int]],
@@ -187,13 +162,13 @@ async def _wait_projection_quiescent(
     entry count and stays there.
     """
     async with asyncio.timeout(deadline):
-        await _wait_path_done(md_path, deadline=deadline)
+        await _wait_path_done(storage, md_path, deadline=deadline)
         stable = 0
         last = await counter(md_path)
         while True:
             await asyncio.sleep(interval)
-            row = await md_change_state_repo.get_by_id(md_path)
-            summary = await md_change_state_repo.queue_summary()
+            row = await storage.sqlite.md_change_state.get_by_id(md_path)
+            summary = await storage.sqlite.md_change_state.queue_summary()
             current = await counter(md_path)
             settled = (
                 row is not None
@@ -207,23 +182,27 @@ async def _wait_projection_quiescent(
                 return current
 
 
-async def _wait_paths_done(*md_paths: str, deadline: float = 15.0) -> None:
-    await asyncio.gather(*[_wait_path_done(p, deadline=deadline) for p in md_paths])
+async def _wait_paths_done(
+    storage: Storage, *md_paths: str, deadline: float = 15.0
+) -> None:
+    await asyncio.gather(
+        *[_wait_path_done(storage, p, deadline=deadline) for p in md_paths]
+    )
 
 
-async def _wait_drain(deadline: float = 15.0) -> None:
+async def _wait_drain(storage: Storage, deadline: float = 15.0) -> None:
     """Wait for the *whole* queue to settle. Use only when you've already
     confirmed at least one path is in flight (via _wait_path_done first)."""
     async with asyncio.timeout(deadline):
         while True:
-            summary = await md_change_state_repo.queue_summary()
+            summary = await storage.sqlite.md_change_state.queue_summary()
             if summary.pending == 0:
                 return
             await asyncio.sleep(0.05)
 
 
-async def _count_lance_rows_md(md_path: str) -> int:
-    table = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
+async def _count_lance_rows_md(storage: Storage, md_path: str) -> int:
+    table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
     return await table.count_rows(filter=f"md_path = '{md_path}'")
 
 
@@ -269,7 +248,7 @@ async def _seed_atomic_facts(
 
 
 async def test_rename_same_owner_kind_in_bucket(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """``mv atomic_fact-D1.md atomic_fact-D2.md`` inside the same owner+kind.
 
@@ -277,7 +256,7 @@ async def test_rename_same_owner_kind_in_bucket(
     dest md_path becomes the new home for the (entry_id, content) pairs.
     """
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator(memory_root)
+    orchestrator = _build_orchestrator(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -294,24 +273,26 @@ async def test_rename_same_owner_kind_in_bucket(
         src_absolute = memory_root.root / src_md_path
         dest_absolute = memory_root.root / dest_md_path
 
-        await _wait_path_done(src_md_path)
+        await _wait_path_done(storage, src_md_path)
 
         # Sanity: cascade has indexed the seed.
-        assert await _count_lance_rows_md(src_md_path) == 5
-        assert await _count_lance_rows_md(dest_md_path) == 0
+        assert await _count_lance_rows_md(storage, src_md_path) == 5
+        assert await _count_lance_rows_md(storage, dest_md_path) == 0
 
         # Real rename — no tmp/atomic-replace involvement.
         await anyio.to_thread.run_sync(
             shutil.move, str(src_absolute), str(dest_absolute)
         )
-        await _wait_paths_done(src_md_path, dest_md_path)
+        await _wait_paths_done(storage, src_md_path, dest_md_path)
 
-        assert await _count_lance_rows_md(src_md_path) == 0, "src not cleared"
-        assert await _count_lance_rows_md(dest_md_path) == 5, "dest not reindexed"
+        assert await _count_lance_rows_md(storage, src_md_path) == 0, "src not cleared"
+        assert await _count_lance_rows_md(storage, dest_md_path) == 5, (
+            "dest not reindexed"
+        )
 
         # md_change_state should reflect both sides finally settled.
-        src_row = await md_change_state_repo.get_by_id(src_md_path)
-        dest_row = await md_change_state_repo.get_by_id(dest_md_path)
+        src_row = await storage.sqlite.md_change_state.get_by_id(src_md_path)
+        dest_row = await storage.sqlite.md_change_state.get_by_id(dest_md_path)
         assert src_row is not None and src_row.status == "done"
         assert dest_row is not None and dest_row.status == "done"
     finally:
@@ -319,7 +300,7 @@ async def test_rename_same_owner_kind_in_bucket(
 
 
 async def test_rename_out_of_kind_glob_degrades_to_delete(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """``mv`` from inside the kind glob to a path outside it.
 
@@ -327,7 +308,7 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
     silently ignored because ``match_kind`` rejects it.
     """
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator(memory_root)
+    orchestrator = _build_orchestrator(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -343,8 +324,8 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
         dest_absolute = memory_root.root / "out_of_scope" / "random.md"
         await anyio.Path(dest_absolute.parent).mkdir(parents=True, exist_ok=True)
 
-        await _wait_path_done(src_md_path)
-        assert await _count_lance_rows_md(src_md_path) == 4
+        await _wait_path_done(storage, src_md_path)
+        assert await _count_lance_rows_md(storage, src_md_path) == 4
 
         await anyio.to_thread.run_sync(
             shutil.move, str(src_absolute), str(dest_absolute)
@@ -353,15 +334,15 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
         # the glob so it never enters md_change_state — can't wait on it.
         # Re-poll src until row reflects the rename.
         await asyncio.sleep(0.5)
-        await _wait_drain()
+        await _wait_drain(storage)
 
-        assert await _count_lance_rows_md(src_md_path) == 0
+        assert await _count_lance_rows_md(storage, src_md_path) == 0
         # No row should appear for the out-of-glob target.
-        src_row = await md_change_state_repo.get_by_id(src_md_path)
+        src_row = await storage.sqlite.md_change_state.get_by_id(src_md_path)
         assert src_row is not None and src_row.status == "done"
         # The dest path was never registered with any kind spec, so no
         # md_change_state row should exist for it.
-        all_rows = await md_change_state_repo.queue_summary()
+        all_rows = await storage.sqlite.md_change_state.queue_summary()
         # Spot check: pending should be 0; total rows present (done)
         # come only from the src side.
         assert all_rows.pending == 0
@@ -370,7 +351,7 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
 
 
 async def test_rename_cross_owner_keeps_frontmatter_owner(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """``mv users/u_a/.atomic_facts/X.md users/u_b/.atomic_facts/X.md``.
 
@@ -381,7 +362,7 @@ async def test_rename_cross_owner_keeps_frontmatter_owner(
     truth source) — surface it as a regression anchor.
     """
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator(memory_root)
+    orchestrator = _build_orchestrator(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -397,20 +378,20 @@ async def test_rename_cross_owner_keeps_frontmatter_owner(
         dest_absolute = memory_root.root / dest_md_path
         await anyio.Path(dest_absolute.parent).mkdir(parents=True, exist_ok=True)
 
-        await _wait_path_done(src_md_path)
-        assert await _count_lance_rows_md(src_md_path) == 3
+        await _wait_path_done(storage, src_md_path)
+        assert await _count_lance_rows_md(storage, src_md_path) == 3
 
         await anyio.to_thread.run_sync(
             shutil.move, str(src_absolute), str(dest_absolute)
         )
-        await _wait_paths_done(src_md_path, dest_md_path)
+        await _wait_paths_done(storage, src_md_path, dest_md_path)
 
-        assert await _count_lance_rows_md(src_md_path) == 0
-        assert await _count_lance_rows_md(dest_md_path) == 3
+        assert await _count_lance_rows_md(storage, src_md_path) == 0
+        assert await _count_lance_rows_md(storage, dest_md_path) == 3
 
         # Inspect a row from dest to confirm owner_id stays as u_a
         # (current design: frontmatter wins over md_path for owner_id).
-        rows = await atomic_fact_repo.find_where(
+        rows = await storage.repos.atomic_fact.find_where(
             f"md_path = '{dest_md_path}'", limit=10
         )
         assert rows, "dest md_path has no rows"
@@ -426,12 +407,12 @@ async def test_rename_cross_owner_keeps_frontmatter_owner(
 
 
 async def test_modify_existing_entry_content_reindexes(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """Rewriting an entry's body (same entry_id, new text) must flip
     content_sha256 and trigger re-upsert (not skip)."""
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator(memory_root)
+    orchestrator = _build_orchestrator(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -448,8 +429,8 @@ async def test_modify_existing_entry_content_reindexes(
         )
         md_path = _atomic_fact_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
-        await _wait_path_done(md_path)
-        rows_before = await atomic_fact_repo.find_where(
+        await _wait_path_done(storage, md_path)
+        rows_before = await storage.repos.atomic_fact.find_where(
             f"md_path = '{md_path}'", limit=10
         )
         assert len(rows_before) == 3
@@ -468,8 +449,8 @@ async def test_modify_existing_entry_content_reindexes(
         # rewritten entry bodies.
         async with asyncio.timeout(15.0):
             while True:
-                await _wait_drain()
-                rows_after = await atomic_fact_repo.find_where(
+                await _wait_drain(storage)
+                rows_after = await storage.repos.atomic_fact.find_where(
                     f"md_path = '{md_path}'", limit=10
                 )
                 if len(rows_after) == 3 and all(
@@ -502,12 +483,12 @@ async def test_modify_existing_entry_content_reindexes(
 
 
 async def test_concurrent_writes_different_owners_no_bleed(
-    cascade_runtime: MemoryRoot,
+    cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """N owners writing in parallel must converge with per-md_path
     isolation: each md_path holds exactly its owner's entries."""
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator(memory_root)
+    orchestrator = _build_orchestrator(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -530,11 +511,13 @@ async def test_concurrent_writes_different_owners_no_bleed(
             ]
         )
         md_paths = [_atomic_fact_md_path(oid, bucket) for oid in owners]
-        await _wait_paths_done(*md_paths)
+        await _wait_paths_done(storage, *md_paths)
 
         for oid in owners:
             md_path = _atomic_fact_md_path(oid, bucket)
-            rows = await atomic_fact_repo.find_where(f"md_path = '{md_path}'", limit=10)
+            rows = await storage.repos.atomic_fact.find_where(
+                f"md_path = '{md_path}'", limit=10
+            )
             assert len(rows) == per_owner, (
                 f"{oid}: expected {per_owner} rows, got {len(rows)}"
             )
@@ -547,8 +530,7 @@ async def test_concurrent_writes_different_owners_no_bleed(
 
 
 async def test_lap_append_during_handler_no_loss(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Writer keeps appending while worker is mid-handler.
 
@@ -563,13 +545,15 @@ async def test_lap_append_during_handler_no_loss(
             await asyncio.sleep(0.05)  # handler takes ~0.05*N entries
             return [0.0] * self.dim
 
-    # Override the fixture's default stub — this test needs latency to
+    # Not the builders' default stub — this test needs latency to
     # force a handler invocation to overlap later writer appends.
-    _patch_embedding_capability(monkeypatch, _SlowEmbedder())
 
     orchestrator = CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_SlowEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
             worker_batch_size=20,
@@ -614,7 +598,10 @@ async def test_lap_append_during_handler_no_loss(
         # handler invocation are projected by a *later* filesystem event, so a
         # done row can coexist with a half-projected table.
         lance_rows = await _wait_projection_quiescent(
-            md_path, counter=_count_lance_rows_md, deadline=30.0
+            storage,
+            md_path,
+            counter=functools.partial(_count_lance_rows_md, storage),
+            deadline=30.0,
         )
 
         md_entries = await _count_md_entries(absolute)
@@ -629,12 +616,17 @@ async def test_lap_append_during_handler_no_loss(
 # ===== C. Scanner fallback scenarios =====
 
 
-def _build_orchestrator_fast_scanner(memory_root: MemoryRoot) -> CascadeOrchestrator:
+def _build_orchestrator_fast_scanner(
+    storage: Storage, memory_root: MemoryRoot
+) -> CascadeOrchestrator:
     """Same as :func:`_build_orchestrator` but with a 2s scanner so tests
     don't wait 30s for the fallback path."""
     return CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_StubEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=2.0,
             worker_batch_size=20,
@@ -649,7 +641,7 @@ def _silence_handler_method(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     """Replace ``watcher._Handler.<name>`` with a no-op for the duration
     of the test. Simulates fseventsd missing that event class entirely.
     """
-    from everos.memory.cascade import watcher as watcher_module
+    from everos.infra.cascade import watcher as watcher_module
 
     monkeypatch.setattr(
         watcher_module._Handler,
@@ -659,14 +651,13 @@ def _silence_handler_method(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
 
 
 async def test_scanner_recovers_missed_delete(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Watcher's ``on_deleted`` is silenced → unlink no longer enqueues
     via the watcher. The scanner sweep should still notice the path
     missing on disk and enqueue a 'deleted' on its own."""
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator_fast_scanner(memory_root)
+    orchestrator = _build_orchestrator_fast_scanner(storage, memory_root)
     await orchestrator.start()
     await asyncio.sleep(0.3)
 
@@ -677,8 +668,8 @@ async def test_scanner_recovers_missed_delete(
         await _seed_atomic_facts(writer, owner_id=owner_id, bucket=bucket, n_items=3)
         md_path = _atomic_fact_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
-        await _wait_path_done(md_path)
-        assert await _count_lance_rows_md(md_path) == 3
+        await _wait_path_done(storage, md_path)
+        assert await _count_lance_rows_md(storage, md_path) == 3
 
         # From here on, watcher ignores deletions.
         _silence_handler_method(monkeypatch, "on_deleted")
@@ -689,7 +680,7 @@ async def test_scanner_recovers_missed_delete(
         await asyncio.sleep(0.2)
 
         async def _lance_cleared() -> bool:
-            return await _count_lance_rows_md(md_path) == 0
+            return await _count_lance_rows_md(storage, md_path) == 0
 
         async with asyncio.timeout(10.0):
             while not await _lance_cleared():  # noqa: ASYNC110 - polling cascade state
@@ -697,7 +688,7 @@ async def test_scanner_recovers_missed_delete(
 
         async with asyncio.timeout(5.0):
             while True:
-                row = await md_change_state_repo.get_by_id(md_path)
+                row = await storage.sqlite.md_change_state.get_by_id(md_path)
                 if row is not None and row.status == "done":
                     break
                 await asyncio.sleep(0.1)
@@ -707,8 +698,7 @@ async def test_scanner_recovers_missed_delete(
 
 
 async def test_scanner_indexes_preexisting_md(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """An md file written BEFORE cascade starts (or by an editor while
     cascade is offline). watchdog ignores files that exist at schedule
@@ -727,7 +717,7 @@ async def test_scanner_indexes_preexisting_md(
     # Now start cascade with the file already on disk. Belt-and-
     # suspenders: silence all watcher events so the only path to
     # discovery is the scanner.
-    orchestrator = _build_orchestrator_fast_scanner(memory_root)
+    orchestrator = _build_orchestrator_fast_scanner(storage, memory_root)
     for name in ("on_created", "on_modified", "on_moved", "on_deleted"):
         _silence_handler_method(monkeypatch, name)
     await orchestrator.start()
@@ -735,7 +725,7 @@ async def test_scanner_indexes_preexisting_md(
     try:
 
         async def _lance_filled() -> bool:
-            return await _count_lance_rows_md(md_path) == 2
+            return await _count_lance_rows_md(storage, md_path) == 2
 
         async with asyncio.timeout(10.0):
             while not await _lance_filled():  # noqa: ASYNC110 - polling cascade state
@@ -745,14 +735,13 @@ async def test_scanner_indexes_preexisting_md(
 
 
 async def test_scanner_recovers_missed_modify(
-    cascade_runtime: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
+    cascade_runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """All non-deletion watcher events silenced. writer.append produces
     an atomic-replace whose events are all dropped by the watcher.
     Scanner should still notice the new file and enqueue 'added'."""
     memory_root = cascade_runtime
-    orchestrator = _build_orchestrator_fast_scanner(memory_root)
+    orchestrator = _build_orchestrator_fast_scanner(storage, memory_root)
 
     # Silence everything BEFORE start() so the initial schedule doesn't
     # see any add/create events either.
@@ -770,13 +759,13 @@ async def test_scanner_recovers_missed_modify(
         md_path = _atomic_fact_md_path(owner_id, bucket)
 
         async def _lance_filled() -> bool:
-            return await _count_lance_rows_md(md_path) == 3
+            return await _count_lance_rows_md(storage, md_path) == 3
 
         async with asyncio.timeout(10.0):
             while not await _lance_filled():  # noqa: ASYNC110 - polling cascade state
                 await asyncio.sleep(0.1)
 
-        row = await md_change_state_repo.get_by_id(md_path)
+        row = await storage.sqlite.md_change_state.get_by_id(md_path)
         assert row is not None and row.status == "done"
     finally:
         await orchestrator.stop()

@@ -56,7 +56,7 @@ from everalgo.types import Candidate
 
 from everos.config.settings import DeciderSettings, load_settings
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index import Predicate
+from everos.memory.ports import Filter
 
 from .dto import SearchEpisodeItem
 from .shaper import shape_episode_from_candidate
@@ -458,7 +458,7 @@ async def search_episodes_llm_multiround(
     query: str,
     *,
     owner_id: str,
-    where: Predicate,
+    where: Filter,
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
@@ -663,7 +663,7 @@ async def _search_episodes_subq(
     query: str,
     *,
     owner_id: str,
-    where: Predicate,
+    where: Filter,
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,

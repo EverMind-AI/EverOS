@@ -5,10 +5,10 @@ machine (``RUNNING → SUCCESS / FAILED / DEAD_LETTER``), and fires
 ``on_dead_letter`` after exhausted retries or contract violations.
 
 Per attempt, binds ``strategy_name`` / ``run_id`` / ``attempt`` into
-``structlog.contextvars`` (so every log record carries those fields
+the log context (so every log record carries those fields
 automatically) and sets ``_CURRENT_STRATEGY`` ContextVar around
 ``meta.func`` (so ``engine.emit`` can refuse direct calls from inside
-a strategy — strategies emit via ``ctx.emit``).
+a strategy — strategies return their follow-up events instead).
 
 **Idempotency contract**: if ``mark_success`` / ``mark_failed`` /
 ``mark_dead_letter`` fails after the strategy body returned, the
@@ -23,72 +23,20 @@ import asyncio
 import random
 import traceback
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from structlog.contextvars import bound_contextvars
-
 from everos.component.utils.datetime import get_utc_now
-from everos.core.observability.logging import get_logger
+from everos.core.observability.logging import bound_log_context, get_logger
 from everos.core.observability.tracing import memory_span, use_traceparent
 from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
+from everos.infra.ome._dispatch.strategy import RunContext, StrategyMeta
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.decorator import StrategyMeta
-from everos.infra.ome.events import BaseEvent
-from everos.infra.ome.exceptions import EmitNotDeclaredError, StrategyContractError
+from everos.infra.ome.exceptions import StrategyContractError
 from everos.infra.ome.records import RunRecord
-
-if TYPE_CHECKING:
-    from everos.infra.ome.engine import OfflineEngine
+from everos.memory.ports import Event
 
 logger = get_logger(__name__)
-
-
-class _RunCtx:
-    """Implements :class:`~everos.infra.ome.context.StrategyContext` Protocol.
-
-    Carries ``run_id``, a strategy-scoped logger, the ``emit``
-    callback that enforces the declared ``emits=[...]`` contract,
-    and engine-delegated helpers for event/run queries.
-    """
-
-    def __init__(
-        self,
-        *,
-        run_id: str,
-        strategy_name: str,
-        emit_hook: Callable[[BaseEvent], Awaitable[None]],
-        declared_emits: frozenset[type[BaseEvent]],
-        engine: OfflineEngine,
-    ) -> None:
-        self.run_id = run_id
-        self.logger = get_logger("ome.strategy")
-        self._emit_hook = emit_hook
-        self._declared = declared_emits
-        self._strategy_name = strategy_name
-        self._engine = engine
-
-    async def emit(self, event: BaseEvent) -> None:
-        if type(event) not in self._declared:
-            raise EmitNotDeclaredError(
-                strategy=self._strategy_name,
-                event=event,
-            )
-        await self._emit_hook(event)
-
-    async def wait_for_event(
-        self,
-        event_id: str,
-        *,
-        timeout: float = 120.0,  # noqa: ASYNC109
-    ) -> list[RunRecord]:
-        """Poll until all runs for ``event_id`` reach a terminal status."""
-        return await self._engine.wait_for_event(event_id, timeout=timeout)
-
-    async def list_runs_by_event_id(self, event_id: str) -> list[RunRecord]:
-        """Return all run records triggered by ``event_id``."""
-        return await self._engine.list_runs_by_event_id(event_id)
 
 
 class Runner:
@@ -99,22 +47,20 @@ class Runner:
         *,
         run_record_store: RunRecordStore,
         engine_sem: asyncio.Semaphore,
-        emit_hook: Callable[[BaseEvent], Awaitable[None]],
+        emit_hook: Callable[[Event], Awaitable[None]],
         config: OMEConfig,
         on_dead_letter: Callable[[RunRecord], None] | None = None,
-        engine: OfflineEngine,
     ) -> None:
         self._rec = run_record_store
         self._sem = engine_sem
         self._emit_hook = emit_hook
         self._config = config
         self._on_dead_letter = on_dead_letter
-        self._engine = engine
 
     async def run(
         self,
         meta: StrategyMeta,
-        event: BaseEvent,
+        event: Event,
         *,
         run_id: str,
         max_retries_snapshot: int,
@@ -184,7 +130,7 @@ class Runner:
         self,
         *,
         meta: StrategyMeta,
-        event: BaseEvent,
+        event: Event,
         current_run_id: str,
         attempt: int,
         event_topic: str,
@@ -196,14 +142,12 @@ class Runner:
         written (success / dead-letter or persistence failure), ``False``
         if FAILED and the caller should loop into the next attempt.
         """
-        ctx = _RunCtx(
-            run_id=current_run_id,
+        ctx = RunContext(
             strategy_name=meta.name,
-            emit_hook=self._emit_hook,
             declared_emits=meta.emits,
-            engine=self._engine,
+            emit_hook=self._emit_hook,
         )
-        with bound_contextvars(  # type: ignore[arg-type]  # structlog typed as Generator; @contextmanager wraps at runtime (structlog/contextvars.py:170)
+        with bound_log_context(
             strategy_name=meta.name,
             run_id=current_run_id,
             attempt=attempt,

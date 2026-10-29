@@ -1,41 +1,28 @@
-"""Tests for OME testing helpers (FakeStrategyContext + StrategyTestHarness)."""
+"""Tests for the OME StrategyTestHarness."""
 
 from __future__ import annotations
 
-import pytest
-
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.events import BaseEvent
-from everos.infra.ome.testing import FakeStrategyContext, StrategyTestHarness
-from everos.infra.ome.triggers import Immediate
+from everos.infra.ome.testing import StrategyTestHarness
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Event, Immediate, StrategySpec
+from tests.fakes import make_deps
 
 
-class _E(BaseEvent):
+class _E(Event):
     """Simple test event."""
 
-    pass
 
-
-@pytest.mark.asyncio
-async def test_fake_strategy_context_collects_emits() -> None:
-    """FakeStrategyContext should collect emit() calls into a list."""
-    ctx = FakeStrategyContext()
-    await ctx.emit(_E())
-    assert len(ctx.emitted) == 1
-
-
-@pytest.mark.asyncio
 async def test_harness_runs_strategy_end_to_end() -> None:
-    """StrategyTestHarness should execute a strategy end-to-end."""
-    seen: list[BaseEvent] = []
+    """The harness registers a spec with its deps and runs it end to end."""
+    seen: list[Event] = []
 
-    @offline_strategy(name="s_t23", trigger=Immediate(on=[_E]), emits=[])
-    async def s(event: _E, ctx: StrategyContext) -> None:
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
         seen.append(event)
+        return []
 
+    spec = StrategySpec(name="s_t23", fn=s, trigger=Immediate(on=[_E]))
     async with StrategyTestHarness() as h:
-        h.register(s)
+        h.register(spec, make_deps())
         await h.start()
         await h.emit(_E())
         await h.drain(timeout=5)

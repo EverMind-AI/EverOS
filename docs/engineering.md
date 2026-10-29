@@ -27,7 +27,7 @@ coverage, and the import-linter layer contracts) — there are no separate
 ```bash
 make install      # uv sync --frozen
 make format       # ruff fix + format
-make lint         # ruff check + format-check + import-linter + datetime/asset/name guards
+make lint         # ruff check + format-check + import-linter + datetime/singleton/asset/name guards
 make test         # pytest tests/unit
 make integration  # pytest tests/integration
 make cov          # unit + integration with coverage (gate: 80%)
@@ -118,7 +118,7 @@ pull request into `main` must pass:
 
 | Check | Command | Guards |
 |---|---|---|
-| lint | `make lint` | ruff style, DDD layer direction (import-linter), datetime discipline, asset, file-size & deprecated-name guards |
+| lint | `make lint` | ruff style, DDD layer direction (import-linter), datetime discipline, no module-level singletons (`check-singletons`), asset, file-size & deprecated-name guards |
 | unit tests | `make test` | `tests/unit` |
 | integration tests | `make integration` | `tests/integration` |
 | package build | `make package` | the wheel builds and imports cleanly |

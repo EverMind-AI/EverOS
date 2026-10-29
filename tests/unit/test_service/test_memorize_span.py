@@ -7,7 +7,6 @@ wrapping + name selection (add vs flush) driven by ``is_final``.
 from __future__ import annotations
 
 import asyncio
-import importlib
 from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
@@ -23,22 +22,30 @@ from everos.core.observability.tracing import (
     init_tracing,
     shutdown_tracing,
 )
+from everos.service import MemorizeResult, MemoryService
+from tests.fakes import make_memory_service
 
-mm = importlib.import_module("everos.service.memorize")
+
+@pytest.fixture
+def mm() -> MemoryService:
+    return make_memory_service()
 
 
 @pytest.fixture(autouse=True)
-def _patch(monkeypatch: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
-    monkeypatch.setattr(mm, "load_settings", lambda: Settings())
+def _patch(
+    mm: MemoryService, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[InMemorySpanExporter]:
     monkeypatch.setattr(
         mm,
         "_memorize_locked",
-        AsyncMock(return_value=mm.MemorizeResult(message_count=0, status="extracted")),
+        AsyncMock(return_value=MemorizeResult(message_count=0, status="extracted")),
     )
 
     # memorize() acquires and releases the lock explicitly (the timeout
     # bounds the wait only), so the stand-in is a real, uncontended Lock.
-    monkeypatch.setattr(mm, "get_session_lock", lambda session_id: asyncio.Lock())
+    monkeypatch.setattr(
+        "everos.service.memory.get_session_lock", lambda session_id: asyncio.Lock()
+    )
 
     exporter = InMemorySpanExporter()
     shutdown_tracing()
@@ -50,7 +57,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
     shutdown_tracing()
 
 
-async def test_add_emits_memory_add_span(_patch: InMemorySpanExporter) -> None:
+async def test_add_emits_memory_add_span(
+    mm: MemoryService, _patch: InMemorySpanExporter
+) -> None:
     await mm.memorize({"session_id": "s1", "messages": []}, is_final=False)
     force_flush()
     spans = {s.name: s for s in _patch.get_finished_spans()}
@@ -58,7 +67,9 @@ async def test_add_emits_memory_add_span(_patch: InMemorySpanExporter) -> None:
     assert spans["everos.memory.add"].attributes["langfuse.session.id"] == "s1"
 
 
-async def test_flush_emits_memory_flush_span(_patch: InMemorySpanExporter) -> None:
+async def test_flush_emits_memory_flush_span(
+    mm: MemoryService, _patch: InMemorySpanExporter
+) -> None:
     await mm.memorize({"session_id": "s2", "messages": []}, is_final=True)
     force_flush()
     names = {s.name for s in _patch.get_finished_spans()}
@@ -66,7 +77,7 @@ async def test_flush_emits_memory_flush_span(_patch: InMemorySpanExporter) -> No
 
 
 async def test_deferred_add_emits_memory_buffer_span(
-    _patch: InMemorySpanExporter,
+    mm: MemoryService, _patch: InMemorySpanExporter
 ) -> None:
     await mm.memorize({"session_id": "s3", "messages": []}, defer_extraction=True)
     force_flush()

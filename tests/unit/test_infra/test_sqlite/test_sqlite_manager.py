@@ -1,53 +1,49 @@
-"""SQLite manager singletons.
+"""``SqliteDatabase``: one root's engine and session factory.
 
-Verifies ``get_engine`` / ``get_session_factory`` / ``dispose_engine``
-are idempotent and rebuild after dispose.
+Building touches nothing on disk; the database directory appears with the
+first connection, and ``dispose`` leaves the engine usable.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+from sqlalchemy import text
 
-from everos.infra.persistence.sqlite import sqlite_manager
-
-
-@pytest.fixture(autouse=True)
-async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Point the singleton at an isolated memory-root and reset module state."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
-    yield
-    await sqlite_manager.dispose_engine()
+from everos.config import SqliteSettings
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import SqliteDatabase
 
 
-async def test_get_engine_is_singleton(tmp_path: Path) -> None:
-    e1 = sqlite_manager.get_engine()
-    e2 = sqlite_manager.get_engine()
-    assert e1 is e2
-    # Engine points at the redirected memory root.
-    assert str(tmp_path) in str(e1.url)
+def _database(tmp_path: Path) -> SqliteDatabase:
+    return SqliteDatabase(MemoryRoot(tmp_path / "root"), SqliteSettings())
 
 
-async def test_get_session_factory_is_singleton() -> None:
-    f1 = sqlite_manager.get_session_factory()
-    f2 = sqlite_manager.get_session_factory()
-    assert f1 is f2
+def test_building_touches_nothing_on_disk(tmp_path: Path) -> None:
+    _database(tmp_path)
+    assert not (tmp_path / "root").exists()
 
 
-async def test_dispose_resets_state() -> None:
-    e1 = sqlite_manager.get_engine()
-    await sqlite_manager.dispose_engine()
-    assert sqlite_manager._engine is None
-    assert sqlite_manager._session_factory is None
-    e2 = sqlite_manager.get_engine()
-    assert e2 is not e1
+async def test_engine_points_at_the_root_system_db(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    assert str(tmp_path / "root") in str(database.engine.url)
+    assert database.session_factory.kw["bind"] is database.engine
 
 
-async def test_dispose_is_idempotent() -> None:
-    await sqlite_manager.dispose_engine()  # nothing built yet
-    sqlite_manager.get_engine()
-    await sqlite_manager.dispose_engine()
-    await sqlite_manager.dispose_engine()  # second call must not raise
+async def test_first_connection_creates_the_directory(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    async with database.engine.connect() as conn:
+        await conn.execute(text("select 1"))
+    assert MemoryRoot(tmp_path / "root").system_db.exists()
+    await database.dispose()
+
+
+async def test_engine_is_usable_after_dispose(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    await database.dispose()  # nothing opened yet
+    async with database.engine.connect() as conn:
+        await conn.execute(text("select 1"))
+    await database.dispose()
+    async with database.engine.connect() as conn:
+        assert (await conn.execute(text("select 1"))).scalar() == 1
+    await database.dispose()

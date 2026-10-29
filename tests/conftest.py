@@ -27,10 +27,12 @@ from __future__ import annotations
 import everos  # noqa: F401  isort: skip
 
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
+
+from tests.fakes.storage import Storage, StorageView, make_storage, open_storage_view
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 _LONG_CONV_PATH = _FIXTURE_DIR / "long_conversation_locomo_caroline_melanie.json"
@@ -65,7 +67,7 @@ def _reset_table_write_locks() -> None:
     The Milvus hook is behind an import guard because pymilvus is an optional
     extra and the suite has to run without it.
     """
-    from everos.core.persistence.lancedb.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
     try:
@@ -73,18 +75,6 @@ def _reset_table_write_locks() -> None:
     except ImportError:
         return
     MilvusRepoBase._reset_locks_for_tests()
-
-
-def _reset_startup_probe() -> None:
-    """Forget the width the startup probe measured.
-
-    Process-wide and read across packages (``/health``), so a value left by
-    one test decides another's answer. Same tell as the locks above: one test
-    module was clearing it by hand.
-    """
-    from everos.infra.persistence.index import _provenance
-
-    _provenance._last_probe = None
 
 
 @pytest.fixture(autouse=True)
@@ -116,67 +106,36 @@ def _reset_settings_cache() -> Iterator[None]:
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
     _reset_table_write_locks()
-    _reset_startup_probe()
     yield
     structlog.reset_defaults()
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
     _partition_locks._reset_for_tests()
     _reset_table_write_locks()
-    _reset_startup_probe()
 
 
-@pytest.fixture(autouse=True)
-def _reset_embedding_capability_singleton() -> Iterator[None]:
-    """Force embedding capability to ``available=False`` for every test.
+@pytest.fixture
+async def storage(tmp_path: Path) -> AsyncIterator[Storage]:
+    """Real storage (system DB + LanceDB index) over the test's memory root."""
+    built = make_storage(tmp_path)
+    yield built
+    await built.aclose()
 
-    ``get_embedding_capability()`` lazily builds a process-wide singleton
-    on first call (see ``component.embedding.accessor``). Leaving the
-    cache as ``None`` between tests lets the accessor read ambient
-    settings — ``~/.everos/everos.toml`` on a developer machine, ``.env``
-    when loaded — which turns test outcomes into a function of the host
-    environment. Pre-seeding a ``Capability(provider=None)`` keeps the
-    suite hermetic: any body-guard that reads ``.available`` sees
-    ``False`` unless the test explicitly opts in by re-assigning
-    ``acc._capability`` (or patching the strategy module's own
-    ``get_embedding_capability`` reference).
+
+@pytest.fixture
+async def storage_view(tmp_path: Path) -> AsyncIterator[StorageView]:
+    """A read-back handle on the storage an application writes under the root.
+
+    For tests that drive a whole application (which owns its connections)
+    and then assert on what it stored. Built on the backend the settings
+    select, so a fixture that picks the backend must be requested first.
     """
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
+    from everos.config import load_settings
 
-    acc._capability = EmbeddingCapability(provider=None)
-    yield
-    acc._capability = None
-
-
-@pytest.fixture(autouse=True)
-def _reset_rerank_capability_singleton() -> Iterator[None]:
-    """Force rerank capability to ``available=False`` for every test.
-
-    See :func:`_reset_embedding_capability_singleton` for rationale — the
-    rerank accessor has the same lazy-singleton shape.
-    """
-    import everos.component.rerank.accessor as acc
-    from everos.component.rerank import RerankCapability
-
-    acc._capability = RerankCapability(provider=None)
-    yield
-    acc._capability = None
-
-
-@pytest.fixture(autouse=True)
-def _reset_multimodal_capability_singleton() -> Iterator[None]:
-    """Force multimodal capability to ``available=False`` for every test.
-
-    See :func:`_reset_embedding_capability_singleton` for rationale — the
-    multimodal accessor has the same lazy-singleton shape.
-    """
-    import everos.component.multimodal.accessor as acc
-    from everos.component.multimodal import MultimodalLLMCapability
-
-    acc._capability = MultimodalLLMCapability(provider=None)
-    yield
-    acc._capability = None
+    load_settings.cache_clear()
+    view = open_storage_view(tmp_path)
+    yield view
+    await view.aclose()
 
 
 @pytest.fixture(scope="session")

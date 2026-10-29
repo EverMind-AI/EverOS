@@ -21,17 +21,15 @@ from pathlib import Path
 import pytest
 
 from everos.config import LanceDBSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    open_lancedb_connection,
-)
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import open_lancedb_connection
 from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo
 from everos.infra.persistence.records.episode import Episode
 
 
 @pytest.fixture(autouse=True)
 def _reset_write_locks() -> None:
-    from everos.core.persistence.lancedb import LanceRepoBase
+    from everos.infra.persistence.lancedb import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 

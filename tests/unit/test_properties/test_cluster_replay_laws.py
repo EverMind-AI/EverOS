@@ -23,12 +23,12 @@ rows stayed, so a user's profile extraction fired early.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import shutil
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -38,24 +38,22 @@ from hypothesis import strategies as st
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
-import everos.component.embedding.accessor as acc
-from everos.component.embedding import EmbeddingCapability
 from everos.config import SqliteSettings
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteClusterStore,
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.ome.testing import FakeStrategyContext
-from everos.infra.persistence.sqlite.repos.cluster import _ClusterRepo
+from everos.infra.persistence.sqlite.repos.cluster import ClusterRepo
 from everos.infra.persistence.sqlite.tables import Cluster, ClusterMember
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
-
-profile_mod = importlib.import_module(
-    "everos.memory.strategies.trigger_profile_clustering"
+from everos.memory.strategies import (
+    trigger_profile_clustering,
+    trigger_skill_clustering,
 )
-skill_mod = importlib.import_module("everos.memory.strategies.trigger_skill_clustering")
+from tests.fakes import make_deps, make_stores
 
 # Two orthogonal directions: entries of one group merge, the groups do not.
 _VECTORS = {0: [1.0, 0.0, 0.0, 0.0], 1: [0.0, 1.0, 0.0, 0.0]}
@@ -73,6 +71,24 @@ async def _fake_cluster_by_llm(
     return cluster_by_geometry(new_cluster, existing, threshold=0.9)
 
 
+class _GroupEmbedder:
+    """Embeds each entry's text into its group's direction."""
+
+    dim = 4
+
+    def __init__(self) -> None:
+        self.vectors_of: dict[str, list[float]] = {}
+
+    async def embed(self, text: str) -> list[float]:
+        return self.vectors_of[text]
+
+    async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.vectors_of[t] for t in texts]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return self.vectors_of[text]
+
+
 async def _run(plan: list[tuple[int, int]], which: str) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="cluster_replay_"))
     try:
@@ -82,16 +98,13 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
         factory = create_session_factory(engine)
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
-        repo = _ClusterRepo(session_factory=factory)
+        repo = ClusterRepo(session_factory=factory)
         _reset_for_tests()
-        embedder = MagicMock()
-        vectors_of: dict[str, list[float]] = {}
-
-        async def embed(text: str) -> list[float]:
-            return vectors_of[text]
-
-        embedder.embed = AsyncMock(side_effect=embed)
-        acc._capability = EmbeddingCapability(provider=embedder)
+        embedder = _GroupEmbedder()
+        deps = make_deps(
+            embedding=embedder,
+            stores=make_stores(cluster=SqliteClusterStore(repo)),
+        )
 
         async def snapshot() -> dict[
             str, tuple[int, tuple[str, ...], tuple[float, ...]]
@@ -110,19 +123,16 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                 for c in cs
             }
 
-        mod = profile_mod if which == "profile" else skill_mod
-        patches = [patch.object(mod, "cluster_repo", repo)]
-        if which == "skill":
-            patches.append(patch.object(mod, "cluster_by_llm", _fake_cluster_by_llm))
-            patches.append(patch.object(mod, "get_llm_client", lambda: object()))
-        for p in patches:
-            p.start()
-        try:
+        llm_merge = patch(
+            "everos.memory.strategies.trigger_skill_clustering.cluster_by_llm",
+            _fake_cluster_by_llm,
+        )
+        with llm_merge:
             seen: set[str] = set()
             for n, group in plan:
                 entry = f"e{n}"
                 text = f"entry {n}"
-                vectors_of[text] = _VECTORS[group]
+                embedder.vectors_of[text] = _VECTORS[group]
                 if which == "profile":
                     ev: Any = EpisodeExtracted(
                         memcell_id=f"mc_{n}",
@@ -132,7 +142,7 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                         owner_id="u",
                         session_id="s",
                     )
-                    run = profile_mod.trigger_profile_clustering
+                    run = trigger_profile_clustering
                 else:
                     ev = AgentCaseExtracted(
                         memcell_id=f"mc_{n}",
@@ -144,9 +154,9 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                         quality_score=0.5,
                         case_timestamp_ms=1_700_000_000_000 + n,
                     )
-                    run = skill_mod.trigger_skill_clustering
+                    run = trigger_skill_clustering
                 before = await snapshot() if entry in seen else None
-                await run(ev, FakeStrategyContext())
+                await run(ev, deps)
                 after = await snapshot()
                 if before is not None:  # a replay
                     assert after == before, (entry, before, after)
@@ -155,9 +165,6 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
                     assert count == len(members), (cid, count, members, plan)
                 placed = [m for _, members, _ in after.values() for m in members]
                 assert sorted(placed) == sorted(seen), (placed, seen)
-        finally:
-            for p in patches:
-                p.stop()
         await engine.dispose()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

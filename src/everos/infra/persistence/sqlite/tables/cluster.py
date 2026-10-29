@@ -13,10 +13,10 @@ member_id)``).
 from __future__ import annotations
 
 from sqlalchemy import Index, LargeBinary
+from sqlmodel import Field
 
 from everos.component.utils.datetime import UtcDatetime
-from everos.core.persistence.sqlite import BaseTable, Field
-from everos.core.persistence.sqlite.base import UtcDateTimeColumn
+from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
 
 
 class Cluster(BaseTable, table=True):

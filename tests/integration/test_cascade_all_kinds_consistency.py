@@ -6,7 +6,7 @@ between md state and LanceDB state:
 
 * ``frontmatter.entry_count == N``
 * number of ``<!-- entry:... -->`` blocks == N
-* ``index_repo.count_rows(md_path=...) == N``
+* ``<kind repository>.count_rows(md_path=...) == N``
 * lance ``entry_id`` set == md ``entry_id`` set
 
 This is the strict counterpart to the loose ``>=`` assertions in
@@ -27,44 +27,31 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlmodel import SQLModel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import build_tokenizer
-from everos.core.persistence import MarkdownReader, MemoryRoot
-from everos.infra.persistence.lancedb import (
-    agent_case_repo,
-    atomic_fact_repo,
-    dispose_connection,
-    ensure_business_indexes,
-    episode_repo,
-    foresight_repo,
-)
-from everos.infra.persistence.lancedb.lancedb_manager import get_table
+from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.cascade.registry import KIND_REGISTRY
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactWriter,
     EpisodeWriter,
     ForesightWriter,
+    MarkdownReader,
 )
 from everos.infra.persistence.records.agent_case import AgentCase
 from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.records.episode import Episode
 from everos.infra.persistence.records.foresight import Foresight
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import CascadeConfig, CascadeOrchestrator
-from everos.memory.cascade.registry import KIND_REGISTRY
 from tests._consistency_assertions import _daily_log_sha_for_entry
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture(autouse=True)
 def _reset_lancedb_write_locks() -> None:
     """ClassVar lock pool reset; see test_repository.py for rationale."""
-    from everos.core.persistence.lancedb.repository import LanceRepoBase
+    from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
 
     LanceRepoBase._reset_locks_for_tests()
 
@@ -81,31 +68,16 @@ class _StubEmbedder(EmbeddingProvider):
 
 @pytest.fixture
 async def cascade_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[MemoryRoot]:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
-    # Handlers fetch the embedder lazily via ``get_embedding_capability()``
-    # rather than through ``CascadeOrchestrator`` — patch the process-wide
-    # singleton so cascade never hits the fake network target above.
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
-    await dispose_connection()
-    await dispose_engine()
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    await ensure_business_indexes()
+    await storage.create_schema()
+    await storage.index.ensure_business_indexes()
     (tmp_path / "ome.toml").write_text("# test\n")
-    yield MemoryRoot.resolve()
-    await dispose_connection()
-    await dispose_engine()
+    yield storage.root
 
 
 @dataclasses.dataclass(frozen=True)
@@ -117,7 +89,6 @@ class _DailyLogKindCase:
     dir_name: str
     file_prefix: str
     writer_factory: Callable[[MemoryRoot], Any]
-    repo: Any
     table_cls: type
     build_item: Callable[[str, int], tuple[Mapping[str, object], Mapping[str, str]]]
 
@@ -185,7 +156,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         dir_name=".atomic_facts",
         file_prefix="atomic_fact",
         writer_factory=AtomicFactWriter,
-        repo=atomic_fact_repo,
         table_cls=AtomicFact,
         build_item=_af_item,
     ),
@@ -195,7 +165,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         dir_name="episodes",
         file_prefix="episode",
         writer_factory=EpisodeWriter,
-        repo=episode_repo,
         table_cls=Episode,
         build_item=_ep_item,
     ),
@@ -205,7 +174,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         dir_name=".foresights",
         file_prefix="foresight",
         writer_factory=ForesightWriter,
-        repo=foresight_repo,
         table_cls=Foresight,
         build_item=_fs_item,
     ),
@@ -215,22 +183,23 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         dir_name=".cases",
         file_prefix="agent_case",
         writer_factory=AgentCaseWriter,
-        repo=agent_case_repo,
         table_cls=AgentCase,
         build_item=_ac_item,
     ),
 ]
 
 
-async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
+async def _wait_path_done(
+    storage: Storage, md_path: str, *, deadline: float = 15.0
+) -> None:
     async with asyncio.timeout(deadline):
         while True:
-            row = await md_change_state_repo.get_by_id(md_path)
+            row = await storage.sqlite.md_change_state.get_by_id(md_path)
             if row is not None:
                 break
             await asyncio.sleep(0.05)
         while True:
-            row = await md_change_state_repo.get_by_id(md_path)
+            row = await storage.sqlite.md_change_state.get_by_id(md_path)
             if row is not None and row.status in ("done", "failed"):
                 break
             await asyncio.sleep(0.05)
@@ -239,14 +208,16 @@ async def _wait_path_done(md_path: str, *, deadline: float = 15.0) -> None:
 
 @pytest.mark.parametrize("case", _KIND_CASES, ids=lambda c: c.name)
 async def test_md_lance_strict_consistency_per_kind(
-    cascade_runtime: MemoryRoot,
-    case: _DailyLogKindCase,
+    cascade_runtime: MemoryRoot, case: _DailyLogKindCase, storage: Storage
 ) -> None:
     """Per-kind strict equality: md entries / frontmatter / lance rows all == N."""
     memory_root = cascade_runtime
     orchestrator = CascadeOrchestrator(
+        index=storage.index,
+        sqlite=storage.sqlite,
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
+        embedding=_StubEmbedder(),
         config=CascadeConfig(
             scan_interval_seconds=60.0,
             worker_batch_size=20,
@@ -272,7 +243,7 @@ async def test_md_lance_strict_consistency_per_kind(
             f"{case.file_prefix}-{bucket.isoformat()}.md"
         )
         absolute = memory_root.root / md_path
-        await _wait_path_done(md_path)
+        await _wait_path_done(storage, md_path)
 
         # 1) frontmatter.entry_count == N
         parsed = await MarkdownReader.read(absolute)
@@ -287,14 +258,16 @@ async def test_md_lance_strict_consistency_per_kind(
         )
 
         # 3) lance count_rows(md_path) == N (strict equality)
-        table = await get_table(case.table_cls.TABLE_NAME, case.table_cls)
+        table = await storage.lance.table(case.table_cls.TABLE_NAME, case.table_cls)
         lance_count = await table.count_rows(filter=f"md_path = '{md_path}'")
         assert lance_count == n, (
             f"{case.name}: md={n} lance={lance_count} for {md_path}"
         )
 
         # 4) lance entry_id set == md entry_id set
-        lance_rows = await case.repo.find_where(f"md_path = '{md_path}'", limit=100)
+        lance_rows = await getattr(storage.repos, case.name).find_where(
+            f"md_path = '{md_path}'", limit=100
+        )
         lance_eids = {r.entry_id for r in lance_rows}
         md_eids = {e.id for e in parsed.entries}
         assert lance_eids == md_eids, (
@@ -317,7 +290,7 @@ async def test_md_lance_strict_consistency_per_kind(
         )
 
         # 5) row state row is terminally done (not failed)
-        state_row = await md_change_state_repo.get_by_id(md_path)
+        state_row = await storage.sqlite.md_change_state.get_by_id(md_path)
         assert state_row is not None and state_row.status == "done", (
             f"{case.name}: state row status={state_row.status if state_row else 'NONE'}"
         )

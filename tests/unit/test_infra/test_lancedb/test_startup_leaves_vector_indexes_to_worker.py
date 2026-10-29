@@ -12,21 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.persistence import BaseLanceTable
-from everos.infra.persistence.lancedb import ensure_business_indexes, lancedb_manager
+from everos.infra.persistence.records import BaseLanceTable
+from tests.fakes.storage import Storage
 
 
 @pytest.fixture(autouse=True)
-async def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def _isolated_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
+):
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
     yield
-    await lancedb_manager.dispose_connection()
+    await storage.lance.close()
 
 
 async def test_startup_pass_never_trains_a_vector_index(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     calls: list[str] = []
 
@@ -35,5 +35,5 @@ async def test_startup_pass_never_trains_a_vector_index(
         return []
 
     monkeypatch.setattr(BaseLanceTable, "ensure_vector_indexes", classmethod(spy))
-    await ensure_business_indexes()
+    await storage.index.ensure_business_indexes()
     assert calls == [], f"startup pass trained vector indexes on {calls}"

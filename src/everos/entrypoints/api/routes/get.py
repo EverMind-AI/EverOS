@@ -7,15 +7,15 @@ return the envelope verbatim. ``request_id`` is generated inside the
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from everos.entrypoints.api.utils import application
 from everos.memory.get import GetRequest, GetResponse
-from everos.service import get as get_service
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/get", response_model=GetResponse)
-async def post_get(req: GetRequest) -> GetResponse:
+async def post_get(req: GetRequest, request: Request) -> GetResponse:
     """Paginated listing over the requested ``memory_type``."""
-    return await get_service(req)
+    return await application(request).memory.get(req)

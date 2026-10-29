@@ -27,29 +27,26 @@ from typer.testing import CliRunner
 
 from everos.config import load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
-from everos.infra.persistence.lancedb import dispose_connection
-from everos.infra.persistence.sqlite import dispose_engine
+from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
+from everos.infra.persistence import MemoryRoot
+from everos.service import OpsService
+from everos.service.backfill import ome_lock_is_free
+from tests.fakes import make_storage
 
 
 @pytest.fixture
 def cli_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Tmp memory root + clean singletons; CLI bootstraps the schema itself."""
+    """Tmp memory root; each CLI command opens and closes its own storage."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "stub-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://stub.invalid/v1")
-    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "stub-key")
+    # No key: the CLI builds its providers from settings, and a keyword-only
+    # deployment is what these commands ran against while the root conftest
+    # pinned the (now removed) embedding accessor to unavailable.
+    monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "")
     load_settings.cache_clear()
     (tmp_path / "ome.toml").write_text("# test\n")
-
-    # Strip any singleton state from a neighbouring test.
-    asyncio.run(_dispose_all())
     yield tmp_path
-    asyncio.run(_dispose_all())
-
-
-async def _dispose_all() -> None:
-    await dispose_connection()
-    await dispose_engine()
 
 
 def _strip_ansi(value: str) -> str:
@@ -85,23 +82,8 @@ def test_sync_on_empty_queue_with_stub_embedder(
     cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``cascade sync`` invokes orchestrator.drain even on empty queue."""
-    # CLI builds the embedder via build_embedding_provider() which would
-    # try to connect; replace the orchestrator builder with one wired to
-    # the stub embedder.
-    from everos.component.tokenizer import build_tokenizer
-    from everos.core.persistence import MemoryRoot
-    from everos.memory.cascade import CascadeOrchestrator
-
-    def fake_build_orchestrator() -> CascadeOrchestrator:
-        root = MemoryRoot.resolve()
-        root.ensure()
-        return CascadeOrchestrator(
-            memory_root=root,
-            tokenizer=build_tokenizer(),
-        )
-
-    monkeypatch.setattr(cascade_mod, "_build_orchestrator", fake_build_orchestrator)
-
+    # The application builds the orchestrator itself (building the embedding
+    # provider opens no connection), so no stand-in is needed.
     result = CliRunner().invoke(cascade_mod.app, ["sync"])
     assert result.exit_code == 0, result.stdout
     assert "sync complete" in result.stdout
@@ -133,18 +115,6 @@ def test_sync_with_unmatched_path(
     cli_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A path under the root but matching no cascade kind exits 1 with a hint."""
-    from everos.component.tokenizer import build_tokenizer
-    from everos.core.persistence import MemoryRoot
-    from everos.memory.cascade import CascadeOrchestrator
-
-    def fake_build_orchestrator() -> CascadeOrchestrator:
-        return CascadeOrchestrator(
-            memory_root=MemoryRoot.resolve(),
-            tokenizer=build_tokenizer(),
-        )
-
-    monkeypatch.setattr(cascade_mod, "_build_orchestrator", fake_build_orchestrator)
-
     # File under the root but in an unregistered subdirectory.
     unregistered = cli_runtime / "stuff" / "random.md"
     unregistered.parent.mkdir(parents=True, exist_ok=True)
@@ -161,13 +131,14 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     """Seed one pending row via the repo before invoking status."""
 
     async def seed() -> None:
-        # Bring the runtime up like the CLI does, seed, then dispose.
-        async with cascade_mod._runtime():
-            from everos.infra.persistence.sqlite import md_change_state_repo
-
-            await md_change_state_repo.force_enqueue(
+        storage = make_storage(cli_runtime)
+        try:
+            await storage.create_schema()
+            await storage.sqlite.md_change_state.force_enqueue(
                 "users/u1/episodes/episode-2026-01-01.md", "episode"
             )
+        finally:
+            await storage.aclose()
 
     asyncio.run(seed())
 
@@ -175,22 +146,6 @@ def test_status_handles_pending_rows(cli_runtime: Path) -> None:
     assert result.exit_code == 0, result.stdout
     # One row pending; LSN must be ≥ 1.
     assert "pending:                  1" in result.stdout
-
-
-def _fake_orchestrator_factory():  # type: ignore[no-untyped-def]
-    from everos.component.tokenizer import build_tokenizer
-    from everos.core.persistence import MemoryRoot
-    from everos.memory.cascade import CascadeOrchestrator
-
-    def _build() -> CascadeOrchestrator:
-        root = MemoryRoot.resolve()
-        root.ensure()
-        return CascadeOrchestrator(
-            memory_root=root,
-            tokenizer=build_tokenizer(),
-        )
-
-    return _build
 
 
 def test_rebuild_recovers_drifted_index_and_reindexes(
@@ -209,8 +164,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     import lancedb
     import pyarrow as pa
 
-    from everos.core.persistence import MemoryRoot
-    from everos.infra.persistence.lancedb import get_table
+    from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.markdown import AtomicFactWriter
     from everos.infra.persistence.records.atomic_fact import AtomicFact
     from everos.infra.persistence.records.episode import Episode
@@ -255,31 +209,32 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
         conn.close()
 
     async def _episode_subject_vector_type():  # type: ignore[no-untyped-def]
-        tbl = await get_table("episode", Episode)
-        return (await tbl.schema()).field("subject_vector").type
+        storage = make_storage(root)
+        try:
+            tbl = await storage.lance.table("episode", Episode)
+            return (await tbl.schema()).field("subject_vector").type
+        finally:
+            await storage.aclose()
 
     async def _atomic_fact_row_count() -> int:
-        tbl = await get_table(AtomicFact.TABLE_NAME, AtomicFact)
-        return await tbl.count_rows(filter=f"md_path = '{md_path}'")
+        storage = make_storage(root)
+        try:
+            tbl = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
+            return await tbl.count_rows(filter=f"md_path = '{md_path}'")
+        finally:
+            await storage.aclose()
 
     asyncio.run(_seed_md())
     asyncio.run(_drift_episode_table())
-    asyncio.run(_dispose_all())
-
-    monkeypatch.setattr(
-        cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
-    )
 
     # Contrast: a normal command boots via _runtime() → verify trips on the drift.
     status_result = CliRunner().invoke(cascade_mod.app, ["status"])
     assert status_result.exit_code != 0
-    asyncio.run(_dispose_all())
 
     # rebuild skips verify, recreates the table, and re-indexes md.
     result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "rebuild complete" in result.stdout
-    asyncio.run(_dispose_all())
 
     # Table recreated with the correct vector type; md re-indexed.
     assert asyncio.run(_episode_subject_vector_type()).equals(
@@ -298,46 +253,24 @@ def test_rebuild_attests_the_model_that_produced_the_new_vectors(
     next start recommends the rebuild that just finished -- and a model swap
     made in between is adopted silently.
 
-    The embedding capability is stood up because the attestation is gated on
-    it, the same condition that keeps keyword-only deployments untouched.
+    Embedding is configured because the attestation is gated on it, the same
+    condition that keeps keyword-only deployments untouched; building the
+    provider makes no network call.
     """
-    import everos.component.embedding.accessor as embedding_accessor
-    from everos.component.embedding import EmbeddingCapability
-    from everos.infra.persistence.index import read_embedding_model
-    from everos.infra.persistence.lancedb import lancedb_manager
-
-    class _Provider:
-        dim = 1024
-
-        async def embed(self, text: str) -> list[float]:
-            return [0.1] * self.dim
-
-        async def embed_query(self, text: str) -> list[float]:
-            return [0.1] * self.dim
-
-        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-            return [[0.1] * self.dim for _ in texts]
-
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "fake-rebuild-model")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
     load_settings.cache_clear()
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=_Provider())
-    )
-    monkeypatch.setattr(
-        cascade_mod, "_build_orchestrator", _fake_orchestrator_factory()
-    )
 
     async def _recorded() -> str | None:
+        storage = make_storage(cli_runtime)
         try:
-            return await read_embedding_model()
+            return await storage.index.read_embedding_model()
         finally:
-            await lancedb_manager.dispose_connection()
+            await storage.aclose()
 
     result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
     assert result.exit_code == 0, result.stdout
-    asyncio.run(_dispose_all())
 
     assert asyncio.run(_recorded()) == "fake-rebuild-model"
 
@@ -353,7 +286,7 @@ def test_rebuild_refuses_to_run_while_a_server_holds_the_lock(
     OME jobstore lock that ``backfill`` already gates on, and the exit code
     matches backfill's ``3`` (SERVER_RUNNING).
     """
-    monkeypatch.setattr(cascade_mod, "ome_lock_is_free", lambda: False)
+    monkeypatch.setattr(OpsService, "ome_lock_is_free", lambda self: False)
 
     result = CliRunner().invoke(cascade_mod.app, ["rebuild", "--yes"])
 
@@ -389,10 +322,10 @@ def test_sync_refuses_to_run_while_a_server_holds_the_lock(
     before opening anything (a second writer inserts rows twice).
     """
 
-    def _boom() -> None:
+    async def _boom(_admin: CascadeAdmin) -> int:
         raise AssertionError("the runtime must not open the DB when refusing")
 
-    monkeypatch.setattr(cascade_mod, "get_engine", _boom)
+    monkeypatch.setattr(CascadeAdmin, "create_schema", _boom)
     with _server_holds_the_lock(cli_runtime):
         result = CliRunner().invoke(cascade_mod.app, ["sync"])
 
@@ -425,18 +358,20 @@ def test_sync_holds_the_lock_while_it_drains(
     """
     seen: list[bool] = []
 
-    class _Orchestrator:
-        async def drain_fully(self) -> int:
-            # scan + every drain pass happen inside this one call
-            seen.append(cascade_mod.ome_lock_is_free())
-            return 0
+    def _lock_is_free() -> bool:
+        return ome_lock_is_free(MemoryRoot.resolve().ome_db)
 
-    monkeypatch.setattr(cascade_mod, "_build_orchestrator", lambda: _Orchestrator())
+    async def _drain_fully(self: CascadeOrchestrator) -> int:
+        # scan + every drain pass happen inside this one call
+        seen.append(_lock_is_free())
+        return 0
+
+    monkeypatch.setattr(CascadeOrchestrator, "drain_fully", _drain_fully)
     result = CliRunner().invoke(cascade_mod.app, ["sync"])
 
     assert result.exit_code == 0, result.output + result.stderr
     assert seen == [False]  # the lock was ours for the whole drain
-    assert cascade_mod.ome_lock_is_free()  # and released afterwards
+    assert _lock_is_free()  # and released afterwards
 
 
 # Reduce false negatives on date drift.

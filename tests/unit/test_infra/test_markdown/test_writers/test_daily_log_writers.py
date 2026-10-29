@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.core.persistence import MarkdownReader, MemoryRoot
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AgentCaseWriter,
@@ -23,7 +23,9 @@ from everos.infra.persistence.markdown import (
     AtomicFactWriter,
     ForesightReader,
     ForesightWriter,
+    MarkdownReader,
 )
+from tests.fakes import handler_deps
 
 
 @pytest.fixture
@@ -204,11 +206,10 @@ async def test_atomic_fact_writer_output_feeds_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The writer's md is exactly what AtomicFactHandler expects to read."""
-    import everos.component.embedding.accessor as acc
-    from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
+    from everos.component.embedding import EmbeddingProvider
     from everos.component.tokenizer import Tokenizer
-    from everos.memory.cascade.handlers import AtomicFactHandler, HandlerDeps
-    from everos.memory.cascade.handlers._daily_log_base import ParsedEntry
+    from everos.infra.cascade.projections import AtomicFactHandler
+    from everos.infra.cascade.projections._daily_log_base import ParsedEntry
 
     class _T(Tokenizer):
         def tokenize(self, t):  # type: ignore[no-untyped-def]
@@ -225,11 +226,6 @@ async def test_atomic_fact_writer_output_feeds_handler(
 
         async def embed_batch(self, ts):  # type: ignore[no-untyped-def]
             return [await self.embed(x) for x in ts]
-
-    # AtomicFactHandler fetches the embedder lazily via
-    # ``get_embedding_capability()`` — patch the process-wide singleton
-    # so the batch embed path returns a real (stub) vector.
-    monkeypatch.setattr(acc, "_capability", EmbeddingCapability(provider=_E()))
 
     today = _dt.date(2026, 5, 15)
     eid = await AtomicFactWriter(memory_root).append_entry(
@@ -250,7 +246,9 @@ async def test_atomic_fact_writer_output_feeds_handler(
     rel = path.relative_to(memory_root.root).as_posix()
     parsed = await MarkdownReader.read(path)
     entry = parsed.entries[0]
-    handler = AtomicFactHandler(HandlerDeps(memory_root=memory_root, tokenizer=_T()))
+    handler = AtomicFactHandler(
+        handler_deps(memory_root=memory_root, tokenizer=_T(), embedding=_E())
+    )
     structured = entry.as_structured()
     pe = ParsedEntry(entry.id, structured, handler._content_sha256(structured))
     [row] = await handler._embed_entries([pe], "u1", "user", "default", "default", rel)

@@ -1,28 +1,32 @@
-"""Tests for :class:`ReflectionOrchestrator`.
+"""Tests for :class:`ReflectionOrchestrator` and :class:`ReflectionFinisher`.
 
-All seven constructor dependencies are mocked. Tests verify:
+Every storage dependency is a mock of its port. Tests verify:
 - candidate selection filtering logic (INIT vs UPDATE)
-- full INIT-mode flow with merge + deprecate
+- full INIT-mode merge, returning the merged episode with its context
 - UPDATE-mode old_episode passthrough
+- the finisher deprecates in markdown only (episodes and their facts),
+  never in the index — the cascade carries it there
 - LLM failure skips cluster gracefully
 - empty candidates return empty list
 """
 
 from __future__ import annotations
 
-import datetime as _dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from everos.infra.ome.testing import FakeStrategyContext
+from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
-from everos.memory.reflection.orchestrator import (
-    _MAX_CLUSTERS_PER_RUN,
-    ReflectionOrchestrator,
-    _merged_episode_to_entry_body,
-    _ts_to_ms,
+from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
+from everos.memory.models import Episode
+from everos.memory.ports import IndexHit, MemoryRef, Scope, Stored
+from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
+from everos.memory.reflection.orchestrator import _MAX_CLUSTERS_PER_RUN
+
+_SCOPE = Scope(
+    app_id="default", project_id="default", owner_id="u_alice", owner_type="user"
 )
 
 
@@ -44,88 +48,121 @@ class _FakeAlgoResult:
     timestamp: int
 
 
-@dataclass
-class _FakeEpisodeRow:
-    """Minimal stand-in for a LanceDB Episode row."""
-
-    id: str
-    entry_id: str
-    owner_id: str
-    owner_type: str = "user"
-    app_id: str = "default"
-    project_id: str = "default"
-    session_id: str | None = "s_test"
-    timestamp: _dt.datetime = _dt.datetime(2026, 6, 1, tzinfo=_dt.UTC)
-    parent_type: str = "memcell"
-    parent_id: str = "mc_aaa"
-    sender_ids: list[str] = field(default_factory=list)
-    subject: str | None = "test subject"
-    summary: str | None = None
-    episode: str = "test episode text"
-    episode_tokens: str = "test episode text"
-    md_path: str = "/tmp/test.md"
-    content_sha256: str = "abc123"
-    deprecated_by: str | None = None
-    vector: list[float] | None = None
-
-
-def _make_episode_row(
+def _stored_episode(
     entry_id: str = "ep_20260601_0001",
     parent_id: str = "mc_aaa",
     parent_type: str = "memcell",
-    owner_id: str = "u_alice",
-    **kwargs: object,
-) -> _FakeEpisodeRow:
-    return _FakeEpisodeRow(
-        id=f"{owner_id}_{entry_id}",
+    episode: str = "test episode text",
+    md_path: str = "default_app/default_project/users/u_alice/episodes/e.md",
+) -> Stored[Episode]:
+    return Stored(
+        ref=MemoryRef(id=f"u_alice_{entry_id}", entry_id=entry_id, md_path=md_path),
+        scope=_SCOPE,
+        item=Episode(
+            owner_id="u_alice",
+            episode=episode,
+            timestamp=1_780_272_000_000,
+            subject="test subject",
+            session_id="s_test",
+            parent_id=parent_id,
+            parent_type=parent_type,  # type: ignore[arg-type]
+        ),
+    )
+
+
+def _merged_ref(entry_id: str) -> MemoryRef:
+    return MemoryRef(
+        id=f"u_alice_{entry_id}",
         entry_id=entry_id,
-        owner_id=owner_id,
-        parent_id=parent_id,
-        parent_type=parent_type,
-        **kwargs,
+        md_path="default_app/default_project/users/u_alice/episodes/m.md",
     )
 
 
-def _make_entry_id(formatted: str = "ep_20260614_0001") -> MagicMock:
-    eid = MagicMock()
-    eid.format.return_value = formatted
-    eid.date = _dt.date(2026, 6, 14)
-    return eid
+@dataclass
+class _Ports:
+    cluster_store: MagicMock
+    episode_store: MagicMock
+    episode_index: MagicMock
+    atomic_fact_store: MagicMock
+    atomic_fact_index: MagicMock
+    report_store: MagicMock
+    reflector: MagicMock
+    embedder: MagicMock
+
+    def orchestrator(self) -> ReflectionOrchestrator:
+        return ReflectionOrchestrator(
+            cluster_store=self.cluster_store,
+            episode_store=self.episode_store,
+            episode_index=self.episode_index,
+            report_store=self.report_store,
+            reflector=self.reflector,
+        )
+
+    def finisher(self) -> ReflectionFinisher:
+        return ReflectionFinisher(
+            cluster_store=self.cluster_store,
+            episode_store=self.episode_store,
+            atomic_fact_store=self.atomic_fact_store,
+            atomic_fact_index=self.atomic_fact_index,
+            report_store=self.report_store,
+            embedder=self.embedder,
+        )
 
 
-def _build_orchestrator(
+@pytest.fixture
+def ports() -> _Ports:
+    return _Ports(*(MagicMock() for _ in range(8)))
+
+
+def _arm_cluster_flow(
+    ports: _Ports,
     *,
-    cluster_repo: MagicMock | None = None,
-    episode_store: MagicMock | None = None,
-    atomic_fact_store: MagicMock | None = None,
-    episode_writer: MagicMock | None = None,
-    report_repo: MagicMock | None = None,
-    reflector: MagicMock | None = None,
-    embedder: MagicMock | None = None,
-) -> ReflectionOrchestrator:
-    return ReflectionOrchestrator(
-        cluster_repo=cluster_repo or MagicMock(),
-        episode_store=episode_store or MagicMock(),
-        atomic_fact_store=atomic_fact_store or MagicMock(),
-        episode_writer=episode_writer or MagicMock(),
-        report_repo=report_repo or MagicMock(),
-        reflector=reflector or MagicMock(),
-        embedder=embedder or MagicMock(),
+    cluster_id: str,
+    members: list[tuple[str, str]],
+    episodes: list[Stored[Episode]],
+    merged_entry_id: str,
+    reflected: set[str] | None = None,
+) -> None:
+    """Wire every port call one successful cluster merge makes."""
+    ports.report_store.reflected_cluster_ids = AsyncMock(
+        return_value=reflected or set()
     )
+    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
+        return_value=[(cluster_id, len(members))]
+    )
+    ports.episode_index.orphans = AsyncMock(return_value=[])
+    ports.cluster_store.members = AsyncMock(return_value=members)
+    ports.episode_index.find_by_entry_ids = AsyncMock(return_value=episodes)
+    ports.reflector.areflect = AsyncMock(
+        return_value=_FakeAlgoResult(
+            owner_id=None,
+            episode="merged episode text",
+            subject="merged subject",
+            timestamp=1717200000000,
+        )
+    )
+    ports.episode_store.append_many = AsyncMock(
+        return_value=[_merged_ref(merged_entry_id)]
+    )
+    ports.episode_store.deprecate = AsyncMock()
+    ports.atomic_fact_index.find = AsyncMock(return_value=[])
+    ports.atomic_fact_store.deprecate = AsyncMock()
+    ports.cluster_store.remove_members = AsyncMock()
+    ports.cluster_store.add_member = AsyncMock()
+    ports.cluster_store.update_metadata = AsyncMock()
+    ports.embedder.embed = AsyncMock(return_value=[0.1] * 1024)
+    ports.report_store.create = AsyncMock()
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────
 
 
-async def test_select_candidates_init_and_update() -> None:
+async def test_select_candidates_init_and_update(ports: _Ports) -> None:
     """Unreflected clusters with >=2 members are INIT candidates.
     Reflected clusters with >1 member are UPDATE candidates.
     """
-    cluster_repo = MagicMock()
-    report_repo = MagicMock()
-
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value={"cl_reflected"})
-    cluster_repo.list_ids_and_member_counts = AsyncMock(
+    ports.report_store.reflected_cluster_ids = AsyncMock(return_value={"cl_reflected"})
+    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
         return_value=[
             ("cl_new_3", 3),
             ("cl_new_1", 1),  # only 1 member -> skip
@@ -134,335 +171,225 @@ async def test_select_candidates_init_and_update() -> None:
         ]
     )
 
-    orch = _build_orchestrator(cluster_repo=cluster_repo, report_repo=report_repo)
-    result = await orch._select_candidates(
-        owner_id="u_alice",
-        kind="user_memory",
-        app_id="default",
-        project_id="default",
+    result = await ports.orchestrator()._select_candidates(
+        scope=_SCOPE, kind="user_memory"
     )
 
     assert result == ["cl_new_3", "cl_reflected"]
+    ports.cluster_store.list_ids_and_member_counts.assert_awaited_once_with(
+        _SCOPE, "user_memory"
+    )
 
 
-async def test_select_candidates_respects_max_limit() -> None:
+async def test_select_candidates_respects_max_limit(ports: _Ports) -> None:
     """More than ``_MAX_CLUSTERS_PER_RUN`` candidates are truncated."""
-    cluster_repo = MagicMock()
-    report_repo = MagicMock()
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value=set())
-    cluster_repo.list_ids_and_member_counts = AsyncMock(
+    ports.report_store.reflected_cluster_ids = AsyncMock(return_value=set())
+    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
         return_value=[(f"cl_{i:03d}", i + 2) for i in range(_MAX_CLUSTERS_PER_RUN + 5)]
     )
 
-    orch = _build_orchestrator(cluster_repo=cluster_repo, report_repo=report_repo)
-    result = await orch._select_candidates(
-        owner_id="u_alice",
-        kind="user_memory",
-        app_id="default",
-        project_id="default",
+    result = await ports.orchestrator()._select_candidates(
+        scope=_SCOPE, kind="user_memory"
     )
+
     assert len(result) == _MAX_CLUSTERS_PER_RUN
 
 
-async def test_empty_candidates_returns_empty() -> None:
+async def test_empty_candidates_returns_empty(ports: _Ports) -> None:
     """No qualifying clusters -> run() returns empty list immediately."""
-    cluster_repo = MagicMock()
-    report_repo = MagicMock()
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value=set())
-    cluster_repo.list_ids_and_member_counts = AsyncMock(
+    ports.report_store.reflected_cluster_ids = AsyncMock(return_value=set())
+    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
         return_value=[("cl_only_one", 1)]
     )
 
-    orch = _build_orchestrator(cluster_repo=cluster_repo, report_repo=report_repo)
-    ctx = FakeStrategyContext()
-    reports = await orch.run(ctx=ctx, owner_id="u_alice")
-    assert reports == []
+    merged = await ports.orchestrator().run(scope=_SCOPE)
+
+    assert merged == []
 
 
-async def test_deprecate_lance_facts_is_scoped_to_the_project() -> None:
-    """``parent_id`` restarts per (app, project, day), so the fact
-    deprecation must carry the scope like its episode sibling does."""
-    from everos.infra.persistence.lancedb import render_predicate
+async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
+    ports: _Ports,
+) -> None:
+    """``parent_id`` restarts per (app, project, day), so the fact lookup
+    carries the scope; the marks land in each fact's own md file."""
+    scope = Scope(
+        app_id="claude-code", project_id="alpha", owner_id="u_alice", owner_type="user"
+    )
+    ports.atomic_fact_index.find = AsyncMock(
+        return_value=[
+            IndexHit(
+                id=f"u_alice_{eid}",
+                score=None,
+                fields={"entry_id": eid, "md_path": md_path},
+            )
+            for eid, md_path in (
+                ("af_1", "facts/a.md"),
+                ("af_2", "facts/a.md"),
+                ("af_3", "facts/b.md"),
+            )
+        ]
+    )
+    ports.atomic_fact_store.deprecate = AsyncMock()
 
-    atomic_fact_store = MagicMock()
-    atomic_fact_store.update = AsyncMock()
-    orch = _build_orchestrator(atomic_fact_store=atomic_fact_store)
-    n = await orch._deprecate_lance_facts(
+    marked = await ports.finisher()._deprecate_facts(
+        scope=scope,
         parent_ids={"ep_20260601_0001"},
-        owner_id="u_alice",
-        app_id="claude-code",
-        project_id="alpha",
         merged_entry_id="ep_20260614_0001",
     )
-    assert n == 1
-    where = atomic_fact_store.update.await_args.kwargs["where"]
-    rendered = render_predicate(where)
+
+    assert marked == 3
+    rendered = render_predicate(ports.atomic_fact_index.find.await_args.args[0])
     assert "(app_id = 'claude-code')" in rendered
     assert "(project_id = 'alpha')" in rendered
-    assert "(parent_id = 'ep_20260601_0001')" in rendered
+    assert "'ep_20260601_0001'" in rendered
+    assert "deprecated_by IS NULL" in rendered
+    calls = {
+        c.kwargs["md_path"]: c.kwargs["replaced"]
+        for c in ports.atomic_fact_store.deprecate.await_args_list
+    }
+    assert calls == {
+        "facts/a.md": {"af_1": "ep_20260614_0001", "af_2": "ep_20260614_0001"},
+        "facts/b.md": {"af_3": "ep_20260614_0001"},
+    }
 
 
-async def test_run_init_mode_merges_and_deprecates() -> None:
-    """Full INIT flow: 2 episode members -> merge -> write -> deprecate."""
-    cluster_repo = MagicMock()
-    episode_store = MagicMock()
-    atomic_fact_store = MagicMock()
-    episode_writer = MagicMock()
-    report_repo = MagicMock()
-    reflector = MagicMock()
-    embedder = MagicMock()
+async def test_deprecate_facts_without_parents_reads_nothing(ports: _Ports) -> None:
+    ports.atomic_fact_index.find = AsyncMock()
 
-    # SELECT: 1 candidate cluster.
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value=set())
-    cluster_repo.list_ids_and_member_counts = AsyncMock(return_value=[("cl_abc", 2)])
-
-    # Step 0: orphan detection returns empty.
-    episode_store.find_where = AsyncMock(return_value=[])
-
-    # Step 1: cluster members (episode type).
-    cluster_repo.get_members_with_type = AsyncMock(
-        return_value=[("ep_20260601_0001", "episode"), ("ep_20260601_0002", "episode")]
+    marked = await ports.finisher()._deprecate_facts(
+        scope=_SCOPE, parent_ids=set(), merged_entry_id="ep_m"
     )
 
-    # Step 2: fetch episodes by entry_id.
-    ep1 = _make_episode_row(
-        entry_id="ep_20260601_0001", parent_id="mc_001", owner_id="u_alice"
-    )
-    ep2 = _make_episode_row(
-        entry_id="ep_20260601_0002", parent_id="mc_002", owner_id="u_alice"
-    )
-    episode_store.find_by_owner_entries = AsyncMock(return_value=[ep1, ep2])
+    assert marked == 0
+    ports.atomic_fact_index.find.assert_not_awaited()
 
-    # Step 4: algo reflector returns merged episode.
-    algo_result = _FakeAlgoResult(
-        owner_id=None,
-        episode="merged episode text",
-        subject="merged subject",
-        timestamp=1717200000000,
-    )
-    reflector.areflect = AsyncMock(return_value=algo_result)
 
-    # Step 5: episode writer returns entry id.
-    entry_id_mock = _make_entry_id("ep_20260614_0001")
-    episode_writer.append_entries = AsyncMock(return_value=[entry_id_mock])
-    episode_writer.patch_frontmatter = AsyncMock()
+async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) -> None:
+    ports.episode_store.append_many = AsyncMock(return_value=[_merged_ref("ep_m")])
 
-    # Step 6: wait_for_event succeeds.
-    ctx = FakeStrategyContext()
-
-    # Step 7: deprecate -> cluster operations.
-    cluster_repo.remove_members = AsyncMock()
-    cluster_repo.add_member = AsyncMock()
-    cluster_repo.update_metadata = AsyncMock()
-    embedder.embed = AsyncMock(return_value=[0.1] * 1024)
-
-    # LanceDB episode store update for deprecation.
-    episode_store.update = AsyncMock()
-
-    # Atomic fact store.
-    atomic_fact_store.update = AsyncMock()
-
-    # Report repo.
-    report_repo.create = AsyncMock()
-
-    orch = _build_orchestrator(
-        cluster_repo=cluster_repo,
-        episode_store=episode_store,
-        atomic_fact_store=atomic_fact_store,
-        episode_writer=episode_writer,
-        report_repo=report_repo,
-        reflector=reflector,
-        embedder=embedder,
+    entry_id = await ports.orchestrator()._write_merged_episode(
+        cluster_id="cl_abc",
+        scope=_SCOPE,
+        algo_result=_FakeAlgoResult(  # type: ignore[arg-type]
+            owner_id=None, episode="merged text", subject="topic", timestamp=0
+        ),
+        last_ts=1_780_272_000_000,
     )
 
-    reports = await orch.run(ctx=ctx, owner_id="u_alice")
+    assert entry_id == "ep_m"
+    scope, (merged,) = ports.episode_store.append_many.await_args.args
+    assert scope == _SCOPE
+    assert merged == Episode(
+        owner_id="u_alice",
+        episode="merged text",
+        timestamp=1_780_272_000_000,
+        subject="topic",
+        parent_id="cl_abc",
+        parent_type="cluster",
+    )
 
-    # Local patch: the reflector reads episode text, never the vectors.
-    assert episode_store.find_by_owner_entries.call_args.kwargs["skip_vectors"]
+
+async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
+    """Full INIT flow: 2 episode members -> merge -> write -> (facts) ->
+    finish: deprecate both originals and move the cluster onto the merge."""
+    ep1 = _stored_episode(entry_id="ep_20260601_0001", parent_id="mc_001")
+    ep2 = _stored_episode(entry_id="ep_20260601_0002", parent_id="mc_002")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_abc",
+        members=[("ep_20260601_0001", "episode"), ("ep_20260601_0002", "episode")],
+        episodes=[ep1, ep2],
+        merged_entry_id="ep_20260614_0001",
+    )
+
+    (merged,) = await ports.orchestrator().run(scope=_SCOPE)
 
     # Reflector was called in INIT mode (no old_episode kwarg).
-    reflector.areflect.assert_awaited_once()
-    call_kwargs = reflector.areflect.call_args
-    assert "old_episode" not in (call_kwargs.kwargs or {})
+    ports.reflector.areflect.assert_awaited_once()
+    assert "old_episode" not in (ports.reflector.areflect.call_args.kwargs or {})
+    ports.episode_store.append_many.assert_awaited_once()
+    assert isinstance(merged, EpisodeExtracted)
+    assert merged.source == "reflection"
+    assert merged.session_id is None
+    assert merged.reflection is not None
+    assert merged.reflection.mode == "init"
+    # Nothing is retired before the merged episode's facts exist.
+    ports.episode_store.deprecate.assert_not_called()
 
-    # Episode was written.
-    episode_writer.append_entries.assert_awaited_once()
+    report = await ports.finisher().finish(
+        scope=_SCOPE,
+        merged_entry_id=merged.episode_entry_id,
+        context=merged.reflection,
+    )
 
-    # EpisodeExtracted was emitted.
-    assert len(ctx.emitted) == 1
-    event = ctx.emitted[0]
-    assert event.source == "reflection"
-    assert event.session_id is None
-
-    # Cluster updated.
-    cluster_repo.remove_members.assert_awaited_once()
-    cluster_repo.add_member.assert_awaited_once_with(
+    # Deprecation is one md patch for the file holding both originals.
+    ports.episode_store.deprecate.assert_awaited_once_with(
+        _SCOPE,
+        replaced={
+            "ep_20260601_0001": "ep_20260614_0001",
+            "ep_20260601_0002": "ep_20260614_0001",
+        },
+        md_path=ep1.ref.md_path,
+    )
+    ports.cluster_store.remove_members.assert_awaited_once()
+    ports.cluster_store.add_member.assert_awaited_once_with(
         "cl_abc", "ep_20260614_0001", "episode"
     )
-
-    # Report created.
-    report_repo.create.assert_awaited_once()
-    assert len(reports) == 1
+    ports.report_store.create.assert_awaited_once_with(report)
 
 
-async def test_run_update_mode_uses_old_episode() -> None:
+async def test_run_update_mode_uses_old_episode(ports: _Ports) -> None:
     """UPDATE flow: cluster has 1 merged episode + 1 original episode."""
-    cluster_repo = MagicMock()
-    episode_store = MagicMock()
-    atomic_fact_store = MagicMock()
-    episode_writer = MagicMock()
-    report_repo = MagicMock()
-    reflector = MagicMock()
-    embedder = MagicMock()
-
-    # SELECT.
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value={"cl_update"})
-    cluster_repo.list_ids_and_member_counts = AsyncMock(return_value=[("cl_update", 2)])
-
-    # Orphan detection.
-    episode_store.find_where = AsyncMock(return_value=[])
-
-    # Members: both episode type (old merged + new original).
-    cluster_repo.get_members_with_type = AsyncMock(
-        return_value=[("ep_20260612_0001", "episode"), ("ep_20260613_0001", "episode")]
-    )
-
-    # Episodes.
-    old_merged = _make_episode_row(
+    old_merged = _stored_episode(
         entry_id="ep_20260612_0001",
         parent_id="cl_update",
         parent_type="cluster",
-        owner_id="u_alice",
         episode="old merged text",
     )
-    new_ep = _make_episode_row(
-        entry_id="ep_20260613_0001",
-        parent_id="mc_004",
-        owner_id="u_alice",
-        episode="new episode text",
+    new_ep = _stored_episode(
+        entry_id="ep_20260613_0001", parent_id="mc_004", episode="new episode text"
     )
-    episode_store.find_by_owner_entries = AsyncMock(return_value=[new_ep, old_merged])
-
-    # Reflector.
-    algo_result = _FakeAlgoResult(
-        owner_id=None,
-        episode="updated merged text",
-        subject="updated subject",
-        timestamp=1717200000000,
-    )
-    reflector.areflect = AsyncMock(return_value=algo_result)
-
-    # Writer.
-    entry_id_mock = _make_entry_id("ep_20260614_0002")
-    episode_writer.append_entries = AsyncMock(return_value=[entry_id_mock])
-    episode_writer.patch_frontmatter = AsyncMock()
-
-    # Deprecate deps.
-    cluster_repo.remove_members = AsyncMock()
-    cluster_repo.add_member = AsyncMock()
-    cluster_repo.update_metadata = AsyncMock()
-    embedder.embed = AsyncMock(return_value=[0.1] * 1024)
-    atomic_fact_store.update = AsyncMock()
-    episode_store.update = AsyncMock()
-    report_repo.create = AsyncMock()
-
-    ctx = FakeStrategyContext()
-    orch = _build_orchestrator(
-        cluster_repo=cluster_repo,
-        episode_store=episode_store,
-        atomic_fact_store=atomic_fact_store,
-        episode_writer=episode_writer,
-        report_repo=report_repo,
-        reflector=reflector,
-        embedder=embedder,
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_update",
+        members=[("ep_20260612_0001", "episode"), ("ep_20260613_0001", "episode")],
+        episodes=[new_ep, old_merged],
+        merged_entry_id="ep_20260614_0002",
+        reflected={"cl_update"},
     )
 
-    reports = await orch.run(ctx=ctx, owner_id="u_alice")
+    (merged,) = await ports.orchestrator().run(scope=_SCOPE)
 
-    # Reflector called with old_episode kwarg (UPDATE mode).
-    reflector.areflect.assert_awaited_once()
-    _, kwargs = reflector.areflect.call_args
+    ports.reflector.areflect.assert_awaited_once()
+    _, kwargs = ports.reflector.areflect.call_args
     assert "old_episode" in kwargs
+    assert merged.reflection is not None
+    assert merged.reflection.mode == "update"
 
-    assert len(reports) == 1
 
-
-async def test_llm_failure_skips_cluster() -> None:
+async def test_llm_failure_skips_cluster(ports: _Ports) -> None:
     """Reflector raising an exception skips the cluster, continues."""
-    cluster_repo = MagicMock()
-    episode_store = MagicMock()
-    report_repo = MagicMock()
-    reflector = MagicMock()
-
-    # SELECT: 1 candidate.
-    report_repo.list_reflected_cluster_ids = AsyncMock(return_value=set())
-    cluster_repo.list_ids_and_member_counts = AsyncMock(return_value=[("cl_fail", 2)])
-
-    # Orphan detection.
-    episode_store.find_where = AsyncMock(return_value=[])
-
-    # Members.
-    cluster_repo.get_members_with_type = AsyncMock(
-        return_value=[("ep_001", "episode"), ("ep_002", "episode")]
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_fail",
+        members=[("ep_001", "episode"), ("ep_002", "episode")],
+        episodes=[
+            _stored_episode(entry_id="ep_001", parent_id="mc_a"),
+            _stored_episode(entry_id="ep_002", parent_id="mc_b"),
+        ],
+        merged_entry_id="ep_m",
     )
+    ports.reflector.areflect = AsyncMock(side_effect=RuntimeError("LLM timeout"))
 
-    # Episodes.
-    ep1 = _make_episode_row(entry_id="ep_001", parent_id="mc_a", owner_id="u_alice")
-    ep2 = _make_episode_row(entry_id="ep_002", parent_id="mc_b", owner_id="u_alice")
-    episode_store.find_by_owner_entries = AsyncMock(return_value=[ep1, ep2])
+    merged = await ports.orchestrator().run(scope=_SCOPE)
 
-    # Reflector fails.
-    reflector.areflect = AsyncMock(side_effect=RuntimeError("LLM timeout"))
-
-    ctx = FakeStrategyContext()
-    orch = _build_orchestrator(
-        cluster_repo=cluster_repo,
-        episode_store=episode_store,
-        report_repo=report_repo,
-        reflector=reflector,
-    )
-
-    reports = await orch.run(ctx=ctx, owner_id="u_alice")
-    assert reports == []
-    assert len(ctx.emitted) == 0
+    assert merged == []
+    ports.episode_store.append_many.assert_not_called()
 
 
-# ── Unit helpers ──────────────────────────────────────────────────────────
-
-
-def test_merged_episode_to_entry_body_shape() -> None:
-    """Verify the inline/sections shape for a merged episode."""
-    result = _FakeAlgoResult(
-        owner_id=None,
-        episode="merged text",
-        subject="merged subject",
-        timestamp=1717200000000,
-    )
-    inline, sections = _merged_episode_to_entry_body(
-        result, "cl_abc", "u_alice", "2026-06-01T00:00:00+00:00"
-    )
-    assert inline["parent_type"] == "cluster"
-    assert inline["parent_id"] == "cl_abc"
-    assert inline["owner_id"] == "u_alice"
-    assert "session_id" not in inline
-    assert sections["Subject"] == "merged subject"
-    assert sections["Content"] == "merged text"
-
-
-def test_ts_to_ms_datetime() -> None:
-    """datetime -> milliseconds conversion."""
-    dt = _dt.datetime(2026, 6, 1, tzinfo=_dt.UTC)
-    ms = _ts_to_ms(dt)
-    assert isinstance(ms, int)
-    assert ms > 0
-
-
-def test_ts_to_ms_int_passthrough() -> None:
-    """int -> int passthrough."""
-    assert _ts_to_ms(1717200000000) == 1717200000000
-
-
-async def test_call_reflector_emits_consolidate_generation_span() -> None:
+async def test_call_reflector_emits_consolidate_generation_span(
+    ports: _Ports,
+) -> None:
     """_call_reflector wraps the reflector call in an everos.reflect.consolidate
     generation span (token usage lands here via the LLM client wrapper)."""
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -477,13 +404,12 @@ async def test_call_reflector_emits_consolidate_generation_span() -> None:
         shutdown_tracing,
     )
 
-    reflector = MagicMock()
-    reflector.areflect = AsyncMock(
+    ports.reflector.areflect = AsyncMock(
         return_value=_FakeAlgoResult(
             owner_id=None, episode="merged", subject="s", timestamp=1717200000000
         )
     )
-    orch = _build_orchestrator(reflector=reflector)
+    orch = ports.orchestrator()
 
     exporter = InMemorySpanExporter()
     shutdown_tracing()
@@ -493,7 +419,7 @@ async def test_call_reflector_emits_consolidate_generation_span() -> None:
     )
     try:
         result = await orch._call_reflector(
-            episodes=[_make_episode_row()],
+            episodes=[_stored_episode()],
             merged_entry_ids=[],
             is_update=False,
             owner_id="u_alice",
@@ -508,4 +434,83 @@ async def test_call_reflector_emits_consolidate_generation_span() -> None:
     assert (
         spans["everos.reflect.consolidate"].attributes["langfuse.observation.type"]
         == "generation"
+    )
+
+
+async def test_deprecation_marks_markdown_and_never_writes_the_index(
+    ports: _Ports,
+) -> None:
+    """Originals are deprecated by md patches only; the cascade owns the index."""
+    ep1 = _stored_episode(entry_id="ep_1", parent_id="mc_1", md_path="a.md")
+    ep2 = _stored_episode(entry_id="ep_2", parent_id="mc_2", md_path="b.md")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_abc",
+        members=[("ep_1", "episode"), ("ep_2", "episode")],
+        episodes=[ep1, ep2],
+        merged_entry_id="ep_m",
+    )
+    ports.atomic_fact_index.find = AsyncMock(
+        return_value=[
+            IndexHit(
+                id="u_alice_af_1",
+                score=None,
+                fields={"entry_id": "af_1", "md_path": "f.md"},
+            )
+        ]
+    )
+
+    report = await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
+    )
+
+    episode_patches = {
+        c.kwargs["md_path"]: c.kwargs["replaced"]
+        for c in ports.episode_store.deprecate.await_args_list
+    }
+    assert episode_patches == {"a.md": {"ep_1": "ep_m"}, "b.md": {"ep_2": "ep_m"}}
+    ports.atomic_fact_store.deprecate.assert_awaited_once_with(
+        _SCOPE, replaced={"af_1": "ep_m"}, md_path="f.md"
+    )
+    ports.episode_index.update.assert_not_called()
+    ports.atomic_fact_index.update.assert_not_called()
+    assert report is not None
+    assert report.source_members == [("ep_1", "episode"), ("ep_2", "episode")]
+    assert report.deprecated_fact_count == 1
+    ports.report_store.create.assert_awaited_once_with(report)
+    ports.cluster_store.update_metadata.assert_awaited_once()
+    ports.embedder.embed.assert_awaited_once_with("merged")
+
+
+async def test_finish_skips_when_no_original_member_remains(ports: _Ports) -> None:
+    """Members re-read under the lock: none of the snapshot left → no-op."""
+    ep1 = _stored_episode(entry_id="ep_1", parent_id="mc_1")
+    ports.cluster_store.members = AsyncMock(return_value=[("ep_other", "episode")])
+    ports.episode_store.deprecate = AsyncMock()
+    ports.report_store.create = AsyncMock()
+
+    report = await ports.finisher().finish(
+        scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1)
+    )
+
+    assert report is None
+    ports.episode_store.deprecate.assert_not_called()
+    ports.report_store.create.assert_not_called()
+
+
+def _context(*episodes: Stored[Episode]) -> ReflectionContext:
+    return ReflectionContext(
+        cluster_id="cl_abc",
+        mode="init",
+        source_members=[(ep.ref.entry_id, "episode") for ep in episodes],
+        episodes=[
+            ReflectedEpisode(
+                entry_id=ep.ref.entry_id,
+                md_path=ep.ref.md_path,
+                parent_id=ep.item.parent_id,
+            )
+            for ep in episodes
+        ],
+        merged_episode="merged",
+        last_ts=1_780_272_000_000,
     )

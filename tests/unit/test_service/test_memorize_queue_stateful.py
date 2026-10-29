@@ -91,15 +91,17 @@ from sqlmodel import SQLModel
 from everos.config import SqliteSettings
 from everos.config.settings import AsyncQueueSettings
 from everos.core.errors import QueueSaturatedError
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteMemorizeInboxStore,
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.memorize_inbox import _MemorizeInboxRepo
+from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
+from everos.service import MemorizeResult
 from everos.service import memorize_queue as mq
-from everos.service.memorize import MemorizeResult
+from tests.fakes.application import make_ops
 
 settings.register_profile(
     "ci",
@@ -182,12 +184,15 @@ class _Queue:
         root.ensure()
         self.engine = create_system_engine(root.system_db, SqliteSettings())
         self.factory = create_session_factory(self.engine)
-        self.repo = _MemorizeInboxRepo(session_factory=self.factory)
+        self.repo = MemorizeInboxRepo(session_factory=self.factory)
         self.clock_offset = timedelta()
-        self.worker = mq.MemorizeQueueWorker(cfg)
+        self.inbox = SqliteMemorizeInboxStore(self.repo)
+        self.deliver = memorize
+        self.ops = make_ops(inbox=self.inbox)
+        self.worker = mq.MemorizeQueueWorker(
+            cfg, inbox=self.inbox, deliver=self.deliver
+        )
         self._patches = [
-            mock.patch.object(mq, "memorize_inbox_repo", self.repo),
-            mock.patch.object(mq, "memorize", memorize),
             mock.patch.object(mq, "get_utc_now", self.now),
             mock.patch.object(mq, "_MARK_RETRY_SECONDS", 0.0),
         ]
@@ -536,7 +541,9 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             else:
                 m["status"] = "queued"
                 self.requeued[rid] += 1
-        self.q.worker = mq.MemorizeQueueWorker(_settings())
+        self.q.worker = mq.MemorizeQueueWorker(
+            _settings(), inbox=self.q.inbox, deliver=self.q.deliver
+        )
         self.run(self.q.worker._sweep())
         self._model_purge()
         self.crashed = False
@@ -591,7 +598,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
             expected = self._pending(session) > 0
             got = self.run(self.q.worker.has_pending(session_id=session))
             assert got == expected, (session, got, expected)
-            page = self.run(mq.list_tasks(session_id=session, page_size=100))
+            page = self.run(self.q.ops.list_tasks(session_id=session, page_size=100))
             want = defaultdict(int)
             for m in self.model.values():
                 if m["session"] == session:
@@ -631,7 +638,7 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
     @invariant()
     def status_reader_agrees(self) -> None:
         for rid in self.seen:
-            got = self.run(mq.get_task(rid))
+            got = self.run(self.q.ops.get_task(rid))
             m = self.model.get(rid)
             if m is None:
                 assert got is None, rid
@@ -825,7 +832,7 @@ async def _jittered(
         async def peek() -> None:
             for _ in range(5):
                 await asyncio.sleep(rng.random() * 0.01)
-                await mq.list_tasks(session_id=rng.choice(SESSIONS))
+                await q.ops.list_tasks(session_id=rng.choice(SESSIONS))
 
         async def restart() -> None:
             nonlocal restarted

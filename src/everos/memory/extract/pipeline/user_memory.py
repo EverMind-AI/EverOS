@@ -3,37 +3,33 @@
 Cells / memcell_ids / message_id-mapping / sender lists are produced by
 :mod:`everos.service._boundary` (which also writes the single
 ``memcell`` sqlite row per cell). This pipeline only handles the
-user-perspective output: Episode md + ``UserPipelineStarted`` emit (one
-per cell, fired at the start of ``run`` so atomic_fact / foresight /
-clustering strategies run in parallel with the in-pipeline Episode work).
+user-perspective output of one cell: Episode md, plus the
+``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
 
-Run inside ``service.memorize`` via ``asyncio.gather`` alongside
-:class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``).
+``MemoryService.memorize`` runs it cell by cell alongside
+:class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``) and
+publishes each cell's events as soon as the cell is done.
 """
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.user_memory import EpisodeExtractor
 
-from everos.component.utils.datetime import from_timestamp, to_iso_format
-from everos.config import resolve_root
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
-from everos.memory import Episode, IngestResult, PipelineOutcome
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
+from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
+from everos.memory.models import Episode, IngestResult
+from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
 from everos.memory.prompt_slots import PromptLoader
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
-
-    from everos.infra.ome.engine import OfflineEngine
-    from everos.infra.persistence.markdown import EpisodeWriter
 
 logger = get_logger(__name__)
 
@@ -42,23 +38,20 @@ _EXTRACT_MAX_RETRIES = 2
 _EXTRACT_RETRY_BACKOFF = 1.0
 
 
-def _root_relative(path: str) -> str:
-    """Path relative to the memory root, for telemetry (never the host abspath)."""
-    try:
-        return str(Path(path).relative_to(resolve_root()))
-    except ValueError:
-        return path
-
-
 class UserMemoryPipeline:
-    """Per-sender Episode extraction on a list of pre-cut MemCells."""
+    """Per-sender Episode extraction, one pre-cut MemCell at a time.
+
+    Args:
+        episode_store: Where extracted episodes are written.
+        prompt_loader: Source of the episode-extraction prompt slot.
+        llm_client: LLM for extraction; ``None`` skips extraction.
+    """
 
     def __init__(
         self,
-        episode_writer: EpisodeWriter,
+        episode_store: EpisodeStore,
         prompt_loader: PromptLoader,
         llm_client: LLMClient | None,
-        engine: OfflineEngine,
     ) -> None:
         # EpisodeExtractor requires `llm` at construction. Skip-with-warning
         # when no LLM is configured — the boundary stage will have skipped
@@ -66,120 +59,55 @@ class UserMemoryPipeline:
         self._ep_ext = (
             EpisodeExtractor(llm=llm_client) if llm_client is not None else None
         )
-        self._episode_writer = episode_writer
+        self._episode_store = episode_store
         self._prompt_loader = prompt_loader
-        self._engine = engine
 
-    async def run(
-        self,
-        ingested: IngestResult,
-        cells: list[AlgoMemCell],
-        memcell_ids: list[str],
-        per_cell_all_senders: list[list[str]],
-    ) -> PipelineOutcome:
-        """Emit UserPipelineStarted per cell, then extract Episodes + write md."""
-        if not cells:
-            return PipelineOutcome(track=_TRACK, status="accumulated", message_count=0)
+    async def run_cell(
+        self, ingested: IngestResult, prepared: PreparedCell
+    ) -> CellOutcome:
+        """Extract the cell's Episode, write one copy per user sender.
+
+        The returned events start with the cell's ``UserPipelineStarted`` so
+        the strategies that consume the MemCell directly (atomic_fact /
+        foresight / clustering) are published first, followed by one
+        ``EpisodeExtracted`` per written episode.
+        """
         if self._ep_ext is None:
             logger.warning(
                 "user_memory_pipeline_no_llm_client",
-                extra={"session_id": ingested.session_id, "cells": len(cells)},
+                session_id=ingested.session_id,
+                memcell_id=prepared.memcell_id,
             )
-            return PipelineOutcome(track=_TRACK, status="skipped", message_count=0)
+            return CellOutcome(status="skipped")
 
-        # Emit upfront so OME-async strategies (atomic_fact / foresight /
-        # cluster) start in parallel with the in-pipeline Episode work; they
-        # consume the MemCell directly and do not depend on Episode output.
-        for cell, memcell_id in zip(cells, memcell_ids, strict=True):
-            await self._emit_pipeline_started(
+        cell, memcell_id = prepared.cell, prepared.memcell_id
+        events: list[Event] = [
+            UserPipelineStarted(
                 memcell_id=memcell_id,
                 session_id=ingested.session_id,
                 app_id=ingested.app_id,
                 project_id=ingested.project_id,
-                cell=cell,
+                memcell=cell,
             )
-
-        episode_prompt = self._prompt_loader.load("episode_extract")
+        ]
         md_paths: list[str] = []
-        msg_count = 0
-        for cell, memcell_id, all_senders in zip(
-            cells, memcell_ids, per_cell_all_senders, strict=True
-        ):
-            msg_count += len(cell.items)
-            user_senders = _unique_user_senders(cell)
-            if not user_senders:
-                continue
-            # One generic LLM call per cell (sender_id=None drives the algo's
-            # whole-memcell EPISODE_GENERATION_PROMPT — explicitly cheaper
-            # than the per-user fan-out per the algo's docstring). Fan-out
-            # is then md-only: every user sender owns a copy of the same
-            # narrative under its own owner_id path.
-            with memory_span(
-                "everos.extract",
-                observation_type="generation",
-                session_id=ingested.session_id,
-                metadata={
-                    "app_id": ingested.app_id,
-                    "project_id": ingested.project_id,
-                    "memcell_id": memcell_id,
-                },
-            ) as extract_span:
-                # Token usage is recorded onto this span by the LLM client
-                # wrapper when the extractor issues its chat() call.
-                #
-                # Retry on ValueError: everalgo raises ValueError when the
-                # LLM returns malformed JSON (e.g. OpenRouter partial
-                # response with finish_reason=stop). Transient — same input
-                # typically succeeds on retry. TODO: catch a typed
-                # ExtractionError once everalgo introduces one.
-                algo_ep = await _extract_with_retry(
-                    self._ep_ext, cell, episode_prompt, memcell_id
-                )
-                # Extracted memory text (only when capture_content is on).
-                capture_output(extract_span, algo_ep.episode)
+        user_senders = _unique_user_senders(cell)
+        if user_senders:
+            algo_ep = await self._extract(ingested, prepared)
             for sender_id in user_senders:
                 ep = Episode.from_algo(
                     algo_ep,
                     owner_id=sender_id,
                     session_id=ingested.session_id,
-                    sender_ids=all_senders,
+                    sender_ids=list(prepared.sender_ids),
                     parent_id=memcell_id,
                 )
-                inline, sections = _episode_to_entry_body(ep)
-                with memory_span(
-                    "everos.persist.markdown",
-                    observation_type="span",
-                    session_id=ingested.session_id,
-                    metadata={
-                        "owner_id": ep.owner_id,
-                        "app_id": ingested.app_id,
-                        "project_id": ingested.project_id,
-                    },
-                ) as persist_span:
-                    eid = await self._episode_writer.append_entry(
-                        ep.owner_id,
-                        inline=inline,
-                        sections=sections,
-                        app_id=ingested.app_id,
-                        project_id=ingested.project_id,
-                    )
-                    md_path = str(
-                        self._episode_writer.path_for(
-                            ep.owner_id,
-                            eid.date,
-                            app_id=ingested.app_id,
-                            project_id=ingested.project_id,
-                        )
-                    )
-                    md_paths.append(md_path)
-                    # Written .md path, memory-root-relative (only when
-                    # capture_content is on) — never leak the host absolute
-                    # path to the telemetry backend.
-                    capture_output(persist_span, _root_relative(md_path))
-                await self._engine.emit(
+                ref = await self._persist(ingested, ep)
+                md_paths.append(ref.md_path)
+                events.append(
                     EpisodeExtracted(
                         memcell_id=memcell_id,
-                        episode_entry_id=eid.format(),
+                        episode_entry_id=ref.entry_id,
                         episode_text=ep.episode,
                         episode_timestamp_ms=ep.timestamp,
                         owner_id=ep.owner_id,
@@ -189,31 +117,78 @@ class UserMemoryPipeline:
                         source="pipeline",
                     )
                 )
-
-        return PipelineOutcome(
-            track=_TRACK,
+        return CellOutcome(
             status="extracted",
-            message_count=msg_count,
-            extracted_md_paths=md_paths,
+            message_count=len(cell.items),
+            events=events,
+            md_paths=md_paths,
         )
 
-    async def _emit_pipeline_started(
-        self,
-        memcell_id: str,
-        session_id: str,
-        app_id: str,
-        project_id: str,
-        cell: AlgoMemCell,
-    ) -> None:
-        await self._engine.emit(
-            UserPipelineStarted(
-                memcell_id=memcell_id,
-                session_id=session_id,
-                app_id=app_id,
-                project_id=project_id,
-                memcell=cell,
+    async def _extract(
+        self, ingested: IngestResult, prepared: PreparedCell
+    ) -> AlgoEpisode:
+        """One generic LLM call for the whole cell.
+
+        ``sender_id=None`` drives the algo's whole-memcell
+        EPISODE_GENERATION_PROMPT — explicitly cheaper than the per-user
+        fan-out per the algo's docstring. Fan-out is then md-only: every
+        user sender owns a copy of the same narrative under its own owner_id
+        path.
+        """
+        assert self._ep_ext is not None  # run_cell returns before without one
+        with memory_span(
+            "everos.extract",
+            observation_type="generation",
+            session_id=ingested.session_id,
+            metadata={
+                "app_id": ingested.app_id,
+                "project_id": ingested.project_id,
+                "memcell_id": prepared.memcell_id,
+            },
+        ) as extract_span:
+            # Token usage is recorded onto this span by the LLM client
+            # wrapper when the extractor issues its chat() call.
+            #
+            # Retry on ValueError: everalgo raises ValueError when the
+            # LLM returns malformed JSON (e.g. OpenRouter partial
+            # response with finish_reason=stop). Transient — same input
+            # typically succeeds on retry. TODO: catch a typed
+            # ExtractionError once everalgo introduces one.
+            algo_ep = await _extract_with_retry(
+                self._ep_ext,
+                prepared.cell,
+                self._prompt_loader.load("episode_extract"),
+                prepared.memcell_id,
             )
-        )
+            # Extracted memory text (only when capture_content is on).
+            capture_output(extract_span, algo_ep.episode)
+        return algo_ep
+
+    async def _persist(self, ingested: IngestResult, ep: Episode) -> MemoryRef:
+        """Write one episode under its owner and trace the write."""
+        with memory_span(
+            "everos.persist.markdown",
+            observation_type="span",
+            session_id=ingested.session_id,
+            metadata={
+                "owner_id": ep.owner_id,
+                "app_id": ingested.app_id,
+                "project_id": ingested.project_id,
+            },
+        ) as persist_span:
+            ref = await self._episode_store.append(
+                Scope(
+                    app_id=ingested.app_id,
+                    project_id=ingested.project_id,
+                    owner_id=ep.owner_id,
+                    owner_type="user",
+                ),
+                ep,
+            )
+            # Written .md path, memory-root-relative (only when
+            # capture_content is on) — never the host absolute path.
+            capture_output(persist_span, ref.md_path)
+        return ref
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -234,63 +209,6 @@ def _unique_user_senders(cell: AlgoMemCell) -> list[str]:
         if sid and sid not in senders:
             senders.append(sid)
     return senders
-
-
-def _episode_to_entry_body(
-    episode: Episode,
-) -> tuple[dict[str, object], dict[str, str]]:
-    """Split a domain Episode into ``(inline, sections)`` for md rendering.
-
-    Lives in the pipeline (memory) layer rather than the writer (infra)
-    because it depends on :class:`everos.memory.Episode` — infra is not
-    allowed to import memory per the layered architecture contract.
-
-    Inline persists the audit / scope fields cascade needs to rebuild
-    the LanceDB row: ``owner_id`` / ``session_id`` / ``timestamp`` /
-    ``parent_id`` / ``sender_ids``. ``parent_id`` is the source memcell
-    id (minted by the boundary stage), and the cascade handler reads it
-    back so the LanceDB ``episode`` row keeps its back-link to the source.
-
-    The md entry's ``entry_id`` (managed by the chassis writer) is the
-    single source of *entry* identity; cascade derives a global episode
-    id from ``<owner_id>_<entry_id>`` on the fly.
-    """
-    ts_iso = (
-        to_iso_format(from_timestamp(episode.timestamp))
-        if isinstance(episode.timestamp, int)
-        else str(episode.timestamp)
-    )
-
-    inline: dict[str, object] = {
-        "owner_id": episode.owner_id,
-        "session_id": episode.session_id,
-        "timestamp": ts_iso,
-        "parent_type": "memcell",
-        "parent_id": episode.parent_id,
-    }
-    if episode.sender_ids:
-        inline["sender_ids"] = list(episode.sender_ids)
-
-    extra = episode.model_dump(
-        exclude={
-            "owner_id",
-            "episode",
-            "timestamp",
-            "session_id",
-            "sender_ids",
-            "parent_id",
-        }
-    )
-    subject = extra.pop("subject", None)
-    summary = extra.pop("summary", None)
-
-    sections: dict[str, str] = {}
-    if subject:
-        sections["Subject"] = str(subject)
-    if summary:
-        sections["Summary"] = str(summary)
-    sections["Content"] = episode.episode
-    return inline, sections
 
 
 async def _extract_with_retry(

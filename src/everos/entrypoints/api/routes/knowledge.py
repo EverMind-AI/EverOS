@@ -19,19 +19,13 @@ Endpoint overview (design spec sections 6.2-6.6):
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
-
-if TYPE_CHECKING:
-    from everos.service.knowledge import KnowledgeExtractor
+from typing import Annotated, Literal
 
 from everalgo.types import ParsedContent
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, UploadFile
 from fastapi.params import Form
 from pydantic import BaseModel, Field
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.llm import get_llm_client
-from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.errors import (
@@ -39,23 +33,13 @@ from everos.core.errors import (
     ProviderNotConfiguredError,
     UnsupportedModalityError,
 )
-from everos.core.persistence import MemoryRoot
-from everos.entrypoints.api.utils import extract_request_id
+from everos.entrypoints.api.utils import application, extract_request_id
 from everos.service import (
     CreateDocumentResult,
     DocumentDetail,
     DocumentListResult,
     SearchKnowledgeResult,
     TopicDetail,
-    create_document,
-    delete_document,
-    get_document,
-    get_topic,
-    list_categories,
-    list_documents,
-    patch_document,
-    replace_document,
-    search_knowledge,
 )
 
 # PathSafeId and SuccessEnvelope are imported from memorize routes;
@@ -65,12 +49,12 @@ from .memorize import AppScopeId, ProjectScopeId, SuccessEnvelope
 _KNOWLEDGE_FEATURE = "knowledge"
 
 
-def _require_knowledge_capabilities() -> None:
+def _require_knowledge_capabilities(request: Request) -> None:
     """Per-endpoint gate: knowledge writes/search require embed + rerank.
 
     **Why the gate lives at the HTTP layer, not at cascade registry**:
     cascade handlers register **unconditionally** now (see
-    ``memory/cascade/registry.py:177-194`` — the earlier atomic-pair
+    ``infra/cascade/registry.py:177-194`` — the earlier atomic-pair
     gate that lived there was removed because it broke the delete
     path: a Tier-3 → Tier-2/1 downgrade would strand existing knowledge
     documents with no handler to process their deletion). Handlers
@@ -82,9 +66,8 @@ def _require_knowledge_capabilities() -> None:
     require Tier 3". Without this gate a Tier-1/2 upload would:
 
     - accept the multipart request → md write succeeds
-    - enqueue for cascade → cascade handler body-guards on
-      ``get_embedding_capability().available`` and no-ops the
-      index write
+    - enqueue for cascade → cascade handler body-guards on the
+      embedding capability and no-ops the index write
     - client sees 201 but the doc is permanently keyword-only /
       unsearchable
 
@@ -103,12 +86,13 @@ def _require_knowledge_capabilities() -> None:
     missing only rerank gets a rerank-specific message rather than
     passing this gate and failing later inside search.
     """
-    if not get_embedding_capability().available:
+    capabilities = application(request).capabilities
+    if not capabilities.embedding:
         raise ProviderNotConfiguredError(
             provider="embedding",
             feature=_KNOWLEDGE_FEATURE,
         )
-    if not get_rerank_capability().available:
+    if not capabilities.rerank:
         raise ProviderNotConfiguredError(
             provider="rerank",
             feature=_KNOWLEDGE_FEATURE,
@@ -306,21 +290,6 @@ class DocumentPatchRequest(BaseModel):
     project_id: ProjectScopeId = "default"
 
 
-# ── Extractor builder ───────────────────────────────────────────────────────
-
-
-def _build_extractor() -> KnowledgeExtractor:
-    """Lazily import and build the knowledge extractor from ``everalgo``.
-
-    Returns an object satisfying the ``KnowledgeExtractor`` protocol
-    defined in ``service.knowledge``.
-    """
-    # Deferred: heavy everalgo import; only needed on document creation.
-    from everalgo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
-
-    return AlgoKnowledgeExtractor(llm=get_llm_client())
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -392,11 +361,12 @@ def _decode_as_utf8(raw_bytes: bytes) -> ParsedContent:
 
 
 async def _parse_upload(
-    file: UploadFile, *, raw_bytes: bytes | None = None
+    request: Request, file: UploadFile, *, raw_bytes: bytes | None = None
 ) -> ParsedContent:
     """Parse an uploaded file via component.parser, or fall back to UTF-8.
 
     Args:
+        request: The request, for the application's knowledge facade.
         file: FastAPI upload file handle.
         raw_bytes: Pre-read bytes; when provided, skips ``file.read()``.
 
@@ -418,12 +388,10 @@ async def _parse_upload(
     if parser_available():
         from everalgo.types import RawFile  # Deferred: optional dep
 
-        from everos.component.parser import aparse_file  # Deferred: optional dep
-
         extension = ""
         if file.filename and "." in file.filename:
             extension = file.filename.rsplit(".", 1)[-1].lower()
-        parsed = await aparse_file(
+        parsed = await application(request).knowledge.parse_file(
             RawFile(
                 content=raw_bytes,
                 mime=file.content_type or "",
@@ -562,17 +530,14 @@ async def create_document_route(
     rid = extract_request_id(request)
     _reject_oversized_upload(file)
     file_content = await file.read()
-    parsed = await _parse_upload(file, raw_bytes=file_content)
+    parsed = await _parse_upload(request, file, raw_bytes=file_content)
     source_name = file.filename
 
-    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
-    extractor = _build_extractor()
-
-    result = await create_document(
-        extractor=extractor,
+    result = await application(request).knowledge.create_document(
         parsed=parsed,
         title=title,
-        knowledge_dir=knowledge_dir,
+        app_id=app_id,
+        project_id=project_id,
         source_name=source_name,
         source_type=source_type,
         category_id=category_id,
@@ -601,17 +566,14 @@ async def replace_document_route(
     rid = extract_request_id(request)
     _reject_oversized_upload(file)
     file_content = await file.read()
-    parsed = await _parse_upload(file, raw_bytes=file_content)
+    parsed = await _parse_upload(request, file, raw_bytes=file_content)
 
-    knowledge_dir = MemoryRoot.resolve().knowledge_dir(app_id, project_id)
-    extractor = _build_extractor()
-
-    result = await replace_document(
-        extractor=extractor,
+    result = await application(request).knowledge.replace_document(
+        doc_id=doc_id,
         parsed=parsed,
         title=title,
-        doc_id=doc_id,
-        knowledge_dir=knowledge_dir,
+        app_id=app_id,
+        project_id=project_id,
         source_name=file.filename,
         source_type=source_type,
         category_id=category_id,
@@ -629,7 +591,9 @@ async def delete_document_route(
 ) -> SuccessEnvelope[DocumentDeleteResponse] | Response:
     """Remove a knowledge document."""
     rid = extract_request_id(request)
-    result = await delete_document(doc_id, app_id, project_id)
+    result = await application(request).knowledge.delete_document(
+        doc_id, app_id, project_id
+    )
 
     if result.deleted_topics == 0:
         return Response(status_code=204)
@@ -657,7 +621,7 @@ async def list_documents_route(
 ) -> SuccessEnvelope[DocumentListResponse]:
     """Paginated document listing."""
     rid = extract_request_id(request)
-    result = await list_documents(
+    result = await application(request).knowledge.list_documents(
         app_id,
         project_id,
         category_id=category_id,
@@ -678,7 +642,9 @@ async def get_document_route(
 ) -> SuccessEnvelope[DocumentDetailResponse]:
     """Fetch a single document with its topic list."""
     rid = extract_request_id(request)
-    detail = await get_document(doc_id, app_id, project_id)
+    detail = await application(request).knowledge.get_document(
+        doc_id, app_id, project_id
+    )
     return SuccessEnvelope(request_id=rid, data=_map_document_detail(detail))
 
 
@@ -691,7 +657,9 @@ async def get_topic_route(
 ) -> SuccessEnvelope[TopicDetailResponse]:
     """Fetch a single topic with full content."""
     rid = extract_request_id(request)
-    detail = await get_topic(topic_id, app_id, project_id)
+    detail = await application(request).knowledge.get_topic(
+        topic_id, app_id, project_id
+    )
     return SuccessEnvelope(request_id=rid, data=_map_topic_detail(detail))
 
 
@@ -705,7 +673,7 @@ async def search_knowledge_route(
 ) -> SuccessEnvelope[KnowledgeSearchResponse]:
     """Knowledge retrieval (keyword / vector / hybrid)."""
     rid = extract_request_id(request)
-    result = await search_knowledge(
+    result = await application(request).knowledge.search_knowledge(
         query=req.query,
         method=req.method,
         top_k=req.top_k,
@@ -725,7 +693,7 @@ async def list_categories_route(
 ) -> SuccessEnvelope[CategoryListResponse]:
     """List taxonomy categories from ``.taxonomy.md``."""
     rid = extract_request_id(request)
-    overviews = await list_categories(app_id, project_id)
+    overviews = await application(request).knowledge.list_categories(app_id, project_id)
     categories = [
         CategoryDTO(
             category_id=c.category_id,
@@ -748,7 +716,7 @@ async def patch_document_route(
 ) -> SuccessEnvelope[DocumentPatchResponse]:
     """Update mutable document metadata fields."""
     rid = extract_request_id(request)
-    result = await patch_document(
+    result = await application(request).knowledge.patch_document(
         doc_id,
         req.app_id,
         req.project_id,

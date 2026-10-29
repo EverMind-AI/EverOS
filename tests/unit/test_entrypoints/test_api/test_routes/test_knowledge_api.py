@@ -12,72 +12,70 @@ from __future__ import annotations
 import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from everalgo.types import ParsedContent
 from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.infra.persistence import MemoryRoot
 from everos.service import (
     DocumentDetail,
     DocumentListResult,
     DocumentNotFoundError,
+    KnowledgeService,
     TopicDetail,
     TopicNotFoundError,
     TopicOverview,
 )
+from tests.fakes import make_application
+from tests.fakes.storage import Storage
 
-knowledge_service_mod = import_module("everos.service.knowledge")
-
-# The route module binds service functions at import time, so patches
-# must target the name in the route module's namespace.
+# Route helpers are patched in the route module; use-case calls are patched on
+# the facade class, which the application's KnowledgeService instance resolves.
 _ROUTE_MOD = "everos.entrypoints.api.routes.knowledge"
+_SERVICE = "everos.service.knowledge.KnowledgeService"
+
+
+async def _parser_must_not_run(raw_file: object) -> ParsedContent:
+    raise AssertionError("parser must not be called")
 
 
 @pytest.fixture
 async def client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[AsyncClient]:
-    """FastAPI app with no lifespan; resets knowledge singletons per test.
+    """FastAPI app over a stub application whose knowledge facade is real.
 
-    The knowledge router gates every route on the embed + rerank
-    capability singletons (Task 13). This suite exercises DTO
-    validation / route mapping, not the capability gate itself, so
-    both singletons are stubbed available here -- otherwise every
-    request would short-circuit into the 422 gate response instead
-    of reaching the mocked service call under test.
+    The knowledge router gates every write / search route on the embed +
+    rerank capabilities. This suite exercises DTO validation / route
+    mapping, not the capability gate itself, so the application reports
+    both available -- otherwise every request would short-circuit into the
+    422 gate response instead of reaching the mocked service call under test.
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    import everos.component.embedding.accessor as embedding_acc
-    import everos.component.rerank.accessor as rerank_acc
-    from everos.component.embedding import EmbeddingCapability
-    from everos.component.rerank import RerankCapability
-
-    monkeypatch.setattr(
-        embedding_acc, "_capability", EmbeddingCapability(provider=object())
+    knowledge = KnowledgeService(
+        root=MemoryRoot(tmp_path),
+        extractor=None,
+        embedding=None,
+        reranker=None,
+        recaller=None,  # type: ignore[arg-type] - every search is mocked
+        search_config=load_settings().knowledge.search,
+        parse_file=_parser_must_not_run,
+        documents=storage.sqlite.knowledge_document,
+        topics=storage.sqlite.knowledge_topic,
     )
-    monkeypatch.setattr(rerank_acc, "_capability", RerankCapability(provider=object()))
-
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    for attr in ("_embedding", "_reranker"):
-        setattr(knowledge_service_mod, attr, None)
-    for attr in ("_embedding_resolved", "_reranker_resolved"):
-        setattr(knowledge_service_mod, attr, False)
-
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application(knowledge=knowledge))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await lancedb_manager.dispose_connection()
+    await storage.lance.close()
     load_settings.cache_clear()
 
 
@@ -134,7 +132,7 @@ async def test_get_document_success(client: AsyncClient) -> None:
     """Mocked service returns detail; route maps to 200 envelope."""
     detail = _make_document_detail()
     with patch(
-        f"{_ROUTE_MOD}.get_document",
+        f"{_SERVICE}.get_document",
         new_callable=AsyncMock,
         return_value=detail,
     ):
@@ -150,7 +148,7 @@ async def test_get_document_success(client: AsyncClient) -> None:
 async def test_get_document_404(client: AsyncClient) -> None:
     """Nonexistent doc_id returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.get_document",
+        f"{_SERVICE}.get_document",
         new_callable=AsyncMock,
         side_effect=DocumentNotFoundError("d_000000000000"),
     ):
@@ -166,7 +164,7 @@ async def test_get_topic_success(client: AsyncClient) -> None:
     """Mocked service returns topic detail; route maps to 200 envelope."""
     detail = _make_topic_detail()
     with patch(
-        f"{_ROUTE_MOD}.get_topic",
+        f"{_SERVICE}.get_topic",
         new_callable=AsyncMock,
         return_value=detail,
     ):
@@ -181,7 +179,7 @@ async def test_get_topic_success(client: AsyncClient) -> None:
 async def test_get_topic_404(client: AsyncClient) -> None:
     """Nonexistent topic_id returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.get_topic",
+        f"{_SERVICE}.get_topic",
         new_callable=AsyncMock,
         side_effect=TopicNotFoundError("d_000000000000_999"),
     ):
@@ -254,7 +252,7 @@ async def test_get_categories_returns_taxonomy(
         ),
     ]
     with patch(
-        f"{_ROUTE_MOD}.list_categories",
+        f"{_SERVICE}.list_categories",
         new=AsyncMock(return_value=overviews),
     ):
         resp = await client.get("/api/v1/knowledge/categories")
@@ -276,7 +274,7 @@ async def test_list_documents_empty(client: AsyncClient) -> None:
     """Empty result returns paginated envelope with zero items."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     with patch(
-        f"{_ROUTE_MOD}.list_documents",
+        f"{_SERVICE}.list_documents",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -292,7 +290,7 @@ async def test_list_documents_pagination_params(client: AsyncClient) -> None:
     """Pagination params are forwarded to the service."""
     result = DocumentListResult(documents=[], total=0, page=2, page_size=5)
     mock = AsyncMock(return_value=result)
-    with patch(f"{_ROUTE_MOD}.list_documents", mock):
+    with patch(f"{_SERVICE}.list_documents", mock):
         resp = await client.get(
             "/api/v1/knowledge/documents",
             params={"page": 2, "page_size": 5, "sort_by": "title", "sort_order": "asc"},
@@ -323,7 +321,7 @@ async def test_list_documents_sort_by_updated_at(client: AsyncClient) -> None:
     """sort_by=updated_at is accepted and forwarded (repo supports it)."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     mock = AsyncMock(return_value=result)
-    with patch(f"{_ROUTE_MOD}.list_documents", mock):
+    with patch(f"{_SERVICE}.list_documents", mock):
         resp = await client.get(
             "/api/v1/knowledge/documents",
             params={"sort_by": "updated_at"},
@@ -359,7 +357,7 @@ async def test_delete_document_returns_204_when_not_found(
 
     result = DeleteResult(doc_id="d_111111111111", deleted_topics=0)
     with patch(
-        f"{_ROUTE_MOD}.delete_document",
+        f"{_SERVICE}.delete_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -374,7 +372,7 @@ async def test_delete_document_returns_envelope(client: AsyncClient) -> None:
 
     result = DeleteResult(doc_id="d_aabbccddee01", deleted_topics=3)
     with patch(
-        f"{_ROUTE_MOD}.delete_document",
+        f"{_SERVICE}.delete_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -399,11 +397,7 @@ async def test_put_document_404_when_not_found(client: AsyncClient) -> None:
             return_value=ParsedContent(text="# Hello"),
         ),
         patch(
-            f"{_ROUTE_MOD}._build_extractor",
-            return_value=AsyncMock(),
-        ),
-        patch(
-            f"{_ROUTE_MOD}.replace_document",
+            f"{_SERVICE}.replace_document",
             new_callable=AsyncMock,
             side_effect=DocumentNotFoundError("d_000000000000"),
         ),
@@ -428,7 +422,7 @@ async def test_patch_document_success(client: AsyncClient) -> None:
         doc_id="d_aabbccddee01", updated_fields=["title"], updated_at=_NOW
     )
     with patch(
-        f"{_ROUTE_MOD}.patch_document",
+        f"{_SERVICE}.patch_document",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -445,7 +439,7 @@ async def test_patch_document_success(client: AsyncClient) -> None:
 async def test_patch_document_404(client: AsyncClient) -> None:
     """Patching nonexistent doc returns 404."""
     with patch(
-        f"{_ROUTE_MOD}.patch_document",
+        f"{_SERVICE}.patch_document",
         new_callable=AsyncMock,
         side_effect=DocumentNotFoundError("d_000000000000"),
     ):
@@ -498,7 +492,7 @@ async def test_pathsafe_rejects_traversal_in_query(client: AsyncClient) -> None:
     """app_id with '..' in query param is rejected."""
     result = DocumentListResult(documents=[], total=0, page=1, page_size=20)
     with patch(
-        f"{_ROUTE_MOD}.list_documents",
+        f"{_SERVICE}.list_documents",
         new_callable=AsyncMock,
         return_value=result,
     ):
@@ -636,26 +630,17 @@ async def test_utf8_short_circuit_skips_parser_when_available(
         source_name="note.md",
         md_path="/tmp/note.md",
     )
-    # `parser_available` / `aparse_file` are locally imported inside
-    # _parse_upload (deferred), so patch the source modules — patches on
-    # the route module namespace won't intercept a `from … import` that
-    # happens at call time.
+    # `parser_available` is locally imported inside _parse_upload
+    # (deferred), so patch the source module — a patch on the route module
+    # namespace won't intercept a `from … import` that happens at call time.
+    # The parser itself is the facade's, which refuses to run (see `client`).
     with (
         patch(
             "everos.component.parser.parser_available",
             return_value=True,
         ),
         patch(
-            "everos.component.parser.aparse_file",
-            new=AsyncMock(side_effect=AssertionError("parser must not be called")),
-            create=True,
-        ),
-        patch(
-            f"{_ROUTE_MOD}._build_extractor",
-            return_value=MagicMock(),
-        ),
-        patch(
-            f"{_ROUTE_MOD}.create_document",
+            f"{_SERVICE}.create_document",
             new=AsyncMock(return_value=result),
         ),
     ):

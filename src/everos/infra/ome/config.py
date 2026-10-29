@@ -13,12 +13,6 @@ from typing import Annotated, Self
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from everos.core.persistence.memory_root import MemoryRoot
-
-
-def _default_jobstore_path() -> Path:
-    return MemoryRoot.resolve().ome_db
-
 
 class CounterOverride(BaseModel):
     """TOML override for a strategy's Counter gate (per-key None means keep)."""
@@ -114,10 +108,9 @@ class OMEConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jobstore_path: Path = Field(
-        default_factory=_default_jobstore_path,
         description="SQLite DB path holding OME's own state (run records, "
-        "counter store, idle store). Defaults to "
-        "``MemoryRoot.resolve().ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
+        "counter store, idle store). The application passes the memory "
+        "root's ``ome_db`` (``<memory-root>/.index/sqlite/ome.db``).",
     )
     aps_jobstore_path: Path | None = Field(
         default=None,
@@ -167,7 +160,7 @@ class OMEConfig(BaseModel):
         Field(
             ge=0,
             description="Default retry budget per run, overridable via "
-            "@offline_strategy(max_retries=...) or StrategyOverride.max_retries. "
+            "StrategySpec(max_retries=...) or StrategyOverride.max_retries. "
             "0 disables retries.",
         ),
     ] = 1
@@ -222,10 +215,10 @@ class OMEConfig(BaseModel):
         description=(
             "Run ``OfflineEngine._run_crash_recovery`` on ``engine.start()``. "
             "Default ``True`` — the primary server engine "
-            "(``service.memorize._get_engine``) needs to resume its own "
+            "(built by ``service.bootstrap``) needs to resume its own "
             "prior sessions' RUNNING work after a crash / restart. "
             "Set to ``False`` for one-shot engines that share the jobstore "
-            "path (e.g. ``memory.cascade._backfill._build_cluster_engine`` "
+            "path (e.g. ``service.backfill._build_cluster_engine`` "
             "and ``_build_skill_engine``). Those engines register only the "
             "Phase 2/3 subset of strategies; if they ran crash recovery on "
             "startup they would re-enqueue the server's stale RUNNING rows "

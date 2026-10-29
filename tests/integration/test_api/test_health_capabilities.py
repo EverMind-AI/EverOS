@@ -172,9 +172,11 @@ async def test_health_endpoint_includes_capabilities() -> None:
     """GET /health returns capabilities dict with all 5 provider fields."""
     from httpx import ASGITransport, AsyncClient
 
+    from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
+    from everos.service import build_application
 
-    app = create_app()
+    app = create_app(application=build_application(load_settings()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport) as client:
         response = await client.get("http://testserver/health")
@@ -277,54 +279,31 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
     """
     from httpx import ASGITransport, AsyncClient
 
-    from everos.component import embedding, multimodal
-    from everos.component import rerank as rerank_mod
-    from everos.component.parser import _core as parser_core
     from everos.entrypoints.api.app import create_app
+    from everos.service import Capabilities
+    from tests.fakes import make_application
 
-    class _StubCapability:
-        def __init__(self, available: bool) -> None:
-            self.available = available
-
-    monkeypatch.setattr(
-        embedding, "get_embedding_capability", lambda: _StubCapability(embed)
+    application = make_application(
+        capabilities=Capabilities(
+            llm=True,
+            decider=True,
+            embedding=embed,
+            rerank=rerank,
+            multimodal_llm=multimodal_llm,
+            parser=parser,
+            index_backend="lancedb",
+        )
     )
-    monkeypatch.setattr(
-        rerank_mod, "get_rerank_capability", lambda: _StubCapability(rerank)
-    )
-    monkeypatch.setattr(
-        multimodal,
-        "get_multimodal_llm_capability",
-        lambda: _StubCapability(multimodal_llm),
-    )
-    monkeypatch.setattr(parser_core, "parser_available", lambda: parser)
-
-    # The health route imports the accessors at module load; patch there
-    # too so the values it actually reads honour the monkeypatch.
-    from everos.entrypoints.api.routes import health as health_route
-
-    # `embed` is the one capability the route does NOT read from an accessor:
+    # `embed` is the one capability the route does NOT read from the snapshot:
     # it reports whether the startup dimension probe got an answer, because
     # "a provider could be constructed" is true even against a dead service
     # (issue #434). But the same payload's `disabled_features` stays on the
     # capability -- it promises what the engine will refuse, and every
     # engine-side gate still asks that. A real deployment derives both from
     # one configuration, so a simulated tier has to set both.
-    monkeypatch.setattr(health_route, "last_probe", lambda: 1024 if embed else None)
-    monkeypatch.setattr(
-        health_route, "get_embedding_capability", lambda: _StubCapability(embed)
-    )
-    monkeypatch.setattr(
-        health_route, "get_rerank_capability", lambda: _StubCapability(rerank)
-    )
-    monkeypatch.setattr(
-        health_route,
-        "get_multimodal_llm_capability",
-        lambda: _StubCapability(multimodal_llm),
-    )
-    monkeypatch.setattr(health_route, "parser_available", lambda: parser)
+    application.ops.probed = embed
 
-    app = create_app()
+    app = create_app(application=application)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport) as client:
         response = await client.get("http://testserver/health")

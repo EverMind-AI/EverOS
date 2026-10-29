@@ -52,10 +52,11 @@ from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 
-from everos.core.persistence import MarkdownReader, MemoryRoot
-from everos.core.persistence.markdown import entries as ent
-from everos.core.persistence.markdown import frontmatter as fm
-from everos.core.persistence.markdown.writer import MarkdownWriter
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import MarkdownReader
+from everos.infra.persistence.markdown.base import entries as ent
+from everos.infra.persistence.markdown.base import frontmatter as fm
+from everos.infra.persistence.markdown.base.writer import MarkdownWriter
 from everos.infra.persistence.markdown.writers.episode_writer import EpisodeWriter
 
 settings.register_profile(

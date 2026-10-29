@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
+import dataclasses
 import hashlib
 import uuid
 from collections.abc import Sequence
@@ -15,12 +15,27 @@ import pytest
 from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 from structlog.testing import capture_logs
 
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.factories import build_indexes, build_stores
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AgentCaseExtracted,
     AgentPipelineStarted,
     EpisodeExtracted,
     UserPipelineStarted,
 )
+from everos.memory.models import Episode
+from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.service.bootstrap import _build_engine
+from tests.fakes import (
+    InMemoryAgentSkillStore,
+    InMemoryEpisodeIndex,
+    InMemoryMemcellStore,
+    InMemoryProfileStore,
+    make_indexes,
+    unscripted_llm,
+)
+from tests.fakes.storage import Storage
 
 
 class _DeterministicHashEmbedder:
@@ -47,6 +62,40 @@ class _DeterministicHashEmbedder:
 
     async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         return [await self.embed(t) for t in texts]
+
+
+_installed: dict[str, MemoryDeps] = {}
+
+
+def _install_deps(
+    storage: Storage,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    llm: object | None = None,
+    embedding: object | None = None,
+    stores: dict[str, object] | None = None,
+    indexes: dict[str, object] | None = None,
+) -> MemoryDeps:
+    """Bind the deps the application engine registers its strategies with.
+
+    Production stores over ``storage`` (markdown + the sqlite system db),
+    with single stores replaced where a test stands in for them; ``indexes``
+    switches to in-memory indexes (with the given replacements).
+    """
+    real = build_stores(storage.root, storage.sqlite)
+    deps = MemoryDeps(
+        llm=llm if llm is not None else unscripted_llm(),
+        embedding=embedding,
+        stores=dataclasses.replace(real, **(stores or {})),
+        indexes=(
+            make_indexes(**indexes)
+            if indexes is not None
+            else build_indexes(storage.index)
+        ),
+    )
+    _installed["deps"] = deps
+    return deps
 
 
 def _sample_memcell() -> MemCell:
@@ -80,34 +129,23 @@ def _sample_memcell() -> MemCell:
 
 @pytest.mark.asyncio
 async def test_emit_dispatches_both_strategies_to_success(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Real OfflineEngine + APScheduler runtime; extractors + LLM mocked.
 
     Verifies the full chain: emit(event) → dispatcher (3 gates) → APS one-shot
     job → Runner.run → strategy body → mark_success.
     """
-    import importlib
 
-    from everos.core.persistence import MemoryRoot
     from everos.infra.ome.records import RunStatus
 
-    svc = importlib.import_module("everos.service.memorize")
-
-    # Redirect MemoryRoot.resolve() to tmp_path so _get_engine() writes ome.db
+    # Redirect MemoryRoot.resolve() to tmp_path so the engine writes ome.db
     # under the test's isolated temp directory instead of the real ~/.everos.
     monkeypatch.setattr(
         MemoryRoot,
         "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
-    # Reset singletons so they rebuild against the patched MemoryRoot.
-    monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
-    _af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    _fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    monkeypatch.setattr(_af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(_fs_mod, "_writer", None, raising=False)
 
     fake_fact = AtomicFact(
         owner_id="u_alice", content="hi", timestamp=1_700_000_000_000
@@ -126,16 +164,9 @@ async def test_emit_dispatches_both_strategies_to_success(
         patch(
             "everos.memory.strategies.extract_foresight.ForesightExtractor"
         ) as mock_fs,
-        patch(
-            "everos.memory.strategies.extract_atomic_facts.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
         capture_logs() as logs,
     ):
+        _install_deps(storage, monkeypatch, tmp_path)
         mock_af.return_value.aextract_from_text = AsyncMock(return_value=[fake_fact])
         mock_fs.return_value.aextract = AsyncMock(return_value=[fake_foresight])
 
@@ -149,9 +180,9 @@ async def test_emit_dispatches_both_strategies_to_success(
         (tmp_path / "ome.toml").write_text(
             "[strategies.extract_foresight]\nenabled = true\n"
         )
-        await _setup_system_db_schema(monkeypatch)
+        await storage.create_schema()
 
-        engine = svc._get_engine()
+        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
         await engine.start()
         try:
             # `ConfigReloader.start()` fires its initial load as a task, so
@@ -210,7 +241,7 @@ async def test_emit_dispatches_both_strategies_to_success(
             assert fs_rows[0].strategy_name == "extract_foresight"
         finally:
             await engine.stop()
-            await _teardown_system_db_schema()
+            await storage.database.dispose()
 
     af_logs = [r for r in logs if r.get("event") == "atomic_facts_extracted"]
     fs_logs = [r for r in logs if r.get("event") == "foresights_extracted"]
@@ -220,42 +251,6 @@ async def test_emit_dispatches_both_strategies_to_success(
     # extract_foresight: 2 senders × 1 foresight each = 2
     assert af_logs[0]["count"] == 1
     assert fs_logs[0]["count"] == 2
-
-
-async def _setup_system_db_schema(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Rebuild the sqlite system.db engine + schema against the active tmp_path.
-
-    The ``sqlite_manager`` engine is a process-wide singleton; without
-    resetting it between tests the second e2e would reuse the first
-    test's tmp engine (and miss the table create_all on this test's
-    fresh tmp_path). ``SQLModel.metadata.create_all`` mirrors what
-    :class:`SqliteLifespanProvider` runs at app startup.
-
-    Pair with :func:`_teardown_system_db_schema` in the test's ``finally``
-    block — the engine created here owns an aiosqlite worker thread that
-    must be closed explicitly, or it lingers past the event loop and
-    raises ``RuntimeError: Event loop is closed`` from the worker.
-    """
-    from sqlmodel import SQLModel
-
-    from everos.infra.persistence.sqlite import sqlite_manager
-
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
-    monkeypatch.setattr(sqlite_manager, "_engine", None, raising=False)
-    monkeypatch.setattr(sqlite_manager, "_session_factory", None, raising=False)
-    engine = sqlite_manager.get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
-
-async def _teardown_system_db_schema() -> None:
-    """Dispose the per-test sqlite engine so its worker thread doesn't outlive
-    the event loop (counterpart of :func:`_setup_system_db_schema`)."""
-    from everos.infra.persistence.sqlite import sqlite_manager
-
-    if sqlite_manager._engine is not None:
-        await sqlite_manager.dispose_engine()
 
 
 def _agent_memcell() -> MemCell:
@@ -282,8 +277,7 @@ def _agent_memcell() -> MemCell:
 
 @pytest.mark.asyncio
 async def test_emit_dispatches_agent_case_strategy_to_success(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Mirror of the user-side e2e for the agent track.
 
@@ -293,21 +287,14 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
     engine registration, and the agent-side mock plumbing that unit tests
     bypass by calling the strategy function directly.
     """
-    import importlib
 
-    from everos.core.persistence import MemoryRoot
     from everos.infra.ome.records import RunStatus
-
-    svc = importlib.import_module("everos.service.memorize")
 
     monkeypatch.setattr(
         MemoryRoot,
         "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
-    monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
-    _ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-    monkeypatch.setattr(_ac_mod, "_writer", None, raising=False)
 
     fake_case = AgentCase(
         id=uuid.uuid4().hex,
@@ -322,19 +309,16 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         patch(
             "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
         ) as mock_ac,
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
         capture_logs() as logs,
     ):
+        _install_deps(storage, monkeypatch, tmp_path)
         mock_ac.return_value.aextract = AsyncMock(return_value=[fake_case])
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")
-        await _setup_system_db_schema(monkeypatch)
+        await storage.create_schema()
 
-        engine = svc._get_engine()
+        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
         await engine.start()
         try:
             await engine.emit(
@@ -358,7 +342,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
             assert ac_rows[0].strategy_name == "extract_agent_case"
         finally:
             await engine.stop()
-            await _teardown_system_db_schema()
+            await storage.database.dispose()
 
     ac_logs = [r for r in logs if r.get("event") == "agent_case_extracted"]
     assert ac_logs, "expected agent_case_extracted log line"
@@ -369,8 +353,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
 
 @pytest.mark.asyncio
 async def test_skill_chain_e2e(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Chain: AgentCaseExtracted → trigger_skill_clustering (sqlite) →
     SkillClusterUpdated → extract_agent_skill → SUCCESS.
@@ -379,29 +362,21 @@ async def test_skill_chain_e2e(
     embedder feeds the top-K nearest-neighbor stage, a ``FakeLLMClient``
     returns ``{"idx": "new"}`` so the algo picks the "brand-new cluster"
     branch — but the recall + skip-threshold + prompt-render + JSON-parse
-    pipeline is all real. Only mocked: LanceDB reads (case + skill),
-    ``AgentSkillExtractor`` (downstream extractor; out of scope), and
-    the markdown writer.
+    pipeline is all real. Stood in: the index reads (case +
+    skill, in-memory and empty), ``AgentSkillExtractor`` (downstream
+    extractor; out of scope), and the skill store (in-memory).
     """
-    import importlib
-    from unittest.mock import MagicMock
 
     from everalgo.testing.fake_llm import FakeLLMClient
     from everalgo.types import AgentSkill as AlgoAgentSkill
 
-    from everos.core.persistence import MemoryRoot
     from everos.infra.ome.records import RunStatus
-
-    svc = importlib.import_module("everos.service.memorize")
-    skill_mod = importlib.import_module("everos.memory.strategies.extract_agent_skill")
 
     monkeypatch.setattr(
         MemoryRoot,
         "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
-    monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
-    monkeypatch.setattr(skill_mod, "_writer", None, raising=False)
 
     embedder = _DeterministicHashEmbedder()
     # FakeLLMClient: cluster_by_llm only invokes it when top-K similarity
@@ -410,14 +385,6 @@ async def test_skill_chain_e2e(
     # at all — so the LLM is never asked. Provide a "{idx: new}" response
     # anyway as belt-and-suspenders for future scenarios with seeded clusters.
     fake_llm = FakeLLMClient(responses=['{"idx": "new"}'])
-
-    target_lance = MagicMock()
-    target_lance.entry_id = "ac_20260517_0001"
-    target_lance.timestamp = _dt.datetime(2026, 5, 17, tzinfo=_dt.UTC)
-    target_lance.task_intent = "summarise the doc"
-    target_lance.approach = "read + condense"
-    target_lance.quality_score = 0.8
-    target_lance.key_insight = ""
 
     emitted_skill = AlgoAgentSkill(
         id=uuid.uuid4().hex,
@@ -430,54 +397,32 @@ async def test_skill_chain_e2e(
         source_case_ids=["ac_20260517_0001"],
     )
 
-    # ``trigger_skill_clustering`` and ``extract_agent_skill`` both body-guard
-    # on ``get_embedding_capability().available`` and then resolve the
-    # concrete embedder via ``.require()``. Installing the deterministic
-    # embedder as the accessor's cached capability handles both the guard
-    # check and the actual embed calls in one shot.
-    import everos.component.embedding.accessor as _emb_acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(_emb_acc, "_capability", EmbeddingCapability(provider=embedder))
-
+    skill_store = InMemoryAgentSkillStore()
     with (
-        patch(
-            "everos.memory.strategies.trigger_skill_clustering.get_llm_client",
-            return_value=fake_llm,
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_skill.agent_case_repo"
-        ) as mock_case_repo,
-        patch(
-            "everos.memory.strategies.extract_agent_skill.agent_skill_repo"
-        ) as mock_skill_repo,
-        patch(
-            "everos.memory.strategies.extract_agent_skill.get_llm_client",
-            return_value=object(),
-        ),
         patch(
             "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
         ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_skill.AgentSkillWriter"
-        ) as mock_writer_cls,
         capture_logs() as logs,
     ):
-        mock_case_repo.find_by_owner_entry = AsyncMock(return_value=target_lance)
-        mock_case_repo.find_by_owner_entries = AsyncMock(return_value=[])
-        # Empty cluster (no prior skills) → small-cluster scalar path.
-        mock_skill_repo.count_in_cluster = AsyncMock(return_value=0)
-        mock_skill_repo.find_in_cluster = AsyncMock(return_value=[])
+        # Index reads are in-memory and empty: no prior skills, no lineage.
+        _install_deps(
+            storage,
+            monkeypatch,
+            tmp_path,
+            llm=fake_llm,
+            embedding=embedder,
+            stores={"agent_skill": skill_store},
+            indexes={},
+        )
         mock_extractor_cls.return_value.aextract = AsyncMock(
             return_value=[emitted_skill]
         )
-        mock_writer_cls.return_value.write_main = AsyncMock(return_value=None)
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")
-        await _setup_system_db_schema(monkeypatch)
+        await storage.create_schema()
 
-        engine = svc._get_engine()
+        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
         await engine.start()
         try:
             await engine.emit(
@@ -508,72 +453,64 @@ async def test_skill_chain_e2e(
             assert skill_rows, "expected SUCCESS for extract_agent_skill"
         finally:
             await engine.stop()
-            await _teardown_system_db_schema()
+            await storage.database.dispose()
 
     cluster_logs = [r for r in logs if r.get("event") == "skill_cluster_updated"]
     skill_logs = [r for r in logs if r.get("event") == "agent_skills_extracted"]
     assert cluster_logs, "expected skill_cluster_updated log line"
     assert skill_logs, "expected agent_skills_extracted log line"
-    # Writer received exactly one SKILL.md write call with cluster_id stamped.
-    write_args = mock_writer_cls.return_value.write_main.call_args
-    fm = write_args.kwargs["frontmatter"]
-    assert fm.cluster_id == cluster_logs[0]["cluster_id"]
-    assert fm.name == "summarise_doc"
+    # Exactly one skill written, with the cluster id stamped.
+    agent = Scope(
+        app_id="default", project_id="default", owner_id="agent_42", owner_type="agent"
+    )
+    (written,) = skill_store.skills[agent].values()
+    assert written.cluster_id == cluster_logs[0]["cluster_id"]
+    assert written.name == "summarise_doc"
 
 
 @pytest.mark.asyncio
 async def test_profile_chain_e2e(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Chain: EpisodeExtracted → trigger_profile_clustering (sqlite) →
     ProfileClusterUpdated → extract_user_profile → SUCCESS.
 
     Real ``cluster_by_geometry`` (cosine + time-window) with a hash-based
     deterministic embedder so the geometry stage operates on well-spread
-    unit vectors. Real ``cluster_repo`` sqlite. ``memcell_repo`` is still
-    mocked (a real memcell row would require the boundary stage to run
-    first; out of scope for the chain emit test). ``ProfileExtractor`` /
-    md reader/writer mocked as algo + IO seams.
+    unit vectors. Real sqlite cluster store. The memcell store and the
+    episode index are in-memory and seeded (a real memcell row would require
+    the boundary stage to run first; out of scope for the chain test), the
+    profile store is in-memory and ``ProfileExtractor`` is patched.
     """
-    import importlib
-    from unittest.mock import MagicMock
 
     from everalgo.types import Profile as AlgoProfile
 
-    from everos.core.persistence import MemoryRoot
     from everos.infra.ome.records import RunStatus
-
-    svc = importlib.import_module("everos.service.memorize")
-    profile_mod = importlib.import_module(
-        "everos.memory.strategies.extract_user_profile"
-    )
 
     monkeypatch.setattr(
         MemoryRoot,
         "resolve",
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
-    monkeypatch.setattr(svc, "_ome_engine", None, raising=False)
-    monkeypatch.setattr(profile_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(profile_mod, "_reader", None, raising=False)
 
     embedder = _DeterministicHashEmbedder()
 
-    fake_memcell_row = MagicMock()
-    fake_memcell_row.memcell_id = "mc_aaaaaaaaaaa1"
-    fake_memcell_row.payload_json = MemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="alice likes hiking",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            ),
-        ],
-        timestamp=1_700_000_001_000,
-    ).model_dump_json()
+    memcells = InMemoryMemcellStore()
+    memcells.seed(
+        "mc_aaaaaaaaaaa1",
+        MemCell(
+            items=[
+                ChatMessage(
+                    id="m1",
+                    role="user",
+                    content="alice likes hiking",
+                    timestamp=1_700_000_001_000,
+                    sender_id="u_alice",
+                ),
+            ],
+            timestamp=1_700_000_001_000,
+        ),
+    )
 
     new_profile = AlgoProfile.model_validate(
         {
@@ -585,58 +522,48 @@ async def test_profile_chain_e2e(
         }
     )
 
-    fake_episode_row = {
-        "entry_id": "ep_20260517_0001",
-        "parent_type": "memcell",
-        "parent_id": "mc_aaaaaaaaaaa1",
-    }
-
-    # ``trigger_profile_clustering`` body-guards on
-    # ``get_embedding_capability().available`` and then resolves the concrete
-    # embedder via ``.require()``; ``extract_user_profile._profile_applies``
-    # reads the same accessor on the ``EpisodeExtracted`` branch. Installing
-    # the deterministic embedder as the accessor's cached capability handles
-    # both the guard check and the actual embed calls in one shot.
-    import everos.component.embedding.accessor as _emb_acc
-    from everos.component.embedding import EmbeddingCapability
-
-    monkeypatch.setattr(_emb_acc, "_capability", EmbeddingCapability(provider=embedder))
+    alice = Scope(
+        app_id="default", project_id="default", owner_id="u_alice", owner_type="user"
+    )
+    episode_index = InMemoryEpisodeIndex()
+    episode_index.seed(
+        Stored(
+            ref=MemoryRef(
+                id="u_alice_ep_20260517_0001",
+                entry_id="ep_20260517_0001",
+                md_path="ep.md",
+            ),
+            scope=alice,
+            item=Episode(
+                owner_id="u_alice",
+                episode="alice likes hiking",
+                timestamp=1_700_000_001_000,
+                parent_id="mc_aaaaaaaaaaa1",
+            ),
+        )
+    )
 
     with (
         patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-        patch(
             "everos.memory.strategies.extract_user_profile.ProfileExtractor"
         ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
-        ),
         capture_logs() as logs,
     ):
-        mock_episode_repo.find_by_owner_entries = AsyncMock(
-            return_value=[fake_episode_row]
+        _install_deps(
+            storage,
+            monkeypatch,
+            tmp_path,
+            embedding=embedder,
+            stores={"memcell": memcells, "profile": InMemoryProfileStore()},
+            indexes={"episode": episode_index},
         )
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[fake_memcell_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
         mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")
-        await _setup_system_db_schema(monkeypatch)
+        await storage.create_schema()
 
-        engine = svc._get_engine()
+        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
         await engine.start()
         try:
             await engine.emit(
@@ -667,7 +594,7 @@ async def test_profile_chain_e2e(
             assert prof_rows, "expected SUCCESS for extract_user_profile"
         finally:
             await engine.stop()
-            await _teardown_system_db_schema()
+            await storage.database.dispose()
 
     cluster_logs = [r for r in logs if r.get("event") == "profile_cluster_updated"]
     profile_logs = [r for r in logs if r.get("event") == "user_profile_extracted"]

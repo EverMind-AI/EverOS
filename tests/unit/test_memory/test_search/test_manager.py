@@ -24,11 +24,10 @@ from typing import Any, ClassVar
 import pytest
 from everalgo.types import Candidate
 
-import everos.component.embedding.accessor as embedding_accessor
-import everos.component.rerank.accessor as rerank_accessor
-from everos.component.embedding import EmbeddingCapability
-from everos.component.rerank import RerankCapability
+from everos.config import load_settings
 from everos.core.errors import ProviderNotConfiguredError
+from everos.memory.models import CanonicalMessage, Cluster
+from everos.memory.ports import Scope, SessionKey
 from everos.memory.search._candidates import FactCandidate
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
@@ -215,6 +214,24 @@ class _StubProfileRecaller:
         return []
 
 
+class _EmptySessionBuffer:
+    """No session has buffered messages."""
+
+    async def list(self, session: SessionKey) -> list[CanonicalMessage]:
+        return []
+
+
+class _NoClusters:
+    """No owner has clusters."""
+
+    async def list_for_owner(self, scope: Scope, kind: str) -> list[Cluster]:
+        return []
+
+
+_NO_SESSION_BUFFER: Any = _EmptySessionBuffer()
+_NO_CLUSTERS: Any = _NoClusters()
+
+
 class _StubEmbedding:
     def __init__(self, dim: int = 4) -> None:
         self.dim = dim
@@ -256,6 +273,8 @@ def _build_manager(
             skill_sparse or [], skill_dense or [], skill_by_case
         ),
         profile_recaller=_StubProfileRecaller(),
+        session_buffer=_NO_SESSION_BUFFER,
+        cluster_store=_NO_CLUSTERS,
         embedding=embedding,
         reranker=reranker,
         llm_client=llm_client,
@@ -272,23 +291,6 @@ def _agent_req(
     method: SearchMethod = SearchMethod.KEYWORD, **kwargs: Any
 ) -> SearchRequest:
     return SearchRequest(agent_id="agent_a", query="hi", method=method, **kwargs)
-
-
-@pytest.fixture(autouse=True)
-def _capabilities_available_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_validate_components`` gates on the process-wide capability
-    singletons, independent of whatever ``embedding=`` / ``reranker=``
-    this module's stub manager was built with. Default both to available
-    so dispatch tests (which drive availability through ``_StubEmbedding``
-    / ``_StubReranker`` instead) aren't skewed by real host settings; the
-    handful of component-guard tests below override this explicitly.
-    """
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=object())
-    )
-    monkeypatch.setattr(
-        rerank_accessor, "_capability", RerankCapability(provider=object())
-    )
 
 
 # ── KEYWORD: user owner ────────────────────────────────────────────────
@@ -392,6 +394,8 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
         agent_case_recaller=_StubAgentCaseRecaller([], []),
         agent_skill_recaller=_StubAgentSkillRecaller([], []),
         profile_recaller=_StubProfileRecaller(),
+        session_buffer=_NO_SESSION_BUFFER,
+        cluster_store=_NO_CLUSTERS,
         embedding=None,
         reranker=None,
         llm_client=None,
@@ -457,9 +461,6 @@ async def test_embed_query_rejects_a_width_that_disagrees_with_dim() -> None:
 async def test_vector_method_requires_embedding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
-    )
     mgr = _build_manager()  # embedding=None by default
     with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.VECTOR))
@@ -601,9 +602,6 @@ async def test_vector_falls_back_to_episode_vector_when_no_facts() -> None:
 
 
 async def test_hybrid_requires_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        embedding_accessor, "_capability", EmbeddingCapability(provider=None)
-    )
     mgr = _build_manager()
     with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.HYBRID))
@@ -665,7 +663,6 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
 async def test_agentic_requires_reranker_and_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
     with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_user_req(method=SearchMethod.AGENTIC))
@@ -681,7 +678,6 @@ async def test_agent_hybrid_requires_reranker_without_llm_rerank(
     so a missing rerank provider must fail-fast with a config hint rather
     than crash deep inside the rerank callback.
     """
-    monkeypatch.setattr(rerank_accessor, "_capability", RerankCapability(provider=None))
     mgr = _build_manager(embedding=_StubEmbedding())
     with pytest.raises(ProviderNotConfiguredError) as excinfo:
         await mgr.search(_agent_req(method=SearchMethod.HYBRID))
@@ -1200,31 +1196,32 @@ async def test_search_emits_top_score_without_hit_for_keyword(
     assert "everos.search.hit" not in attrs
 
 
+def _hit_threshold(monkeypatch: pytest.MonkeyPatch, threshold: float) -> None:
+    monkeypatch.setenv("EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD", str(threshold))
+    load_settings.cache_clear()
+
+
 async def test_search_emits_hit_when_calibrated_above_threshold(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """HYBRID is calibrated ([0, 1]) so a top score >= recall_hit_threshold
-    (default 0.6) sets everos.search.hit = True on the retriever span."""
-    import everos.memory.search.manager as mgr_mod
-
-    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.9)
-    mgr = _build_manager(embedding=_StubEmbedding())
+    sets everos.search.hit = True on the retriever span."""
+    _hit_threshold(monkeypatch, 0.0)
+    mgr = _build_manager(embedding=_StubEmbedding())  # no candidates: top 0.0
     await mgr.search(_user_req(method=SearchMethod.HYBRID))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
-    assert attrs["everos.search.top_score"] == pytest.approx(0.9)
+    assert attrs["everos.search.top_score"] == pytest.approx(0.0)
     assert attrs["everos.search.hit"] is True
 
 
 async def test_search_hit_false_when_calibrated_below_threshold(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import everos.memory.search.manager as mgr_mod
-
-    monkeypatch.setattr(mgr_mod, "_top_score", lambda data: 0.3)
-    mgr = _build_manager(embedding=_StubEmbedding())
+    _hit_threshold(monkeypatch, 0.5)
+    mgr = _build_manager(embedding=_StubEmbedding())  # no candidates: top 0.0
     await mgr.search(_user_req(method=SearchMethod.HYBRID))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
-    assert attrs["everos.search.top_score"] == pytest.approx(0.3)
+    assert attrs["everos.search.top_score"] == pytest.approx(0.0)
     assert attrs["everos.search.hit"] is False
 
 

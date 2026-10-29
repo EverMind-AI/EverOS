@@ -11,7 +11,7 @@ the same case body is a valid reference experience for **every**
 assistant sender that participated in the trajectory. We collect all
 distinct assistant-side sender_ids in the memcell, write the same case
 body once per agent (each gets its own owner_id-scoped md entry), and
-emit one ``AgentCaseExtracted`` per agent so the downstream skill
+return one ``AgentCaseExtracted`` per agent so the downstream skill
 clustering chain runs in each agent's own scope.
 
 Algo limitation (recorded in
@@ -25,36 +25,19 @@ from __future__ import annotations
 
 from everalgo.agent_memory import AgentCaseExtractor
 
-from everos.component.llm import get_llm_client
-from everos.component.utils.datetime import from_timestamp, to_iso_format
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.markdown import AgentCaseWriter
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
 from everos.memory.models import AgentCase, MemCell
+from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
 
-_writer: AgentCaseWriter | None = None
 
-
-def _get_writer() -> AgentCaseWriter:
-    global _writer
-    if _writer is None:
-        _writer = AgentCaseWriter(root=MemoryRoot.resolve())
-    return _writer
-
-
-@offline_strategy(
-    name="extract_agent_case",
-    trigger=Immediate(on=[AgentPipelineStarted]),
-    emits=[AgentCaseExtracted],
-    max_retries=2,
-)
-async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) -> None:
+async def extract_agent_case(
+    event: AgentPipelineStarted, deps: MemoryDeps
+) -> list[Event]:
+    """Distil one case from the memcell and file it under every agent sender."""
     # 1. Find the distinct assistant senders in this memcell; bail if none.
     agent_ids = _collect_agent_ids(event.memcell)
     if not agent_ids:
@@ -63,10 +46,10 @@ async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) 
             memcell_id=event.memcell_id,
             session_id=event.session_id,
         )
-        return
+        return []
 
     # 2. Run the LLM extractor once; algo returns [] or [single case].
-    extractor = AgentCaseExtractor(llm=get_llm_client())
+    extractor = AgentCaseExtractor(llm=deps.require_llm())
     algo_cases = await extractor.aextract(event.memcell)
     if not algo_cases:
         logger.info(
@@ -74,12 +57,12 @@ async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) 
             memcell_id=event.memcell_id,
             session_id=event.session_id,
         )
-        return
+        return []
 
-    # 3. For each agent sender: write the same case body to its md and emit
-    #    AgentCaseExtracted → downstream trigger_skill_clustering.
+    # 3. For each agent sender: write the same case body to its md and
+    #    announce it → downstream trigger_skill_clustering.
     algo_case = algo_cases[0]
-    writer = _get_writer()
+    extracted: list[Event] = []
     for agent_id in agent_ids:
         case = AgentCase.from_algo(
             algo_case,
@@ -87,18 +70,17 @@ async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) 
             session_id=event.session_id,
             parent_id=event.memcell_id,
         )
-        inline, sections = _agent_case_to_entry_body(case)
-        eid = await writer.append_entry(
-            case.owner_id,
-            inline=inline,
-            sections=sections,
+        scope = Scope(
             app_id=event.app_id,
             project_id=event.project_id,
+            owner_id=agent_id,
+            owner_type="agent",
         )
-        await ctx.emit(
+        ref = await deps.stores.agent_case.append(scope, case)
+        extracted.append(
             AgentCaseExtracted(
                 memcell_id=event.memcell_id,
-                case_entry_id=eid.format(),
+                case_entry_id=ref.entry_id,
                 task_intent=case.task_intent,
                 approach=case.approach,
                 key_insight=case.key_insight,
@@ -117,6 +99,7 @@ async def extract_agent_case(event: AgentPipelineStarted, ctx: StrategyContext) 
         quality_score=algo_case.quality_score,
         fanout=len(agent_ids),
     )
+    return extracted
 
 
 def _collect_agent_ids(memcell: MemCell) -> list[str]:
@@ -142,28 +125,10 @@ def _collect_agent_ids(memcell: MemCell) -> list[str]:
     return seen
 
 
-def _agent_case_to_entry_body(
-    case: AgentCase,
-) -> tuple[dict[str, object], dict[str, str]]:
-    """Split a domain AgentCase into ``(inline, sections)`` for md rendering.
-
-    Mirrors ``_atomic_fact_to_entry_body`` / ``_foresight_to_entry_body`` /
-    ``_episode_to_entry_body``. ``quality_score`` rides in inline so cascade
-    can hash it (it's part of ``content_change_keys`` on the handler);
-    KeyInsight is optional and elided when empty.
-    """
-    inline: dict[str, object] = {
-        "owner_id": case.owner_id,
-        "session_id": case.session_id,
-        "timestamp": to_iso_format(from_timestamp(case.timestamp)),
-        "parent_type": "memcell",
-        "parent_id": case.parent_id,
-        "quality_score": case.quality_score,
-    }
-    sections: dict[str, str] = {
-        "TaskIntent": case.task_intent,
-        "Approach": case.approach,
-    }
-    if case.key_insight:
-        sections["KeyInsight"] = case.key_insight
-    return inline, sections
+EXTRACT_AGENT_CASE_SPEC = StrategySpec(
+    name="extract_agent_case",
+    fn=extract_agent_case,
+    trigger=Immediate(on=[AgentPipelineStarted]),
+    emits=frozenset({AgentCaseExtracted}),
+    max_retries=2,
+)

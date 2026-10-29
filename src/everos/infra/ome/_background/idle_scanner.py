@@ -8,8 +8,7 @@ from datetime import datetime
 from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
 from everos.infra.ome._stores.idle import IdleStore
-from everos.infra.ome.events import BaseEvent, IdleTick
-from everos.infra.ome.triggers import Idle
+from everos.memory.ports import Event, Idle, IdleTick
 
 logger = get_logger(__name__)
 
@@ -23,7 +22,7 @@ class IdleScanner:
         strategy_name: str,
         trigger: Idle,
         idle_store: IdleStore,
-        emit: Callable[[BaseEvent], Awaitable[None]],
+        emit: Callable[[Event], Awaitable[None]],
     ) -> None:
         self._name = strategy_name
         self._trigger = trigger

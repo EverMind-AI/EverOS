@@ -12,8 +12,8 @@ from typing import Any, Final, Literal
 
 from everos.component.utils.datetime import ensure_utc, from_iso_format, from_timestamp
 from everos.core.errors import FilterError as FilterError
-from everos.infra.persistence.index import (
-    Predicate,
+from everos.memory.ports import (
+    Filter,
     Scalar,
     all_of,
     any_of,
@@ -55,9 +55,9 @@ def compile_filters(
     owner_type: str,
     app_id: str = "default",
     project_id: str = "default",
-) -> Predicate:
+) -> Filter:
     """Validate request filters and return one normalized predicate tree."""
-    base: list[Predicate] = [
+    base: list[Filter] = [
         eq("owner_id", owner_id),
         eq("owner_type", owner_type),
         eq("app_id", app_id),
@@ -72,9 +72,9 @@ def compile_filters(
     return all_of(*base)
 
 
-def _compile_node(raw: dict[str, Any]) -> Predicate | None:
+def _compile_node(raw: dict[str, Any]) -> Filter | None:
     raw = dict(raw)
-    parts: list[Predicate] = []
+    parts: list[Filter] = []
 
     if (and_list := raw.pop("AND", None)) is not None:
         combinator = _compile_combinator(and_list, "AND")
@@ -99,10 +99,10 @@ def _compile_node(raw: dict[str, Any]) -> Predicate | None:
 
 def _compile_combinator(
     children: list[dict[str, Any]], op: Literal["AND", "OR"]
-) -> Predicate | None:
+) -> Filter | None:
     if not isinstance(children, list):
         raise FilterError(f"{op} expects an array of nodes")
-    fragments: list[Predicate] = []
+    fragments: list[Filter] = []
     for child in children:
         if not isinstance(child, dict):
             raise FilterError(f"{op} children must be objects")
@@ -114,7 +114,7 @@ def _compile_combinator(
     return all_of(*fragments) if op == "AND" else any_of(*fragments)
 
 
-def compile_predicate(field: str, value: Any) -> Predicate:
+def compile_predicate(field: str, value: Any) -> Filter:
     """Validate and normalize one field clause into the neutral AST."""
     spec = ALLOWED_FIELDS[field]
     if isinstance(value, dict):
@@ -129,7 +129,7 @@ def compile_predicate(field: str, value: Any) -> Predicate:
     return _compile_op_clause(spec, field, "eq", value)
 
 
-def _compile_op_clause(spec: _FieldSpec, field: str, op: str, value: Any) -> Predicate:
+def _compile_op_clause(spec: _FieldSpec, field: str, op: str, value: Any) -> Filter:
     if op not in {"eq", "ne", "gt", "gte", "lt", "lte", "in"}:
         raise FilterError(f"unsupported operator {op!r} on field {field!r}")
 

@@ -1,24 +1,18 @@
-"""LanceDB repo singleton for the ``agent_skill`` table."""
+"""LanceDB repository for the ``agent_skill`` table."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from lancedb import AsyncTable
-
-from everos.core.persistence.lancedb import LanceRepoBase
-from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
+from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
+from everos.infra.persistence.records.table_chassis import VECTOR_QUERY_NPROBES
 
 from ...records.agent_skill import AgentSkill
-from ..lancedb_manager import get_table
 from ._contract import LanceIndexContract
 
 
 class _AgentSkillRepo(LanceIndexContract[AgentSkill], LanceRepoBase[AgentSkill]):
     schema = AgentSkill
-
-    async def _table_lookup(self) -> AsyncTable:
-        return await get_table(self.schema.TABLE_NAME, self.schema)
 
     async def count_in_cluster(self, *, owner_id: str, cluster_id: str) -> int:
         """Count skills under one ``(owner_id, cluster_id)``."""
@@ -82,6 +76,3 @@ def _q(value: str) -> str:
 
 def _in_cluster(owner_id: str, cluster_id: str) -> str:
     return f"owner_id = '{_q(owner_id)}' AND cluster_id = '{_q(cluster_id)}'"
-
-
-agent_skill_repo = _AgentSkillRepo()

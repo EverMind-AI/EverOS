@@ -15,7 +15,6 @@ import datetime as _dt
 import os
 import re
 from collections.abc import AsyncIterator
-from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -28,23 +27,14 @@ from everos.infra.persistence.index import (
     AgentSkill,
     Episode,
     UserProfile,
-    agent_case_repo,
-    agent_skill_repo,
-    episode_repo,
-    user_profile_repo,
 )
-from everos.infra.persistence.index import shutdown as shutdown_index
-
-# Lance keeps a process-local connection and table cache. It is not part of
-# the neutral port, but this fixture swaps EVEROS_ROOT without a lifespan, so
-# the cache has to be dropped by hand or the next test reads the old root.
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.service import build_application
+from tests.fakes.storage import StorageView
 
 # ``everos.service.__init__`` re-exports the ``get`` function under the
 # same name as the submodule (``from .get import get as get``), which
 # shadows the submodule when imported normally. Pull the actual module
 # via importlib so the test can poke at its ``_manager`` singleton.
-get_service_mod = import_module("everos.service.get")
 
 
 def _ts(day: int) -> _dt.datetime:
@@ -136,22 +126,21 @@ async def client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     index_backend: str,
+    storage_view: StorageView,
 ) -> AsyncIterator[AsyncClient]:
-    """Build the FastAPI app against a tmp memory root with no lifespan."""
+    """Build the FastAPI app over an unstarted application on a tmp root.
+
+    ``storage_view`` is requested after ``index_backend`` so the tests seed
+    the backend the application reads.
+    """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    # Reset every module-level singleton the get-path touches.
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    get_service_mod._manager = None
-
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=build_application(load_settings()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await shutdown_index()
     load_settings.cache_clear()
 
 
@@ -159,10 +148,10 @@ async def client(
 
 
 async def test_get_episodes_returns_page_and_total(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """5 rows in, page_size=2 → 2 episodes back + total_count=5."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 6)],
     )
     resp = await client.post(
@@ -192,10 +181,10 @@ async def test_get_episodes_returns_page_and_total(
 
 
 async def test_get_episodes_filtered_by_session_id(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """Filter narrows results to the matching ``session_id`` only."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_a"),
@@ -249,15 +238,17 @@ async def test_get_profile_miss_returns_empty(client: AsyncClient) -> None:
     assert data["total_count"] == 0
 
 
-async def test_get_profile_returns_seeded_row(client: AsyncClient) -> None:
+async def test_get_profile_returns_seeded_row(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """A profile row in the ``user_profile`` table is returned + json-decoded.
 
     Full-stack: seed the LanceDB ``user_profile`` table (as cascade would
     from ``users/u1/user.md``), then read it back through the HTTP route.
-    White-box surface: ``user_profile_repo`` (the same table /search's
+    White-box surface: ``storage_view.repos.user_profile`` (the same table /search's
     ``include_profile`` reads).
     """
-    await user_profile_repo.upsert(
+    await storage_view.repos.user_profile.upsert(
         [
             UserProfile(
                 id="u1",
@@ -298,10 +289,10 @@ async def test_get_profile_returns_seeded_row(client: AsyncClient) -> None:
 
 
 async def test_get_episodes_page_two_returns_correct_slice(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """5 rows / page_size=2 / page=2 → middle slice (rows 3 + 4 by DESC ts)."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 6)],
     )
     resp = await client.post(
@@ -322,9 +313,11 @@ async def test_get_episodes_page_two_returns_correct_slice(
     assert [ep["id"] for ep in data["episodes"]] == ["u1_ep_003", "u1_ep_002"]
 
 
-async def test_get_episodes_sort_order_asc(client: AsyncClient) -> None:
+async def test_get_episodes_sort_order_asc(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """``sort_order=asc`` flips the order (oldest first)."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 4)],
     )
     resp = await client.post(
@@ -343,9 +336,11 @@ async def test_get_episodes_sort_order_asc(client: AsyncClient) -> None:
 # ── Agent-side kinds ────────────────────────────────────────────────────
 
 
-async def test_get_agent_cases_happy_path(client: AsyncClient) -> None:
+async def test_get_agent_cases_happy_path(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """``agent_case`` listing returns shaped items, populates only that array."""
-    await agent_case_repo.upsert(
+    await storage_view.repos.agent_case.upsert(
         [_agent_case(f"ac_{i:03d}", day=i) for i in range(1, 4)],
     )
     resp = await client.post(
@@ -375,9 +370,11 @@ async def test_get_agent_cases_happy_path(client: AsyncClient) -> None:
     assert first["agent_id"] == "a1"
 
 
-async def test_get_agent_cases_filtered_by_session(client: AsyncClient) -> None:
+async def test_get_agent_cases_filtered_by_session(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Filter narrows ``agent_case`` rows to the session."""
-    await agent_case_repo.upsert(
+    await storage_view.repos.agent_case.upsert(
         [
             _agent_case("ac_001", session="sess_x"),
             _agent_case("ac_002", session="sess_x"),
@@ -399,9 +396,11 @@ async def test_get_agent_cases_filtered_by_session(client: AsyncClient) -> None:
     assert ids == {"a1_ac_001", "a1_ac_002"}
 
 
-async def test_get_agent_skills_happy_path(client: AsyncClient) -> None:
+async def test_get_agent_skills_happy_path(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """``agent_skill`` listing — sort silently uses ``updated_at``."""
-    await agent_skill_repo.upsert(
+    await storage_view.repos.agent_skill.upsert(
         [_agent_skill(name) for name in ("planner", "summariser")],
     )
     resp = await client.post(
@@ -419,11 +418,11 @@ async def test_get_agent_skills_happy_path(client: AsyncClient) -> None:
 
 
 async def test_get_agent_skills_sort_by_timestamp_silently_downgraded(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """Explicit ``sort_by=timestamp`` does not 500 — manager rewrites to
     ``updated_at`` (the only temporal column on ``agent_skill``)."""
-    await agent_skill_repo.upsert([_agent_skill("planner")])
+    await storage_view.repos.agent_skill.upsert([_agent_skill("planner")])
     resp = await client.post(
         "/api/v1/memory/get",
         json={
@@ -439,9 +438,11 @@ async def test_get_agent_skills_sort_by_timestamp_silently_downgraded(
 # ── Filter coverage end-to-end ──────────────────────────────────────────
 
 
-async def test_get_episodes_filtered_by_ne_session(client: AsyncClient) -> None:
+async def test_get_episodes_filtered_by_ne_session(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """``ne`` op on a str field excludes matching rows end-to-end."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_internal"),
@@ -464,10 +465,10 @@ async def test_get_episodes_filtered_by_ne_session(client: AsyncClient) -> None:
 
 
 async def test_get_episodes_filtered_by_iso_timestamp(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """ISO 8601 string timestamp literal is accepted alongside epoch ms."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", day=1),  # 2026-01-01
             _episode("ep_002", day=5),  # 2026-01-05
@@ -487,9 +488,11 @@ async def test_get_episodes_filtered_by_iso_timestamp(
     assert ids == {"u1_ep_002", "u1_ep_003"}
 
 
-async def test_get_episodes_filtered_by_parent_id(client: AsyncClient) -> None:
+async def test_get_episodes_filtered_by_parent_id(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Core use case: every episode derived from one memcell."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", parent_id="mc_target"),
             _episode("ep_002", parent_id="mc_target"),
@@ -512,10 +515,10 @@ async def test_get_episodes_filtered_by_parent_id(client: AsyncClient) -> None:
 
 
 async def test_get_episodes_filtered_by_sender_id_in(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """``sender_id: {"in": [...]}`` → ``array_has(sender_ids, ...) OR ...``."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", sender_ids=["alice", "assistant"]),
             _episode("ep_002", sender_ids=["bob", "assistant"]),
@@ -537,9 +540,11 @@ async def test_get_episodes_filtered_by_sender_id_in(
     assert ids == {"u1_ep_001", "u1_ep_002"}
 
 
-async def test_get_episodes_nested_and_inside_or(client: AsyncClient) -> None:
+async def test_get_episodes_nested_and_inside_or(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Nested ``AND`` inside ``OR`` — parity with /search combinator semantics."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", session="sess_a", parent_id="mc_target"),
             _episode("ep_002", session="sess_a", parent_id="mc_other"),
@@ -586,10 +591,10 @@ async def test_get_episodes_nested_and_inside_or(client: AsyncClient) -> None:
 
 
 async def test_get_top_level_and_or_compiles_and_filters(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """``AND`` / ``OR`` combinators are accepted (parity with /search)."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", session="sess_a"),
             _episode("ep_002", session="sess_b"),
@@ -612,10 +617,10 @@ async def test_get_top_level_and_or_compiles_and_filters(
 
 
 async def test_get_episodes_filtered_by_timestamp_range(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """``timestamp: {gte, lt}`` — same-field double op compiles to implicit AND."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", day=1),  # 2026-01-01
             _episode("ep_002", day=3),  # 2026-01-03
@@ -645,9 +650,11 @@ async def test_get_episodes_filtered_by_timestamp_range(
     assert ids == {"u1_ep_002", "u1_ep_003"}
 
 
-async def test_get_episodes_top_level_and_filter(client: AsyncClient) -> None:
+async def test_get_episodes_top_level_and_filter(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Explicit top-level ``AND`` — distinct from implicit multi-field AND."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", session="sess_a", parent_id="mc_target"),
             _episode("ep_002", session="sess_a", parent_id="mc_other"),
@@ -682,6 +689,7 @@ async def test_get_truncates_above_max_fetch(
     index_backend: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    storage_view: StorageView,
 ) -> None:
     """Filter matches > ``max_fetch`` rows → chassis emits warning + page
     contents come from the truncated prefix; ``total_count`` is still the
@@ -709,16 +717,19 @@ async def test_get_truncates_above_max_fetch(
 
     configure_logging(level="WARNING")
 
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [_episode(f"ep_{i:03d}", day=i) for i in range(1, 11)],
     )
-    original = episode_repo.find_where_paginated
+    # Patched on the class: the application reads through its own repository
+    # instance, not the test's.
+    repo_type = type(storage_view.repos.episode)
+    original = repo_type.find_where_paginated
 
-    async def low_cap(*args: object, **kwargs: object) -> object:
+    async def low_cap(self: object, *args: object, **kwargs: object) -> object:
         kwargs["max_fetch"] = 5
-        return await original(*args, **kwargs)  # type: ignore[arg-type]
+        return await original(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(episode_repo, "find_where_paginated", low_cap)
+    monkeypatch.setattr(repo_type, "find_where_paginated", low_cap)
 
     with caplog.at_level("WARNING"):
         resp = await client.post(
@@ -755,12 +766,12 @@ async def test_get_truncates_above_max_fetch(
 
 
 async def test_get_concurrent_owners_no_cross_contamination(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """Concurrent /get requests against different ``owner_id`` partitions
     return only their own rows. ``GetManager`` is a lazy singleton —
     this also exercises first-request lazy-init under contention."""
-    await episode_repo.upsert(
+    await storage_view.repos.episode.upsert(
         [
             _episode("ep_001", owner="u1"),
             _episode("ep_002", owner="u1"),
@@ -797,13 +808,15 @@ async def test_get_concurrent_owners_no_cross_contamination(
     assert {ep["id"] for ep in u3["data"]["episodes"]} == {"u3_ep_001"}  # type: ignore[index]
 
 
-async def test_get_concurrent_different_memory_types(client: AsyncClient) -> None:
+async def test_get_concurrent_different_memory_types(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Concurrent /get on different ``memory_type`` (episode + agent_case +
     agent_skill) returns each kind in its own envelope slot, with no
     cross-array bleed."""
-    await episode_repo.upsert([_episode("ep_001", owner="u1")])
-    await agent_case_repo.upsert([_agent_case("ac_001", owner="a1")])
-    await agent_skill_repo.upsert([_agent_skill("planner", owner="a1")])
+    await storage_view.repos.episode.upsert([_episode("ep_001", owner="u1")])
+    await storage_view.repos.agent_case.upsert([_agent_case("ac_001", owner="a1")])
+    await storage_view.repos.agent_skill.upsert([_agent_skill("planner", owner="a1")])
 
     async def query(payload: dict[str, object]) -> dict[str, object]:
         resp = await client.post("/api/v1/memory/get", json=payload)
@@ -835,24 +848,3 @@ async def test_get_concurrent_different_memory_types(client: AsyncClient) -> Non
     # Skill envelope: only ``agent_skills`` populated.
     assert len(skill_body["data"]["agent_skills"]) == 1  # type: ignore[index]
     assert skill_body["data"]["episodes"] == []  # type: ignore[index]
-
-
-async def test_get_concurrent_lazy_init_builds_one_manager(
-    client: AsyncClient,
-) -> None:
-    """The lazy singleton survives first-request contention — N concurrent
-    requests against a virgin manager all succeed and leave one instance."""
-    # ``client`` fixture already reset _manager to None.
-    assert get_service_mod._manager is None
-    await episode_repo.upsert([_episode("ep_001")])
-
-    payload = {
-        "user_id": "u1",
-        "memory_type": "episode",
-    }
-    results = await asyncio.gather(
-        *(client.post("/api/v1/memory/get", json=payload) for _ in range(8))
-    )
-    assert all(r.status_code == 200 for r in results)
-    # After the storm, exactly one manager instance is cached.
-    assert get_service_mod._manager is not None

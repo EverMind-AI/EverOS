@@ -11,19 +11,25 @@ Hard partition by ``(owner_type, memory_type)`` (validated by
 
 Reads only — never writes. Filters are compiled through
 :func:`compile_filters_for_get` so the column allow-list stays
-shared with :mod:`memory.search`. Pagination + in-memory sort
-runs through :meth:`LanceRepoBase.find_where_paginated`.
+shared with :mod:`memory.search`. Pagination + sort run in the index
+behind the injected ports.
 """
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any
-
-from everos.component.utils.datetime import to_display_tz
+from everos.component.utils.datetime import from_timestamp_ms, to_display_tz
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index import primary_key
+from everos.memory.models import AgentCase, AgentSkill, Episode
+from everos.memory.ports import (
+    AgentCaseIndex,
+    AgentSkillIndex,
+    EpisodeIndex,
+    Page,
+    ProfileIndex,
+    Scope,
+    Stored,
+)
 
 from .dto import (
     GetAgentCaseItem,
@@ -37,34 +43,32 @@ from .dto import (
 )
 from .filters_adapter import compile_filters_for_get
 
-if TYPE_CHECKING:
-    from everos.infra.persistence.index import (
-        AgentCase,
-        AgentSkill,
-        Episode,
-        IndexRepository,
-        UserProfile,
-    )
-
 logger = get_logger(__name__)
 
 
 class GetManager:
-    """Dispatch ``GetRequest`` to the matching LanceDB-backed repo and
-    shape rows into the public DTO."""
+    """Dispatch ``GetRequest`` to the matching index and shape the stored
+    domain objects into the public DTO.
+
+    Args:
+        episode_index: Episode reads.
+        agent_case_index: Agent-case reads.
+        agent_skill_index: Agent-skill reads.
+        profile_index: User-profile reads.
+    """
 
     def __init__(
         self,
         *,
-        episode_repo: IndexRepository[Episode],
-        agent_case_repo: IndexRepository[AgentCase],
-        agent_skill_repo: IndexRepository[AgentSkill],
-        user_profile_repo: IndexRepository[UserProfile],
+        episode_index: EpisodeIndex,
+        agent_case_index: AgentCaseIndex,
+        agent_skill_index: AgentSkillIndex,
+        profile_index: ProfileIndex,
     ) -> None:
-        self._ep = episode_repo
-        self._case = agent_case_repo
-        self._skill = agent_skill_repo
-        self._profile = user_profile_repo
+        self._ep = episode_index
+        self._case = agent_case_index
+        self._skill = agent_skill_index
+        self._profile = profile_index
 
     # ── Public entry ─────────────────────────────────────────────────
 
@@ -78,20 +82,20 @@ class GetManager:
             app_id=req.app_id,
             project_id=req.project_id,
         )
+        page = Page(
+            sort_by=req.sort_by,
+            number=req.page,
+            size=req.page_size,
+            descending=descending,
+        )
 
         match req.memory_type:
             case GetMemoryType.EPISODE:
-                rows, total = await self._ep.find_where_paginated(
-                    where,
-                    sort_by=req.sort_by,
-                    descending=descending,
-                    page=req.page,
-                    page_size=req.page_size,
-                )
-                items = [self._shape_episode(r) for r in rows]
+                episodes = await self._ep.paginate(where, page)
+                items = [self._shape_episode(e) for e in episodes.items]
                 data = GetData(
                     episodes=items,
-                    total_count=total,
+                    total_count=episodes.total,
                     count=len(items),
                 )
             case GetMemoryType.PROFILE:
@@ -102,35 +106,31 @@ class GetManager:
                     count=len(profiles),
                 )
             case GetMemoryType.AGENT_CASE:
-                rows, total = await self._case.find_where_paginated(
-                    where,
-                    sort_by=req.sort_by,
-                    descending=descending,
-                    page=req.page,
-                    page_size=req.page_size,
-                )
-                items = [self._shape_agent_case(r) for r in rows]
+                cases = await self._case.paginate(where, page)
+                items = [self._shape_agent_case(c) for c in cases.items]
                 data = GetData(
                     agent_cases=items,
-                    total_count=total,
+                    total_count=cases.total,
                     count=len(items),
                 )
             case GetMemoryType.AGENT_SKILL:
                 # AgentSkill has no ``timestamp`` column. Silently
-                # downgrade ``sort_by`` to ``updated_at`` (from
-                # :class:`BaseLanceTable`) so the caller cannot
+                # downgrade ``sort_by`` to ``updated_at`` (the index's
+                # row-maintenance column) so the caller cannot
                 # accidentally trigger a schema error.
-                rows, total = await self._skill.find_where_paginated(
+                skills = await self._skill.paginate(
                     where,
-                    sort_by="updated_at",
-                    descending=descending,
-                    page=req.page,
-                    page_size=req.page_size,
+                    Page(
+                        sort_by="updated_at",
+                        number=req.page,
+                        size=req.page_size,
+                        descending=descending,
+                    ),
                 )
-                items = [self._shape_agent_skill(r) for r in rows]
+                items = [self._shape_agent_skill(s) for s in skills.items]
                 data = GetData(
                     agent_skills=items,
-                    total_count=total,
+                    total_count=skills.total,
                     count=len(items),
                 )
 
@@ -139,56 +139,59 @@ class GetManager:
     # ── Shapers ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _shape_episode(row: Episode) -> GetEpisodeItem:
+    def _shape_episode(stored: Stored[Episode]) -> GetEpisodeItem:
+        episode = stored.item
         return GetEpisodeItem(
-            id=row.id,
-            user_id=row.owner_id,
-            app_id=row.app_id,
-            project_id=row.project_id,
-            session_id=row.session_id,
-            timestamp=to_display_tz(row.timestamp),
-            sender_ids=row.sender_ids,
-            summary=row.summary or "",
-            subject=row.subject or "",
-            episode=row.episode,
+            id=stored.ref.id,
+            user_id=episode.owner_id,
+            app_id=stored.scope.app_id,
+            project_id=stored.scope.project_id,
+            session_id=episode.session_id,
+            timestamp=to_display_tz(from_timestamp_ms(episode.timestamp)),
+            sender_ids=episode.sender_ids,
+            summary=episode.summary or "",
+            subject=episode.subject or "",
+            episode=episode.episode,
             type="Conversation",
         )
 
     @staticmethod
-    def _shape_agent_case(row: AgentCase) -> GetAgentCaseItem:
+    def _shape_agent_case(stored: Stored[AgentCase]) -> GetAgentCaseItem:
+        case = stored.item
         return GetAgentCaseItem(
-            id=row.id,
-            agent_id=row.owner_id,
-            app_id=row.app_id,
-            project_id=row.project_id,
-            session_id=row.session_id,
-            task_intent=row.task_intent,
-            approach=row.approach,
-            quality_score=row.quality_score,
-            key_insight=row.key_insight,
-            timestamp=to_display_tz(row.timestamp),
+            id=stored.ref.id,
+            agent_id=case.owner_id,
+            app_id=stored.scope.app_id,
+            project_id=stored.scope.project_id,
+            session_id=case.session_id,
+            task_intent=case.task_intent,
+            approach=case.approach,
+            quality_score=case.quality_score,
+            key_insight=case.key_insight,
+            timestamp=to_display_tz(from_timestamp_ms(case.timestamp)),
         )
 
     @staticmethod
-    def _shape_agent_skill(row: AgentSkill) -> GetAgentSkillItem:
+    def _shape_agent_skill(stored: Stored[AgentSkill]) -> GetAgentSkillItem:
+        skill = stored.item
         return GetAgentSkillItem(
-            id=row.id,
-            agent_id=row.owner_id,
-            app_id=row.app_id,
-            project_id=row.project_id,
-            name=row.name,
-            description=row.description,
-            content=row.content,
-            confidence=row.confidence,
-            maturity_score=row.maturity_score,
-            source_case_ids=row.source_case_ids,
+            id=stored.ref.id,
+            agent_id=stored.scope.owner_id,
+            app_id=stored.scope.app_id,
+            project_id=stored.scope.project_id,
+            name=skill.name,
+            description=skill.description,
+            content=skill.content,
+            confidence=skill.confidence,
+            maturity_score=skill.maturity_score,
+            source_case_ids=skill.source_case_ids,
         )
 
     # ── Profile ──────────────────────────────────────────────────────
 
     async def _fetch_profile(self, req: GetRequest) -> list[GetProfileItem]:
-        """Fetch the owner's single profile row from the ``user_profile``
-        LanceDB table (kept in sync with ``users/<id>/user.md`` by cascade).
+        """Fetch the owner's single profile from the profile index (kept in
+        sync with ``users/<id>/user.md`` by cascade).
 
         Profile is one-row-per-owner KV — there is no pagination / sort /
         filter surface, so at most one item is returned. Mirrors the
@@ -198,39 +201,30 @@ class GetManager:
         """
         if not req.owner_id:
             return []
-        row = await self._profile.find_one_where(
-            primary_key(req.app_id, req.project_id, req.owner_id)
+        stored = await self._profile.get(
+            Scope(
+                app_id=req.app_id,
+                project_id=req.project_id,
+                owner_id=req.owner_id,
+                owner_type="user",
+            )
         )
-        if row is None:
+        if stored is None:
             logger.debug("get_profile_miss", owner_id=req.owner_id)
             return []
+        profile = stored.item
         profile_data: dict[str, object] = {
-            "summary": row.summary,
-            "explicit_info": _load_json(row.explicit_info_json),
-            "implicit_traits": _load_json(row.implicit_traits_json),
-            "profile_timestamp_ms": row.profile_timestamp_ms,
+            "summary": profile.summary,
+            "explicit_info": profile.explicit_info,
+            "implicit_traits": profile.implicit_traits,
+            "profile_timestamp_ms": profile.timestamp,
         }
         return [
             GetProfileItem(
-                id=row.id,
-                user_id=row.owner_id,
-                app_id=row.app_id,
-                project_id=row.project_id,
+                id=stored.ref.id,
+                user_id=profile.owner_id,
+                app_id=stored.scope.app_id,
+                project_id=stored.scope.project_id,
                 profile_data=profile_data,
             )
         ]
-
-
-def _load_json(text: str) -> Any:
-    """Decode a json-encoded profile frontmatter bucket.
-
-    Returns ``[]`` on empty / malformed input so a row with a stale
-    encoding doesn't break the get response (mirrors the search recaller).
-    """
-    if not text:
-        return []
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        logger.debug("get_profile_json_decode_failed", payload_head=text[:80])
-        return []

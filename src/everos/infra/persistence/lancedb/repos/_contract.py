@@ -4,7 +4,7 @@
 its chassis base (``LanceRepoBase`` / ``LanceDailyLogRepoBase``). The chassis
 speaks LanceDB's SQL-like ``where`` strings; the contract
 (:mod:`everos.infra.persistence.index.protocols`) speaks the neutral
-:class:`Predicate`. The mixin renders one into the other on the way down and
+:class:`Filter`. The mixin renders one into the other on the way down and
 adds the reads the chassis does not have (``count_where``, ``scan``, the two
 search routes). Everything else — ``upsert`` merging on the declared
 ``PRIMARY_KEY``, maintenance, the ``find_by_*`` helpers — is the chassis
@@ -27,15 +27,15 @@ except ImportError:  # pragma: no cover
     from lancedb._lancedb import Occur  # type: ignore[attr-defined,no-redef]
 
 from everos.component.utils.datetime import ensure_utc, to_iso_format
-from everos.core.persistence.lancedb.base import VECTOR_QUERY_NPROBES
-from everos.infra.persistence.predicate import (
+from everos.infra.persistence.records.table_chassis import VECTOR_QUERY_NPROBES
+from everos.memory.ports.query import (
     All,
     AnyOf,
     Comparison,
     Contains,
+    Filter,
     In,
     IsNull,
-    Predicate,
     Scalar,
     all_of,
     eq,
@@ -53,7 +53,7 @@ _OPERATORS: Final[dict[str, str]] = {
 }
 
 
-def render_predicate(predicate: Predicate | None) -> str:
+def render_predicate(predicate: Filter | None) -> str:
     """Render a neutral predicate as a LanceDB DataFusion expression."""
     if predicate is None:
         return ""
@@ -76,7 +76,7 @@ def render_predicate(predicate: Predicate | None) -> str:
     raise TypeError(f"unsupported predicate: {type(predicate).__name__}")
 
 
-def _render_group(children: tuple[Predicate, ...], operator: str) -> str:
+def _render_group(children: tuple[Filter, ...], operator: str) -> str:
     rendered = [render_predicate(child) for child in children]
     rendered = [item for item in rendered if item]
     if not rendered:
@@ -104,12 +104,12 @@ def _literal(value: Scalar) -> str:
     return str(value)
 
 
-def _render_optional(predicate: Predicate | None) -> str | None:
+def _render_optional(predicate: Filter | None) -> str | None:
     rendered = render_predicate(predicate)
     return rendered or None
 
 
-def _where(where: Predicate | str) -> str:
+def _where(where: Filter | str) -> str:
     """The chassis' own callers pass strings; the contract passes predicates."""
     return where if isinstance(where, str) else render_predicate(where)
 
@@ -132,23 +132,23 @@ class LanceIndexContract[T]:
     # ``schema``, ``table_name`` and ``_table()`` come from the chassis base that
     # follows this mixin in the MRO; nothing is declared here so nothing shadows it.
 
-    async def count_where(self, where: Predicate | None = None) -> int:
+    async def count_where(self, where: Filter | None = None) -> int:
         table = await self._table()
         return await table.count_rows(filter=_render_optional(where))
 
     async def find_where(
-        self, where: Predicate | str, *, limit: int = 100, skip_vectors: bool = False
+        self, where: Filter | str, *, limit: int = 100, skip_vectors: bool = False
     ) -> list[T]:
         return await super().find_where(  # type: ignore[misc]
             _where(where), limit=limit, skip_vectors=skip_vectors
         )
 
-    async def find_one_where(self, where: Predicate | str) -> T | None:
+    async def find_one_where(self, where: Filter | str) -> T | None:
         return await super().find_one_where(_where(where))  # type: ignore[misc]
 
     async def find_where_paginated(
         self,
-        where: Predicate | str,
+        where: Filter | str,
         *,
         sort_by: str,
         descending: bool = True,
@@ -169,7 +169,7 @@ class LanceIndexContract[T]:
         self,
         *,
         vector: Sequence[float] | None = None,
-        where: Predicate | str | None = None,
+        where: Filter | str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         if vector is not None:
@@ -183,7 +183,7 @@ class LanceIndexContract[T]:
     async def sparse_search(
         self,
         query_terms: Sequence[str],
-        where: Predicate | str | None,
+        where: Filter | str | None,
         *,
         columns: Sequence[str] | None = None,
         limit: int,
@@ -225,7 +225,7 @@ class LanceIndexContract[T]:
     async def dense_search(
         self,
         vector: Sequence[float],
-        where: Predicate | str | None,
+        where: Filter | str | None,
         *,
         limit: int,
         vector_field: str = "vector",
@@ -245,7 +245,7 @@ class LanceIndexContract[T]:
             builder = builder.where(expression)
         return await builder.limit(limit).to_list()
 
-    async def scan(self, where: Predicate | str | None = None) -> list[T]:
+    async def scan(self, where: Filter | str | None = None) -> list[T]:
         """Return all matching records without a hidden row cap."""
         table = await self._table()
         builder = table.query()
@@ -342,10 +342,10 @@ class LanceIndexContract[T]:
             limit=limit,
         )
 
-    async def update(self, updates: dict[str, Any], *, where: Predicate | str) -> None:
+    async def update(self, updates: dict[str, Any], *, where: Filter | str) -> None:
         await super().update(updates, where=_where(where))  # type: ignore[misc]
 
-    async def delete(self, predicate: Predicate | str) -> None:
+    async def delete(self, predicate: Filter | str) -> None:
         await super().delete(_where(predicate))  # type: ignore[misc]
 
 

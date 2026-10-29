@@ -32,20 +32,20 @@ from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
 from everos.infra.ome._dispatch.dispatcher import EventDispatcher
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._dispatch.runner import Runner
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.decorator import Strategy, StrategyMeta
-from everos.infra.ome.events import BaseEvent, CronTick, ManualTick, resolve_topic
+from everos.infra.ome.events import resolve_topic
 from everos.infra.ome.exceptions import (
     EngineCallFromStrategyError,
     EngineLockHeldError,
     OMEError,
 )
 from everos.infra.ome.records import RunRecord, RunStatus, StrategyRouteInfo
-from everos.infra.ome.triggers import Cron, Idle
+from everos.memory.ports import Cron, CronTick, Event, Idle, ManualTick
 
 logger = get_logger(__name__)
 
@@ -55,10 +55,9 @@ _ENGINES: dict[str, OfflineEngine] = {}
 def _refuse_inside_strategy(method: Any) -> Any:
     """Raise :class:`EngineCallFromStrategyError` when called from a strategy.
 
-    Strategies must interact with the engine only via the ``(event, ctx)``
-    parameters Runner provides; direct calls bypass the declared
-    ``emits=[...]`` contract enforced by ``ctx.emit``. Wraps sync and async
-    methods alike.
+    Strategies return their follow-up events and OME publishes them through
+    the run context, which enforces the declared ``emits``; a direct engine
+    call would bypass that contract. Wraps sync and async methods alike.
     """
     if inspect.iscoroutinefunction(method):
 
@@ -212,15 +211,15 @@ class OfflineEngine:
         self._active_runs = 0
         self._idle_event: asyncio.Event | None = None
 
-    def register(self, strategy: Strategy) -> None:
-        """Register a :class:`Strategy` returned by ``@offline_strategy``.
+    def register(self, strategy: StrategyMeta) -> None:
+        """Register a strategy built by ``to_ome_strategy``.
 
         Must be called before :meth:`start`; registering after start raises
         :class:`OMEError` because the scheduler has already snapshotted
         the strategy set for Cron / Idle job creation.
 
         Args:
-            strategy: A Strategy instance produced by the decorator.
+            strategy: The adapted strategy.
 
         Raises:
             OMEError: If the engine has already started.
@@ -322,7 +321,6 @@ class OfflineEngine:
             emit_hook=self._dispatch_event,
             config=self._config,
             on_dead_letter=self._on_dead_letter,
-            engine=self,
         )
         self._idle_store = IdleStore(storage=self._storage)
 
@@ -569,22 +567,21 @@ class OfflineEngine:
                 self._lock_handle = None
 
     @_refuse_inside_strategy
-    async def emit(self, event: BaseEvent) -> None:
+    async def emit(self, event: Event) -> None:
         """Public engine event entry point.
 
-        Strategies must NOT call this directly; use ``ctx.emit`` instead.
-        The :func:`_refuse_inside_strategy` guard raises
-        :class:`EngineCallFromStrategyError` on in-strategy calls — only
-        ``ctx.emit`` enforces the strategy's declared ``emits=[...]``
-        contract.
+        Strategies must NOT call this directly: they return their follow-up
+        events. The :func:`_refuse_inside_strategy` guard raises
+        :class:`EngineCallFromStrategyError` on in-strategy calls — only the
+        run context enforces the strategy's declared ``emits``.
         """
         await self._dispatch_event(event)
 
-    async def _dispatch_event(self, event: BaseEvent) -> None:
+    async def _dispatch_event(self, event: Event) -> None:
         """Internal: actually run an event through dispatch.
 
-        Used by Runner's ``emit_hook`` so ``ctx.emit`` flows through
-        dispatch without tripping the public-method guard.
+        Used by Runner's ``emit_hook`` so a strategy's returned events flow
+        through dispatch without tripping the public-method guard.
         """
         if not self._started:
             raise OMEError("emit: engine not started")
@@ -616,9 +613,9 @@ class OfflineEngine:
         self,
         name: str,
         *,
-        event: BaseEvent | None = None,
+        event: Event | None = None,
         force: bool = False,
-    ) -> tuple[BaseEvent, list[tuple[StrategyMeta, str]]]:
+    ) -> tuple[Event, list[tuple[StrategyMeta, str]]]:
         """Manually trigger one strategy.
 
         - ``event=None`` → engine self-emits ``ManualTick(strategy_name=name)``;
@@ -652,7 +649,7 @@ class OfflineEngine:
             self._enqueue_run(meta, event, run_id)
         return event, routes
 
-    def _enqueue_run(self, meta: StrategyMeta, event: BaseEvent, run_id: str) -> None:
+    def _enqueue_run(self, meta: StrategyMeta, event: Event, run_id: str) -> None:
         """Add a one-shot APScheduler job that hands the event to Runner.
 
         Computes ``max_retries_snapshot`` from meta or engine default and
@@ -743,8 +740,8 @@ class OfflineEngine:
         strategy-author API; intended to be called only by
         ``_runner_entry`` (and crash recovery). Not guarded with
         ``_refuse_inside_strategy`` because APS executors may inherit
-        the calling task's ContextVar — a strategy that ``ctx.emit``s
-        and triggers a cascade would falsely trip the guard here.
+        the calling task's ContextVar — a strategy whose returned events
+        trigger a cascade would falsely trip the guard here.
 
         Closes the +1 the matching enqueue path opened, in ``finally``
         so cancellation, retries, and crashes all release the count.
@@ -789,7 +786,7 @@ class OfflineEngine:
         await scanner.scan_once()
 
     @_refuse_inside_strategy
-    async def inspect_dispatch(self, event: BaseEvent) -> list[StrategyRouteInfo]:
+    async def inspect_dispatch(self, event: Event) -> list[StrategyRouteInfo]:
         """Return per-strategy routing info for event (read-only).
 
         Calls the dispatcher in inspect mode (no counter mutation).
@@ -849,12 +846,11 @@ class OfflineEngine:
     async def list_runs_by_event_id(self, event_id: str) -> list[RunRecord]:
         """Return all run records triggered by ``event_id``.
 
-        Not guarded by ``_refuse_inside_strategy`` — designed to be
-        called from inside a strategy (e.g. Reflection waiting for
-        downstream extraction runs).
+        Not guarded by ``_refuse_inside_strategy``: a read-only query
+        that cannot bypass the emit contract.
 
         Args:
-            event_id: The ``BaseEvent.event_id`` of the triggering event.
+            event_id: The ``Event.event_id`` of the triggering event.
 
         Returns:
             All ``RunRecord`` instances whose ``event_id`` matches,
@@ -899,8 +895,8 @@ class OfflineEngine:
     is ``FAILED`` has a retry pending (a failure with no retry left is
     written as ``DEAD_LETTER``). Treating it as terminal let
     :meth:`wait_for_event` return during the backoff window with the retry
-    still to run -- Reflection, which waits on it before deprecating, would
-    have acted on an outcome that was not final.
+    still to run -- a caller acting on the outcome would have acted on one
+    that was not final.
     """
 
     async def wait_for_event(
@@ -912,12 +908,11 @@ class OfflineEngine:
     ) -> list[RunRecord]:
         """Poll until all runs triggered by ``event_id`` reach a terminal status.
 
-        Not guarded by ``_refuse_inside_strategy`` — designed to be
-        called from inside a strategy (e.g. Reflection waiting for
-        downstream extraction runs to complete before deprecating).
+        Not guarded by ``_refuse_inside_strategy``: a read-only query
+        that cannot bypass the emit contract.
 
         Args:
-            event_id: The ``BaseEvent.event_id`` of the triggering event.
+            event_id: The ``Event.event_id`` of the triggering event.
             timeout: Maximum seconds to wait before raising ``TimeoutError``.
             poll_interval: Seconds between polls.
 

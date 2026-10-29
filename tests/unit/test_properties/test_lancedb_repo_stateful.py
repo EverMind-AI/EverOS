@@ -39,13 +39,13 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from everos.config import LanceDBSettings
-from everos.core.persistence import MemoryRoot
-from everos.core.persistence.lancedb import (
-    BaseLanceTable,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import (
+    LanceIndexContract,
     LanceRepoBase,
     open_lancedb_connection,
 )
-from everos.infra.persistence.lancedb import LanceIndexContract
+from everos.infra.persistence.records import BaseLanceTable
 
 settings.register_profile(
     "ci",

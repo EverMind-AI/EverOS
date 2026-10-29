@@ -71,17 +71,19 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.core.errors import SessionBufferQuarantinedError
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteMemcellStore,
+    SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
 )
 from everos.infra.persistence.sqlite.repos.conversation_status import (
-    _ConversationStatusRepo,
+    ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import _MemcellRepo
+from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
-    _UnprocessedBufferRepo,
+    UnprocessedBufferRepo,
 )
 from everos.infra.persistence.sqlite.tables import (
     ConversationStatus,
@@ -133,17 +135,14 @@ class BoundaryMachine(RuleBasedStateMachine):
         self.engine = create_system_engine(root.system_db, SqliteSettings())
         self.factory = create_session_factory(self.engine)
         self.run(self._create_tables())
-        self.buffer_repo = _UnprocessedBufferRepo(session_factory=self.factory)
-        self.memcell_repo = _MemcellRepo(session_factory=self.factory)
-        self.status_repo = _ConversationStatusRepo(session_factory=self.factory)
+        self.buffer_repo = UnprocessedBufferRepo(session_factory=self.factory)
+        self.memcell_repo = MemcellRepo(session_factory=self.factory)
+        self.status_repo = ConversationStatusRepo(session_factory=self.factory)
+        self.session_buffer = SqliteSessionBufferStore(
+            self.buffer_repo, self.status_repo
+        )
+        self.memcell = SqliteMemcellStore(self.memcell_repo)
         self._patches = [
-            mock.patch.object(
-                boundary_mod, "unprocessed_buffer_repo", self.buffer_repo
-            ),
-            mock.patch.object(boundary_mod, "memcell_repo", self.memcell_repo),
-            mock.patch.object(
-                boundary_mod, "conversation_status_repo", self.status_repo
-            ),
             mock.patch.object(boundary_mod, "detect_boundaries", self._detect),
         ]
         for p in self._patches:
@@ -293,10 +292,12 @@ class BoundaryMachine(RuleBasedStateMachine):
                 for m in fresh
             ],
         }
-        ingested = await ingest.process(payload)
+        ingested = await ingest.process(payload, multimodal_llm=None)
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:
-            outcome = await boundary_mod.buffer_messages(ingested, mode="chat")
+            outcome = await boundary_mod.buffer_messages(
+                ingested, mode="chat", session_buffer=self.session_buffer
+            )
         else:
             outcome = await boundary_mod.prepare_cells(
                 ingested,
@@ -306,6 +307,8 @@ class BoundaryMachine(RuleBasedStateMachine):
                 prompt_loader=_Prompts(),  # type: ignore[arg-type]
                 hard_token_limit=10_000,
                 hard_msg_limit=100,
+                session_buffer=self.session_buffer,
+                memcell_store=self.memcell,
             )
         return outcome.status
 

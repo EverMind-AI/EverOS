@@ -2,26 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from everos.core.errors import NotFoundError
-from everos.core.observability.logging import get_logger
-
-if TYPE_CHECKING:
-    # Type-only — used solely to annotate `_summarize_runs`. Importing the
-    # engine eagerly costs ~750ms (apscheduler + aiosqlite, 26 modules), so
-    # keep it out of the runtime path even though `service.memorize` already
-    # imports it eagerly and today's app startup pays that cost regardless:
-    # this router's own `_get_engine` import is deliberately deferred (see
-    # `trigger`), and an eager import here would contradict it.
-    from everos.infra.ome.engine import OfflineEngine
+from everos.entrypoints.api.utils import application
 
 router = APIRouter(prefix="/ome", tags=["ome"])
-
-logger = get_logger(__name__)
 
 
 class TriggerRequest(BaseModel):
@@ -76,45 +62,22 @@ class TriggerResponse(BaseModel):
 
 
 @router.post("/trigger", response_model=TriggerResponse)
-async def trigger(req: TriggerRequest) -> TriggerResponse:
+async def trigger(req: TriggerRequest, request: Request) -> TriggerResponse:
     """Manually trigger a registered OME strategy and wait for its runs to
     settle. Returns without waiting for the LanceDB index — the response
     reflects markdown state only; poll ``GET /health``'s ``cascade.pending``
     for index convergence (two consecutive zero samples to guard against the
     watcher-input window). See docs/api.md#eventual-consistency.
     """
-    # Deferred: avoid importing heavy OME engine at module level.
-    from everos.service.memorize import _get_engine
-
-    engine = _get_engine()
-    try:
-        event, routes = await engine.trigger_manual(req.name, force=req.force)
-    except KeyError:
-        raise NotFoundError(f"strategy '{req.name}' not found") from None
-
-    if not routes:
-        logger.info("ome_trigger_manual_not_dispatched", strategy=req.name)
-        return TriggerResponse(
-            status="not_dispatched", name=req.name, dispatched=0, runs=[]
-        )
-
-    logger.info("ome_trigger_manual", strategy=req.name, dispatched=len(routes))
-    idle = await engine.wait_idle(timeout=req.timeout)
-    runs = await _summarize_runs(engine, event.event_id)
-    if not idle:
-        logger.warning("ome_trigger_timeout", strategy=req.name, timeout=req.timeout)
-        return TriggerResponse(
-            status="timeout", name=req.name, dispatched=len(routes), runs=runs
-        )
-    return TriggerResponse(
-        status="ok", name=req.name, dispatched=len(routes), runs=runs
+    result = await application(request).ops.ome_trigger(
+        req.name, force=req.force, wait_seconds=req.timeout
     )
-
-
-async def _summarize_runs(engine: OfflineEngine, event_id: str) -> list[RunSummary]:
-    """Fetch and shape run records for one event into the response DTO."""
-    records = await engine.list_runs_by_event_id(event_id)
-    return [
-        RunSummary(run_id=r.run_id, status=r.status.value, error=r.error)
-        for r in records
-    ]
+    return TriggerResponse(
+        status=result.status,
+        name=req.name,
+        dispatched=result.dispatched,
+        runs=[
+            RunSummary(run_id=r.run_id, status=r.status, error=r.error)
+            for r in result.runs
+        ],
+    )

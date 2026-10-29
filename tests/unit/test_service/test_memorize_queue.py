@@ -33,27 +33,56 @@ from everos.component.utils.datetime import get_utc_now
 from everos.config import SqliteSettings
 from everos.config.settings import AsyncQueueSettings
 from everos.core.errors import PayloadTooLargeError, QueueSaturatedError
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteMemorizeInboxStore,
     create_session_factory,
     create_system_engine,
 )
-from everos.infra.persistence.sqlite.repos.memorize_inbox import _MemorizeInboxRepo
+from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
+from everos.service import MemorizeResult
 from everos.service import memorize_queue as mq
-from everos.service.memorize import MemorizeResult
+from everos.service.ops import OpsService
+from tests.fakes.application import make_ops
+
+# What each test's worker is built over: the test's inbox store and the fake
+# memorize it installed (looked up at delivery time, so installing it after
+# the worker was built still takes effect).
+_wiring: dict[str, Any] = {}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_wiring() -> None:
+    _wiring.clear()
+
+
+def _worker(
+    settings: AsyncQueueSettings, *, accept_async: bool = True
+) -> mq.MemorizeQueueWorker:
+    async def deliver(payload: dict[str, Any], **kwargs: Any) -> object:
+        return await _wiring["deliver"](payload, **kwargs)
+
+    return mq.MemorizeQueueWorker(
+        settings, inbox=_wiring["inbox"], deliver=deliver, accept_async=accept_async
+    )
+
+
+def _ops() -> OpsService:
+    return make_ops(inbox=_wiring["inbox"])
 
 
 @pytest.fixture
-async def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _MemorizeInboxRepo:
+async def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemorizeInboxRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    inbox = _MemorizeInboxRepo(session_factory=factory)
-    monkeypatch.setattr(mq, "memorize_inbox_repo", inbox)
+    inbox = MemorizeInboxRepo(session_factory=factory)
+    store = SqliteMemorizeInboxStore(inbox)
+    _wiring["inbox"] = store
     return inbox
 
 
@@ -99,7 +128,7 @@ class _FakeMemorize:
 @pytest.fixture
 def fake(monkeypatch: pytest.MonkeyPatch) -> _FakeMemorize:
     f = _FakeMemorize()
-    monkeypatch.setattr(mq, "memorize", f)
+    _wiring["deliver"] = f
     return f
 
 
@@ -107,9 +136,9 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> _FakeMemorize:
 
 
 async def test_enqueue_persists_row_and_reports_pending_depth(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
 
     a1 = await w.enqueue(
         _payload(n_messages=3), request_id="r1", is_final=False, defer_extraction=True
@@ -126,9 +155,9 @@ async def test_enqueue_persists_row_and_reports_pending_depth(
 
 
 async def test_enqueue_rejects_oversized_payload(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(max_payload_bytes=64))
+    w = _worker(_settings(max_payload_bytes=64))
 
     with pytest.raises(PayloadTooLargeError):
         await w.enqueue(
@@ -141,9 +170,9 @@ async def test_enqueue_rejects_oversized_payload(
 
 
 async def test_enqueue_rejects_when_session_cap_reached(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(max_pending_per_session=1))
+    w = _worker(_settings(max_pending_per_session=1))
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -159,9 +188,9 @@ async def test_enqueue_rejects_when_session_cap_reached(
 
 
 async def test_enqueue_rejects_when_global_cap_reached(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(max_pending_total=1))
+    w = _worker(_settings(max_pending_total=1))
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -173,9 +202,9 @@ async def test_enqueue_rejects_when_global_cap_reached(
 
 
 async def test_has_pending_reflects_queued_rows(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     assert await w.has_pending(session_id="s1") is False
 
     await w.enqueue(
@@ -190,9 +219,9 @@ async def test_has_pending_reflects_queued_rows(
 
 
 async def test_serial_drain_delivers_in_insertion_order_with_row_flags(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(max_concurrency=1))
+    w = _worker(_settings(max_concurrency=1))
     await w.enqueue(
         _payload("a"), request_id="r1", is_final=False, defer_extraction=True
     )
@@ -216,11 +245,11 @@ async def test_serial_drain_delivers_in_insertion_order_with_row_flags(
 
 
 async def test_failing_row_is_retried_then_marked_failed_and_skipped(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _FakeMemorize(failing={"bad"})
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings(max_concurrency=1, max_attempts=3))
+    _wiring["deliver"] = fake
+    w = _worker(_settings(max_concurrency=1, max_attempts=3))
     await w.enqueue(
         _payload("bad"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -244,7 +273,7 @@ async def test_failing_row_is_retried_then_marked_failed_and_skipped(
 
 
 async def test_start_requeues_processing_rows_and_delivers_them(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     await repo.add(
         MemorizeInbox(
@@ -254,7 +283,7 @@ async def test_start_requeues_processing_rows_and_delivers_them(
             status="processing",
         )
     )
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
 
     await w.start()
     try:
@@ -267,9 +296,9 @@ async def test_start_requeues_processing_rows_and_delivers_them(
 
 
 async def test_enqueue_wakes_running_worker_without_scan(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=600.0))
+    w = _worker(_settings(scan_interval_seconds=600.0))
     await w.start()
     try:
         await w.enqueue(
@@ -282,7 +311,7 @@ async def test_enqueue_wakes_running_worker_without_scan(
 
 
 async def test_start_purges_rows_past_retention(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     old = get_utc_now() - timedelta(hours=48)
     await repo.add(
@@ -299,7 +328,7 @@ async def test_start_purges_rows_past_retention(
             request_id="fresh", session_id="s1", payload_json="{}", status="success"
         )
     )
-    w = mq.MemorizeQueueWorker(_settings(row_retention_hours=24.0))
+    w = _worker(_settings(row_retention_hours=24.0))
 
     await w.start()
     await w.stop()
@@ -309,9 +338,9 @@ async def test_start_purges_rows_past_retention(
 
 
 async def test_stop_is_idempotent_and_safe_before_start(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.stop()
     await w.start()
     await w.stop()
@@ -322,7 +351,7 @@ async def test_stop_is_idempotent_and_safe_before_start(
 
 
 async def test_get_task_maps_row_in_the_cloud_shape(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     await repo.add(
         MemorizeInbox(
@@ -346,9 +375,9 @@ async def test_get_task_maps_row_in_the_cloud_shape(
         )
     )
 
-    failed = await mq.get_task("r1")
-    queued = await mq.get_task("r2")
-    lost = await mq.get_task("r3")
+    failed = await _ops().get_task("r1")
+    queued = await _ops().get_task("r2")
+    lost = await _ops().get_task("r3")
 
     assert failed is not None and queued is not None and lost is not None
     assert (failed.id, failed.status, failed.task_type) == (
@@ -374,13 +403,13 @@ async def test_get_task_maps_row_in_the_cloud_shape(
             last_error="replayed 3 times without finishing; giving up",
         )
     )
-    poison = await mq.get_task("r4")
+    poison = await _ops().get_task("r4")
     assert poison is not None and poison.error_code == "replays_exhausted"
-    assert await mq.get_task("nope") is None
+    assert await _ops().get_task("nope") is None
 
 
 async def test_list_tasks_filters_by_session_and_status_and_pages(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     for i in range(5):
         await repo.add(
@@ -393,18 +422,18 @@ async def test_list_tasks_filters_by_session_and_status_and_pages(
         )
     await repo.add(MemorizeInbox(request_id="b0", session_id="s2", payload_json="{}"))
 
-    page = await mq.list_tasks(session_id="s1", page=1, page_size=2)
+    page = await _ops().list_tasks(session_id="s1", page=1, page_size=2)
     assert (page.total, page.page, page.page_size) == (5, 1, 2)
     assert [t.id for t in page.items] == ["a4", "a3"]  # newest first
-    queued = await mq.list_tasks(session_id="s1", status="queued", page_size=10)
+    queued = await _ops().list_tasks(session_id="s1", status="queued", page_size=10)
     assert (queued.total, [t.id for t in queued.items]) == (3, ["a4", "a2", "a0"])
-    everything = await mq.list_tasks(page_size=100)
+    everything = await _ops().list_tasks(page_size=100)
     assert everything.total == 6
-    assert (await mq.list_tasks(session_id="nobody")).total == 0
+    assert (await _ops().list_tasks(session_id="nobody")).total == 0
 
 
 async def _wait_until_status(
-    repo: _MemorizeInboxRepo, request_id: str, status: str
+    repo: MemorizeInboxRepo, request_id: str, status: str
 ) -> None:
     async with asyncio.timeout(2.0):
         while True:
@@ -486,11 +515,11 @@ async def _enqueue_all(w: mq.MemorizeQueueWorker, *rows: tuple[str, str]) -> Non
 
 
 async def test_sessions_run_side_by_side_each_in_order(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = fake
+    w = _worker(_settings())
     await _enqueue_all(w, ("a1", "a"), ("b1", "b"), ("a2", "a"))
 
     drain = asyncio.create_task(w.drain_once())
@@ -508,11 +537,11 @@ async def test_sessions_run_side_by_side_each_in_order(
 
 
 async def test_max_concurrency_bounds_the_rows_in_flight(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings(max_concurrency=2))
+    _wiring["deliver"] = fake
+    w = _worker(_settings(max_concurrency=2))
     await _enqueue_all(w, ("a1", "a"), ("b1", "b"), ("c1", "c"))
 
     drain = asyncio.create_task(w.drain_once())
@@ -528,12 +557,12 @@ async def test_max_concurrency_bounds_the_rows_in_flight(
 
 
 async def test_new_session_starts_while_another_session_blocks(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An enqueue wakes the scheduler; it must not wait for the running batch."""
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = fake
+    w = _worker(_settings())
     await _enqueue_all(w, ("a1", "a"))
 
     drain = asyncio.create_task(w.drain_once())
@@ -547,11 +576,11 @@ async def test_new_session_starts_while_another_session_blocks(
 
 
 async def test_sweep_spares_the_rows_in_flight(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = fake
+    w = _worker(_settings())
     await _enqueue_all(w, ("a1", "a"))
     drain = asyncio.create_task(w.drain_once())
     await fake.wait_calls(1)
@@ -572,11 +601,11 @@ async def test_sweep_spares_the_rows_in_flight(
 
 
 async def test_stop_waits_for_every_row_in_flight(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = fake
+    w = _worker(_settings())
     await w.start()
     await _enqueue_all(w, ("a1", "a"), ("b1", "b"))
     await fake.wait_calls(2)
@@ -593,7 +622,7 @@ async def test_stop_waits_for_every_row_in_flight(
 
 
 async def test_start_requeues_every_processing_row(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """A crash with several batches in flight replays all of them."""
     for rid, session in (("a1", "a"), ("b1", "b")):
@@ -605,7 +634,7 @@ async def test_start_requeues_every_processing_row(
                 status="processing",
             )
         )
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
 
     await w.start()
     try:
@@ -618,12 +647,12 @@ async def test_start_requeues_every_processing_row(
 
 
 async def test_stop_waits_for_the_row_in_flight(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A normal shutdown must not leave a half-delivered row for a replay."""
     fake = _BlockingMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = fake
+    w = _worker(_settings())
     await w.start()
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
@@ -641,12 +670,12 @@ async def test_stop_waits_for_the_row_in_flight(
 
 
 async def test_stop_cancels_after_the_grace_period(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _BlockingMemorize()  # never released
-    monkeypatch.setattr(mq, "memorize", fake)
+    _wiring["deliver"] = fake
     monkeypatch.setattr(mq, "_STOP_GRACE_SECONDS", 0.05)
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.start()
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
@@ -663,11 +692,11 @@ async def test_stop_cancels_after_the_grace_period(
 
 
 async def test_enqueue_rejects_lone_surrogate_with_422_class(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     from everos.core.errors import InvalidInputError
 
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     payload = _payload()
     payload["messages"][0]["content"] = "bad \ud800 text"
 
@@ -679,7 +708,7 @@ async def test_enqueue_rejects_lone_surrogate_with_422_class(
 
 
 async def test_sweep_fails_processing_rows_nobody_is_working_on(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """A row left ``processing`` by a lost status write must not stay pending."""
     stuck = await repo.add(
@@ -687,7 +716,7 @@ async def test_sweep_fails_processing_rows_nobody_is_working_on(
             request_id="stuck", session_id="s1", payload_json="{}", status="processing"
         )
     )
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
 
     await w._sweep()
 
@@ -699,7 +728,7 @@ async def test_sweep_fails_processing_rows_nobody_is_working_on(
 
 
 async def test_status_write_is_retried_before_giving_up(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(mq, "_MARK_RETRY_SECONDS", 0.0)
     real_mark = repo.mark
@@ -712,7 +741,7 @@ async def test_status_write_is_retried_before_giving_up(
         await real_mark(row_id, **values)
 
     monkeypatch.setattr(repo, "mark", flaky_mark)
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -725,7 +754,7 @@ async def test_status_write_is_retried_before_giving_up(
 
 
 async def test_worker_not_accepting_async_still_delivers_backlog(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """``enabled = false`` only closes the door; rows already inside still run."""
     await repo.add(
@@ -735,7 +764,7 @@ async def test_worker_not_accepting_async_still_delivers_backlog(
             payload_json='{"session_id": "s1", "messages": []}',
         )
     )
-    w = mq.MemorizeQueueWorker(_settings(), accept_async=False)
+    w = _worker(_settings(), accept_async=False)
     assert w.accepting is False
 
     await w.start()
@@ -749,10 +778,10 @@ async def test_worker_not_accepting_async_still_delivers_backlog(
 
 
 async def test_delivered_row_drops_its_request_body(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """Terminal rows must not hold seven days of request bodies on disk."""
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.enqueue(
         _payload("s1", n_messages=3),
         request_id="r1",
@@ -769,10 +798,10 @@ async def test_delivered_row_drops_its_request_body(
 
 
 async def test_failed_row_keeps_its_body_and_error_in_one_write(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _FakeMemorize(failing={"bad"})
-    monkeypatch.setattr(mq, "memorize", fake)
+    _wiring["deliver"] = fake
     writes: list[dict[str, Any]] = []
     real_mark = repo.mark
 
@@ -781,7 +810,7 @@ async def test_failed_row_keeps_its_body_and_error_in_one_write(
         await real_mark(row_id, **values)
 
     monkeypatch.setattr(repo, "mark", spy_mark)
-    w = mq.MemorizeQueueWorker(_settings())  # max_attempts 1
+    w = _worker(_settings())  # max_attempts 1
     await w.enqueue(
         _payload("bad"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -796,7 +825,7 @@ async def test_failed_row_keeps_its_body_and_error_in_one_write(
 
 
 async def test_lost_status_write_is_reaped_before_the_next_row(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stuck row must not wait for the backlog to drain before it is failed."""
     monkeypatch.setattr(mq, "_MARK_RETRY_SECONDS", 0.0)
@@ -809,7 +838,7 @@ async def test_lost_status_write_is_reaped_before_the_next_row(
         await real_mark(row_id, **values)
 
     monkeypatch.setattr(repo, "mark", mark_that_loses_r1)
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -828,13 +857,13 @@ async def test_lost_status_write_is_reaped_before_the_next_row(
 
 
 async def test_purge_failure_does_not_stop_delivery(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def broken_purge(*, before: object) -> tuple[int, int]:
         raise RuntimeError("database or disk is full")
 
     monkeypatch.setattr(repo, "purge_expired", broken_purge)
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -875,9 +904,9 @@ async def _kill_loop(
 
 
 async def test_dead_loop_restarts_on_next_enqueue(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    w = _worker(_settings(scan_interval_seconds=0.05))
     await w.start()
     try:
         await _kill_loop(w, monkeypatch)
@@ -897,10 +926,10 @@ async def test_dead_loop_restarts_on_next_enqueue(
 
 
 async def test_dead_loop_restarts_itself(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No traffic needed: the loop's own exit schedules the relaunch."""
-    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    w = _worker(_settings(scan_interval_seconds=0.05))
     await w.start()
     try:
         await _kill_loop(w, monkeypatch)
@@ -915,11 +944,11 @@ async def test_dead_loop_restarts_itself(
 
 
 async def test_health_observes_a_dead_loop_and_the_backlog(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _GatedMemorize()
-    monkeypatch.setattr(mq, "memorize", fake)
-    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    _wiring["deliver"] = fake
+    w = _worker(_settings(scan_interval_seconds=0.05))
     await w.start()
     try:
         await _enqueue_all(w, ("a1", "a"))
@@ -951,7 +980,7 @@ async def test_health_observes_a_dead_loop_and_the_backlog(
 
 
 async def test_start_gives_up_on_a_row_replayed_too_often(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """A batch that keeps killing the process is failed, not replayed forever."""
     await repo.add(
@@ -963,14 +992,14 @@ async def test_start_gives_up_on_a_row_replayed_too_often(
             attempt=3,
         )
     )
-    w = mq.MemorizeQueueWorker(_settings())  # max_replays defaults to 3
+    w = _worker(_settings())  # max_replays defaults to 3
 
     await w.start()
     try:
         row = await repo.find_one(request_id="poison")
         assert row is not None and row.status == "failed"
         assert row.last_error == "replayed 3 times without finishing; giving up"
-        assert (await mq.get_task("poison")).error_code == "replays_exhausted"  # type: ignore[union-attr]
+        assert (await _ops().get_task("poison")).error_code == "replays_exhausted"  # type: ignore[union-attr]
     finally:
         await w.stop()
     assert fake.calls == []
@@ -980,12 +1009,12 @@ async def test_start_gives_up_on_a_row_replayed_too_often(
 
 
 async def test_corrupt_payload_fails_its_own_row_and_the_pass_goes_on(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     await repo.add(
         MemorizeInbox(request_id="bad", session_id="s1", payload_json="not json")
     )
-    w = mq.MemorizeQueueWorker(_settings())
+    w = _worker(_settings())
     await w.enqueue(
         _payload("s2"), request_id="good", is_final=False, defer_extraction=False
     )
@@ -1000,7 +1029,7 @@ async def test_corrupt_payload_fails_its_own_row_and_the_pass_goes_on(
 
 
 async def test_storage_errors_are_not_echoed_in_last_error(
-    repo: _MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemorizeInboxRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from sqlalchemy.exc import OperationalError
 
@@ -1013,8 +1042,8 @@ async def test_storage_errors_are_not_echoed_in_last_error(
             )
         raise RuntimeError("plain message")
 
-    monkeypatch.setattr(mq, "memorize", memorize_hitting_sqlite)
-    w = mq.MemorizeQueueWorker(_settings())
+    _wiring["deliver"] = memorize_hitting_sqlite
+    w = _worker(_settings())
     await _enqueue_all(w, ("r1", "s1"), ("r2", "s2"))
 
     await w.drain_once()
@@ -1031,10 +1060,10 @@ async def test_storage_errors_are_not_echoed_in_last_error(
 
 
 async def test_externally_cancelled_loop_relaunches(
-    repo: _MemorizeInboxRepo, fake: _FakeMemorize
+    repo: MemorizeInboxRepo, fake: _FakeMemorize
 ) -> None:
     """A cancel that did not come from stop() counts as the loop dying."""
-    w = mq.MemorizeQueueWorker(_settings(scan_interval_seconds=0.05))
+    w = _worker(_settings(scan_interval_seconds=0.05))
     await w.start()
     try:
         assert w._task is not None

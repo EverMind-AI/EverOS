@@ -3,8 +3,8 @@
 The route has one rule: a request is queued (202) when it asks for
 ``async_mode`` **or** when its session already has unfinished queued rows;
 otherwise it runs ``memorize()`` inline exactly as before (200). These
-tests pin that rule and the two response shapes against a stub worker
-stashed where the lifespan would put it, with ``memorize`` faked out.
+tests pin that rule and the two response shapes against a stub
+``MemoryService`` (queue + memorize) injected as the application's facade.
 
 The sync 200 body must stay byte-for-byte what it was before ``async_mode``
 existed: every existing caller depends on it.
@@ -22,106 +22,28 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
-from everos.core.errors import QueueSaturatedError
 from everos.entrypoints.api.app import create_app
-from everos.entrypoints.api.routes import memorize as route_mod
-from everos.entrypoints.api.routes import tasks as tasks_mod
-from everos.service.memorize import MemorizeResult
-from everos.service.memorize_queue import (
-    MemorizeQueueWorker,
-    QueueHealth,
-    TaskItem,
-    TaskPage,
-)
-
-
-class _StubQueue(MemorizeQueueWorker):
-    """Records enqueues; ``pending`` seeds per-session backlog."""
-
-    def __init__(self, pending: dict[str, int] | None = None) -> None:
-        self.pending = dict(pending or {})
-        self.enqueued: list[tuple[dict[str, Any], str, bool, bool]] = []
-        self.saturated = False
-        self.accepting = True
-        self.health_calls = 0
-
-    async def has_pending(
-        self,
-        *,
-        session_id: str,
-        app_id: str = "default",
-        project_id: str = "default",
-    ) -> bool:
-        return self.pending.get(session_id, 0) > 0
-
-    async def health(self) -> QueueHealth:
-        self.health_calls += 1
-        return QueueHealth(
-            healthy=True,
-            reasons=[],
-            loop_alive=True,
-            accepting=self.accepting,
-            pending=sum(self.pending.values()),
-            oldest_pending_age_s=1.5 if self.pending else None,
-            failed=0,
-            loop_restarts=0,
-            last_loop_error_at=None,
-        )
-
-    async def enqueue(
-        self,
-        payload: dict[str, Any],
-        *,
-        request_id: str,
-        is_final: bool,
-        defer_extraction: bool,
-    ) -> int:
-        if self.saturated:
-            raise QueueSaturatedError("memorize queue saturated for session s1")
-        self.enqueued.append((payload, request_id, is_final, defer_extraction))
-        n = self.pending.get(payload["session_id"], 0) + 1
-        self.pending[payload["session_id"]] = n
-        return n
-
-
-class _FakeMemorize:
-    def __init__(self) -> None:
-        self.calls: list[tuple[dict[str, Any], bool, bool]] = []
-
-    async def __call__(
-        self,
-        payload: dict[str, Any],
-        *,
-        is_final: bool = False,
-        defer_extraction: bool = False,
-    ) -> MemorizeResult:
-        self.calls.append((payload, is_final, defer_extraction))
-        return MemorizeResult(
-            message_count=len(payload["messages"]), status="extracted"
-        )
-
-
-@pytest.fixture
-def fake_memorize(monkeypatch: pytest.MonkeyPatch) -> _FakeMemorize:
-    f = _FakeMemorize()
-    monkeypatch.setattr(route_mod, "memorize", f)
-    return f
+from everos.service import TaskItem, TaskPage
+from tests.fakes import StubMemoryService, make_application
 
 
 @pytest.fixture
 def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    application = create_app(lifespan_providers=[])
+    application = create_app(application=make_application())
     yield application
     load_settings.cache_clear()
 
 
 @pytest.fixture
-def queue(app: FastAPI) -> _StubQueue:
-    q = _StubQueue()
-    app.state.lifespan_data = {"memorize_queue": q}
-    return q
+def queue(app: FastAPI) -> StubMemoryService:
+    return app.state.application.memory
+
+
+@pytest.fixture
+def fake_memorize(app: FastAPI) -> StubMemoryService:
+    return app.state.application.memory
 
 
 @pytest.fixture
@@ -152,7 +74,7 @@ def _add_body(**overrides: Any) -> dict[str, Any]:
 
 
 async def test_sync_add_without_backlog_runs_inline_and_keeps_old_body(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     resp = await client.post("/api/v2/memory/add", json=_add_body())
 
@@ -167,7 +89,7 @@ async def test_sync_add_without_backlog_runs_inline_and_keeps_old_body(
 
 
 async def test_async_add_is_queued_and_answers_202(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
@@ -184,7 +106,7 @@ async def test_async_add_is_queued_and_answers_202(
 
 
 async def test_sync_add_with_backlog_joins_the_queue(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.pending["s1"] = 2
 
@@ -197,7 +119,7 @@ async def test_sync_add_with_backlog_joins_the_queue(
 
 
 async def test_sync_add_on_another_session_is_not_blocked_by_s1_backlog(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.pending["s1"] = 2
 
@@ -208,7 +130,7 @@ async def test_sync_add_on_another_session_is_not_blocked_by_s1_backlog(
 
 
 async def test_defer_extraction_rides_on_the_queued_row(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     resp = await client.post(
         "/api/v2/memory/add", json=_add_body(async_mode=True, defer_extraction=True)
@@ -220,9 +142,9 @@ async def test_defer_extraction_rides_on_the_queued_row(
 
 
 async def test_async_mode_without_worker_runs_synchronously(
-    client: AsyncClient, app: FastAPI, fake_memorize: _FakeMemorize
+    client: AsyncClient, app: FastAPI, fake_memorize: StubMemoryService
 ) -> None:
-    app.state.lifespan_data = {}  # queue disabled / lifespan absent
+    app.state.application.memory.accepting = False  # queue not accepting
 
     resp = await client.post("/api/v2/memory/add", json=_add_body(async_mode=True))
 
@@ -232,7 +154,7 @@ async def test_async_mode_without_worker_runs_synchronously(
 
 
 async def test_saturated_queue_maps_to_429(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.saturated = True
 
@@ -246,7 +168,7 @@ async def test_saturated_queue_maps_to_429(
 
 
 async def test_sync_flush_without_backlog_keeps_old_body(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     resp = await client.post("/api/v2/memory/flush", json={"session_id": "s1"})
 
@@ -257,7 +179,7 @@ async def test_sync_flush_without_backlog_keeps_old_body(
 
 
 async def test_sync_flush_with_backlog_joins_the_queue(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.pending["s1"] = 1
 
@@ -272,7 +194,9 @@ async def test_sync_flush_with_backlog_joins_the_queue(
 # ── GET /tasks ─────────────────────────────────────────────────────────────
 
 
-async def test_task_by_id(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_task_by_id(
+    client: AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
     seen: list[str] = []
 
     async def fake_get(task_id: str) -> TaskItem | None:
@@ -286,7 +210,7 @@ async def test_task_by_id(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) 
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
 
-    monkeypatch.setattr(tasks_mod, "get_task", fake_get)
+    monkeypatch.setattr(app.state.application.ops, "get_task", fake_get)
 
     resp = await client.get("/api/v2/tasks/r1")
     assert resp.status_code == 200
@@ -306,7 +230,7 @@ async def test_task_by_id(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_task_list_passes_filters_and_caps_page_size(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: list[dict[str, Any]] = []
 
@@ -316,7 +240,7 @@ async def test_task_list_passes_filters_and_caps_page_size(
             total=0, page=kwargs["page"], page_size=kwargs["page_size"], items=[]
         )
 
-    monkeypatch.setattr(tasks_mod, "list_tasks", fake_list)
+    monkeypatch.setattr(app.state.application.ops, "list_tasks", fake_list)
 
     resp = await client.get(
         "/api/v2/tasks",
@@ -354,7 +278,7 @@ async def test_task_list_rejects_unknown_status(client: AsyncClient) -> None:
 
 
 async def test_async_mode_is_ignored_when_queue_is_not_accepting(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.accepting = False
 
@@ -366,7 +290,7 @@ async def test_async_mode_is_ignored_when_queue_is_not_accepting(
 
 
 async def test_backlog_still_queues_sync_calls_when_not_accepting(
-    client: AsyncClient, queue: _StubQueue, fake_memorize: _FakeMemorize
+    client: AsyncClient, queue: StubMemoryService, fake_memorize: StubMemoryService
 ) -> None:
     queue.accepting = False
     queue.pending["s1"] = 1
@@ -381,7 +305,7 @@ async def test_backlog_still_queues_sync_calls_when_not_accepting(
 
 
 async def test_health_reports_the_memorize_queue_block(
-    client: AsyncClient, queue: _StubQueue
+    client: AsyncClient, queue: StubMemoryService
 ) -> None:
     queue.pending = {"s1": 2}
 
@@ -400,7 +324,7 @@ async def test_health_reports_the_memorize_queue_block(
 
 
 async def test_health_without_the_queue_lifespan_has_no_block(app: FastAPI) -> None:
-    app.state.lifespan_data = {}
+    app.state.application.memory.queue_running = False
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         resp = await c.get("/health")
     assert resp.status_code == 200

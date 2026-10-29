@@ -32,6 +32,7 @@ boundary decisions deterministically so we own exact slicing.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import json
 from collections.abc import AsyncIterator, Callable
@@ -45,14 +46,27 @@ from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
 from sqlalchemy import text
-from sqlmodel import SQLModel
 
-from everos.core.persistence import MemoryRoot
-from everos.service.memorize import memorize
+from everos.infra.persistence import MemoryRoot
+from everos.service import (
+    MemorizeResult,
+    MemoryService,
+    build_application,
+    build_providers,
+)
+from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
 # FakeLLM with scripted boundary responses (FIFO queue, one pop per call)
 # ---------------------------------------------------------------------------
+
+_under_test: dict[str, MemoryService] = {}
+"""The memory facade of the application the ``memorize_env`` fixture built."""
+
+
+async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
+    """``MemoryService.memorize`` of the application under test."""
+    return await _under_test["memory"].memorize(payload, **kwargs)
 
 
 def _boundary_response(boundaries: list[int]) -> str:
@@ -91,32 +105,19 @@ def _make_scripted_llm(
 
 @pytest_asyncio.fixture
 async def memorize_env_scripted(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[Callable[..., AsyncMock]]:
     monkeypatch.setattr(
         MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    client_mod = importlib.import_module("everos.component.llm.client")
     lock_mod = importlib.import_module("everos.service._session_lock")
 
-    for attr in (
-        "_episode_writer",
-        "_prompt_loader",
-        "_user_pipeline",
-        "_agent_pipeline",
-        "_ome_engine",
-    ):
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
     lock_mod._reset_for_tests()
 
     started: dict[str, Any] = {"engine": None}
@@ -129,13 +130,7 @@ async def memorize_env_scripted(
 
         load_settings.cache_clear()
 
-        monkeypatch.setattr(client_mod, "_llm_client", fake_llm)
-
-        from everos.infra.persistence.sqlite import get_engine
-
-        db_engine = get_engine()
-        async with db_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        await storage.create_schema()
 
         # Silence OME strategies — orthogonal to boundary segmentation.
         mock_af = AsyncMock(return_value=[])
@@ -151,7 +146,13 @@ async def memorize_env_scripted(
             lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
         )
 
-        engine = svc._get_engine()
+        settings = load_settings()
+        application = build_application(
+            settings,
+            providers=dataclasses.replace(build_providers(settings), llm=fake_llm),
+        )
+        _under_test["memory"] = application.memory
+        engine = application._engine
         await engine.start()
         started["engine"] = engine
 
@@ -159,9 +160,6 @@ async def memorize_env_scripted(
 
     if started["engine"] is not None:
         await started["engine"].stop()
-    from everos.infra.persistence.sqlite import dispose_engine
-
-    await dispose_engine()
 
 
 # ---------------------------------------------------------------------------
@@ -182,12 +180,11 @@ def _msg(idx: int, sender: str = "alice") -> dict[str, Any]:
     }
 
 
-async def _buffer_rows(session_id: str) -> list[tuple[str, int]]:
+async def _buffer_rows(storage: Storage, session_id: str) -> list[tuple[str, int]]:
     """Return ``[(message_id, timestamp_ms)]`` for buffer rows, time-ordered."""
     from everos.component.utils.datetime import from_iso_format, to_timestamp_ms
-    from everos.infra.persistence.sqlite import get_engine
 
-    eng = get_engine()
+    eng = storage.database.engine
     async with eng.connect() as conn:
         result = await conn.execute(
             text(
@@ -204,11 +201,12 @@ async def _buffer_rows(session_id: str) -> list[tuple[str, int]]:
         return rows
 
 
-async def _memcell_rows(session_id: str) -> list[tuple[str, list[str]]]:
+async def _memcell_rows(
+    storage: Storage, session_id: str
+) -> list[tuple[str, list[str]]]:
     """Return ``[(memcell_id, message_ids[])]`` in insertion order."""
-    from everos.infra.persistence.sqlite import get_engine
 
-    eng = get_engine()
+    eng = storage.database.engine
     async with eng.connect() as conn:
         result = await conn.execute(
             text(
@@ -226,7 +224,7 @@ async def _memcell_rows(session_id: str) -> list[tuple[str, list[str]]]:
 
 
 async def test_single_add_no_cut_accumulates_full_batch_in_buffer(
-    memorize_env_scripted: Callable[..., AsyncMock],
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """boundaries=[] → no memcell, entire batch sits in buffer."""
     await memorize_env_scripted(fake_llm=_make_scripted_llm([[]]))
@@ -235,8 +233,8 @@ async def test_single_add_no_cut_accumulates_full_batch_in_buffer(
     inputs = [_msg(i) for i in range(3)]
     await memorize({"session_id": session, "messages": inputs})
 
-    cells = await _memcell_rows(session)
-    buffer = await _buffer_rows(session)
+    cells = await _memcell_rows(storage, session)
+    buffer = await _buffer_rows(storage, session)
 
     assert cells == [], f"expected no memcell, got {cells}"
     assert len(buffer) == 3, f"expected 3 buffer rows, got {len(buffer)}"
@@ -246,7 +244,7 @@ async def test_single_add_no_cut_accumulates_full_batch_in_buffer(
 
 
 async def test_single_add_with_cut_splits_prefix_to_cell_suffix_to_buffer(
-    memorize_env_scripted: Callable[..., AsyncMock],
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """boundaries=[2] on a 3-msg batch → cell=[m0,m1], buffer=[m2]."""
     await memorize_env_scripted(fake_llm=_make_scripted_llm([[2]]))
@@ -255,8 +253,8 @@ async def test_single_add_with_cut_splits_prefix_to_cell_suffix_to_buffer(
     inputs = [_msg(i) for i in range(3)]
     await memorize({"session_id": session, "messages": inputs})
 
-    cells = await _memcell_rows(session)
-    buffer = await _buffer_rows(session)
+    cells = await _memcell_rows(storage, session)
+    buffer = await _buffer_rows(storage, session)
 
     # Exactly one memcell carved.
     assert len(cells) == 1, cells
@@ -286,13 +284,14 @@ async def test_single_add_with_cut_splits_prefix_to_cell_suffix_to_buffer(
 
 
 async def test_second_add_consumes_prior_buffer_and_replaces_tail(
-    memorize_env_scripted: Callable[..., AsyncMock],
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Core test: prior tail must end up in next memcell, NOT remain in buffer."""
     # Round 1: cut after 2 of 3 → cell=[m0,m1], buffer=[m2]
     # Round 2: merged input = [m2,m3,m4,m5]; cut after 3 → cell=[m2,m3,m4],
     #          buffer=[m5]
     await memorize_env_scripted(
+        storage,
         fake_llm=_make_scripted_llm([[2], [3]]),
     )
 
@@ -302,8 +301,8 @@ async def test_second_add_consumes_prior_buffer_and_replaces_tail(
     r1_inputs = [_msg(i) for i in range(3)]
     await memorize({"session_id": session, "messages": r1_inputs})
 
-    r1_cells = await _memcell_rows(session)
-    r1_buffer = await _buffer_rows(session)
+    r1_cells = await _memcell_rows(storage, session)
+    r1_buffer = await _buffer_rows(storage, session)
     assert len(r1_cells) == 1
     assert len(r1_buffer) == 1
     prior_tail_msg_id = r1_buffer[0][0]
@@ -312,8 +311,8 @@ async def test_second_add_consumes_prior_buffer_and_replaces_tail(
     r2_inputs = [_msg(i) for i in range(3, 6)]
     await memorize({"session_id": session, "messages": r2_inputs})
 
-    r2_cells = await _memcell_rows(session)
-    r2_buffer = await _buffer_rows(session)
+    r2_cells = await _memcell_rows(storage, session)
+    r2_buffer = await _buffer_rows(storage, session)
 
     # Two memcells total: one from round 1, one from round 2.
     assert len(r2_cells) == 2, r2_cells
@@ -361,12 +360,13 @@ async def test_second_add_consumes_prior_buffer_and_replaces_tail(
 
 
 async def test_flush_after_accumulation_drains_buffer_into_memcell(
-    memorize_env_scripted: Callable[..., AsyncMock],
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """add(boundaries=[]) → buffer accumulates → flush → cell=all, buffer=[]."""
     # Round 1 add: boundaries=[] → no cut, all into buffer.
     # Flush: is_final=True passes empty boundaries → algo closes tail into cell.
     await memorize_env_scripted(
+        storage,
         fake_llm=_make_scripted_llm([[], []]),
     )
 
@@ -375,16 +375,16 @@ async def test_flush_after_accumulation_drains_buffer_into_memcell(
     await memorize({"session_id": session, "messages": inputs})
 
     # Post-add: nothing in memcell yet.
-    cells = await _memcell_rows(session)
-    buffer = await _buffer_rows(session)
+    cells = await _memcell_rows(storage, session)
+    buffer = await _buffer_rows(storage, session)
     assert cells == []
     assert len(buffer) == 3
 
     # Flush
     await memorize({"session_id": session, "messages": []}, is_final=True)
 
-    cells = await _memcell_rows(session)
-    buffer = await _buffer_rows(session)
+    cells = await _memcell_rows(storage, session)
+    buffer = await _buffer_rows(storage, session)
 
     assert len(cells) == 1, cells
     assert len(cells[0][1]) == 3
@@ -397,13 +397,14 @@ async def test_flush_after_accumulation_drains_buffer_into_memcell(
 
 
 async def test_three_sequential_adds_conservation_no_loss(
-    memorize_env_scripted: Callable[..., AsyncMock],
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """3 sequential adds with mixed cuts: every input id covered exactly once."""
     # add 1: 3 msgs, no cut → buffer holds [m0,m1,m2]
     # add 2: 3 msgs, cut after 4 of merged [m0..m5] → cell=[m0..m3], buffer=[m4,m5]
     # add 3: 3 msgs, cut after 3 of merged [m4..m8] → cell=[m4,m5,m6], buffer=[m7,m8]
     await memorize_env_scripted(
+        storage,
         fake_llm=_make_scripted_llm([[], [4], [3]]),
     )
 
@@ -418,8 +419,8 @@ async def test_three_sequential_adds_conservation_no_loss(
         )
         total_inputs += 3
 
-    cells = await _memcell_rows(session)
-    buffer = await _buffer_rows(session)
+    cells = await _memcell_rows(storage, session)
+    buffer = await _buffer_rows(storage, session)
 
     in_cells: set[str] = set()
     for _, msg_ids in cells:

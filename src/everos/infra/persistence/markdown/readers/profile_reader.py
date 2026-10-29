@@ -17,7 +17,9 @@ from typing import TypeVar
 
 import anyio
 
-from everos.core.persistence import BaseFrontmatter, MarkdownReader, MemoryRoot
+from everos.infra.persistence.markdown.base.frontmatter import BaseFrontmatter
+from everos.infra.persistence.markdown.base.reader import MarkdownReader
+from everos.infra.persistence.memory_root import MemoryRoot
 
 T = TypeVar("T", bound=BaseFrontmatter)
 

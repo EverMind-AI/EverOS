@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any, Protocol, TypeVar, overload, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, overload, runtime_checkable
 
 from pydantic import BaseModel
 
-from .predicate import Predicate
+from everos.memory.ports.query import Filter
+
+if TYPE_CHECKING:
+    from .repositories import IndexRepositories
 
 T_co = TypeVar("T_co", bound=BaseModel, covariant=True)
 T = TypeVar("T", bound=BaseModel)
@@ -39,13 +42,13 @@ class IndexRepository(Protocol[T]):
 
     async def count(self) -> int: ...
 
-    async def count_where(self, where: Predicate | None = None) -> int: ...
+    async def count_where(self, where: Filter | None = None) -> int: ...
 
     async def find_where(
-        self, where: Predicate, *, limit: int = 100, skip_vectors: bool = False
+        self, where: Filter, *, limit: int = 100, skip_vectors: bool = False
     ) -> list[T]: ...
 
-    async def find_one_where(self, where: Predicate) -> T | None: ...
+    async def find_one_where(self, where: Filter) -> T | None: ...
 
     async def find_by_owner(self, owner_id: str, *, limit: int = 100) -> list[T]: ...
 
@@ -105,7 +108,7 @@ class IndexRepository(Protocol[T]):
 
     async def find_where_paginated(
         self,
-        where: Predicate,
+        where: Filter,
         *,
         sort_by: str,
         descending: bool = True,
@@ -118,14 +121,14 @@ class IndexRepository(Protocol[T]):
         self,
         *,
         vector: Sequence[float] | None = None,
-        where: Predicate | None = None,
+        where: Filter | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]: ...
 
     async def sparse_search(
         self,
         query_terms: Sequence[str],
-        where: Predicate | None,
+        where: Filter | None,
         *,
         columns: Sequence[str] | None = None,
         limit: int,
@@ -134,17 +137,17 @@ class IndexRepository(Protocol[T]):
     async def dense_search(
         self,
         vector: Sequence[float],
-        where: Predicate | None,
+        where: Filter | None,
         *,
         limit: int,
         vector_field: str = "vector",
     ) -> list[dict[str, Any]]: ...
 
-    async def scan(self, where: Predicate | None = None) -> list[T]: ...
+    async def scan(self, where: Filter | None = None) -> list[T]: ...
 
-    async def update(self, updates: dict[str, Any], *, where: Predicate) -> None: ...
+    async def update(self, updates: dict[str, Any], *, where: Filter) -> None: ...
 
-    async def delete(self, predicate: Predicate) -> None: ...
+    async def delete(self, predicate: Filter) -> None: ...
 
     async def delete_by_md_path(self, md_path: str) -> int: ...
 
@@ -208,7 +211,7 @@ class IndexBackend(Protocol):
     """Lifecycle contract for one configured derived-index backend."""
 
     name: str
-    repositories: tuple[IndexRepository[Any], ...]
+    repositories: IndexRepositories
 
     async def connect(self) -> object: ...
 

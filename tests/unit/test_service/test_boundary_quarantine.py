@@ -28,17 +28,19 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.core.errors import LLMServiceError, SessionBufferQuarantinedError
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteMemcellStore,
+    SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
 )
 from everos.infra.persistence.sqlite.repos.conversation_status import (
-    _ConversationStatusRepo,
+    ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import _MemcellRepo
+from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
-    _UnprocessedBufferRepo,
+    UnprocessedBufferRepo,
 )
 from everos.memory.extract.ingest import service as ingest
 from everos.service import _boundary as boundary_mod
@@ -55,21 +57,16 @@ class _Stage:
         root.ensure()
         self.engine = create_system_engine(root.system_db, SqliteSettings())
         self.factory = create_session_factory(self.engine)
-        self.buffer = _UnprocessedBufferRepo(session_factory=self.factory)
+        self.buffer = UnprocessedBufferRepo(session_factory=self.factory)
         self.replies: list[
             str
         ] = []  # "ok" | "garbage" | "outage", consumed per attempt
         self.detect_calls = 0
+        self.session_buffer = SqliteSessionBufferStore(
+            self.buffer, ConversationStatusRepo(session_factory=self.factory)
+        )
+        self.memcell = SqliteMemcellStore(MemcellRepo(session_factory=self.factory))
         self.patches = [
-            mock.patch.object(boundary_mod, "unprocessed_buffer_repo", self.buffer),
-            mock.patch.object(
-                boundary_mod, "memcell_repo", _MemcellRepo(session_factory=self.factory)
-            ),
-            mock.patch.object(
-                boundary_mod,
-                "conversation_status_repo",
-                _ConversationStatusRepo(session_factory=self.factory),
-            ),
             mock.patch.object(boundary_mod, "detect_boundaries", self.detect),
         ]
 
@@ -99,8 +96,12 @@ class _Stage:
 
     async def defer(self, session: str, n: int, start: int) -> Any:
         """A deferred add: the messages land in the buffer with no model call."""
-        ingested = await ingest.process(self._payload(session, n, start))
-        return await boundary_mod.buffer_messages(ingested, mode="chat")
+        ingested = await ingest.process(
+            self._payload(session, n, start), multimodal_llm=None
+        )
+        return await boundary_mod.buffer_messages(
+            ingested, mode="chat", session_buffer=self.session_buffer
+        )
 
     @staticmethod
     def _payload(session: str, n: int, start: int) -> dict[str, Any]:
@@ -130,7 +131,7 @@ class _Stage:
                 for i in range(n)
             ],
         }
-        ingested = await ingest.process(payload)
+        ingested = await ingest.process(payload, multimodal_llm=None)
         return await boundary_mod.prepare_cells(
             ingested,
             mode="chat",
@@ -139,6 +140,8 @@ class _Stage:
             prompt_loader=SimpleNamespace(load=lambda name: "p"),  # type: ignore[arg-type]
             hard_token_limit=10_000,
             hard_msg_limit=100,
+            session_buffer=self.session_buffer,
+            memcell_store=self.memcell,
         )
 
     async def tracks(self, session: str) -> dict[str, list[str]]:

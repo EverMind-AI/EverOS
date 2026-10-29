@@ -35,6 +35,7 @@ phase behaviour of its own.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import os
 import signal
@@ -47,13 +48,20 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
+from everos.component.embedding import EmbeddingProvider
 from everos.component.utils.datetime import get_utc_now
-from everos.config import load_settings
+from everos.config import Settings, load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.persistence.lancedb import Episode, dispose_connection, episode_repo
-from everos.memory.cascade import _backfill as backfill_mod
+from everos.infra.persistence.lancedb import Episode
+from everos.service import (
+    Application,
+    OpsService,
+    build_application,
+    build_providers,
+)
+from everos.service import backfill as backfill_mod
+from tests.fakes.storage import StorageView
 
 _DIM = 1024
 
@@ -75,16 +83,21 @@ async def backfill_runtime(
     """Tmp memory root + stub embedder (mirrors ``test_backfill_phase1.py``)."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
-    await dispose_connection()
 
-    import everos.component.embedding.accessor as acc
+    def _build_with_stub_embedder(settings: Settings) -> Application:
+        providers = dataclasses.replace(
+            build_providers(settings), embedding=_StubEmbedder()
+        )
+        return build_application(settings, providers=providers)
 
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
-    )
+    monkeypatch.setattr(cascade_mod, "build_application", _build_with_stub_embedder)
 
     yield tmp_path
-    await dispose_connection()
+
+
+def _ops() -> OpsService:
+    """The ops facade of the application the CLI would build right now."""
+    return cascade_mod.build_application(load_settings()).ops
 
 
 def _episode(entry_id: str) -> Episode:
@@ -110,7 +123,7 @@ def _episode(entry_id: str) -> Episode:
 async def test_summary_block_all_zero_on_empty_db(
     backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = await run_backfill(phase="all", auto_yes=True)
+    code = await run_backfill(_ops(), phase="all", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
@@ -125,11 +138,13 @@ async def test_summary_block_all_zero_on_empty_db(
 
 
 async def test_summary_block_reports_real_counts_for_ran_phase_only(
-    backfill_runtime: Path, capsys: pytest.CaptureFixture[str]
+    backfill_runtime: Path,
+    capsys: pytest.CaptureFixture[str],
+    storage_view: StorageView,
 ) -> None:
-    await episode_repo.add([_episode("ep1"), _episode("ep2")])
+    await storage_view.repos.episode.add([_episode("ep1"), _episode("ep2")])
 
-    code = await run_backfill(phase="vectors", auto_yes=True)
+    code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 0
@@ -166,7 +181,7 @@ async def test_synchronous_keyboard_interrupt_mid_phase_returns_130_with_resume_
 
     monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _raise_interrupt)
 
-    code = await run_backfill(phase="all", auto_yes=True)
+    code = await run_backfill(_ops(), phase="all", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 130
@@ -203,7 +218,7 @@ async def test_cancelled_error_mid_phase_returns_130_with_resume_hint(
 
     monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _raise_cancelled)
 
-    code = await run_backfill(phase="all", auto_yes=True)
+    code = await run_backfill(_ops(), phase="all", auto_yes=True)
     out = capsys.readouterr().out
 
     assert code == 130

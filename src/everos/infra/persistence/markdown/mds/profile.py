@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-from everos.core.persistence.markdown import ProfilePathMixin, UserScopedFrontmatter
+from everos.infra.persistence.markdown.base.frontmatter import (
+    ProfilePathMixin,
+    UserScopedFrontmatter,
+)
 
 
 class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):

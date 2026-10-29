@@ -10,30 +10,25 @@ import asyncio
 
 import pytest
 
-from everos.infra.ome import (
-    BaseEvent,
-    Counter,
-    Cron,
-    CronTick,
-    Immediate,
-    StrategyContext,
-    offline_strategy,
-)
 from everos.infra.ome.engine import _cron_entry
 from everos.infra.ome.testing import StrategyTestHarness
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Counter, Cron, CronTick, Event, Immediate
+from tests.fakes import make_deps
+from tests.helpers.ome import strategy_spec
 
 
-class MemCellSaved(BaseEvent):
+class MemCellSaved(Event):
     user_id: str
     cell_id: str
 
 
-class EpisodeSaved(BaseEvent):
+class EpisodeSaved(Event):
     user_id: str
     episode_text: str
 
 
-class ClusteringCompleted(BaseEvent):
+class ClusteringCompleted(Event):
     user_id: str
 
 
@@ -45,26 +40,27 @@ async def test_chain_emit_without_counter_gate() -> None:
     """
     log: list[tuple[str, str]] = []
 
-    @offline_strategy(
+    @strategy_spec(
         name="cluster_e2e",
         trigger=Immediate(on=[EpisodeSaved]),
         emits=[ClusteringCompleted],
     )
-    async def cluster(event: EpisodeSaved, ctx: StrategyContext) -> None:
+    async def cluster(event: EpisodeSaved, deps: MemoryDeps) -> list[Event]:
         log.append(("cluster", event.user_id))
-        await ctx.emit(ClusteringCompleted(user_id=event.user_id))
+        return [ClusteringCompleted(user_id=event.user_id)]
 
-    @offline_strategy(
+    @strategy_spec(
         name="profile_e2e",
         trigger=Immediate(on=[ClusteringCompleted]),
         emits=[],
     )
-    async def profile(event: ClusteringCompleted, ctx: StrategyContext) -> None:
+    async def profile(event: ClusteringCompleted, deps: MemoryDeps) -> list[Event]:
         log.append(("profile", event.user_id))
+        return []
 
     async with StrategyTestHarness() as h:
-        h.register(cluster)
-        h.register(profile)
+        h.register(cluster, make_deps())
+        h.register(profile, make_deps())
         await h.start()
         # Emit 3 episodes -> cluster runs 3x -> emits ClusteringCompleted 3x ->
         # profile runs 3x (no counter gate).
@@ -96,32 +92,34 @@ async def test_chain_pipeline_runs_full_path() -> None:
     """Full chain with atomic, cluster, and profile (Counter gated)."""
     log: list[tuple[str, str]] = []
 
-    @offline_strategy(name="atomic_e2e", trigger=Immediate(on=[MemCellSaved]), emits=[])
-    async def atomic(event: MemCellSaved, ctx: StrategyContext) -> None:
+    @strategy_spec(name="atomic_e2e", trigger=Immediate(on=[MemCellSaved]), emits=[])
+    async def atomic(event: MemCellSaved, deps: MemoryDeps) -> list[Event]:
         log.append(("atomic", event.cell_id))
+        return []
 
-    @offline_strategy(
+    @strategy_spec(
         name="cluster_e2e",
         trigger=Immediate(on=[EpisodeSaved]),
         emits=[ClusteringCompleted],
     )
-    async def cluster(event: EpisodeSaved, ctx: StrategyContext) -> None:
+    async def cluster(event: EpisodeSaved, deps: MemoryDeps) -> list[Event]:
         log.append(("cluster", event.user_id))
-        await ctx.emit(ClusteringCompleted(user_id=event.user_id))
+        return [ClusteringCompleted(user_id=event.user_id)]
 
-    @offline_strategy(
+    @strategy_spec(
         name="profile_e2e",
         trigger=Immediate(on=[ClusteringCompleted]),
         emits=[],
         gate=Counter(threshold=3, event_field="user_id"),
     )
-    async def profile(event: ClusteringCompleted, ctx: StrategyContext) -> None:
+    async def profile(event: ClusteringCompleted, deps: MemoryDeps) -> list[Event]:
         log.append(("profile", event.user_id))
+        return []
 
     async with StrategyTestHarness() as h:
-        h.register(atomic)
-        h.register(cluster)
-        h.register(profile)
+        h.register(atomic, make_deps())
+        h.register(cluster, make_deps())
+        h.register(profile, make_deps())
         await h.start()
         # Two memcells (each fires atomic).
         await h.emit(MemCellSaved(user_id="u1", cell_id="c1"))
@@ -170,12 +168,13 @@ async def test_cron_strategy_executes_when_cron_entry_fires() -> None:
     """
     seen: list[str] = []
 
-    @offline_strategy(name="cron_e2e", trigger=Cron(expr="0 * * * *"), emits=[])
-    async def cron_job(event: CronTick, ctx: StrategyContext) -> None:
+    @strategy_spec(name="cron_e2e", trigger=Cron(expr="0 * * * *"), emits=[])
+    async def cron_job(event: CronTick, deps: MemoryDeps) -> list[Event]:
         seen.append(event.strategy_name)
+        return []
 
     async with StrategyTestHarness() as h:
-        h.register(cron_job)
+        h.register(cron_job, make_deps())
         await h.start()
         # Directly invoke what APS would call; bypass scheduler timing.
         await _cron_entry(h._engine._engine_id, "cron_e2e")

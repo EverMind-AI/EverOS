@@ -21,16 +21,16 @@ without standing up the FastAPI app:
   are preserved. Skips the schema-verify guard (which the drift would
   otherwise trip on startup).
 
-CLI is in-process (12 doc §7.1 + 16 doc §9.2): it constructs the same
-:class:`CascadeOrchestrator` as the daemon but only calls
-``sync_once`` / ``drain_once`` / ``queue_summary``. No watcher /
-scanner background task is started.
+CLI is in-process (12 doc §7.1 + 16 doc §9.2): each command builds the
+same :class:`~everos.service.Application` as the server but never starts
+it -- it opens storage for the one command through
+:meth:`~everos.service.OpsService.index_session` and calls ``ops``
+methods. No watcher / scanner background task is started.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import enum
 import os
 from collections import Counter
@@ -40,10 +40,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from sqlmodel import SQLModel
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.tokenizer import build_tokenizer
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.errors import (
@@ -51,31 +48,10 @@ from everos.core.errors import (
     IndexSchemaMismatchError,
 )
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.ome.exceptions import EngineLockHeldError
-from everos.infra.persistence.index import (
-    assert_record_dim_matches_settings,
-    connect,
-    count_business_rows,
-    drop_business_tables,
-    ensure_business_indexes,
-    shutdown,
-    verify_configuration,
-    write_embedding_model,
-)
-from everos.infra.persistence.sqlite import (
-    dispose_engine,
-    get_engine,
-    md_change_state_repo,
-)
-from everos.memory.cascade import (
-    CascadeOrchestrator,
-    hold_ome_lock,
-    match_kind,
-    ome_lock_is_free,
-)
+from everos.service import OpsService, build_application
 
 logger = get_logger(__name__)
 
@@ -150,36 +126,29 @@ _VERBOSE_OPTION_HELP = (
 @asynccontextmanager
 async def _runtime(
     *, verify: bool = True, ensure: bool = True, exclusive: bool = False
-) -> AsyncIterator[None]:
-    """Stand up sqlite + lancedb the same way the API lifespan would.
+) -> AsyncIterator[OpsService]:
+    """Build the application and open its storage for one command.
 
-    The CLI uses the same lazy, process-wide singletons the API lifespan
-    does. They are **per-process**: a running daemon has its own
-    connection and table-handle cache, and reads its own LanceDB
-    snapshot. Reads interleave safely; writes do not — a second process
-    upserting the same table cannot see what the daemon just committed
-    (nor the other way round) and both insert the row, so every command
-    that writes the index (``sync``, ``fix --apply``, ``rebuild``) passes
+    The application is per-process: a running daemon has its own
+    connection and table-handle cache, and reads its own index snapshot.
+    Reads interleave safely; writes do not -- a second process upserting
+    the same table cannot see what the daemon just committed (nor the
+    other way round) and both insert the row, so every command that writes
+    the index (``sync``, ``fix --apply``, ``rebuild``) passes
     ``exclusive=True`` and holds the OME lock for its whole run. Refused
     with exit code 3 while a server (or another exclusive CLI phase) holds
     it; a server starting meanwhile fails at its own lock instead.
 
-    ``verify=False`` skips :func:`verify_business_schemas` — required by
-    ``cascade rebuild``, whose whole purpose is to recover from a table
-    whose schema *has* drifted; running the guard there would abort
-    startup before the rebuild could fix it (chicken-and-egg).
-
-    ``ensure=False`` additionally skips :func:`ensure_business_indexes`.
-    That call runs the schema / FTS migrations against the **existing**
-    tables, and on the corruption classes rebuild exists to repair (a
-    missing column, an un-alterable type) it raises before the drop can
-    happen — the recovery path dying on the damage it was invoked to fix.
-    Rebuild recreates the tables and their indexes itself after dropping,
-    so skipping the pre-drop pass loses nothing.
+    ``verify=False`` / ``ensure=False`` are for ``cascade rebuild``, which
+    repairs exactly what verification rejects and what the index
+    migrations raise on (see :meth:`OpsService.index_session`).
     """
-    lock = hold_ome_lock() if exclusive else contextlib.nullcontext()
+    application = build_application(load_settings())
     try:
-        lock.__enter__()
+        async with application.ops.index_session(
+            verify=verify, ensure=ensure, exclusive=exclusive
+        ):
+            yield application.ops
     except EngineLockHeldError:
         typer.echo(
             "error: another process holds this memory root's OME lock — a "
@@ -194,64 +163,15 @@ async def _runtime(
             err=True,
         )
         raise typer.Exit(code=3) from None
-    try:
-        engine = get_engine()
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        # Unconditional, including under `verify=False`: `rebuild` skips
-        # verification precisely because it is repairing the index, but it is
-        # also the one command that creates every table from scratch -- a
-        # disagreement between the two readers of `dim` would be baked into
-        # the new tables and only surface on the next `server start`.
-        assert_record_dim_matches_settings()
-        await connect()
-        if verify:
-            # The rest of the facade's startup() sequence; the dim assertion
-            # above is hoisted out of it so `rebuild` gets it too.
-            # `_runtime` does not call it (it drives connect / verify /
-            # ensure separately so `rebuild` can skip the middle), so the
-            # dim guard and the provenance check have to be named here or
-            # they would be absent from every CLI phase.
-            # Attest only while holding the index lock -- `status`,
-            # `fix` and `backfill` are read-only phases.
-            await verify_configuration(may_attest=exclusive)
-        if ensure:
-            await ensure_business_indexes()
-        try:
-            yield
-        finally:
-            await shutdown()
-            await dispose_engine()
     except (IndexSchemaMismatchError, EmbeddingProvenanceError) as exc:
-        # Same shape as the lock message above: the operator has one thing to
-        # go and do, so say what drifted and stop. Without this the startup
-        # guards reach the user as a bare traceback and exit 1 -- and 1
-        # already means "no everos.toml here", so the two would be
-        # indistinguishable in a script.
+        # The operator has one thing to go and do, so say what drifted and
+        # stop. Without this the startup guards reach the user as a bare
+        # traceback and exit 1 -- and 1 already means "no everos.toml here",
+        # so the two would be indistinguishable in a script.
         typer.secho(str(exc), err=True)
         raise typer.Exit(code=3) from None
     finally:
-        lock.__exit__(None, None, None)
-
-
-def _build_orchestrator() -> CascadeOrchestrator:
-    memory_root = MemoryRoot.resolve()
-    memory_root.ensure()
-    tokenizer = build_tokenizer()
-
-    capability = get_embedding_capability()
-    if capability.available:
-        logger.info("cli_cascade_embed_available")
-    else:
-        logger.info(
-            "cli_cascade_embed_unavailable",
-            reason="embedding not configured; keyword-only mode",
-        )
-
-    return CascadeOrchestrator(
-        memory_root=memory_root,
-        tokenizer=tokenizer,
-    )
+        await application.aclose()
 
 
 # ── sync ─────────────────────────────────────────────────────────────────
@@ -301,10 +221,9 @@ def sync(
         raise typer.BadParameter("--force-all re-enqueues every md; do not pass PATH")
 
     async def _run() -> None:
-        async with _runtime(exclusive=True):
-            orchestrator = _build_orchestrator()
+        async with _runtime(exclusive=True) as ops:
             if force_all:
-                rows = await orchestrator.force_enqueue_all()
+                rows = await ops.cascade_force_enqueue_all()
                 by_status = Counter(row.status for row in rows)
                 summary = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
                 typer.echo(
@@ -312,18 +231,17 @@ def sync(
                     + (f": {summary}" if summary else "")
                 )
             if path is not None:
-                rel = _resolve_relative(path)
-                spec = match_kind(rel)
-                if spec is None:
+                rel = _resolve_relative(ops, path)
+                kind = await ops.cascade_force_enqueue(rel)
+                if kind is None:
                     typer.echo(
                         f"error: path does not match any registered cascade "
                         f"kind: {rel}",
                         err=True,
                     )
                     raise typer.Exit(code=1)
-                await md_change_state_repo.force_enqueue(rel, spec.name)
-                typer.echo(f"force-enqueued {rel} (kind={spec.name})")
-            processed = await orchestrator.drain_fully()
+                typer.echo(f"force-enqueued {rel} (kind={kind})")
+            processed = await ops.cascade_sync()
             typer.echo(f"sync complete — processed {processed} row(s)")
 
     asyncio.run(_run())
@@ -348,8 +266,9 @@ def status(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime():
-            summary = await md_change_state_repo.queue_summary()
+        async with _runtime() as ops:
+            status = await ops.cascade_status()
+            summary = status.summary
             lag = max(0, summary.max_lsn - summary.last_processed_lsn)
             typer.echo("queue:")
             typer.echo(f"  pending:                  {summary.pending}")
@@ -377,14 +296,14 @@ def status(
             # Counted live here, unlike /health's startup snapshot: this is
             # a command someone runs *because* they are suspicious, and the
             # answer they came for is whether the index holds anything.
-            rows = await count_business_rows()
+            rows = status.index_rows
             typer.echo("index rows:")
             for table, count in rows.items():
                 typer.echo(f"  {table + ':':<24} {count}")
             # `summary.done` would count completed deletions, so a user who
             # removed their last markdown file would be warned that their
             # index is missing and sent to rebuild it from nothing.
-            live = await md_change_state_repo.count_done_live_sources()
+            live = status.live_sources
             if live > 0 and summary.pending == 0 and not any(rows.values()):
                 typer.secho(
                     f"\n  {live} source file(s) are indexed but every "
@@ -425,8 +344,8 @@ def fix(
     _apply_verbose_logging(verbose)
 
     async def _run() -> None:
-        async with _runtime(exclusive=apply):
-            rows = await md_change_state_repo.list_failed()
+        async with _runtime(exclusive=apply) as ops:
+            rows = await ops.cascade_failed()
             if not rows:
                 typer.echo("no failed rows")
                 return
@@ -448,11 +367,9 @@ def fix(
                     )
                 return
 
-            moved = await md_change_state_repo.reset_retryable_to_pending()
+            moved, processed = await ops.cascade_fix()
             typer.echo(f"re-enqueued {moved} retryable row(s)")
             if moved:
-                orchestrator = _build_orchestrator()
-                processed = await orchestrator.drain_once()
                 typer.echo(f"[worker] processed {processed} row(s) on drain")
             permanent_rows = [r for r in rows if not r.retryable]
             if permanent_rows:
@@ -530,8 +447,8 @@ def backfill(
     _apply_verbose_logging(verbose)
 
     async def _run() -> int:
-        async with _runtime():
-            return await run_backfill(phase=phase.value, auto_yes=yes)
+        async with _runtime() as ops:
+            return await run_backfill(ops, phase=phase.value, auto_yes=yes)
 
     try:
         code = asyncio.run(_run())
@@ -581,7 +498,7 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
-    if not ome_lock_is_free():
+    if not build_application(load_settings()).ops.ome_lock_is_free():
         typer.echo(
             "error: a server (or another exclusive CLI phase) is running on "
             "this memory root.\n"
@@ -605,33 +522,15 @@ def rebuild(
         # to fix; the startup guard would abort before we could rebuild.
         # ensure=False: the pre-drop migration pass would raise on exactly
         # the damage we are here to repair (see _runtime).
-        async with _runtime(verify=False, ensure=False, exclusive=True):
-            # Reset the queue FIRST so every crash window converges on
-            # "queue pending → next scan re-indexes". Doing it after the
-            # drop leaves a window where a crash yields empty tables with
-            # a fully-`done` queue: nothing re-indexes, the schema guard
-            # passes, and the deployment comes up silently empty — the
-            # exact state this command exists to avoid.
-            cleared = await md_change_state_repo.reset_all()
-            typer.echo(f"reset {cleared} cascade queue row(s)")
-            dropped = await drop_business_tables()
+        async with _runtime(verify=False, ensure=False, exclusive=True) as ops:
+            result = await ops.cascade_rebuild()
+            typer.echo(f"reset {result.ledger_rows_reset} cascade queue row(s)")
+            dropped = result.dropped_tables
             typer.echo(
                 f"dropped {len(dropped)} LanceDB table(s): "
                 f"{', '.join(dropped) or '(none)'}"
             )
-            # Recreate the tables (current schema) + FTS indexes.
-            await ensure_business_indexes()
-            # Re-scan + drain: re-embed and re-insert every md entry.
-            orchestrator = _build_orchestrator()
-            processed = await orchestrator.drain_fully()
-            # Attest the model that just produced every one of those vectors.
-            # The create path cannot carry it: a table built from a pydantic
-            # model has no field metadata, so without this line the rebuilt
-            # index comes up unattested and the next start recommends the
-            # rebuild that was just done.
-            if get_embedding_capability().available:
-                await write_embedding_model(load_settings().embedding.model or "")
-            typer.echo(f"rebuild complete — re-indexed {processed} md file(s)")
+            typer.echo(f"rebuild complete — re-indexed {result.processed} md file(s)")
 
     try:
         asyncio.run(_run())
@@ -648,22 +547,17 @@ def rebuild(
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
-def _resolve_relative(p: Path) -> str:
+def _resolve_relative(ops: OpsService, p: Path) -> str:
     """Translate an absolute / relative path arg into the memory-root rel form.
 
     The state table stores paths relative to memory root, so the CLI
-    must match that convention before calling :meth:`force_enqueue`.
+    must match that convention before force-enqueueing.
     Outside-the-root inputs surface as an error in the caller.
     """
-    memory_root = MemoryRoot.resolve()
-    absolute = p.expanduser().resolve()
     try:
-        rel = absolute.relative_to(memory_root.root)
+        return ops.relative_to_root(p)
     except ValueError as exc:
-        raise typer.BadParameter(
-            f"path {p!s} is not under memory root {memory_root.root!s}"
-        ) from exc
-    return rel.as_posix()
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _print_failed_table(rows: list) -> None:  # type: ignore[type-arg]

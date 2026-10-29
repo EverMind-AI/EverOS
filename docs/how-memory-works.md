@@ -95,7 +95,7 @@ visually distinct from a user-named one).
     [Operating it](#operating-it)).
 
 The path manager is
-[`MemoryRoot`](../src/everos/core/persistence/memory_root.py); every path
+[`MemoryRoot`](../src/everos/infra/persistence/memory_root.py); every path
 above is a property on it. `MemoryRoot.ensure()` creates the runtime dirs
 (`.index/{sqlite,lancedb}/`, `.tmp/`); user-visible dirs appear on first
 write. Config files (`everos.toml`, `ome.toml`) are created by `everos init`.

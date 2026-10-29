@@ -39,7 +39,7 @@ from everalgo.types import Candidate
 
 from everos.component.rerank import RerankProvider
 from everos.core.observability.tracing import memory_span
-from everos.infra.persistence.index import Predicate
+from everos.memory.ports import Filter
 
 if TYPE_CHECKING:
     from .recall import KindRecaller
@@ -214,7 +214,7 @@ def build_case_rerank_fn(provider: RerankProvider) -> RerankFn:
 def build_retrieve_fn(
     recaller: KindRecaller,
     *,
-    where: Predicate,
+    where: Filter,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     rrf_k: int = 60,
 ) -> RetrieveFn:

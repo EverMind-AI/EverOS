@@ -34,13 +34,13 @@ from everalgo.types import Candidate
 from hypothesis import given
 from hypothesis import strategies as st
 
-from everos.memory.cascade.reconciler import PriorState, reconcile
-from everos.memory.cascade.types import ScanInput
+from everos.infra.cascade.models import ScanInput
+from everos.infra.cascade.reconciler import PriorState, reconcile
 from everos.memory.models import CanonicalMessage
 from everos.memory.search.llm_multiround import _coerce_core_indices, _parse_decision
 from everos.memory.search.manager import _merge_by_id_max
 from everos.service._boundary import _merge_dedupe_sort
-from everos.service.memorize import _merge_status
+from everos.service.memory import _merge_status
 
 _UTC = dt.UTC
 

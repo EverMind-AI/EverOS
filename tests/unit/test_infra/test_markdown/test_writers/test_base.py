@@ -14,10 +14,10 @@ from typing import ClassVar, Literal
 import pytest
 
 from everos.component.utils.datetime import today_with_timezone
-from everos.core.persistence import (
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
     AgentScopedFrontmatter,
     MarkdownReader,
-    MemoryRoot,
     UserScopedFrontmatter,
 )
 from everos.infra.persistence.markdown.writers import BaseDailyWriter

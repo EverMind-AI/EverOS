@@ -38,10 +38,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from everos.core.observability.logging import get_logger
-from everos.entrypoints.api.utils import cascade_orchestrator
-
-logger = get_logger(__name__)
+from everos.entrypoints.api.utils import application
 
 router = APIRouter(prefix="/cascade", tags=["cascade"])
 
@@ -79,45 +76,20 @@ async def quiesce(request: Request) -> QuiesceResponse:
 
     Idempotent -- a second call reports ``quiesced=false`` rather than failing.
     """
-    orch = cascade_orchestrator(request)
-    if orch is None:
+    result = await application(request).ops.cascade_quiesce()
+    if result is None:
         raise HTTPException(
             status_code=503,
             detail=(
                 "cascade subsystem is not running; nothing to quiesce "
-                "(disabled via EVEROS_DISABLE_CASCADE, or this app was built "
-                "without the cascade lifespan)"
+                "(disabled via EVEROS_DISABLE_CASCADE, or the application "
+                "was not started)"
             ),
-        )
-
-    before = await orch.queue_summary()
-    # Drain BEFORE stopping. `drain_fully` is a full scan + drain to empty, so it
-    # also picks up markdown the watcher never saw -- which matters here because
-    # the watcher is the half most likely to be off (inotify watches are a
-    # per-user kernel resource a shared host can exhaust) -- and it does not stop
-    # at the worker's per-drain bound, which the ledger an upgrade re-queues can
-    # exceed.
-    drained = await orch.drain_fully()
-    await orch.stop()
-    after = await orch.queue_summary()
-
-    logger.info(
-        "cascade_quiesced",
-        drained=drained,
-        pending_before=before.pending,
-        pending_after=after.pending,
-        failed_permanent=after.failed_permanent,
-    )
-    if after.pending:
-        logger.warning(
-            "cascade_quiesce_left_pending",
-            pending=after.pending,
-            reason="index is not a complete projection of the markdown",
         )
     return QuiesceResponse(
         quiesced=True,
-        drained=drained,
-        pending_before=before.pending,
-        pending_after=after.pending,
-        failed_permanent=after.failed_permanent,
+        drained=result.drained,
+        pending_before=result.pending_before,
+        pending_after=result.pending_after,
+        failed_permanent=result.failed_permanent,
     )

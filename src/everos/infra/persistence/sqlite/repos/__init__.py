@@ -1,43 +1,37 @@
-"""Business SQLite repository singletons.
+"""Business SQLite repositories, one per table.
 
-Repository instances for business tables, wired to the process-wide
-engine singleton.
+Each is built over the session factory of the application's
+:class:`~everos.infra.persistence.sqlite.SqliteDatabase`.
 """
 
-from .cluster import cluster_repo as cluster_repo
-from .cluster import mint_cluster_id as mint_cluster_id
-from .conversation_status import conversation_status_repo as conversation_status_repo
+from .cluster import ClusterRepo as ClusterRepo
+from .conversation_status import ConversationStatusRepo as ConversationStatusRepo
 from .knowledge import DocumentListPage as DocumentListPage
 from .knowledge import DocumentUpsertPayload as DocumentUpsertPayload
+from .knowledge import KnowledgeDocumentRepo as KnowledgeDocumentRepo
+from .knowledge import KnowledgeTopicRowRepo as KnowledgeTopicRowRepo
 from .knowledge import TopicUpsertPayload as TopicUpsertPayload
-from .knowledge import knowledge_document_repo as knowledge_document_repo
-from .knowledge import knowledge_topic_sqlite_repo as knowledge_topic_sqlite_repo
 from .md_change_state import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
+from .md_change_state import MdChangeStateRepo as MdChangeStateRepo
 from .md_change_state import QueueSummary as QueueSummary
-from .md_change_state import md_change_state_repo as md_change_state_repo
-from .memcell import memcell_repo as memcell_repo
-from .memorize_inbox import LOST_STATUS_WRITE as LOST_STATUS_WRITE
-from .memorize_inbox import REPLAYS_EXHAUSTED_PREFIX as REPLAYS_EXHAUSTED_PREFIX
-from .memorize_inbox import memorize_inbox_repo as memorize_inbox_repo
-from .reflection_report import reflection_report_repo as reflection_report_repo
-from .unprocessed_buffer import unprocessed_buffer_repo as unprocessed_buffer_repo
+from .memcell import MemcellRepo as MemcellRepo
+from .memorize_inbox import MemorizeInboxRepo as MemorizeInboxRepo
+from .reflection_report import ReflectionReportRepo as ReflectionReportRepo
+from .unprocessed_buffer import UnprocessedBufferRepo as UnprocessedBufferRepo
 
 __all__ = [
-    "LOST_STATUS_WRITE",
     "MTIME_TOLERANCE_SECONDS",
-    "REPLAYS_EXHAUSTED_PREFIX",
+    "ClusterRepo",
+    "ConversationStatusRepo",
     "DocumentListPage",
     "DocumentUpsertPayload",
+    "KnowledgeDocumentRepo",
+    "KnowledgeTopicRowRepo",
+    "MdChangeStateRepo",
+    "MemcellRepo",
+    "MemorizeInboxRepo",
     "QueueSummary",
+    "ReflectionReportRepo",
     "TopicUpsertPayload",
-    "cluster_repo",
-    "conversation_status_repo",
-    "knowledge_document_repo",
-    "knowledge_topic_sqlite_repo",
-    "md_change_state_repo",
-    "memcell_repo",
-    "memorize_inbox_repo",
-    "mint_cluster_id",
-    "reflection_report_repo",
-    "unprocessed_buffer_repo",
+    "UnprocessedBufferRepo",
 ]

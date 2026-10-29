@@ -33,6 +33,7 @@ from everos.infra.persistence.markdown import (
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
 )
+from tests.fakes.storage import StorageView
 
 # Directory names live on the frontmatter schemas (single source of truth);
 # atomic_facts / foresights are dotfile-hidden so users only see episodes.
@@ -128,6 +129,7 @@ async def test_long_conversation_produces_all_memory_types(
     cascade_done_poll: Callable[..., Awaitable[None]],
     buffer_count: Callable[[str], Awaitable[int]],
     memcell_count: Callable[..., Awaitable[int]],
+    storage_view: StorageView,
 ) -> None:
     """One big seamless run: add 19 batches, flush, poll, assert everything."""
 
@@ -242,9 +244,8 @@ async def test_long_conversation_produces_all_memory_types(
     )
 
     # 5.2 episode → LanceDB
-    from everos.infra.persistence.index import episode_repo
 
-    lance_episode_count = await episode_repo.count()
+    lance_episode_count = await storage_view.repos.episode.count()
     assert lance_episode_count >= 15, (
         f"LanceDB episode rows ({lance_episode_count}) < md entries ({episode_entries})"
     )
@@ -253,9 +254,7 @@ async def test_long_conversation_produces_all_memory_types(
     af_files = _list_md_files(memory_root, _ATOMIC_FACT_DIR)
     assert af_files, "no atomic_fact md files — extract_atomic_facts did not emit"
 
-    from everos.infra.persistence.index import atomic_fact_repo
-
-    lance_af_count = await atomic_fact_repo.count()
+    lance_af_count = await storage_view.repos.atomic_fact.count()
     assert lance_af_count >= 1, (
         f"LanceDB atomic_fact rows = {lance_af_count}; expected ≥ 1"
     )
@@ -266,9 +265,8 @@ async def test_long_conversation_produces_all_memory_types(
     # yields explicit future-intent statements, so count is usually 0.
     # We assert the LanceDB table exists (count returns 0 cleanly) — not
     # that any row was emitted.
-    from everos.infra.persistence.index import foresight_repo
 
-    lance_fs_count = await foresight_repo.count()
+    lance_fs_count = await storage_view.repos.foresight.count()
     assert lance_fs_count >= 0, f"foresight table broken: count={lance_fs_count}"
 
     # 5.5 profile (md only — profile retrieval path is stub; we only assert
@@ -308,6 +306,7 @@ async def test_long_conversation_produces_all_memory_types(
 
     await assert_md_lance_strict_consistent(
         memory_root,
+        storage_view.repos,
         expect_at_least={
             "episode": 1,
             "atomic_fact": 1,

@@ -1,29 +1,36 @@
 """Dual-trigger contract for :func:`extract_user_profile`.
 
 Pre-refactor, the strategy only listened for ``ProfileClusterUpdated`` — a
-cluster-path-only event that ``trigger_profile_clustering`` never emits when
-embedding is unavailable (Tier 1, see Task 14's registration gate). This
-file pins the fix: the strategy now also listens for ``EpisodeExtracted``
-(direct path) and gates each event type via ``_profile_applies`` so exactly
-one path fires per memcell, regardless of tier.
+cluster-path-only event that ``trigger_profile_clustering`` never produces
+when embedding is unavailable (Tier 1). This file pins the fix: the
+strategy also listens for ``EpisodeExtracted`` (direct path) and gates each
+event type via ``_profile_applies`` so exactly one path fires per memcell,
+regardless of tier.
 """
 
 from __future__ import annotations
 
-import importlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Profile as AlgoProfile
 
-from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory._partition_locks import _reset_for_tests
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
-from everos.memory.strategies.extract_user_profile import (
-    _profile_applies,
-    _select_via_timestamp,
-    extract_user_profile,
+from everos.memory.models import Cluster, Episode, EpisodeParentType, Profile
+from everos.memory.ports import MemoryRef, Scope, Stored
+from everos.memory.strategies import EXTRACT_USER_PROFILE_SPEC, extract_user_profile
+from tests.fakes import make_deps
+
+_MODULE = "everos.memory.strategies.extract_user_profile"
+_EXTRACTOR = f"{_MODULE}.ProfileExtractor"
+_INTERVAL = f"{_MODULE}.PROFILE_EXTRACTION_INTERVAL"
+_ALICE = Scope(
+    app_id="default", project_id="default", owner_id="u_alice", owner_type="user"
 )
+_applies = EXTRACT_USER_PROFILE_SPEC.applies_to
 
 
 @pytest.fixture(autouse=True)
@@ -59,10 +66,65 @@ def _episode_event(
     )
 
 
-def _mock_capability(*, available: bool):
-    return patch(
-        "everos.memory.strategies.extract_user_profile.get_embedding_capability",
-        return_value=MagicMock(available=available),
+def _tier(*, embed_available: bool) -> MemoryDeps:
+    return make_deps() if embed_available else make_deps(embedding=None)
+
+
+def _indexed_episode(
+    entry_id: str,
+    parent_id: str,
+    *,
+    parent_type: EpisodeParentType = "memcell",
+    timestamp: int = 1_700_000_001_000,
+) -> Stored[Episode]:
+    return Stored(
+        ref=MemoryRef(id=f"u_alice_{entry_id}", entry_id=entry_id, md_path="ep.md"),
+        scope=_ALICE,
+        item=Episode(
+            owner_id="u_alice",
+            episode="...",
+            timestamp=timestamp,
+            parent_id=parent_id,
+            parent_type=parent_type,
+        ),
+    )
+
+
+def _memcell(memcell_id: str = "mc_1") -> MemCell:
+    return MemCell(
+        items=[
+            ChatMessage(
+                id=f"{memcell_id}_m1",
+                role="user",
+                content="hi",
+                timestamp=1_700_000_001_000,
+                sender_id="u_alice",
+            )
+        ],
+        timestamp=1_700_000_001_000,
+    )
+
+
+def _profile(**overrides: object) -> AlgoProfile:
+    return AlgoProfile.model_validate(
+        {
+            "owner_id": "u_alice",
+            "summary": "s",
+            "timestamp": 1_700_000_001_000,
+            "explicit_info": [],
+            "implicit_traits": [],
+            **overrides,
+        }
+    )
+
+
+def _cluster_with_count(cluster_id: str, count: int) -> Cluster:
+    return Cluster(
+        id=cluster_id,
+        centroid=(0.0,) * 8,
+        count=count,
+        last_ts=1_700_000_001_000,
+        members=[f"ep_{cluster_id}_{i}" for i in range(count)],
     )
 
 
@@ -70,12 +132,10 @@ def _mock_capability(*, available: bool):
 
 
 def test_applies_to_cluster_event_always_true() -> None:
-    """ProfileClusterUpdated only fires when trigger_profile_clustering ran
+    """ProfileClusterUpdated only exists when trigger_profile_clustering ran
     (embed available), so accepting it unconditionally cannot double-fire."""
-    event = _cluster_event()
-    for cap_available in (True, False):
-        with _mock_capability(available=cap_available):
-            assert _profile_applies(event) is True
+    for available in (True, False):
+        assert _applies(_cluster_event(), _tier(embed_available=available)) is True
 
 
 def test_applies_to_episode_event_only_when_no_embed() -> None:
@@ -84,13 +144,13 @@ def test_applies_to_episode_event_only_when_no_embed() -> None:
     pipeline_event = _episode_event(source="pipeline")
     reflection_event = _episode_event(source="reflection")
 
-    with _mock_capability(available=False):
-        assert _profile_applies(pipeline_event) is True
-        assert _profile_applies(reflection_event) is False
+    tier1 = _tier(embed_available=False)
+    assert _applies(pipeline_event, tier1) is True
+    assert _applies(reflection_event, tier1) is False
 
-    with _mock_capability(available=True):
-        assert _profile_applies(pipeline_event) is False
-        assert _profile_applies(reflection_event) is False
+    tier2 = _tier(embed_available=True)
+    assert _applies(pipeline_event, tier2) is False
+    assert _applies(reflection_event, tier2) is False
 
 
 @pytest.mark.parametrize(
@@ -109,49 +169,26 @@ def test_applies_to_episode_event_only_when_no_embed() -> None:
     ],
 )
 def test_applies_to_matrix(event_factory, embed_available, expected) -> None:
-    with _mock_capability(available=embed_available):
-        assert _profile_applies(event_factory()) is expected
+    assert _applies(event_factory(), _tier(embed_available=embed_available)) is (
+        expected
+    )
 
 
-def test_meta_registers_both_event_types() -> None:
-    meta = extract_user_profile.meta
-    assert set(meta.trigger.on) == {ProfileClusterUpdated, EpisodeExtracted}
-    assert meta.applies_to is _profile_applies
+def test_spec_registers_both_event_types() -> None:
+    spec = EXTRACT_USER_PROFILE_SPEC
+    assert set(spec.trigger.on) == {ProfileClusterUpdated, EpisodeExtracted}
+    assert callable(spec.applies_to)
 
 
 # ── direct path (Tier 1, EpisodeExtracted) ────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_direct_path_fetches_via_timestamp_and_writes_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """EpisodeExtracted in Tier 1 pulls episodes via list_by_owner_after_ts,
+async def test_direct_path_fetches_via_timestamp_and_writes_profile() -> None:
+    """EpisodeExtracted in Tier 1 pulls memcells via the timestamp selector,
     feeds them to the LLM extractor, and persists the resulting profile."""
-    # `_select_via_timestamp` calls `list_by_owner_after_ts(..., columns=[...])`
-    # so the repo returns raw dicts (projection contract) — not full Episode
-    # objects. Mock accordingly.
-    ep_row = {"parent_id": "mc_aaaaaaaaaaa1"}
-    mc_row = MagicMock()
-    mc_row.memcell_id = "mc_aaaaaaaaaaa1"
-
-    from everalgo.types import ChatMessage
-    from everalgo.types import MemCell as AlgoMemCell
-
-    cell = AlgoMemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hi",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            )
-        ],
-        timestamp=1_700_000_001_000,
-    )
-    mc_row.payload_json = cell.model_dump_json()
-
+    deps = _tier(embed_available=False)
+    deps.indexes.episode.seed(_indexed_episode("ep_1", "mc_aaaaaaaaaaa1"))
+    deps.stores.memcell.seed("mc_aaaaaaaaaaa1", _memcell("mc_aaaaaaaaaaa1"))
     new_profile = AlgoProfile.model_validate(
         {
             "owner_id": "u_alice",
@@ -161,611 +198,229 @@ async def test_direct_path_fetches_via_timestamp_and_writes_profile(
             "implicit_traits": ["adventurous"],
         }
     )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        await extract_user_profile(_episode_event(), deps)
 
-    with (
-        _mock_capability(available=False),
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[ep_row])
-        mock_episode_repo.count_by_owner = AsyncMock(return_value=1)
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[mc_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-
-        await extract_user_profile(_episode_event(), FakeStrategyContext())
-
-    mock_episode_repo.list_by_owner_after_ts.assert_awaited_once_with(
-        owner_id="u_alice",
-        after_ts=0,
-        parent_type="memcell",
-        app_id="default",
-        project_id="default",
-        columns=["parent_id"],
-    )
-    mock_memcell_repo.find_by_ids.assert_awaited_once()
-    assert set(mock_memcell_repo.find_by_ids.call_args.args[0]) == {"mc_aaaaaaaaaaa1"}
-
-    extractor_call = mock_extractor_cls.return_value.aextract.call_args
+    extractor_call = extractor_cls.return_value.aextract.call_args
+    assert [len(mc.items) for mc in extractor_call.args[0]] == [1]
     assert extractor_call.kwargs["old_profile"] is None
     assert extractor_call.kwargs["sender_id"] == "u_alice"
-
-    write_call = mock_writer_cls.return_value.write.call_args
-    assert write_call.args[0] == "u_alice"
-    assert write_call.kwargs["frontmatter"].summary == "Alice is a hiker."
+    assert deps.stores.profile.profiles[_ALICE].summary == "Alice is a hiker."
 
 
-@pytest.mark.asyncio
-async def test_cluster_path_unaffected_by_dual_trigger_refactor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cluster path (ProfileClusterUpdated) keeps its pre-refactor behavior:
-    _select_via_cluster still drives memcell selection from cluster members."""
-    import numpy as np
-    from everalgo.clustering import Cluster as AlgoCluster
-
-    cluster = AlgoCluster(
-        id="cl_user00000001",
-        centroid=np.zeros(1024, dtype=np.float32),
-        count=1,
-        last_ts=1_700_000_001_000,
-        preview=[],
-        members=["ep_20260101_0001"],
-    )
-    ep_row = {
-        "entry_id": "ep_20260101_0001",
-        "parent_type": "memcell",
-        "parent_id": "mc_aaaaaaaaaaa1",
-    }
-
-    from everalgo.types import ChatMessage
-    from everalgo.types import MemCell as AlgoMemCell
-
-    cell = AlgoMemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hi",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            )
-        ],
-        timestamp=1_700_000_001_000,
-    )
-    mc_row = MagicMock()
-    mc_row.memcell_id = "mc_aaaaaaaaaaa1"
-    mc_row.payload_json = cell.model_dump_json()
-
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "Alice is a hiker.",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [],
-            "implicit_traits": [],
-        }
-    )
-
-    with (
-        patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
+async def test_cluster_path_unaffected_by_dual_trigger_refactor() -> None:
+    """Cluster path (ProfileClusterUpdated): memcells are resolved from the
+    cluster's members, not from the timestamp selector."""
+    deps = make_deps()
+    deps.stores.cluster.seed(
+        _ALICE,
+        "user_memory",
+        Cluster(
+            id="cl_user00000001",
+            centroid=(0.0,) * 8,
+            count=1,
+            last_ts=1_700_000_001_000,
+            members=["ep_20260101_0001"],
         ),
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_cluster_repo.list_for_owner = AsyncMock(return_value=[cluster])
-        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=[ep_row])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[mc_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-
-        await extract_user_profile(_cluster_event(), FakeStrategyContext())
-
-    mock_episode_repo.find_by_owner_entries.assert_awaited_once()
-    mock_episode_repo.list_by_owner_after_ts.assert_not_called()
-    write_call = mock_writer_cls.return_value.write.call_args
-    assert write_call.kwargs["frontmatter"].summary == "Alice is a hiker."
-
-
-# ── _select_via_timestamp (event-first, cascade-race-proof) ──────────────
-#
-# Round-2 review found the direct-path selector previously read LanceDB
-# exclusively — on a fresh Tier-1 install the cascade may not have indexed
-# the just-arrived memcell yet, so ``list_by_owner_after_ts`` returned
-# ``[]``, the MIN_MEMCELLS guard early-returned, and the first memory's
-# profile was permanently lost. The selector now always seeds the set
-# with ``event.memcell_id`` (event-first, matches ``EpisodeExtracted``'s
-# contract at ``events.py:40-51``); LanceDB is a best-effort supplement.
-
-
-@pytest.mark.asyncio
-async def test_direct_path_returns_event_memcell_when_lancedb_empty() -> None:
-    """M4: cascade race — LanceDB returns [] but the event's memcell is
-    still emitted, so the strategy never early-returns on the first memory."""
-    event = _episode_event(memcell_id="mc_fresh_install")
-    with patch(
-        "everos.memory.strategies.extract_user_profile.episode_repo"
-    ) as mock_episode_repo:
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[])
-        result = await _select_via_timestamp(event, last_profile_ts=0)
-    assert result == ["mc_fresh_install"]
-
-
-@pytest.mark.asyncio
-async def test_direct_path_returns_event_memcell_plus_supplement() -> None:
-    """Union: event's memcell merged with the LanceDB supplement, deduped."""
-    event = _episode_event(memcell_id="mc_current")
-    # Projection contract: repo returns raw dicts when caller passes `columns`.
-    older_a = {"parent_id": "mc_older_a"}
-    older_b = {"parent_id": "mc_older_b"}
-    with patch(
-        "everos.memory.strategies.extract_user_profile.episode_repo"
-    ) as mock_episode_repo:
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(
-            return_value=[older_a, older_b]
+    )
+    # The supplement row would be picked up only by the timestamp selector.
+    deps.indexes.episode.seed(
+        _indexed_episode("ep_20260101_0001", "mc_aaaaaaaaaaa1"),
+        _indexed_episode("ep_unrelated", "mc_not_in_cluster"),
+    )
+    deps.stores.memcell.seed("mc_aaaaaaaaaaa1", _memcell("mc_aaaaaaaaaaa1"))
+    deps.stores.memcell.seed("mc_not_in_cluster", _memcell("mc_not_in_cluster"))
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(
+            return_value=_profile(summary="Alice is a hiker.")
         )
-        result = await _select_via_timestamp(event, last_profile_ts=100)
-    assert set(result) == {"mc_current", "mc_older_a", "mc_older_b"}
-    assert len(result) == 3, "expected de-duplication, got duplicates"
+        await extract_user_profile(_cluster_event(), deps)
+
+    (memcells,) = extractor_cls.return_value.aextract.call_args.args
+    assert [mc.items[0].id for mc in memcells] == ["mc_aaaaaaaaaaa1_m1"]
+    assert deps.stores.profile.profiles[_ALICE].summary == "Alice is a hiker."
 
 
-@pytest.mark.asyncio
+# ── direct-path memcell selection (event-first, cascade-race-proof) ──────
+#
+# Round-2 review found the direct-path selector previously read the index
+# exclusively — on a fresh Tier-1 install the cascade may not have indexed
+# the just-arrived memcell yet, so the supplement came back empty, the
+# MIN_MEMCELLS guard early-returned, and the first memory's profile was
+# permanently lost. The selector now always seeds the set with
+# ``event.memcell_id``; the index is a best-effort supplement.
+
+
+async def _selected_memcells(deps: MemoryDeps, event: EpisodeExtracted) -> set[str]:
+    """Run the direct path; return the memcell ids it asked the store for."""
+    for memcell_id in (
+        event.memcell_id,
+        *(r.item.parent_id for r in deps.indexes.episode.rows),
+    ):
+        deps.stores.memcell.seed(memcell_id, _memcell(memcell_id))
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=_profile())
+        await extract_user_profile(event, deps)
+    (memcells,) = extractor_cls.return_value.aextract.call_args.args
+    return {mc.items[0].id.removesuffix("_m1") for mc in memcells}
+
+
+async def test_direct_path_returns_event_memcell_when_index_empty() -> None:
+    """M4: cascade race — the index has nothing yet but the event's memcell
+    is still selected, so the strategy never early-returns on the first
+    memory."""
+    deps = _tier(embed_available=False)
+    selected = await _selected_memcells(
+        deps, _episode_event(memcell_id="mc_fresh_install")
+    )
+    assert selected == {"mc_fresh_install"}
+
+
+async def test_direct_path_returns_event_memcell_plus_supplement() -> None:
+    """Union: event's memcell merged with the index supplement."""
+    deps = _tier(embed_available=False)
+    deps.indexes.episode.seed(
+        _indexed_episode("ep_a", "mc_older_a"),
+        _indexed_episode("ep_b", "mc_older_b"),
+    )
+    selected = await _selected_memcells(deps, _episode_event(memcell_id="mc_current"))
+    assert selected == {"mc_current", "mc_older_a", "mc_older_b"}
+
+
 async def test_direct_path_dedupes_when_supplement_overlaps_event() -> None:
-    """No duplicate when the LanceDB supplement returns the same memcell."""
-    event = _episode_event(memcell_id="mc_shared")
-    # Projection contract: repo returns raw dicts when caller passes `columns`.
-    overlap = {"parent_id": "mc_shared"}
-    with patch(
-        "everos.memory.strategies.extract_user_profile.episode_repo"
-    ) as mock_episode_repo:
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[overlap])
-        result = await _select_via_timestamp(event, last_profile_ts=0)
-    assert result == ["mc_shared"]
+    """No duplicate when the supplement returns the event's own memcell."""
+    deps = _tier(embed_available=False)
+    deps.indexes.episode.seed(_indexed_episode("ep_shared", "mc_shared"))
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=_profile())
+        deps.stores.memcell.seed("mc_shared", _memcell("mc_shared"))
+        await extract_user_profile(_episode_event(memcell_id="mc_shared"), deps)
+    (memcells,) = extractor_cls.return_value.aextract.call_args.args
+    assert len(memcells) == 1
 
 
-@pytest.mark.asyncio
 async def test_direct_path_includes_event_memcell_even_when_timestamp_le_last_profile() -> (  # noqa: E501
     None
 ):
-    """M5: historical-timestamp import — the event's own memcell has a
-    timestamp <= ``last_profile_ts``, so LanceDB legitimately returns [];
-    the selector must still include the event's memcell (matches the
-    cluster path's ``c.id == event.cluster_id`` fallback at :139)."""
-    event = _episode_event(memcell_id="mc_historical_import")
-    with patch(
-        "everos.memory.strategies.extract_user_profile.episode_repo"
-    ) as mock_episode_repo:
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[])
-        result = await _select_via_timestamp(event, last_profile_ts=2_000_000_000_000)
-    assert result == ["mc_historical_import"]
+    """M5: historical-timestamp import — every indexed episode is older than
+    the existing profile, so the supplement is empty; the selector must still
+    include the event's memcell (matches the cluster path's
+    ``c.id == event.cluster_id`` fallback)."""
+    deps = _tier(embed_available=False)
+    deps.stores.profile.profiles[_ALICE] = Profile(
+        owner_id="u_alice", summary="prior", timestamp=2_000_000_000_000
+    )
+    deps.indexes.episode.seed(_indexed_episode("ep_old", "mc_old"))
+    selected = await _selected_memcells(
+        deps, _episode_event(memcell_id="mc_historical_import")
+    )
+    assert selected == {"mc_historical_import"}
 
 
-# ── grep-style confirmation: Tier 2+ EpisodeExtracted never double-fires ──
+# ── Tier 2+ EpisodeExtracted never double-fires ──────────────────────────
 
 
 def test_tier2_episode_created_does_not_fire_direct_path() -> None:
     """For a memcell created under Tier 2+ (embed available), the direct
     path's gate must return False — the cluster path (via the later
-    ProfileClusterUpdated emitted by trigger_profile_clustering) is the
-    only one that proceeds."""
-    with _mock_capability(available=True):
-        assert _profile_applies(_episode_event(source="pipeline")) is False
+    ProfileClusterUpdated from trigger_profile_clustering) is the only one
+    that proceeds."""
+    assert _applies(_episode_event(source="pipeline"), make_deps()) is False
 
 
 # ── strategy-entry throttle (unified across both paths) ───────────────────
 #
-# The pre-refactor throttle sat inside ``_select_via_cluster`` so the
-# Tier-1 direct path silently skipped it. Bumping ``PROFILE_EXTRACTION_INTERVAL``
+# The pre-refactor throttle sat inside the cluster selector so the Tier-1
+# direct path silently skipped it. Bumping ``PROFILE_EXTRACTION_INTERVAL``
 # to cap LLM cost therefore only slowed the cluster path down. These tests
 # pin the lifted-throttle contract: both paths gate on the same modulo
-# check at strategy entry, and the direct path derives its count from
-# ``episode_repo.count_by_owner`` (~1:1 with cluster.count in normal usage).
+# check at strategy entry, and the direct path derives its count from the
+# owner's memcell episodes in the index (~1:1 with cluster.count).
 
 
-def _cluster_with_count(cluster_id: str, count: int) -> object:
-    """Minimal AlgoCluster stand-in — only ``count``/``last_ts``/``id`` are read."""
-    import numpy as np
-    from everalgo.clustering import Cluster as AlgoCluster
-
-    return AlgoCluster(
-        id=cluster_id,
-        centroid=np.zeros(1024, dtype=np.float32),
-        count=count,
-        last_ts=1_700_000_001_000,
-        preview=[],
-        members=[f"ep_{cluster_id}_{i}" for i in range(count)],
+def _seed_memcell_episodes(deps: MemoryDeps, count: int) -> None:
+    deps.indexes.episode.seed(
+        *(_indexed_episode(f"ep_{i}", f"mc_{i}") for i in range(count))
     )
+    for i in range(count):
+        deps.stores.memcell.seed(f"mc_{i}", _memcell(f"mc_{i}"))
 
 
-@pytest.mark.asyncio
-async def test_direct_path_throttles_by_episode_count(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Tier 1: episode_count % interval != 0 skips extraction and logs.
+async def test_direct_path_throttles_by_episode_count() -> None:
+    """Tier 1: episode_count % interval != 0 skips extraction.
 
-    ``episode_repo.count_by_owner`` returns 6, ``PROFILE_EXTRACTION_INTERVAL``
-    is 5 → 6 % 5 == 1 → gate fails → no LLM call, no writer call.
+    6 memcell episodes, ``PROFILE_EXTRACTION_INTERVAL`` = 5 → 6 % 5 == 1 →
+    gate fails → no LLM call, no profile write.
     """
-    with (
-        _mock_capability(available=False),
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_episode_repo.count_by_owner = AsyncMock(return_value=6)
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock()
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-        monkeypatch.setattr(mod, "PROFILE_EXTRACTION_INTERVAL", 5)
+    deps = _tier(embed_available=False)
+    _seed_memcell_episodes(deps, 6)
+    with patch(_INTERVAL, 5), patch(_EXTRACTOR) as extractor_cls:
+        await extract_user_profile(_episode_event(), deps)
 
-        await extract_user_profile(_episode_event(), FakeStrategyContext())
-
-    mock_episode_repo.count_by_owner.assert_awaited_once_with(
-        "u_alice",
-        app_id="default",
-        project_id="default",
-        parent_type="memcell",
-    )
-    mock_episode_repo.list_by_owner_after_ts.assert_not_called()
-    mock_extractor_cls.return_value.aextract.assert_not_called()
-    mock_writer_cls.return_value.write.assert_not_called()
+    extractor_cls.assert_not_called()
+    assert deps.stores.profile.writes == []
 
 
-@pytest.mark.asyncio
-async def test_direct_path_does_not_throttle_at_default_interval_1(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_direct_path_does_not_throttle_at_default_interval_1() -> None:
     """Interval=1 disables the gate outright (``interval > 1`` guard)."""
-    # Projection contract: repo returns raw dicts when caller passes `columns`.
-    ep_row = {"parent_id": "mc_1"}
-    from everalgo.types import ChatMessage
-    from everalgo.types import MemCell as AlgoMemCell
+    deps = _tier(embed_available=False)
+    _seed_memcell_episodes(deps, 7)
+    with patch(_INTERVAL, 1), patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=_profile())
+        await extract_user_profile(_episode_event(), deps)
 
-    cell = AlgoMemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hi",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            )
-        ],
-        timestamp=1_700_000_001_000,
-    )
-    mc_row = MagicMock()
-    mc_row.memcell_id = "mc_1"
-    mc_row.payload_json = cell.model_dump_json()
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "s",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [],
-            "implicit_traits": [],
-        }
-    )
-
-    with (
-        _mock_capability(available=False),
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_episode_repo.count_by_owner = AsyncMock(return_value=7)
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[ep_row])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[mc_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-        monkeypatch.setattr(mod, "PROFILE_EXTRACTION_INTERVAL", 1)
-
-        await extract_user_profile(_episode_event(), FakeStrategyContext())
-
-    # Any count % 1 == 0 → gate always passes → extractor + writer both fire.
-    mock_extractor_cls.return_value.aextract.assert_awaited_once()
-    mock_writer_cls.return_value.write.assert_awaited_once()
+    extractor_cls.return_value.aextract.assert_awaited_once()
+    assert len(deps.stores.profile.writes) == 1
 
 
-@pytest.mark.asyncio
-async def test_direct_path_fires_when_count_is_multiple_of_interval(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_direct_path_fires_when_count_is_multiple_of_interval() -> None:
     """Count=5, interval=5 → gate passes → LLM extractor is invoked."""
-    # Projection contract: repo returns raw dicts when caller passes `columns`.
-    ep_row = {"parent_id": "mc_1"}
-    from everalgo.types import ChatMessage
-    from everalgo.types import MemCell as AlgoMemCell
+    deps = _tier(embed_available=False)
+    _seed_memcell_episodes(deps, 5)
+    with patch(_INTERVAL, 5), patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=_profile())
+        await extract_user_profile(_episode_event(), deps)
 
-    cell = AlgoMemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hi",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            )
-        ],
-        timestamp=1_700_000_001_000,
-    )
-    mc_row = MagicMock()
-    mc_row.memcell_id = "mc_1"
-    mc_row.payload_json = cell.model_dump_json()
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "s",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [],
-            "implicit_traits": [],
-        }
-    )
-
-    with (
-        _mock_capability(available=False),
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_episode_repo.count_by_owner = AsyncMock(return_value=5)
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[ep_row])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[mc_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-        monkeypatch.setattr(mod, "PROFILE_EXTRACTION_INTERVAL", 5)
-
-        await extract_user_profile(_episode_event(), FakeStrategyContext())
-
-    mock_extractor_cls.return_value.aextract.assert_awaited_once()
-    mock_writer_cls.return_value.write.assert_awaited_once()
+    extractor_cls.return_value.aextract.assert_awaited_once()
+    assert len(deps.stores.profile.writes) == 1
 
 
-@pytest.mark.asyncio
-async def test_cluster_path_still_throttles_after_lift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_cluster_path_still_throttles_after_lift() -> None:
     """Tier 2+: sum(c.count) % interval != 0 still throttles.
 
-    Preserves pre-refactor cluster-path semantics after lifting the
-    throttle to strategy entry. Two clusters with counts 4+2 = 6,
-    ``PROFILE_EXTRACTION_INTERVAL`` = 5 → 6 % 5 == 1 → throttled.
+    Two clusters with counts 4+2 = 6, ``PROFILE_EXTRACTION_INTERVAL`` = 5 →
+    6 % 5 == 1 → throttled before any memcell is selected.
     """
-    clusters = [
+    deps = make_deps()
+    deps.stores.cluster.seed(
+        _ALICE,
+        "user_memory",
         _cluster_with_count("cl_a", 4),
         _cluster_with_count("cl_b", 2),
-    ]
+    )
+    with patch(_INTERVAL, 5), patch(_EXTRACTOR) as extractor_cls:
+        await extract_user_profile(_cluster_event(), deps)
 
-    with (
-        patch(
-            "everos.memory.strategies.extract_user_profile.cluster_repo"
-        ) as mock_cluster_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_cluster_repo.list_for_owner = AsyncMock(return_value=clusters)
-        mock_episode_repo.find_by_owner_entries = AsyncMock(return_value=[])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock()
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-        monkeypatch.setattr(mod, "PROFILE_EXTRACTION_INTERVAL", 5)
-
-        await extract_user_profile(_cluster_event(), FakeStrategyContext())
-
-    mock_cluster_repo.list_for_owner.assert_awaited_once()
-    mock_episode_repo.find_by_owner_entries.assert_not_called()
-    mock_extractor_cls.return_value.aextract.assert_not_called()
-    mock_writer_cls.return_value.write.assert_not_called()
+    extractor_cls.assert_not_called()
+    assert deps.stores.profile.writes == []
 
 
-@pytest.mark.asyncio
-async def test_direct_path_throttle_ignores_reflection_merged_episodes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Tier 1: throttle counter must exclude Reflection-merged rows.
+async def test_direct_path_throttle_ignores_reflection_merged_episodes() -> None:
+    """Tier 1: the throttle counter must exclude Reflection-merged rows.
 
-    ``count_by_owner`` is now passed ``parent_type='memcell'`` so it counts
-    only the same rows ``_select_via_timestamp`` will later fetch. With 5
-    memcell episodes + 1 cluster-merged episode in the store, the counter
-    must return 5 (not 6) — matching interval=5 exactly (5 % 5 == 0), the
-    gate passes and the LLM extractor is invoked.
+    5 memcell episodes + 1 cluster-merged episode in the index: the counter
+    reads 5 (not 6) — matching interval=5 exactly (5 % 5 == 0), so the gate
+    passes and the LLM extractor is invoked.
     """
-    ep_row = MagicMock()
-    ep_row.parent_id = "mc_1"
-    from everalgo.types import ChatMessage
-    from everalgo.types import MemCell as AlgoMemCell
-
-    cell = AlgoMemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="hi",
-                timestamp=1_700_000_001_000,
-                sender_id="u_alice",
-            )
-        ],
-        timestamp=1_700_000_001_000,
+    deps = _tier(embed_available=False)
+    _seed_memcell_episodes(deps, 5)
+    deps.indexes.episode.seed(
+        _indexed_episode("ep_merged", "cl_1", parent_type="cluster")
     )
-    mc_row = MagicMock()
-    mc_row.memcell_id = "mc_1"
-    mc_row.payload_json = cell.model_dump_json()
-    new_profile = AlgoProfile.model_validate(
-        {
-            "owner_id": "u_alice",
-            "summary": "s",
-            "timestamp": 1_700_000_001_000,
-            "explicit_info": [],
-            "implicit_traits": [],
-        }
-    )
+    with patch(_INTERVAL, 5), patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=_profile())
+        await extract_user_profile(_episode_event(), deps)
 
-    # Simulate the invariant the real repo now enforces: with
-    # parent_type='memcell' → 5 rows; without the filter → 6 (5 memcell
-    # + 1 cluster). Whichever kwarg the strategy sends decides the count.
-    async def _fake_count(owner_id: str, **kwargs: object) -> int:
-        return 5 if kwargs.get("parent_type") == "memcell" else 6
-
-    with (
-        _mock_capability(available=False),
-        patch(
-            "everos.memory.strategies.extract_user_profile.episode_repo"
-        ) as mock_episode_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.memcell_repo"
-        ) as mock_memcell_repo,
-        patch(
-            "everos.memory.strategies.extract_user_profile.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileExtractor"
-        ) as mock_extractor_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileReader"
-        ) as mock_reader_cls,
-        patch(
-            "everos.memory.strategies.extract_user_profile.ProfileWriter"
-        ) as mock_writer_cls,
-    ):
-        mock_episode_repo.count_by_owner = AsyncMock(side_effect=_fake_count)
-        mock_episode_repo.list_by_owner_after_ts = AsyncMock(return_value=[ep_row])
-        mock_memcell_repo.find_by_ids = AsyncMock(return_value=[mc_row])
-        mock_reader_cls.return_value.read = AsyncMock(return_value=None)
-        mock_writer_cls.return_value.write = AsyncMock(return_value=None)
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        mod = importlib.import_module("everos.memory.strategies.extract_user_profile")
-        monkeypatch.setattr(mod, "_writer", None, raising=False)
-        monkeypatch.setattr(mod, "_reader", None, raising=False)
-        monkeypatch.setattr(mod, "PROFILE_EXTRACTION_INTERVAL", 5)
-
-        await extract_user_profile(_episode_event(), FakeStrategyContext())
-
-    # Strategy passed parent_type='memcell' → fake returns 5 → 5 % 5 == 0 →
-    # gate passes → extractor + writer both fire.
-    mock_episode_repo.count_by_owner.assert_awaited_once_with(
-        "u_alice",
-        app_id="default",
-        project_id="default",
-        parent_type="memcell",
-    )
-    kwargs = mock_episode_repo.count_by_owner.await_args.kwargs
-    assert kwargs["parent_type"] == "memcell"
-    mock_extractor_cls.return_value.aextract.assert_awaited_once()
-    mock_writer_cls.return_value.write.assert_awaited_once()
+    extractor_cls.return_value.aextract.assert_awaited_once()
+    assert len(deps.stores.profile.writes) == 1

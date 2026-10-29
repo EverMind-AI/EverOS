@@ -18,6 +18,9 @@ from everos.memory.extract.parser import enrich_content_items
 
 _APARSE_FILE_TARGET = "everos.component.parser.aparse_file"
 
+_LLM = object()
+"""Stands in for the multimodal LLM; the parser itself is faked."""
+
 
 @pytest.fixture(autouse=True)
 def _ensure_parser_module_imported() -> None:
@@ -54,12 +57,13 @@ def _html_uri_item() -> dict[str, Any]:
 async def test_enrich_backfills_parsed_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
+        assert llm is _LLM, "the injected multimodal LLM reaches the parser"
         return ParsedContent(text="OCR RESULT")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items: list[dict[str, Any]] = [{"type": "text", "text": "hi"}, _img_item()]
-    await enrich_content_items(items, max_concurrency=2)
+    await enrich_content_items(items, llm=_LLM, max_concurrency=2)
 
     assert items[1]["parsed_content"] == "OCR RESULT"
     assert items[1]["parse_status"] == "success"
@@ -69,23 +73,23 @@ async def test_enrich_backfills_parsed_content(
 async def test_enrich_unsupported_modality_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         raise UnsupportedModalityError("video deferred")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     with pytest.raises(UnsupportedModalityError):
-        await enrich_content_items([_img_item()])
+        await enrich_content_items([_img_item()], llm=_LLM)
 
 
 async def test_enrich_transient_llm_error_degrades(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         raise LLMCallError("provider down", reason="transport")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_img_item()]
-    await enrich_content_items(items)
+    await enrich_content_items(items, llm=_LLM)
 
     assert items[0]["parse_status"] == "failed"
     assert "parsed_content" not in items[0]
@@ -96,14 +100,14 @@ async def test_enrich_html_base64_routes_as_html_bytes(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         seen["extension"] = raw_file.extension
         seen["content"] = raw_file.content
         return ParsedContent(text="HTML PARSED")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_html_b64_item()]
-    await enrich_content_items(items)
+    await enrich_content_items(items, llm=_LLM)
 
     assert items[0]["parsed_content"] == "HTML PARSED"
     assert items[0]["parse_status"] == "success"
@@ -116,14 +120,14 @@ async def test_enrich_http_uri_routes_as_uri(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         seen["uri"] = raw_file.uri
         seen["content"] = raw_file.content
         return ParsedContent(text="URL PARSED")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_html_uri_item()]
-    await enrich_content_items(items)
+    await enrich_content_items(items, llm=_LLM)
 
     assert items[0]["parsed_content"] == "URL PARSED"
     assert items[0]["parse_status"] == "success"
@@ -134,12 +138,12 @@ async def test_enrich_http_uri_routes_as_uri(
 async def test_enrich_html_text_only_raises_unsupported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         return ParsedContent(text="should-not-be-reached")
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     with pytest.raises(UnsupportedModalityError):
-        await enrich_content_items([{"type": "html", "text": "<p>hi</p>"}])
+        await enrich_content_items([{"type": "html", "text": "<p>hi</p>"}], llm=_LLM)
 
 
 async def test_enrich_file_uri_hydrates_and_parses(
@@ -148,7 +152,7 @@ async def test_enrich_file_uri_hydrates_and_parses(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_aparse(raw_file: Any) -> ParsedContent:
+    async def fake_aparse(raw_file: Any, *, llm: Any) -> ParsedContent:
         seen["content"] = raw_file.content
         seen["uri"] = raw_file.uri
         return ParsedContent(text="FILE PARSED")
@@ -157,7 +161,7 @@ async def test_enrich_file_uri_hydrates_and_parses(
     f = tmp_path / "doc.html"
     f.write_bytes(b"<html>hello</html>")
     items = [{"type": "html", "uri": f.as_uri()}]
-    await enrich_content_items(items)
+    await enrich_content_items(items, llm=_LLM)
 
     assert items[0]["parsed_content"] == "FILE PARSED"
     assert items[0]["parse_status"] == "success"

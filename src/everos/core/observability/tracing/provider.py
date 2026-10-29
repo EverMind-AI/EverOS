@@ -149,6 +149,23 @@ def init_tracing(
     return True
 
 
+def configure_tracing(settings: ObservabilitySettings) -> bool:
+    """Install the process-wide tracer provider; the application bootstrap's call.
+
+    Tracing is configured once, where the application is assembled, rather
+    than by whichever component first wants a tracer. Re-running it replaces
+    the provider (see :func:`init_tracing`), so a second assembly in the same
+    process -- a test, a CLI command after a server in one interpreter -- does
+    not orphan the first one's exporter.
+
+    Returns:
+        True if a real provider was installed.
+    """
+    enabled = init_tracing(settings)
+    logger.info("tracing_configured", enabled=enabled)
+    return enabled
+
+
 def get_tracer(name: str) -> Any:
     """Return a tracer for ``name`` — the real one if initialized, else no-op."""
     if _provider is None:

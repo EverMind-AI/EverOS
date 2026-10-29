@@ -1,4 +1,4 @@
-"""Tests for :class:`_MemcellRepo` — bulk primary-key fetch semantics.
+"""Tests for :class:`MemcellRepo` — bulk primary-key fetch semantics.
 
 Pins the ``find_by_ids`` contract:
 
@@ -24,25 +24,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
 from everos.infra.persistence.sqlite.repos import memcell as memcell_mod
-from everos.infra.persistence.sqlite.repos.memcell import _MemcellRepo
+from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite.tables import Memcell
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> _MemcellRepo:
+async def repo(tmp_path: Path) -> MemcellRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return _MemcellRepo(session_factory=factory)
+    return MemcellRepo(session_factory=factory)
 
 
 def _memcell(memcell_id: str) -> Memcell:
@@ -62,7 +59,7 @@ def _memcell(memcell_id: str) -> Memcell:
 
 
 async def test_find_by_ids_empty_returns_empty_without_sql(
-    repo: _MemcellRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemcellRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Empty input → empty output, no SQL executed."""
     calls = 0
@@ -79,7 +76,7 @@ async def test_find_by_ids_empty_returns_empty_without_sql(
     assert calls == 0, "empty id list must not open a session or run SQL"
 
 
-async def test_find_by_ids_single_chunk_below_cap(repo: _MemcellRepo) -> None:
+async def test_find_by_ids_single_chunk_below_cap(repo: MemcellRepo) -> None:
     """Small id list (below cap) still round-trips correctly and preserves order."""
     real_ids = [f"mc_{i:012d}" for i in range(5)]
     await repo.insert_many([_memcell(mid) for mid in real_ids])
@@ -91,7 +88,7 @@ async def test_find_by_ids_single_chunk_below_cap(repo: _MemcellRepo) -> None:
 
 
 async def test_find_by_ids_handles_chunk_size_larger_than_sqlite_limit(
-    repo: _MemcellRepo, monkeypatch: pytest.MonkeyPatch
+    repo: MemcellRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """1500 unique ids at chunk=500 → 3 SELECTs, all rows returned in caller order.
 

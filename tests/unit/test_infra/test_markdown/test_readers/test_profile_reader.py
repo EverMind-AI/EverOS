@@ -8,7 +8,8 @@ from typing import ClassVar, Literal
 import pytest
 from pydantic import ValidationError
 
-from everos.core.persistence import MemoryRoot, UserScopedFrontmatter
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import UserScopedFrontmatter
 from everos.infra.persistence.markdown.readers import ProfileReader
 from everos.infra.persistence.markdown.writers import ProfileWriter
 

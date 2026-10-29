@@ -6,7 +6,6 @@ from typing import ClassVar
 
 import pytest
 
-from everos.core.persistence import BaseLanceTable
 from everos.infra.persistence.index import (
     AgentCase,
     AgentSkill,
@@ -18,6 +17,7 @@ from everos.infra.persistence.index import (
     check_primary_keys,
 )
 from everos.infra.persistence.index.schema import schema_for
+from everos.infra.persistence.records import BaseLanceTable
 
 BUSINESS_TABLES = (
     Episode,

@@ -9,13 +9,16 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from everos.infra.ome.adapter import to_ome_strategy
 from everos.infra.ome.config import OMEConfig
-from everos.infra.ome.decorator import Strategy
 from everos.infra.ome.engine import OfflineEngine
-from everos.infra.ome.events import BaseEvent
 from everos.infra.ome.records import RunRecord, RunStatus
+from everos.memory.ports import Event, StrategySpec
+
+if TYPE_CHECKING:
+    from everos.memory.deps import MemoryDeps
 
 
 class StrategyTestHarness:
@@ -26,7 +29,7 @@ class StrategyTestHarness:
 
     Example:
         async with StrategyTestHarness() as h:
-            h.register(my_strategy_func)
+            h.register(my_spec, deps)
             await h.start()
             await h.emit(MyEvent())
             await h.drain(timeout=5)
@@ -57,23 +60,24 @@ class StrategyTestHarness:
         finally:
             shutil.rmtree(self._tmpdir, ignore_errors=True)
 
-    def register(self, strategy: Strategy) -> None:
-        """Register a :class:`Strategy` returned by ``@offline_strategy``.
+    def register(self, spec: StrategySpec, deps: MemoryDeps) -> None:
+        """Register ``spec`` with ``deps`` bound, as production does.
 
         Args:
-            strategy: A Strategy instance produced by the decorator.
+            spec: The strategy declaration.
+            deps: What the strategy function receives on every run.
         """
-        self._engine.register(strategy)
+        self._engine.register(to_ome_strategy(spec, deps))
 
     async def start(self) -> None:
         """Start the OfflineEngine."""
         await self._engine.start()
 
-    async def emit(self, event: BaseEvent) -> None:
+    async def emit(self, event: Event) -> None:
         """Emit an event to the engine.
 
         Args:
-            event: A BaseEvent subclass instance.
+            event: A Event subclass instance.
         """
         await self._engine.emit(event)
 

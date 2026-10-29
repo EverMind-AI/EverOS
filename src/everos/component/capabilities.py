@@ -36,7 +36,7 @@ def compute_disabled_features(caps: dict[str, bool]) -> list[str]:
               and boolean availability values. Note: ``caps["llm"]`` is
               accepted for shape symmetry but NOT read here — LLM is a
               Tier-1 hard requirement enforced at server startup
-              (``LLMLifespanProvider``), so any process reaching this
+              (``Application.start``), so any process reaching this
               function is guaranteed to have LLM available. If LLM ever
               becomes soft, add an ``if not caps["llm"]`` branch here
               covering the LLM-dependent features.

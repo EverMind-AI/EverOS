@@ -17,7 +17,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar, Literal
 
-from everos.core.persistence.markdown import (
+from everos.infra.persistence.markdown.base.frontmatter import (
     DailyLogPathMixin,
     UserScopedFrontmatter,
 )

@@ -24,15 +24,15 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
+from everos.infra.persistence.index.adapters import EpisodeIndexAdapter
 from everos.infra.persistence.lancedb import (
     Episode,
     ParentType,
     build_or_query,
-    episode_repo,
-    lancedb_manager,
 )
 from everos.memory.search.recall.base import RecallerDeps
 from everos.memory.search.recall.episode import EpisodeRecaller
+from tests.fakes.storage import Storage
 
 
 class _WhitespaceTokenizer(Tokenizer):
@@ -78,14 +78,14 @@ def _episode_row(
 @pytest.fixture(autouse=True)
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
     yield
-    await lancedb_manager.dispose_connection()
 
 
-def _recaller() -> EpisodeRecaller:
-    return EpisodeRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
+def _recaller(storage: Storage) -> EpisodeRecaller:
+    return EpisodeRecaller(
+        RecallerDeps(tokenizer=_WhitespaceTokenizer()),
+        EpisodeIndexAdapter(storage.repos.episode),
+    )
 
 
 # ── build_or_query helper unit-level checks ────────────────────────────
@@ -116,7 +116,7 @@ def test_build_or_query_multi_token_returns_boolean_query() -> None:
 # ── Live recall: poison token + informative token must surface results ──
 
 
-async def test_or_semantics_poison_token_does_not_kill_query() -> None:
+async def test_or_semantics_poison_token_does_not_kill_query(storage: Storage) -> None:
     """Two episodes, owner name in every doc (DF=100%), plus distinct content.
 
     Pre-fix, querying ``"alice support group"`` against owner=alice would
@@ -125,7 +125,7 @@ async def test_or_semantics_poison_token_does_not_kill_query() -> None:
     Post-fix, ``BooleanQuery + SHOULD`` lets ``support`` / ``group`` carry
     the query on their own.
     """
-    await episode_repo.upsert(
+    await storage.repos.episode.upsert(
         [
             _episode_row(
                 eid="ep_1",
@@ -141,24 +141,25 @@ async def test_or_semantics_poison_token_does_not_kill_query() -> None:
     )
     # LanceDB FTS only sees data merged into the index after optimize().
     # Tests treat that as part of "the corpus is ready to query".
-    from everos.infra.persistence.lancedb import get_table
 
-    tbl = await get_table(Episode.TABLE_NAME, Episode)
+    tbl = await storage.lance.table(Episode.TABLE_NAME, Episode)
     await tbl.optimize()
 
     from everos.infra.persistence.index import all_of, eq
 
     where = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
-    cands = await _recaller().sparse_recall("alice support group", where, limit=10)
+    cands = await _recaller(storage).sparse_recall(
+        "alice support group", where, limit=10
+    )
     assert cands, "alice + support + group should recall ep_1 via SHOULD"
     # ep_1 is the support-group episode; should rank above ep_2 (no support).
     assert cands[0].id == "alice_ep_1"
     assert cands[0].score > 0.0
 
 
-async def test_or_semantics_single_informative_token() -> None:
+async def test_or_semantics_single_informative_token(storage: Storage) -> None:
     """Single non-poison token still recalls (regression for ``painting``)."""
-    await episode_repo.upsert(
+    await storage.repos.episode.upsert(
         [
             _episode_row(
                 eid="ep_1",
@@ -172,22 +173,23 @@ async def test_or_semantics_single_informative_token() -> None:
             ),
         ]
     )
-    from everos.infra.persistence.lancedb import get_table
 
-    tbl = await get_table(Episode.TABLE_NAME, Episode)
+    tbl = await storage.lance.table(Episode.TABLE_NAME, Episode)
     await tbl.optimize()
 
     from everos.infra.persistence.index import all_of, eq
 
     where = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
-    cands = await _recaller().sparse_recall("painting", where, limit=10)
+    cands = await _recaller(storage).sparse_recall("painting", where, limit=10)
     assert cands, "single informative token must recall the matching episode"
     assert cands[0].id == "alice_ep_2"
 
 
-async def test_or_semantics_empty_query_returns_empty() -> None:
+async def test_or_semantics_empty_query_returns_empty(storage: Storage) -> None:
     """Tokenisation yields nothing → recall returns ``[]`` without hitting LanceDB."""
     from everos.infra.persistence.index import eq
 
-    cands = await _recaller().sparse_recall("   ", eq("owner_id", "alice"), limit=10)
+    cands = await _recaller(storage).sparse_recall(
+        "   ", eq("owner_id", "alice"), limit=10
+    )
     assert cands == []

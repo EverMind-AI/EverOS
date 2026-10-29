@@ -12,34 +12,40 @@ catches a key-name drift.
 
 from __future__ import annotations
 
-import importlib
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import anyio
-import pytest
 from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 
-from everos.component.embedding import EmbeddingCapability, EmbeddingProvider
+from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.core.persistence import MarkdownReader, MemoryRoot
-from everos.infra.ome.testing import FakeStrategyContext
-from everos.memory.cascade.handlers import (
+from everos.infra.cascade.projections import (
     AgentCaseHandler,
     AtomicFactHandler,
     ForesightHandler,
-    HandlerDeps,
 )
-from everos.memory.cascade.handlers._daily_log_base import ParsedEntry
+from everos.infra.cascade.projections._daily_log_base import ParsedEntry
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import (
+    MarkdownAgentCaseStore,
+    MarkdownAtomicFactStore,
+    MarkdownForesightStore,
+    MarkdownReader,
+)
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import (
     AgentPipelineStarted,
     EpisodeExtracted,
     UserPipelineStarted,
 )
-from everos.memory.strategies.extract_agent_case import extract_agent_case
-from everos.memory.strategies.extract_atomic_facts import extract_atomic_facts
-from everos.memory.strategies.extract_foresight import extract_foresight
+from everos.memory.strategies import (
+    extract_agent_case,
+    extract_atomic_facts,
+    extract_foresight,
+)
+from tests.fakes import handler_deps, make_deps, make_stores
 
 
 class _StubTokenizer(Tokenizer):
@@ -60,15 +66,15 @@ class _StubEmbedder(EmbeddingProvider):
         return [await self.embed(t) for t in texts]
 
 
-@pytest.fixture(autouse=True)
-def _stub_embedding_capability(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Handlers fetch the embedder lazily via ``get_embedding_capability()``
-    — patch the process-wide singleton so ``_build_row`` returns a real
-    (stub) vector."""
-    import everos.component.embedding.accessor as acc
-
-    monkeypatch.setattr(
-        acc, "_capability", EmbeddingCapability(provider=_StubEmbedder())
+def _markdown_deps(tmp_path: Path) -> MemoryDeps:
+    """Deps whose daily-log stores write real markdown under ``tmp_path``."""
+    root = MemoryRoot(root=tmp_path)
+    return make_deps(
+        stores=make_stores(
+            atomic_fact=MarkdownAtomicFactStore(root),
+            foresight=MarkdownForesightStore(root),
+            agent_case=MarkdownAgentCaseStore(root),
+        )
     )
 
 
@@ -132,14 +138,9 @@ async def _build_row_from_md(
 
 
 async def test_atomic_fact_strategy_md_feeds_handler_with_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """Strategy → md → AtomicFactHandler must carry the fact text intact."""
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
 
     facts = [
         AtomicFact(
@@ -150,20 +151,17 @@ async def test_atomic_fact_strategy_md_feeds_handler_with_content(
     ]
     with (
         patch(
-            "everos.memory.strategies.extract_atomic_facts.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_atomic_facts.AtomicFactExtractor"
         ) as mock_ext,
     ):
         mock_ext.return_value.aextract_from_text = AsyncMock(return_value=facts)
-        await extract_atomic_facts(_episode_event("u_alice"), FakeStrategyContext())
+        await extract_atomic_facts(_episode_event("u_alice"), _markdown_deps(tmp_path))
 
     handler = AtomicFactHandler(
-        HandlerDeps(
+        handler_deps(
             memory_root=MemoryRoot(root=tmp_path),
             tokenizer=_StubTokenizer(),
+            embedding=_StubEmbedder(),
         )
     )
     row = await _build_row_from_md(
@@ -176,14 +174,9 @@ async def test_atomic_fact_strategy_md_feeds_handler_with_content(
 
 
 async def test_foresight_strategy_md_feeds_handler_with_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """Strategy → md → ForesightHandler must carry foresight + evidence text."""
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
 
     foresights = [
         Foresight(
@@ -195,20 +188,17 @@ async def test_foresight_strategy_md_feeds_handler_with_content(
     ]
     with (
         patch(
-            "everos.memory.strategies.extract_foresight.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_foresight.ForesightExtractor"
         ) as mock_ext,
     ):
         mock_ext.return_value.aextract = AsyncMock(return_value=foresights)
-        await extract_foresight(_event("u_alice"), FakeStrategyContext())
+        await extract_foresight(_event("u_alice"), _markdown_deps(tmp_path))
 
     handler = ForesightHandler(
-        HandlerDeps(
+        handler_deps(
             memory_root=MemoryRoot(root=tmp_path),
             tokenizer=_StubTokenizer(),
+            embedding=_StubEmbedder(),
         )
     )
     row = await _build_row_from_md(
@@ -249,14 +239,9 @@ def _agent_event() -> AgentPipelineStarted:
 
 
 async def test_agent_case_strategy_md_feeds_handler_with_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """Strategy → md → AgentCaseHandler carries task_intent, approach, score."""
-    ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-    monkeypatch.setattr(
-        MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
-    )
-    monkeypatch.setattr(ac_mod, "_writer", None, raising=False)
 
     cases = [
         AgentCase(
@@ -270,20 +255,17 @@ async def test_agent_case_strategy_md_feeds_handler_with_content(
     ]
     with (
         patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
             "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
         ) as mock_ext,
     ):
         mock_ext.return_value.aextract = AsyncMock(return_value=cases)
-        await extract_agent_case(_agent_event(), FakeStrategyContext())
+        await extract_agent_case(_agent_event(), _markdown_deps(tmp_path))
 
     handler = AgentCaseHandler(
-        HandlerDeps(
+        handler_deps(
             memory_root=MemoryRoot(root=tmp_path),
             tokenizer=_StubTokenizer(),
+            embedding=_StubEmbedder(),
         )
     )
     row = await _build_row_from_md(

@@ -1,4 +1,4 @@
-"""Repository for ``conversation_status`` — singleton bound to ``sqlite_manager``.
+"""Repository for ``conversation_status``.
 
 Upsert helpers for the (session_id, track) window pointer.
 """
@@ -8,19 +8,15 @@ from __future__ import annotations
 import datetime as dt
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import ConversationStatus
 
 
-class _ConversationStatusRepo(RepoBase[ConversationStatus]):
+class ConversationStatusRepo(RepoBase[ConversationStatus]):
     model = ConversationStatus
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def touch_last_message_ts(
         self,
@@ -85,6 +81,3 @@ class _ConversationStatusRepo(RepoBase[ConversationStatus]):
                 if last_memcell_ts is not None:
                     existing.last_memcell_ts = last_memcell_ts
             await s.commit()
-
-
-conversation_status_repo = _ConversationStatusRepo()

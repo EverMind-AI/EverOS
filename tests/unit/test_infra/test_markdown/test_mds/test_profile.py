@@ -12,7 +12,7 @@ from typing import ClassVar, Literal
 import pytest
 from pydantic import ValidationError
 
-from everos.core.persistence.markdown import UserScopedFrontmatter
+from everos.infra.persistence.markdown import UserScopedFrontmatter
 
 
 class _SampleUserProfileFM(UserScopedFrontmatter):

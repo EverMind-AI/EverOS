@@ -5,13 +5,14 @@ Public API:
         Settings, MemorySettings, SqliteSettings, LanceDBSettings,
         LLMSettings, EmbeddingSettings, RerankSettings,
         BoundaryDetectionSettings, CascadeSettings,
-        load_settings, resolve_root,
+        load_settings, resolve_root, missing_config_error,
     )
 
 Distinct from ``everos.component.config`` (which is a *capability* —
 loader / merger / env reader).
 """
 
+from .hints import missing_config_error as missing_config_error
 from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
@@ -42,5 +43,6 @@ __all__ = [
     "Settings",
     "SqliteSettings",
     "load_settings",
+    "missing_config_error",
     "resolve_root",
 ]

@@ -31,7 +31,6 @@ from __future__ import annotations
 import datetime as _dt
 import time
 from collections.abc import AsyncIterator, Sequence
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +39,7 @@ import pytest
 from everalgo.clustering import Cluster as AlgoCluster
 from httpx import ASGITransport, AsyncClient
 
-from everos.component.embedding import get_embedding_capability
+from everos.component.embedding import build_embedding_provider
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.infra.persistence.lancedb import (
@@ -49,84 +48,47 @@ from everos.infra.persistence.lancedb import (
     AtomicFact,
     Episode,
     UserProfile,
-    agent_case_repo,
-    agent_skill_repo,
-    atomic_fact_repo,
-    ensure_business_indexes,
-    episode_repo,
-    lancedb_manager,
-    user_profile_repo,
 )
-from everos.infra.persistence.sqlite import cluster_repo, mint_cluster_id
-
-# ``service.__init__`` shadows the submodule under the same name; reach
-# the module via importlib so we can reset its private singletons.
-search_service_mod = import_module("everos.service.search")
-
+from everos.memory.models import mint_cluster_id
+from everos.service import build_application, build_providers
+from tests.fakes.storage import StorageView
 
 # ── Fixture: app with no lifespan + per-test singleton reset ──────────
 
 
 @pytest.fixture
 async def client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage_view: StorageView
 ) -> AsyncIterator[AsyncClient]:
     """FastAPI app against a tmp memory root; no lifespan (no cascade/OME)."""
-    from everos.core.persistence.sqlite import SQLModel as _SQLModel
-    from everos.infra.persistence.sqlite import sqlite_manager
+    from everos.infra.persistence.sqlite import SQLModel as _SQLModel
 
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    # Lance: reset connection + cached table handles.
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-
-    # SQLite: reset engine + factory singletons so the next ``get_engine``
-    # targets the just-monkeypatched memory root, then run
-    # ``metadata.create_all`` since we build the app with
-    # ``lifespan_providers=[]`` and therefore skip
-    # ``SqliteLifespanProvider``'s normal startup pass. The AGENTIC
+    # Run ``metadata.create_all`` since the application is never started and
+    # therefore skips the schema pass of ``Application.start``. The AGENTIC
     # cluster-path tests need the ``cluster`` table; other search paths
     # don't touch sqlite but the schema is cheap to materialise.
-    sqlite_manager._engine = None
-    sqlite_manager._session_factory = None
-    _engine = sqlite_manager.get_engine()
-    async with _engine.begin() as _conn:
-        await _conn.run_sync(_SQLModel.metadata.create_all)
+    async with storage_view.database.engine.begin() as conn:
+        await conn.run_sync(_SQLModel.metadata.create_all)
 
-    # Search service: reset the manager singleton so each test rebuilds
-    # against the just-monkey-patched memory root + .env creds.
-    search_service_mod._manager = None
-
-    # Embedding / rerank / LLM route through their process-wide
-    # capability / singleton accessors — reset those directly so each
-    # test rebuilds against the just-monkey-patched memory root + .env
-    # creds (also covered by the autouse fixtures in
-    # ``tests/conftest.py``; kept explicit here for locality with the
-    # rest of this fixture's singleton reset).
-    embedding_acc = import_module("everos.component.embedding.accessor")
-    rerank_acc = import_module("everos.component.rerank.accessor")
-    llm_client_mod = import_module("everos.component.llm.client")
-    embedding_acc._capability = None
-    rerank_acc._capability = None
-    llm_client_mod._llm_client = None
-
-    app = create_app(lifespan_providers=[])
+    # A fresh application per test builds its search manager against the
+    # just-monkey-patched memory root + .env creds.
+    app = create_app(application=build_application(load_settings()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    await lancedb_manager.dispose_connection()
-    await sqlite_manager.dispose_engine()
     load_settings.cache_clear()
 
 
 # ── Seed loading helpers ──────────────────────────────────────────────
 
 
-async def _seed_episodes(rows: list[dict[str, Any]]) -> list[Episode]:
+async def _seed_episodes(
+    storage_view: StorageView, rows: list[dict[str, Any]]
+) -> list[Episode]:
     """Validate + add episode rows + build FTS index.
 
     Tests should pre-mutate per-row fields (e.g. ``session_id``) in the
@@ -136,26 +98,32 @@ async def _seed_episodes(rows: list[dict[str, Any]]) -> list[Episode]:
     current row set so sparse_recall can see them.
     """
     seeded = [Episode.model_validate(r) for r in rows]
-    await episode_repo.add(seeded)
-    await ensure_business_indexes()
+    await storage_view.repos.episode.add(seeded)
+    await storage_view.index.ensure_business_indexes()
     return seeded
 
 
-async def _seed_atomic_facts(rows: list[dict[str, Any]]) -> list[AtomicFact]:
+async def _seed_atomic_facts(
+    storage_view: StorageView, rows: list[dict[str, Any]]
+) -> list[AtomicFact]:
     facts = [AtomicFact.model_validate(r) for r in rows]
-    await atomic_fact_repo.add(facts)
-    await ensure_business_indexes()
+    await storage_view.repos.atomic_fact.add(facts)
+    await storage_view.index.ensure_business_indexes()
     return facts
 
 
-async def _seed_user_profiles(rows: list[dict[str, Any]]) -> list[UserProfile]:
+async def _seed_user_profiles(
+    storage_view: StorageView, rows: list[dict[str, Any]]
+) -> list[UserProfile]:
     profiles = [UserProfile.model_validate(r) for r in rows]
-    await user_profile_repo.add(profiles)
+    await storage_view.repos.user_profile.add(profiles)
     # profile table has no FTS — no index rebuild needed.
     return profiles
 
 
-async def _seed_user_memory_cluster(eps: list[dict], *, owner_id: str) -> None:
+async def _seed_user_memory_cluster(
+    storage_view: StorageView, eps: list[dict], *, owner_id: str
+) -> None:
     """Seed one ``user_memory`` cluster covering every episode in ``eps``.
 
     The AGENTIC episode path goes through ``acluster_retrieve`` (see
@@ -174,8 +142,10 @@ async def _seed_user_memory_cluster(eps: list[dict], *, owner_id: str) -> None:
     """
     entry_ids = list({ep["entry_id"] for ep in eps})
     centroid_text = eps[0]["episode"]
-    centroid_vec = await get_embedding_capability().require().embed(centroid_text)
-    await cluster_repo.upsert_with_members(
+    centroid_vec = await build_embedding_provider(load_settings().embedding).embed(
+        centroid_text
+    )
+    await storage_view.sqlite.cluster.upsert_with_members(
         AlgoCluster(
             id=mint_cluster_id(),
             centroid=np.asarray(centroid_vec, dtype=np.float32),
@@ -263,15 +233,19 @@ def _agent_skill(
     )
 
 
-async def _seed_agent_cases(rows: list[AgentCase]) -> list[AgentCase]:
-    await agent_case_repo.add(rows)
-    await ensure_business_indexes()
+async def _seed_agent_cases(
+    storage_view: StorageView, rows: list[AgentCase]
+) -> list[AgentCase]:
+    await storage_view.repos.agent_case.add(rows)
+    await storage_view.index.ensure_business_indexes()
     return rows
 
 
-async def _seed_agent_skills(rows: list[AgentSkill]) -> list[AgentSkill]:
-    await agent_skill_repo.add(rows)
-    await ensure_business_indexes()
+async def _seed_agent_skills(
+    storage_view: StorageView, rows: list[AgentSkill]
+) -> list[AgentSkill]:
+    await storage_view.repos.agent_skill.add(rows)
+    await storage_view.index.ensure_business_indexes()
     return rows
 
 
@@ -332,10 +306,10 @@ def _post(
 
 
 async def test_keyword_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=keyword`` runs BM25-only — no embedder needed."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(client, query="LGBTQ", method="keyword")
     assert resp.status_code == 200, resp.text
@@ -352,7 +326,7 @@ async def test_keyword_search_returns_episode_hits(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_vector_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=vector`` embeds the query and ranks by cosine.
 
@@ -360,8 +334,8 @@ async def test_vector_search_returns_episode_hits(
     atomic_fact ANN → max-pool by parent_id → fetch episodes; an
     episode-only corpus would return 0 hits.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
-    await _seed_atomic_facts(_facts_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
+    await _seed_atomic_facts(storage_view, _facts_for_owner(search_seed, "caroline"))
 
     # top_k>0 disables the default unlimited-radius (0.5) quality floor,
     # so we can verify dense recall finds *something* without the
@@ -380,10 +354,10 @@ async def test_vector_search_returns_episode_hits(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_hybrid_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=hybrid`` (default) runs sparse + dense + fusion."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(client, query="counseling")  # method=hybrid default
     assert resp.status_code == 200, resp.text
@@ -396,7 +370,7 @@ async def test_hybrid_search_returns_episode_hits(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_agentic_search_returns_episode_hits(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=agentic`` runs the cross-encoder rerank loop.
 
@@ -407,9 +381,9 @@ async def test_agentic_search_returns_episode_hits(
     memcell ids (for the ``acluster_retrieve`` narrowing step).
     """
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
-    await _seed_atomic_facts(_facts_for_owner(search_seed, "caroline"))
-    await _seed_user_memory_cluster(eps, owner_id="caroline")
+    await _seed_episodes(storage_view, eps)
+    await _seed_atomic_facts(storage_view, _facts_for_owner(search_seed, "caroline"))
+    await _seed_user_memory_cluster(storage_view, eps, owner_id="caroline")
 
     resp = await _post(client, query="support group", method="agentic")
     assert resp.status_code == 200, resp.text
@@ -422,7 +396,7 @@ async def test_agentic_search_returns_episode_hits(
 # ── Agent owner_type dispatch (separate path: agent_case + agent_skill) ─
 
 
-async def _seed_one_agent_corpus(owner: str = "a1") -> None:
+async def _seed_one_agent_corpus(storage_view: StorageView, owner: str = "a1") -> None:
     """Single seed used by the parametrized agent dispatch test.
 
     One case + one skill sharing surface tokens with the test query
@@ -437,7 +411,7 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     skill_desc = "refactor authentication middleware reliably"
     skill_body = "step-by-step approach for auth refactors"
 
-    embedder = get_embedding_capability().provider
+    embedder = build_providers(load_settings()).embedding
     if embedder is not None:
         case_vec, skill_vec = await embedder.embed_batch(
             [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
@@ -449,6 +423,7 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
         skill_vec = [0.0] * 1024
 
     await _seed_agent_cases(
+        storage_view,
         [
             _agent_case(
                 "ac_001",
@@ -457,9 +432,10 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
                 approach=case_approach,
                 vector=case_vec,
             ),
-        ]
+        ],
     )
     await _seed_agent_skills(
+        storage_view,
         [
             _agent_skill(
                 "refactor_auth_middleware",
@@ -468,7 +444,7 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
                 content=skill_body,
                 vector=skill_vec,
             ),
-        ]
+        ],
     )
 
 
@@ -494,7 +470,7 @@ async def _seed_one_agent_corpus(owner: str = "a1") -> None:
     ],
 )
 async def test_search_agent_dispatch_per_method(
-    client: AsyncClient, method: str
+    client: AsyncClient, method: str, storage_view: StorageView
 ) -> None:
     """``owner_type=agent`` × every ranking method.
 
@@ -510,7 +486,7 @@ async def test_search_agent_dispatch_per_method(
     All methods must enforce the owner_type hard partition:
     ``episodes`` / ``profiles`` stay empty.
     """
-    await _seed_one_agent_corpus()
+    await _seed_one_agent_corpus(storage_view)
 
     resp = await _post(
         client,
@@ -540,7 +516,7 @@ async def test_search_agent_dispatch_per_method(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_hybrid_with_llm_rerank_returns_hits(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=hybrid`` + ``enable_llm_rerank=true`` runs the phase-5 LLM pass.
 
@@ -548,7 +524,7 @@ async def test_hybrid_with_llm_rerank_returns_hits(
     ``chat`` call that re-ranks the top-K. The route must accept the
     flag and still return well-formed episodes.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(
         client,
@@ -567,7 +543,7 @@ async def test_hybrid_with_llm_rerank_returns_hits(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_hybrid_rerank_bridges_skill_via_case_lineage(
-    client: AsyncClient,
+    client: AsyncClient, storage_view: StorageView
 ) -> None:
     """Case→skill bridge: a skill whose own text does NOT directly match the
     query is surfaced because its ``source_case_ids`` lineage includes a
@@ -595,13 +571,14 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
         "independently."
     )
 
-    embedder = get_embedding_capability().provider
+    embedder = build_providers(load_settings()).embedding
     assert embedder is not None, "live_llm test requires a real embedder"
     case_vec, skill_vec = await embedder.embed_batch(
         [f"{case_intent}\n{case_approach}", f"{skill_desc}\n{skill_body}"]
     )
 
     await _seed_agent_cases(
+        storage_view,
         [
             _agent_case(
                 "ac_1",
@@ -610,9 +587,10 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
                 approach=case_approach,
                 vector=case_vec,
             ),
-        ]
+        ],
     )
     await _seed_agent_skills(
+        storage_view,
         [
             _agent_skill(
                 "graphql_resolver_patterns",
@@ -622,7 +600,7 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
                 source_case_ids=[case_id_with_owner],
                 vector=skill_vec,
             ),
-        ]
+        ],
     )
 
     resp = await _post(
@@ -653,10 +631,14 @@ async def test_hybrid_rerank_bridges_skill_via_case_lineage(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-async def test_search_owner_isolation(client: AsyncClient, search_seed: dict) -> None:
+async def test_search_owner_isolation(
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
+) -> None:
     """Same query, two owners — each only sees their own episodes."""
     await _seed_episodes(
-        _eps_for_owner(search_seed, "caroline") + _eps_for_owner(search_seed, "melanie")
+        storage_view,
+        _eps_for_owner(search_seed, "caroline")
+        + _eps_for_owner(search_seed, "melanie"),
     )
 
     resp_c = await _post(
@@ -674,9 +656,12 @@ async def test_search_owner_isolation(client: AsyncClient, search_seed: dict) ->
     assert all(ep["user_id"] == "melanie" for ep in resp_m.json()["data"]["episodes"])
 
 
-async def test_search_owner_isolation_two_agents(client: AsyncClient) -> None:
+async def test_search_owner_isolation_two_agents(
+    client: AsyncClient, storage_view: StorageView
+) -> None:
     """Two agent owners share a hot keyword — each sees only its own rows."""
     await _seed_agent_cases(
+        storage_view,
         [
             _agent_case(
                 "ac_a1_001",
@@ -690,7 +675,7 @@ async def test_search_owner_isolation_two_agents(client: AsyncClient) -> None:
                 task_intent="optimize batch loader latency",
                 approach="cache hot keys in process memory",
             ),
-        ]
+        ],
     )
 
     resp_a1 = await _post(
@@ -724,21 +709,21 @@ async def test_search_owner_isolation_two_agents(client: AsyncClient) -> None:
 
 
 async def test_search_top_k_caps_result_count(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``top_k=2`` returns at most 2 episodes."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
     resp = await _post(client, query="caroline", method="keyword", top_k=2)
     assert resp.status_code == 200
     assert len(resp.json()["data"]["episodes"]) <= 2
 
 
 async def test_search_top_k_unlimited_returns_all_matching(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``top_k=-1`` (default) means unlimited; should exceed any specific cap."""
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
+    await _seed_episodes(storage_view, eps)
     resp = await _post(client, query="caroline", method="keyword", top_k=-1)
     assert resp.status_code == 200
     # Caroline has 8 seeded episodes; unlimited returns up to that.
@@ -753,10 +738,10 @@ async def test_search_top_k_unlimited_returns_all_matching(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_search_radius_filters_low_similarity(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """A near-1.0 radius drops all but the closest hits (likely 0)."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     loose = await _post(client, query="career", method="vector", radius=0.0)
     strict = await _post(client, query="career", method="vector", radius=0.95)
@@ -776,11 +761,13 @@ async def test_search_radius_filters_low_similarity(
 
 
 async def test_search_include_profile_false_returns_no_profile(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """Default ``include_profile=False`` leaves ``data.profiles`` empty."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
-    await _seed_user_profiles(_profiles_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
+    await _seed_user_profiles(
+        storage_view, _profiles_for_owner(search_seed, "caroline")
+    )
 
     resp = await _post(client, query="LGBTQ", method="keyword")
     assert resp.status_code == 200
@@ -788,11 +775,13 @@ async def test_search_include_profile_false_returns_no_profile(
 
 
 async def test_search_include_profile_true_returns_profile(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``include_profile=true`` (user owner) attaches the profile row."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
-    await _seed_user_profiles(_profiles_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
+    await _seed_user_profiles(
+        storage_view, _profiles_for_owner(search_seed, "caroline")
+    )
 
     resp = await _post(client, query="LGBTQ", method="keyword", include_profile=True)
     assert resp.status_code == 200
@@ -810,7 +799,7 @@ async def test_search_include_profile_true_returns_profile(
 
 
 async def test_search_include_profile_ignored_for_agent_owner(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``include_profile=true`` is silently ignored when ``owner_type=agent``.
 
@@ -820,10 +809,12 @@ async def test_search_include_profile_ignored_for_agent_owner(
     """
     # Seed a user profile that would match under user-owner search; the
     # agent-owner request must NOT pick it up.
-    await _seed_user_profiles(_profiles_for_owner(search_seed, "caroline"))
+    await _seed_user_profiles(
+        storage_view, _profiles_for_owner(search_seed, "caroline")
+    )
     # FTS indexes are built lazily by _seed_*; build them for the agent
     # tables so sparse_recall returns [] gracefully on the agent path.
-    await ensure_business_indexes()
+    await storage_view.index.ensure_business_indexes()
 
     resp = await _post(
         client,
@@ -846,15 +837,16 @@ async def test_search_include_profile_ignored_for_agent_owner(
 
 
 async def test_search_filter_by_session_id(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``filters: {session_id: ...}`` confines the search to one session."""
     base = _eps_for_owner(search_seed, "caroline")
     # Re-tag half to a different session so the filter has something to do.
     half = len(base) // 2
     await _seed_episodes(
+        storage_view,
         [{**r, "session_id": "sess_target"} for r in base[:half]]
-        + [{**r, "session_id": "sess_other"} for r in base[half:]]
+        + [{**r, "session_id": "sess_other"} for r in base[half:]],
     )
 
     resp = await _post(
@@ -870,14 +862,15 @@ async def test_search_filter_by_session_id(
 
 
 async def test_search_filter_by_sender_id_in(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``filters: {sender_id: {in: [...]}}`` → array_has OR ... ."""
     base = _eps_for_owner(search_seed, "caroline")
     half = len(base) // 2
     await _seed_episodes(
+        storage_view,
         [{**r, "sender_ids": ["alice", "assistant"]} for r in base[:half]]
-        + [{**r, "sender_ids": ["bob", "assistant"]} for r in base[half:]]
+        + [{**r, "sender_ids": ["bob", "assistant"]} for r in base[half:]],
     )
 
     resp = await _post(
@@ -893,7 +886,7 @@ async def test_search_filter_by_sender_id_in(
 
 
 async def test_search_filter_by_parent_id_memcell(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``filters: {parent_id: ...}`` — verifies memcell-based slicing.
 
@@ -903,7 +896,7 @@ async def test_search_filter_by_parent_id_memcell(
     target_mc = base[0]["parent_id"]
     target_eps = [r for r in base if r["parent_id"] == target_mc]
     other_eps = [r for r in base if r["parent_id"] != target_mc]
-    await _seed_episodes(target_eps + other_eps)
+    await _seed_episodes(storage_view, target_eps + other_eps)
 
     resp = await _post(
         client,
@@ -918,15 +911,16 @@ async def test_search_filter_by_parent_id_memcell(
 
 
 async def test_search_filter_top_level_or(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """Top-level ``OR`` combinator parses + executes correctly."""
     base = _eps_for_owner(search_seed, "caroline")
     third = len(base) // 3
     await _seed_episodes(
+        storage_view,
         [{**r, "session_id": "sess_a"} for r in base[:third]]
         + [{**r, "session_id": "sess_b"} for r in base[third : third * 2]]
-        + [{**r, "session_id": "sess_c"} for r in base[third * 2 :]]
+        + [{**r, "session_id": "sess_c"} for r in base[third * 2 :]],
     )
 
     resp = await _post(
@@ -942,7 +936,7 @@ async def test_search_filter_top_level_or(
 
 
 async def test_search_filter_nested_and_or(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """Nested ``AND`` inside ``OR`` exercises the recursive compiler."""
     base = _eps_for_owner(search_seed, "caroline")
@@ -966,7 +960,7 @@ async def test_search_filter_nested_and_or(
         ]
     )
     by_id = {r["id"]: r for r in built}
-    await _seed_episodes(built)
+    await _seed_episodes(storage_view, built)
 
     resp = await _post(
         client,
@@ -997,7 +991,7 @@ async def test_search_filter_nested_and_or(
 
 
 async def test_search_filter_by_timestamp_range(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``timestamp`` filter with ``gte`` / ``lt`` operators narrows by time.
 
@@ -1005,7 +999,7 @@ async def test_search_filter_by_timestamp_range(
     ``2023-07-01`` cut splits them into a "before" and "after" group.
     """
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
+    await _seed_episodes(storage_view, eps)
 
     cutoff = "2023-07-01T00:00:00"
     expected_after = {r["id"] for r in eps if r["timestamp"] >= cutoff}
@@ -1028,10 +1022,10 @@ async def test_search_filter_by_timestamp_range(
 
 
 async def test_search_filter_no_match_returns_empty(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """A filter that matches no row → 200 + episodes=[], not 404 / 422."""
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(
         client,
@@ -1054,7 +1048,7 @@ async def test_search_filter_no_match_returns_empty(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """HYBRID + hierarchical eviction end-to-end with memcell facts.
 
@@ -1075,13 +1069,13 @@ async def test_search_hybrid_hierarchical_eviction_with_memcell_facts(
        host episode.
     """
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
+    await _seed_episodes(storage_view, eps)
     ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
         r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
     assert matching_facts, "seed should have at least one fact bridging an episode"
-    await _seed_atomic_facts(matching_facts)
+    await _seed_atomic_facts(storage_view, matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=5)
     assert resp.status_code == 200
@@ -1106,6 +1100,7 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
+    storage_view: StorageView,
 ) -> None:
     """Hierarchical eviction end-to-end fact injection, exercised with ``alpha=0``.
 
@@ -1128,13 +1123,13 @@ async def test_hybrid_hierarchical_eviction_injects_facts_with_alpha_zero(
     monkeypatch.setattr(mgr, "RankConfig", _AlphaZeroConfig)
 
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
+    await _seed_episodes(storage_view, eps)
     ep_entry_ids = {r["entry_id"] for r in eps}
     matching_facts = [
         r for r in search_seed["atomic_fact"] if r["parent_id"] in ep_entry_ids
     ]
     assert matching_facts, "seed should have at least one fact bridging an episode"
-    await _seed_atomic_facts(matching_facts)
+    await _seed_atomic_facts(storage_view, matching_facts)
 
     resp = await _post(client, query="counseling", method="hybrid", top_k=10)
     assert resp.status_code == 200
@@ -1245,7 +1240,7 @@ async def test_search_returns_empty_envelope_for_unknown_owner(
 
 
 async def test_search_user_owner_has_empty_agent_arrays(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """User-owner dispatch never populates ``agent_cases`` / ``agent_skills``.
 
@@ -1255,9 +1250,9 @@ async def test_search_user_owner_has_empty_agent_arrays(
     test). Guards against future regressions that might leak cross-type
     rows when the dispatch logic is refactored.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
-    await _seed_agent_cases([_agent_case("ac_leak", owner="a1")])
-    await _seed_agent_skills([_agent_skill("leak_skill", owner="a1")])
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
+    await _seed_agent_cases(storage_view, [_agent_case("ac_leak", owner="a1")])
+    await _seed_agent_skills(storage_view, [_agent_skill("leak_skill", owner="a1")])
 
     resp = await _post(client, query="caroline", method="keyword")
     assert resp.status_code == 200
@@ -1268,7 +1263,7 @@ async def test_search_user_owner_has_empty_agent_arrays(
 
 
 async def test_search_filter_error_returns_422(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """Filter DSL violations (unknown field) → 422 via the route's handler.
 
@@ -1277,7 +1272,7 @@ async def test_search_filter_error_returns_422(
     which raises :class:`FilterError`. The route catches that and
     converts it to a clean 422 (separate path from Pydantic 422).
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     resp = await _post(
         client,
@@ -1303,7 +1298,7 @@ async def test_search_filter_error_returns_422(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_vector_search_with_session_filter(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=vector`` + ``filters={session_id: ...}`` narrows by session.
 
@@ -1322,10 +1317,12 @@ async def test_vector_search_with_session_filter(
     target_parent_ids = {r["entry_id"] for r in base[:half]}
 
     await _seed_episodes(
+        storage_view,
         [{**r, "session_id": "sess_target"} for r in base[:half]]
-        + [{**r, "session_id": "sess_other"} for r in base[half:]]
+        + [{**r, "session_id": "sess_other"} for r in base[half:]],
     )
     await _seed_atomic_facts(
+        storage_view,
         [
             {
                 **f,
@@ -1336,7 +1333,7 @@ async def test_vector_search_with_session_filter(
                 ),
             }
             for f in facts
-        ]
+        ],
     )
 
     resp = await _post(
@@ -1355,7 +1352,7 @@ async def test_vector_search_with_session_filter(
 @pytest.mark.slow
 @pytest.mark.live_llm
 async def test_agentic_search_with_timestamp_filter(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``method=agentic`` + ``filters={timestamp: {gte: ...}}`` honors the cutoff.
 
@@ -1365,7 +1362,7 @@ async def test_agentic_search_with_timestamp_filter(
     non-filter agentic test (facts + cluster).
     """
     eps = _eps_for_owner(search_seed, "caroline")
-    await _seed_episodes(eps)
+    await _seed_episodes(storage_view, eps)
 
     cutoff = "2023-07-01T00:00:00"
     expected_after = {r["id"] for r in eps if r["timestamp"] >= cutoff}
@@ -1380,6 +1377,7 @@ async def test_agentic_search_with_timestamp_filter(
     eps_post = [r for r in eps if r["timestamp"] >= cutoff]
     facts = _facts_for_owner(search_seed, "caroline")
     await _seed_atomic_facts(
+        storage_view,
         [
             {
                 **f,
@@ -1387,9 +1385,9 @@ async def test_agentic_search_with_timestamp_filter(
                 "timestamp": eps_post[i % len(eps_post)]["timestamp"],
             }
             for i, f in enumerate(facts)
-        ]
+        ],
     )
-    await _seed_user_memory_cluster(eps, owner_id="caroline")
+    await _seed_user_memory_cluster(storage_view, eps, owner_id="caroline")
 
     # ``counseling`` matches the post-cutoff caroline corpus (July 6 episode
     # is explicitly about counseling + mental health), so the agentic
@@ -1426,7 +1424,7 @@ async def test_agentic_search_with_timestamp_filter(
     ],
 )
 async def test_search_include_profile_independent_of_method(
-    client: AsyncClient, search_seed: dict, method: str
+    client: AsyncClient, search_seed: dict, method: str, storage_view: StorageView
 ) -> None:
     """``include_profile=true`` works regardless of ranking method.
 
@@ -1436,8 +1434,10 @@ async def test_search_include_profile_independent_of_method(
     Pin that contract: vector / hybrid must also surface the profile,
     not just keyword.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
-    await _seed_user_profiles(_profiles_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
+    await _seed_user_profiles(
+        storage_view, _profiles_for_owner(search_seed, "caroline")
+    )
 
     resp = await _post(
         client,
@@ -1472,6 +1472,7 @@ async def test_search_include_profile_independent_of_method(
 
 
 async def _seed_unprocessed_buffer_rows(
+    storage_view: StorageView,
     session_id: str,
     rows_spec: list[dict[str, Any]],
     *,
@@ -1489,7 +1490,7 @@ async def _seed_unprocessed_buffer_rows(
     deterministic.
 
     Always writes the full (session, track) slice in a single
-    :meth:`unprocessed_buffer_repo.replace` call — re-reading detached
+    :meth:`storage_view.sqlite.unprocessed_buffer.replace` call — re-reading detached
     SQLModel instances and rewriting them in a later session triggers
     silent insert dedup on the PK, so callers must batch their rows.
     """
@@ -1499,7 +1500,6 @@ async def _seed_unprocessed_buffer_rows(
     from everos.component.utils.datetime import get_now_with_timezone
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        unprocessed_buffer_repo,
     )
 
     base_ts = get_now_with_timezone()
@@ -1523,7 +1523,7 @@ async def _seed_unprocessed_buffer_rows(
                 tool_call_id=None,
             )
         )
-    await unprocessed_buffer_repo.replace(
+    await storage_view.sqlite.unprocessed_buffer.replace(
         session_id,
         track,
         rows,
@@ -1533,7 +1533,7 @@ async def _seed_unprocessed_buffer_rows(
 
 
 async def test_search_unprocessed_messages_returned_for_top_level_session_filter(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """``filters={"session_id": "<sid>"}`` surfaces the buffered messages.
 
@@ -1543,13 +1543,14 @@ async def test_search_unprocessed_messages_returned_for_top_level_session_filter
     in timestamp order, with the single-text shorthand collapsed to a
     plain ``str``.
 
-    White-box surface: ``unprocessed_buffer_repo`` (read & write via the
+    White-box surface: ``storage_view.sqlite.unprocessed_buffer`` (read & write via the
     same public repo the pipeline uses).
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     # Two rows in the target session, one in a noise session.
     await _seed_unprocessed_buffer_rows(
+        storage_view,
         "sess_inflight",
         [
             {
@@ -1565,6 +1566,7 @@ async def test_search_unprocessed_messages_returned_for_top_level_session_filter
         ],
     )
     await _seed_unprocessed_buffer_rows(
+        storage_view,
         "sess_other",
         [
             {
@@ -1601,7 +1603,7 @@ async def test_search_unprocessed_messages_returned_for_top_level_session_filter
 
 
 async def test_search_unprocessed_messages_empty_without_top_level_session_filter(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """No ``filters.session_id`` (or compound shape) → ``unprocessed_messages=[]``.
 
@@ -1614,10 +1616,11 @@ async def test_search_unprocessed_messages_empty_without_top_level_session_filte
 
     All three return ``[]`` even though matching buffer rows exist.
 
-    White-box surface: ``unprocessed_buffer_repo``.
+    White-box surface: ``storage_view.sqlite.unprocessed_buffer``.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
     await _seed_unprocessed_buffer_rows(
+        storage_view,
         "sess_inflight",
         [
             {
@@ -1655,7 +1658,7 @@ async def test_search_unprocessed_messages_empty_without_top_level_session_filte
 
 
 async def test_search_unprocessed_messages_assistant_role_round_trips(
-    client: AsyncClient, search_seed: dict
+    client: AsyncClient, search_seed: dict, storage_view: StorageView
 ) -> None:
     """Buffer surfacing carries the original ``role`` through the wire.
 
@@ -1664,8 +1667,9 @@ async def test_search_unprocessed_messages_assistant_role_round_trips(
     would degrade to the opaque ``list[dict]`` shorthand, while a single
     text item collapses to ``str``.
     """
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
     await _seed_unprocessed_buffer_rows(
+        storage_view,
         "sess_assistant",
         [
             {
@@ -1725,6 +1729,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
+    storage_view: StorageView,
 ) -> None:
     """Q2 anti-drift contract: same on-disk row, two display zones, one instant.
 
@@ -1748,10 +1753,9 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
     from everos.component.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        unprocessed_buffer_repo,
     )
 
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     # Step 1: switch to Shanghai, write a row at a deterministic instant.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
@@ -1776,7 +1780,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
         tool_calls_json=None,
         tool_call_id=None,
     )
-    await unprocessed_buffer_repo.replace(
+    await storage_view.sqlite.unprocessed_buffer.replace(
         "sess_tz_drift",
         "memorize",
         [row],
@@ -1802,11 +1806,11 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
     # Step 3: white-box probe — SQLite row comes back UTC-aware.
     #
     # The SQLAlchemy ``load`` event listener registered on ``BaseTable``
-    # (see ``core/persistence/sqlite/base.py``) re-attaches ``tzinfo=UTC``
+    # (see ``infra/persistence/sqlite/base/base.py``) re-attaches ``tzinfo=UTC``
     # to every ``UtcDatetime`` column after ORM hydrate, so callers never
     # observe a naive datetime — even though SQLite physically strips tz
     # at write time and SQLAlchemy ORM bypasses Pydantic on read.
-    rows_back = await unprocessed_buffer_repo.list_for_track(
+    rows_back = await storage_view.sqlite.unprocessed_buffer.list_for_track(
         "sess_tz_drift", "memorize", app_id="default", project_id="default"
     )
     stored = rows_back[0].timestamp
@@ -1848,6 +1852,7 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
+    storage_view: StorageView,
 ) -> None:
     """Same anti-drift contract, but for the LanceDB-backed episode path.
 
@@ -1867,7 +1872,7 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     pinned_utc = _real_dt.datetime(2026, 5, 29, 6, 0, 0, tzinfo=_real_dt.UTC)
     base = _eps_for_owner(search_seed, "caroline")[:1]
     base[0] = {**base[0], "timestamp": pinned_utc, "session_id": "sess_ep_tz"}
-    await _seed_episodes(base)
+    await _seed_episodes(storage_view, base)
 
     # Step 1: Shanghai display tz.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
@@ -1913,6 +1918,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
+    storage_view: StorageView,
 ) -> None:
     """Reverse direction: write under UTC, read under Shanghai → no drift.
 
@@ -1927,10 +1933,9 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
     from everos.component.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        unprocessed_buffer_repo,
     )
 
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     # Step 1: UTC display tz first, write at 06:00 UTC = 14:00 Shanghai.
     await _switch_display_tz(monkeypatch, "UTC")
@@ -1951,7 +1956,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
         tool_calls_json=None,
         tool_call_id=None,
     )
-    await unprocessed_buffer_repo.replace(
+    await storage_view.sqlite.unprocessed_buffer.replace(
         "sess_rev",
         "memorize",
         [row],
@@ -1996,6 +2001,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     client: AsyncClient,
     search_seed: dict,
     monkeypatch: pytest.MonkeyPatch,
+    storage_view: StorageView,
 ) -> None:
     """Mixed timeline: write A under Shanghai, switch to UTC, write B, query both.
 
@@ -2011,10 +2017,9 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     from everos.component.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
-        unprocessed_buffer_repo,
     )
 
-    await _seed_episodes(_eps_for_owner(search_seed, "caroline"))
+    await _seed_episodes(storage_view, _eps_for_owner(search_seed, "caroline"))
 
     # Step 1: write row A under Shanghai.
     await _switch_display_tz(monkeypatch, "Asia/Shanghai")
@@ -2057,7 +2062,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     # Persist both in one replace so the (session, track) slice owns both rows.
     # ``replace`` deletes the slice then inserts; a write-A/switch/write-B
     # interleaving on the wire would have the same storage effect.
-    await unprocessed_buffer_repo.replace(
+    await storage_view.sqlite.unprocessed_buffer.replace(
         "sess_mixed",
         "memorize",
         [row_a, row_b],

@@ -3,13 +3,13 @@
 The HTTP route inserts an accepted ``/add`` or ``/flush`` body into
 ``memorize_inbox`` (one row, one commit) and answers 202. This worker
 claims rows in ``id`` order, never two of one session at a time and at
-most ``max_concurrency`` overall, and calls the unchanged :func:`memorize`
-for each: a session's batches and its flush run in the order the client
-sent them, and sessions do not wait for each other. The per-session lock
-inside ``memorize()`` still provides mutual exclusion against synchronous
-calls; the inbox ``id`` provides the order. A row whose delivery fails is
-marked ``failed`` and skipped -- its session, and every other session,
-keeps moving.
+most ``max_concurrency`` overall, and hands each to the memorize use case
+it was built with (:meth:`MemoryService.memorize`): a session's batches and
+its flush run in the order the client sent them, and sessions do not wait
+for each other. The per-session lock inside ``memorize`` still provides
+mutual exclusion against synchronous calls; the inbox ``id`` provides the
+order. A row whose delivery fails is marked ``failed`` and skipped -- its
+session, and every other session, keeps moving.
 
 Cloud runs the same shape as gateway -> msgbus -> Kafka -> consumer ->
 engine, partitioned by group so groups run in parallel and each group in
@@ -17,9 +17,8 @@ order. Here the whole chain lives in one process: the route is the
 gateway, the SQLite table is the topic, this worker is the consumer with
 the session as the partition, and ``memorize()`` is the engine.
 
-External usage::
-
-    from everos.service import MemorizeQueueWorker, get_task, list_tasks
+The worker is a private collaborator of :class:`~everos.service.MemoryService`,
+which builds it over the injected inbox store and owns its start / stop.
 """
 
 from __future__ import annotations
@@ -28,9 +27,8 @@ import asyncio
 import contextlib
 import datetime as dt
 import json
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
-import structlog
 from pydantic import BaseModel
 
 from everos.component.utils.datetime import get_utc_now
@@ -41,16 +39,29 @@ from everos.core.errors import (
     PayloadTooLargeError,
     QueueSaturatedError,
 )
-from everos.core.observability.logging import get_logger
-from everos.infra.persistence.sqlite import (
+from everos.core.observability.logging import bound_log_context, get_logger
+from everos.memory.models import MemorizeTask
+from everos.memory.ports import (
     LOST_STATUS_WRITE,
     REPLAYS_EXHAUSTED_PREFIX,
-    MemorizeInbox,
-    memorize_inbox_repo,
+    MemorizeInboxStore,
+    SessionKey,
 )
-from everos.service.memorize import memorize
 
 logger = get_logger(__name__)
+
+
+class Deliver(Protocol):
+    """The memorize call the worker makes for one accepted request."""
+
+    async def __call__(
+        self,
+        payload: dict[str, Any],
+        *,
+        is_final: bool,
+        defer_extraction: bool,
+    ) -> object: ...
+
 
 _ERROR_SUMMARY_CHARS = 500
 # Exceptions from these packages carry SQL text and bound parameters, i.e.
@@ -136,10 +147,25 @@ class MemorizeQueueWorker:
     route ignores ``async_mode`` and runs calls inline, but the worker still
     runs so rows accepted earlier are delivered, and a session that still
     has such rows still queues its synchronous calls behind them.
+
+    Args:
+        settings: The ``[memorize.async_queue]`` section.
+        inbox: The durable queue the rows live in.
+        deliver: The memorize call made for each claimed row.
+        accept_async: Whether new ``async_mode`` work is accepted.
     """
 
-    def __init__(self, settings: AsyncQueueSettings, *, accept_async: bool = True):
+    def __init__(
+        self,
+        settings: AsyncQueueSettings,
+        *,
+        inbox: MemorizeInboxStore,
+        deliver: Deliver,
+        accept_async: bool = True,
+    ) -> None:
         self._cfg = settings
+        self._inbox = inbox
+        self._deliver = deliver
         self.accepting = accept_async
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -150,7 +176,7 @@ class MemorizeQueueWorker:
         # Rows being delivered right now, by id; the scheduler's own view,
         # which is what lets the sweep tell a lost status write from a row
         # that is simply still running.
-        self._in_flight: dict[int, tuple[MemorizeInbox, asyncio.Task[None]]] = {}
+        self._in_flight: dict[int, tuple[MemorizeTask, asyncio.Task[None]]] = {}
 
     # ── producer side (called by the route) ────────────────────────────────
 
@@ -166,8 +192,8 @@ class MemorizeQueueWorker:
         A synchronous call on such a session must join the queue too, or it
         would run ahead of batches the client was already told are accepted.
         """
-        count = await memorize_inbox_repo.count_pending(
-            session_id=session_id, app_id=app_id, project_id=project_id
+        count = await self._inbox.count_pending(
+            SessionKey(app_id=app_id, project_id=project_id, session_id=session_id)
         )
         return count > 0
 
@@ -200,29 +226,26 @@ class MemorizeQueueWorker:
         session_id = str(payload["session_id"])
         app_id = str(payload.get("app_id", "default"))
         project_id = str(payload.get("project_id", "default"))
-        pending = await memorize_inbox_repo.count_pending(
-            session_id=session_id, app_id=app_id, project_id=project_id
+        session = SessionKey(
+            app_id=app_id, project_id=project_id, session_id=session_id
         )
+        pending = await self._inbox.count_pending(session)
         if pending >= self._cfg.max_pending_per_session:
             raise QueueSaturatedError(
                 f"memorize queue saturated for session {session_id}: {pending} pending"
             )
-        total = await memorize_inbox_repo.count_pending()
+        total = await self._inbox.count_pending()
         if total >= self._cfg.max_pending_total:
             raise QueueSaturatedError(
                 f"memorize queue saturated: {total} pending across all sessions"
             )
-        row = await memorize_inbox_repo.add(
-            MemorizeInbox(
-                request_id=request_id,
-                app_id=app_id,
-                project_id=project_id,
-                session_id=session_id,
-                is_final=is_final,
-                defer_extraction=defer_extraction,
-                payload_json=body,
-                message_count=len(payload.get("messages") or []),
-            )
+        row = await self._inbox.enqueue(
+            session,
+            request_id=request_id,
+            is_final=is_final,
+            defer_extraction=defer_extraction,
+            payload_json=body,
+            message_count=len(payload.get("messages") or []),
         )
         self._wake.set()
         if self._task is not None and self._task.done():
@@ -242,7 +265,7 @@ class MemorizeQueueWorker:
         """Recover ``processing`` rows, purge expired ones, launch the loop."""
         if self._task is not None:
             return
-        requeued, gave_up = await memorize_inbox_repo.requeue_processing(
+        requeued, gave_up = await self._inbox.requeue_processing(
             max_replays=self._cfg.max_replays
         )
         if requeued:
@@ -340,6 +363,11 @@ class MemorizeQueueWorker:
         )
         self._in_flight.clear()
 
+    @property
+    def started(self) -> bool:
+        """Whether the worker was started and not stopped since."""
+        return self._task is not None
+
     async def health(self) -> QueueHealth:
         """Probe for ``GET /health``: observe, never act."""
         reasons: list[str] = []
@@ -350,8 +378,8 @@ class MemorizeQueueWorker:
                 if self._stopping
                 else "delivery loop is not running"
             )
-        pending = await memorize_inbox_repo.count_pending()
-        oldest = await memorize_inbox_repo.oldest_pending_created_at()
+        pending = await self._inbox.count_pending()
+        oldest = await self._inbox.oldest_pending_at()
         age = (
             None
             if oldest is None
@@ -364,7 +392,7 @@ class MemorizeQueueWorker:
             accepting=self.accepting,
             pending=pending,
             oldest_pending_age_s=age,
-            failed=await memorize_inbox_repo.count_status("failed"),
+            failed=await self._inbox.count_status("failed"),
             loop_restarts=self._loop_restarts,
             last_loop_error_at=self._last_loop_error_at,
         )
@@ -387,12 +415,11 @@ class MemorizeQueueWorker:
                     not self._stopping
                     and len(self._in_flight) < self._cfg.max_concurrency
                 ):
-                    row = await memorize_inbox_repo.claim_next(
+                    row = await self._inbox.claim_next(
                         exclude_sessions=self._busy_sessions()
                     )
                     if row is None:
                         break
-                    assert row.id is not None
                     task = asyncio.create_task(
                         self._process(row), name=f"memorize-queue-row-{row.id}"
                     )
@@ -417,9 +444,11 @@ class MemorizeQueueWorker:
             await self._reap_lost()
         return started
 
-    def _busy_sessions(self) -> set[tuple[str, str, str]]:
+    def _busy_sessions(self) -> set[SessionKey]:
         return {
-            (row.app_id, row.project_id, row.session_id)
+            SessionKey(
+                app_id=row.app_id, project_id=row.project_id, session_id=row.session_id
+            )
             for row, _ in self._in_flight.values()
         }
 
@@ -469,69 +498,68 @@ class MemorizeQueueWorker:
                 self._last_loop_error_at = get_utc_now()
                 logger.exception("memorize_queue_loop_error")
 
-    async def _process(self, row: MemorizeInbox) -> None:
+    async def _process(self, row: MemorizeTask) -> None:
         assert row.id is not None
         # Carry the accepting request's id so spans and logs emitted inside
         # memorize() correlate with the 202 the client received.
         token = set_request_id(row.request_id)
-        structlog.contextvars.bind_contextvars(request_id=row.request_id)
         try:
-            for attempt in range(1, self._cfg.max_attempts + 1):
-                try:
-                    # Inside the try: a row whose body was hand-edited into
-                    # garbage fails with that reason, not the whole pass.
-                    payload = json.loads(row.payload_json)
-                    await memorize(
-                        payload,
-                        is_final=row.is_final,
-                        defer_extraction=row.defer_extraction,
-                    )
-                except Exception as exc:
-                    error = _error_summary(exc)
-                    if attempt < self._cfg.max_attempts:
-                        await self._mark(
-                            row.id,
-                            status="processing",
-                            attempt=attempt,
-                            last_error=error,
+            with bound_log_context(request_id=row.request_id):
+                for attempt in range(1, self._cfg.max_attempts + 1):
+                    try:
+                        # Inside the try: a row whose body was hand-edited into
+                        # garbage fails with that reason, not the whole pass.
+                        payload = json.loads(row.payload_json)
+                        await self._deliver(
+                            payload,
+                            is_final=row.is_final,
+                            defer_extraction=row.defer_extraction,
                         )
-                        logger.warning(
-                            "memorize_queue_retry",
+                    except Exception as exc:
+                        error = _error_summary(exc)
+                        if attempt < self._cfg.max_attempts:
+                            await self._mark(
+                                row.id,
+                                status="processing",
+                                attempt=attempt,
+                                last_error=error,
+                            )
+                            logger.warning(
+                                "memorize_queue_retry",
+                                row_id=row.id,
+                                session_id=row.session_id,
+                                attempt=attempt,
+                                error=error,
+                            )
+                            await asyncio.sleep(self._cfg.retry_backoff_seconds)
+                            continue
+                        # One write: a lost second write would let the sweep overwrite
+                        # a known failure with "outcome unknown".
+                        await self._mark(
+                            row.id, status="failed", attempt=attempt, last_error=error
+                        )
+                        logger.error(
+                            "memorize_queue_failed",
                             row_id=row.id,
                             session_id=row.session_id,
-                            attempt=attempt,
+                            attempts=attempt,
+                            message_count=row.message_count,
                             error=error,
                         )
-                        await asyncio.sleep(self._cfg.retry_backoff_seconds)
-                        continue
-                    # One write: a lost second write would let the sweep overwrite
-                    # a known failure with "outcome unknown".
+                        return
+                    # Drop the body: nothing reads a delivered row's payload, and
+                    # keeping it would hold seven days of request bodies on disk.
                     await self._mark(
-                        row.id, status="failed", attempt=attempt, last_error=error
+                        row.id, status="success", attempt=attempt, payload_json=""
                     )
-                    logger.error(
-                        "memorize_queue_failed",
+                    logger.info(
+                        "memorize_queue_delivered",
                         row_id=row.id,
                         session_id=row.session_id,
-                        attempts=attempt,
-                        message_count=row.message_count,
-                        error=error,
+                        attempt=attempt,
                     )
                     return
-                # Drop the body: nothing reads a delivered row's payload, and
-                # keeping it would hold seven days of request bodies on disk.
-                await self._mark(
-                    row.id, status="success", attempt=attempt, payload_json=""
-                )
-                logger.info(
-                    "memorize_queue_delivered",
-                    row_id=row.id,
-                    session_id=row.session_id,
-                    attempt=attempt,
-                )
-                return
         finally:
-            structlog.contextvars.unbind_contextvars("request_id")
             reset_request_id(token)
 
     async def _mark(self, row_id: int, **values: Any) -> None:
@@ -544,7 +572,7 @@ class MemorizeQueueWorker:
         """
         for attempt in range(1, _MARK_ATTEMPTS + 1):
             try:
-                await memorize_inbox_repo.mark(row_id, **values)
+                await self._inbox.mark(row_id, **values)
                 return
             except Exception:
                 if attempt == _MARK_ATTEMPTS:
@@ -564,9 +592,7 @@ class MemorizeQueueWorker:
         # that signal must survive this reap.
         self._status_write_lost = False
         try:
-            stuck = await memorize_inbox_repo.fail_abandoned(
-                exclude_ids=list(self._in_flight)
-            )
+            stuck = await self._inbox.fail_abandoned(exclude_ids=list(self._in_flight))
         except Exception:
             self._status_write_lost = True
             logger.exception("memorize_queue_reap_failed")
@@ -585,9 +611,7 @@ class MemorizeQueueWorker:
         """
         before = get_utc_now() - dt.timedelta(hours=self._cfg.row_retention_hours)
         try:
-            deleted, undelivered = await memorize_inbox_repo.purge_expired(
-                before=before
-            )
+            deleted, undelivered = await self._inbox.purge_expired(before=before)
         except Exception:
             logger.exception("memorize_queue_purge_failed")
         else:
@@ -609,7 +633,8 @@ class MemorizeQueueWorker:
 # ── task readers (no worker needed; plain table reads) ─────────────────────
 
 
-def _task_item(row: MemorizeInbox) -> TaskItem:
+def to_task_item(row: MemorizeTask) -> TaskItem:
+    """The Cloud-shaped view of one inbox row."""
     terminal = row.status in ("success", "failed")
     error_code: str | None = None
     if row.last_error == LOST_STATUS_WRITE:
@@ -626,31 +651,4 @@ def _task_item(row: MemorizeInbox) -> TaskItem:
         error_code=error_code,
         created_at=row.created_at,
         finished_at=row.updated_at if terminal else None,
-    )
-
-
-async def get_task(request_id: str) -> TaskItem | None:
-    row = await memorize_inbox_repo.find_one(request_id=request_id)
-    return None if row is None else _task_item(row)
-
-
-async def list_tasks(
-    *,
-    session_id: str | None = None,
-    status: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    app_id: str = "default",
-    project_id: str = "default",
-) -> TaskPage:
-    rows, total = await memorize_inbox_repo.list_tasks(
-        session_id=session_id,
-        status=status,
-        app_id=app_id,
-        project_id=project_id,
-        offset=(page - 1) * page_size,
-        limit=page_size,
-    )
-    return TaskPage(
-        total=total, page=page, page_size=page_size, items=[_task_item(r) for r in rows]
     )

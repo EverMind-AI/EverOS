@@ -1,11 +1,11 @@
-"""KindRecaller protocol + LanceDB row → Candidate helpers.
+"""KindRecaller protocol + index hit → Candidate helpers.
 
 Every recaller exposes two callsites:
 
 * :meth:`sparse_recall` — BM25 over the schema's ``*_tokens`` FTS column(s);
 * :meth:`dense_recall`  — cosine ANN over the 1024-d ``vector`` column.
 
-Both are filtered by the precompiled LanceDB ``where`` string and capped
+Both are filtered by the compiled ``where`` filter and capped
 at ``limit`` (the candidate pool size). The recaller does **not** apply
 ``radius``; that runs in the manager so the same value applies before
 fusion / rerank.
@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from everalgo.types import Candidate
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.persistence.index import Predicate
+from everos.memory.ports import Filter, IndexHit
 
 # Columns that should never travel through the ranker / shaper. ``vector``
 # is huge (1024 floats); ``_distance`` belongs to LanceDB's query engine
@@ -61,31 +61,30 @@ class KindRecaller(Protocol):
     """Source column for cross-encoder rerank passages (display text)."""
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
+        self, query: str, where: Filter, *, limit: int
     ) -> list[Candidate]: ...
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
+        self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[Candidate]: ...
 
 
 def row_to_candidate(
-    row: dict[str, Any],
+    hit: IndexHit,
     *,
     source: str,
     score: float,
 ) -> Candidate:
-    """Pack a LanceDB row dict into an everalgo ``Candidate``.
+    """Pack an index hit into an everalgo ``Candidate``.
 
-    The full row (minus noise columns) rides in ``metadata`` so the
-    shaper can build the response DTO without going back to LanceDB.
+    The hit's full field map (minus noise columns) rides in ``metadata`` so
+    the shaper can build the response DTO without going back to the index.
     """
-    rid = row.get("id")
-    if not isinstance(rid, str):
-        raise ValueError(f"row missing string 'id': {row!r}")
-    metadata = {k: v for k, v in row.items() if k not in _NOISE_COLUMNS and k != "id"}
+    metadata = {
+        k: v for k, v in hit.fields.items() if k not in _NOISE_COLUMNS and k != "id"
+    }
     return Candidate(
-        id=rid,
+        id=hit.id,
         score=float(score),
         source=source,  # type: ignore[arg-type]  # "keyword" | "vector"
         metadata=metadata,

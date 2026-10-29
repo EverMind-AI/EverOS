@@ -23,8 +23,9 @@ entrypoints  →  service  →  memory  →  infra
 2. **Private internals**: `service`, `memory`, and `entrypoints` must not import
    `infra.persistence.{markdown,lancedb,sqlite}.**` internals — go through the
    package facade (`from everos.infra.persistence.markdown import ...`).
-3. **OME isolation**: `infra.ome` must not import `persistence`, `memory`,
-   `service`, or `entrypoints`. It is a low-level scheduler with no domain knowledge.
+3. **OME isolation**: `infra.ome` imports only `everos.memory.ports` (the types
+   the domain declares for it) — never other `memory` modules, `persistence`,
+   `service`, or `entrypoints`. It is a scheduler with no domain logic.
 
 If a change needs to cross a boundary the wrong way, the design is wrong — refactor,
 don't add an exception.

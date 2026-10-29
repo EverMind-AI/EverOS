@@ -27,11 +27,10 @@ from uuid import uuid4
 
 from everos.core.observability.logging import get_logger
 from everos.infra.ome._dispatch.registry import StrategyRegistry
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome._stores.counter import CounterStore
-from everos.infra.ome.decorator import StrategyMeta
-from everos.infra.ome.events import BaseEvent, ManualTick
 from everos.infra.ome.records import CounterProgress, StrategyRouteInfo
-from everos.infra.ome.triggers import Cron
+from everos.memory.ports import Cron, Event, ManualTick
 
 logger = get_logger(__name__)
 
@@ -50,7 +49,7 @@ class EventDispatcher:
 
     async def dispatch(
         self,
-        event: BaseEvent,
+        event: Event,
         *,
         force_enabled: bool = False,
         strategy_filter: str | None = None,
@@ -114,7 +113,7 @@ class EventDispatcher:
             out.append((meta, uuid4().hex))
         return out
 
-    async def inspect(self, event: BaseEvent) -> list[StrategyRouteInfo]:
+    async def inspect(self, event: Event) -> list[StrategyRouteInfo]:
         """Dry-run twin of :meth:`dispatch` — no counter mutation.
 
         Returns one :class:`StrategyRouteInfo` per matched strategy with
@@ -160,7 +159,7 @@ class EventDispatcher:
         return out
 
 
-def _routes_to(event: BaseEvent, meta: StrategyMeta) -> bool:
+def _routes_to(event: Event, meta: StrategyMeta) -> bool:
     """Narrow engine-emitted ticks to their single target strategy.
 
     Cron / Idle / Manual ticks carry a ``strategy_name`` naming the
@@ -172,7 +171,7 @@ def _routes_to(event: BaseEvent, meta: StrategyMeta) -> bool:
     return target is None or target == meta.name
 
 
-def _safe_applies(meta: StrategyMeta, event: BaseEvent) -> bool:
+def _safe_applies(meta: StrategyMeta, event: Event) -> bool:
     """Evaluate ``meta.applies_to`` with user-callable exceptions isolated.
 
     A faulty ``applies_to`` callable is logged at exception level with
@@ -192,8 +191,8 @@ def _safe_applies(meta: StrategyMeta, event: BaseEvent) -> bool:
 
 
 def _applies(
-    spec: str | Callable[[BaseEvent], bool] | None,
-    event: BaseEvent,
+    spec: str | Callable[[Event], bool] | None,
+    event: Event,
 ) -> bool:
     """Resolve ``applies_to`` semantics.
 
@@ -213,7 +212,7 @@ def _applies(
     return bool(getattr(event, spec, None))
 
 
-def _bucket_key(event: BaseEvent, field: str | None) -> str:
+def _bucket_key(event: Event, field: str | None) -> str:
     """Compute a Counter-store bucket key from an event field.
 
     ``field=None`` means the gate is un-bucketed → single shared bucket

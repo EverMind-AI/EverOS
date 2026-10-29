@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,12 +13,13 @@ from everos.infra.ome.config import (
 )
 
 
-def test_ome_config_defaults() -> None:
-    from everos.core.persistence.memory_root import MemoryRoot
+def test_ome_config_defaults(tmp_path: Path) -> None:
+    from everos.infra.persistence.memory_root import MemoryRoot
 
-    c = OMEConfig()
-    assert c.jobstore_path == MemoryRoot.resolve().ome_db
-    assert c.aps_jobstore_path == MemoryRoot.resolve().ome_aps_db
+    root = MemoryRoot(tmp_path)
+    c = OMEConfig(jobstore_path=root.ome_db)
+    assert c.jobstore_path == root.ome_db
+    assert c.aps_jobstore_path == root.ome_aps_db
     assert c.max_concurrent_runs == 20
     assert c.max_retries == 1
     assert c.max_records_per_strategy == 1000
@@ -48,14 +51,19 @@ def test_aps_jobstore_path_respects_explicit_value(tmp_path: object) -> None:
     assert c.aps_jobstore_path == aps
 
 
-def test_ome_config_rejects_unknown_field() -> None:
+def test_ome_config_requires_jobstore_path() -> None:
     with pytest.raises(ValidationError):
-        OMEConfig(unknown_field=1)  # type: ignore[call-arg]
+        OMEConfig()  # type: ignore[call-arg]
 
 
-def test_ome_config_rejects_zero_concurrency() -> None:
+def test_ome_config_rejects_unknown_field(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
-        OMEConfig(max_concurrent_runs=0)
+        OMEConfig(jobstore_path=tmp_path / "ome.db", unknown_field=1)  # type: ignore[call-arg]
+
+
+def test_ome_config_rejects_zero_concurrency(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        OMEConfig(jobstore_path=tmp_path / "ome.db", max_concurrent_runs=0)
 
 
 def test_toml_root_parses_strategy_override() -> None:

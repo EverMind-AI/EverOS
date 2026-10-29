@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from everos.config import missing_config_error
+
 
 class ErrorCode(StrEnum):
     """Machine-readable error codes returned in the API error envelope.
@@ -291,11 +293,6 @@ class ProviderNotConfiguredError(ConfigurationError):
         feature: str | None = None,
         alternative_hint: str | None = None,
     ) -> None:
-        # Lazy import: `config_hints` -> `core.persistence` -> `core.persistence
-        # .markdown.writer` imports `PathTraversalError` from this module, so a
-        # module-level import here would be circular.
-        from everos.component.utils.config_hints import missing_config_error
-
         self.provider = provider
         self.feature = feature
         self.alternative_hint = alternative_hint

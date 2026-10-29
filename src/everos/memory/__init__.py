@@ -5,16 +5,14 @@ prompt management capabilities.
 
 External usage:
     from everos.memory import (
-        CanonicalMessage, IngestResult, PipelineOutcome,
+        CanonicalMessage, IngestResult,
         ToolCall, MemCell, Episode, AlgoMessage,
     )
 
-Path resolution and addressing of markdown records live with the infra
-writer/reader pair (``BaseDailyWriter`` / ``BaseDailyReader`` /
-``SkillWriter`` / ``SkillReader`` / ``ProfileWriter`` /
-``ProfileReader``) — see :mod:`everos.infra.persistence.markdown`. The
-domain layer here is reserved for actual business logic (extract /
-cascade / search / prompt_slots / evolution).
+Storage is reached only through the protocols in :mod:`everos.memory.ports`;
+path resolution and addressing of markdown records live with the storage
+adapters that implement them. The domain layer here is reserved for actual
+business logic (extract / search / reflection / prompt_slots).
 """
 
 from .models import AgentCase as AgentCase
@@ -29,7 +27,6 @@ from .models import Episode as Episode
 from .models import Foresight as Foresight
 from .models import IngestResult as IngestResult
 from .models import MemCell as MemCell
-from .models import PipelineOutcome as PipelineOutcome
 from .models import ToolCall as ToolCall
 
 __all__ = [
@@ -45,6 +42,5 @@ __all__ = [
     "Foresight",
     "IngestResult",
     "MemCell",
-    "PipelineOutcome",
     "ToolCall",
 ]

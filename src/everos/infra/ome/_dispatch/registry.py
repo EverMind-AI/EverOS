@@ -10,10 +10,17 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 
-from everos.infra.ome.decorator import Strategy, StrategyMeta
-from everos.infra.ome.events import BaseEvent, CronTick, IdleTick
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 from everos.infra.ome.exceptions import StartupValidationError
-from everos.infra.ome.triggers import Cron, Idle, Immediate, Trigger
+from everos.memory.ports import (
+    Cron,
+    CronTick,
+    Event,
+    Idle,
+    IdleTick,
+    Immediate,
+    Trigger,
+)
 
 
 class StrategyRegistry:
@@ -22,19 +29,18 @@ class StrategyRegistry:
     def __init__(self) -> None:
         self._strategies: dict[str, StrategyMeta] = {}
 
-    def register(self, strategy: Strategy) -> None:
-        """Register a :class:`Strategy` returned by ``@offline_strategy``.
+    def register(self, meta: StrategyMeta) -> None:
+        """Register a strategy built by ``to_ome_strategy``.
 
         Raises:
-            StartupValidationError: If ``strategy`` is not a Strategy
-                instance or its name is already registered.
+            StartupValidationError: If ``meta`` is not a :class:`StrategyMeta`
+                or its name is already registered.
         """
-        if not isinstance(strategy, Strategy):
-            label = getattr(strategy, "__name__", repr(strategy))
+        if not isinstance(meta, StrategyMeta):
+            label = getattr(meta, "__name__", repr(meta))
             raise StartupValidationError(
-                f"register: {label} is not decorated with @offline_strategy"
+                f"register: {label} is not a strategy built by to_ome_strategy"
             )
-        meta = strategy.meta
         if meta.name in self._strategies:
             raise StartupValidationError(
                 f"register: duplicate strategy name {meta.name!r}"
@@ -62,7 +68,7 @@ class StrategyRegistry:
         """Return a snapshot list of every registered strategy."""
         return list(self._strategies.values())
 
-    def lookup_by_event(self, event_cls: type[BaseEvent]) -> list[StrategyMeta]:
+    def lookup_by_event(self, event_cls: type[Event]) -> list[StrategyMeta]:
         """Return strategies that may receive an event of ``event_cls``.
 
         Resolution:
@@ -140,7 +146,7 @@ class StrategyRegistry:
                     )
 
 
-def _event_classes_for_trigger(trigger: Trigger) -> list[type[BaseEvent]]:
+def _event_classes_for_trigger(trigger: Trigger) -> list[type[Event]]:
     """Enumerate event classes a strategy with the given trigger receives."""
     if isinstance(trigger, Immediate):
         return list(trigger.on)

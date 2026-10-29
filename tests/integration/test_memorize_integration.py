@@ -7,7 +7,7 @@ runs without real LLM calls. Each test isolates state by:
 - redirecting ``MemoryRoot.resolve()`` to a ``tmp_path``
 - resetting service-layer lazy singletons
 - starting / stopping a per-test ``OfflineEngine``
-- patching ``get_llm_client`` (boundary + strategies) onto a fake
+- building the application over a fake LLM (boundary + strategies)
 
 OME strategies (atomic / foresight) are silenced via ``mock_aextract`` so
 this test focuses on the synchronous boundary + pipeline + md path —
@@ -17,6 +17,7 @@ strategy dispatch correctness already has its own coverage in
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import json
 import sqlite3
@@ -30,14 +31,27 @@ import pytest_asyncio
 from everalgo.llm.types import ChatMessage as LLMChatMessage
 from everalgo.llm.types import ChatResponse
 from everalgo.testing.fake_llm import FakeLLMClient
-from sqlmodel import SQLModel
 
-from everos.core.persistence import MemoryRoot
-from everos.service.memorize import MemorizeResult, memorize
+from everos.infra.persistence import MemoryRoot
+from everos.service import (
+    MemorizeResult,
+    MemoryService,
+    build_application,
+    build_providers,
+)
+from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
 # Canned LLM responses
 # ---------------------------------------------------------------------------
+
+_under_test: dict[str, MemoryService] = {}
+"""The memory facade of the application the ``memorize_env`` fixture built."""
+
+
+async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
+    """``MemoryService.memorize`` of the application under test."""
+    return await _under_test["memory"].memorize(payload, **kwargs)
 
 
 def _boundary_response(boundaries: list[int]) -> str:
@@ -91,8 +105,7 @@ def _make_fake_llm(
 
 @pytest_asyncio.fixture
 async def memorize_env(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> AsyncIterator[Callable[..., AsyncMock]]:
     """Yield a builder that configures a clean memorize environment.
 
@@ -109,28 +122,14 @@ async def memorize_env(
     monkeypatch.setattr(
         MemoryRoot, "resolve", classmethod(lambda cls: MemoryRoot(root=tmp_path))
     )
+    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    svc = importlib.import_module("everos.service.memorize")
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    client_mod = importlib.import_module("everos.component.llm.client")
 
-    # Reset singletons.
-    for attr in (
-        "_episode_writer",
-        "_prompt_loader",
-        "_user_pipeline",
-        "_agent_pipeline",
-        "_ome_engine",
-    ):
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    monkeypatch.setattr(af_mod, "_writer", None, raising=False)
-    monkeypatch.setattr(fs_mod, "_writer", None, raising=False)
-
-    started: dict[str, Any] = {"engine": None, "sqlite_engine": None}
+    started: dict[str, Any] = {"engine": None}
 
     async def _setup(
         *,
@@ -139,8 +138,8 @@ async def memorize_env(
         hard_token_limit: int = 65536,
         hard_msg_limit: int = 500,
     ) -> None:
-        # Provide a non-None API key + base_url so get_llm_client doesn't
-        # raise; we replace the cached singleton with our fake right after.
+        # Provide a non-None API key + base_url so the configured LLM resolves;
+        # the application is then built over the fake instead.
         monkeypatch.setenv("EVEROS_MEMORIZE__MODE", mode)
         monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
         monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
@@ -154,17 +153,9 @@ async def memorize_env(
 
         load_settings.cache_clear()
 
-        # Replace the cached client singleton with our fake so get_llm_client
-        # returns the fake on subsequent calls.
-        monkeypatch.setattr(client_mod, "_llm_client", fake_llm)
-
         # Build sqlite schema.
-        from everos.infra.persistence.sqlite import dispose_engine, get_engine
 
-        db_engine = get_engine()
-        async with db_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        started["sqlite_engine"] = (get_engine, dispose_engine)
+        await storage.create_schema()
 
         # Mock the OME extractors so the async strategy chain is a no-op
         # (the strategy itself still runs; it just sees no facts/foresights).
@@ -181,7 +172,13 @@ async def memorize_env(
             lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
         )
 
-        engine = svc._get_engine()
+        settings = load_settings()
+        application = build_application(
+            settings,
+            providers=dataclasses.replace(build_providers(settings), llm=fake_llm),
+        )
+        _under_test["memory"] = application.memory
+        engine = application._engine
         await engine.start()
         started["engine"] = engine
 
@@ -189,9 +186,6 @@ async def memorize_env(
 
     if started["engine"] is not None:
         await started["engine"].stop()
-    if started["sqlite_engine"] is not None:
-        _, dispose = started["sqlite_engine"]
-        await dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +259,7 @@ def _episode_paths(tmp_path: Path) -> list[Path]:
 
 
 async def test_chat_baseline_two_msgs_one_cell(
-    tmp_path: Path,
-    memorize_env: Callable[..., Any],
+    tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """2 messages → flush forces them into 1 cell + 1 Episode + 1 memcell row."""
     fake = _make_fake_llm(boundary_responses=[[]])  # no internal cuts
@@ -377,8 +370,7 @@ async def test_single_user_message_accumulates(
 
 
 async def test_deferred_add_persists_without_llm_then_flushes(
-    tmp_path: Path,
-    memorize_env: Callable[..., Any],
+    tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Deferred add is durable and cheap; flush performs the LLM extraction."""
     calls: list[str] = []
@@ -494,13 +486,13 @@ async def test_duplicate_message_id_dedup_across_adds(
 
 
 async def test_hard_msg_limit_force_split(
-    tmp_path: Path, memorize_env: Callable[..., Any]
+    tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
 ) -> None:
     """Exceeding ``hard_msg_limit`` triggers a force-split before the LLM call."""
     fake = _make_fake_llm(boundary_responses=[[]])  # LLM call after force-split
     # hard_msg_limit=3 → batch of 5 msgs forces ~1 split before LLM.
     await memorize_env(
-        mode="chat", fake_llm=fake, hard_msg_limit=3, hard_token_limit=10_000
+        storage, mode="chat", fake_llm=fake, hard_msg_limit=3, hard_token_limit=10_000
     )
 
     msgs = [
@@ -519,13 +511,13 @@ async def test_hard_msg_limit_force_split(
 
 
 async def test_hard_token_limit_force_split(
-    tmp_path: Path, memorize_env: Callable[..., Any]
+    tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
 ) -> None:
     """Exceeding ``hard_token_limit`` triggers a force-split (token-based)."""
     fake = _make_fake_llm(boundary_responses=[[]])
     # Very small token budget → even tiny content triggers force-split.
     await memorize_env(
-        mode="chat", fake_llm=fake, hard_msg_limit=500, hard_token_limit=20
+        storage, mode="chat", fake_llm=fake, hard_msg_limit=500, hard_token_limit=20
     )
 
     msgs = [
@@ -738,8 +730,7 @@ async def test_same_session_multi_add_concatenates(
 
 
 async def test_flush_produces_nested_trace(
-    tmp_path: Path,
-    memorize_env: Callable[..., Any],
+    tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """A real flush that extracts one Episode emits everos.memory.flush with
     everos.extract + everos.persist.markdown as children of one trace."""

@@ -33,12 +33,12 @@ from typing import Any
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from everos.component.utils.datetime import get_utc_now
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables import MdChangeState
 
 MTIME_TOLERANCE_SECONDS = 0.01
@@ -46,7 +46,7 @@ MTIME_TOLERANCE_SECONDS = 0.01
 
 Used both by the upsert's retry_count carry-over CASE (below) and by the
 cascade reconciler's stable-mtime check
-(:func:`everos.memory.cascade.reconciler.reconcile`). The two comparisons
+(:func:`everos.infra.cascade.reconciler.reconcile`). The two comparisons
 share this single source of truth so their notions of "same file" stay
 in lock-step; drift would leave upsert preserving ``retry_count`` while
 the reconciler skips re-enqueue (or vice versa), corrupting the retry
@@ -86,11 +86,8 @@ class QueueSummary:
     (``done`` or ``failed``); 0 if no terminal rows yet."""
 
 
-class _MdChangeStateRepo(RepoBase[MdChangeState]):
+class MdChangeStateRepo(RepoBase[MdChangeState]):
     model = MdChangeState
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     # ── Writers: watcher / scanner / CLI sync ──────────────────────────────
 
@@ -475,7 +472,7 @@ class _MdChangeStateRepo(RepoBase[MdChangeState]):
         ``QueueSummary.done`` counts completed **deletions** too: the
         reconciler keeps a finished delete as ``status='done'`` with
         ``change_type='deleted'`` so the file is not re-enqueued every scan
-        (:mod:`everos.memory.cascade.reconciler`). That makes ``done`` the
+        (:mod:`everos.infra.cascade.reconciler`). That makes ``done`` the
         wrong evidence for "sources were indexed, so the tables should hold
         rows" -- a user who deletes their last markdown file ends up with
         ``done > 0``, nothing pending and empty tables, which is exactly
@@ -602,6 +599,3 @@ async def _count_where(session: AsyncSession, predicate: object) -> int:
     """``SELECT COUNT(*) WHERE <predicate>`` returning a Python int."""
     stmt = select(func.count()).select_from(MdChangeState).where(predicate)  # type: ignore[arg-type]
     return int((await session.execute(stmt)).scalar_one())
-
-
-md_change_state_repo = _MdChangeStateRepo()

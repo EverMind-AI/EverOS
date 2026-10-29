@@ -1,7 +1,7 @@
-"""LanceDB manager singletons.
+"""``LanceDbConnection``: one root's connection and table cache.
 
-Verifies ``get_connection`` / ``get_table`` / ``dispose_connection``
-are idempotent and rebuild after dispose.
+Building opens nothing; the connection and tables open on first use, are
+cached, and come back after ``close``.
 """
 
 from __future__ import annotations
@@ -12,8 +12,10 @@ from typing import ClassVar
 import pytest
 from lancedb.pydantic import Vector
 
-from everos.core.persistence import BaseLanceTable
-from everos.infra.persistence.lancedb import lancedb_manager
+from everos.config import LanceDBSettings
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.lancedb import LanceDbConnection
+from everos.infra.persistence.records import BaseLanceTable
 
 
 class _DemoVec(BaseLanceTable):
@@ -25,51 +27,51 @@ class _DemoVec(BaseLanceTable):
     vector: Vector(3)  # type: ignore[valid-type]
 
 
-@pytest.fixture(autouse=True)
-async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Point the singleton at an isolated memory-root and reset module state."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    yield
-    await lancedb_manager.dispose_connection()
+@pytest.fixture
+async def connection(tmp_path: Path):  # type: ignore[no-untyped-def]
+    built = LanceDbConnection(MemoryRoot(tmp_path / "root"), LanceDBSettings())
+    yield built
+    await built.close()
 
 
-async def test_get_connection_is_singleton() -> None:
-    c1 = await lancedb_manager.get_connection()
-    c2 = await lancedb_manager.get_connection()
-    assert c1 is c2
+def test_building_touches_nothing_on_disk(tmp_path: Path) -> None:
+    LanceDbConnection(MemoryRoot(tmp_path / "root"), LanceDBSettings())
+    assert not (tmp_path / "root").exists()
 
 
-async def test_get_table_creates_then_caches() -> None:
-    t1 = await lancedb_manager.get_table("demo", _DemoVec)
-    t2 = await lancedb_manager.get_table("demo", _DemoVec)
+async def test_connect_returns_the_same_connection(
+    connection: LanceDbConnection,
+) -> None:
+    assert await connection.connect() is await connection.connect()
+
+
+async def test_table_creates_then_caches(connection: LanceDbConnection) -> None:
+    t1 = await connection.table("demo", _DemoVec)
+    t2 = await connection.table("demo", _DemoVec)
     assert t1 is t2
-    assert "demo" in lancedb_manager._tables
 
 
-async def test_get_table_reopens_existing() -> None:
+async def test_table_reopens_existing_after_close(
+    connection: LanceDbConnection,
+) -> None:
     """A second connection cycle must reopen (not recreate) the table."""
-    await lancedb_manager.get_table("demo", _DemoVec)
-    await lancedb_manager.dispose_connection()
+    await connection.table("demo", _DemoVec)
+    await connection.close()
 
-    t = await lancedb_manager.get_table("demo", _DemoVec)
-    assert t is not None
+    t = await connection.table("demo", _DemoVec)
     # Round-trip a row to prove the schema survived.
     await t.add([_DemoVec(text="hello", vector=[0.1, 0.2, 0.3])])
     assert await t.count_rows() == 1
 
 
-async def test_dispose_resets_state() -> None:
-    await lancedb_manager.get_connection()
-    await lancedb_manager.get_table("demo", _DemoVec)
-    await lancedb_manager.dispose_connection()
-    assert lancedb_manager._conn is None
-    assert lancedb_manager._tables == {}
+async def test_close_evicts_the_cache(connection: LanceDbConnection) -> None:
+    t1 = await connection.table("demo", _DemoVec)
+    await connection.close()
+    assert await connection.table("demo", _DemoVec) is not t1
 
 
-async def test_dispose_is_idempotent() -> None:
-    await lancedb_manager.dispose_connection()  # nothing built yet
-    await lancedb_manager.get_connection()
-    await lancedb_manager.dispose_connection()
-    await lancedb_manager.dispose_connection()  # second call must not raise
+async def test_close_is_idempotent(connection: LanceDbConnection) -> None:
+    await connection.close()  # nothing opened yet
+    await connection.connect()
+    await connection.close()
+    await connection.close()  # second call must not raise

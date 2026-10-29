@@ -2,7 +2,7 @@
 
 Provides:
 
-- ``core_pipeline_runtime``: tmp memory root + reset memorize singletons.
+- ``core_pipeline_runtime``: tmp memory root + packaged ``ome.toml``.
   Uses the **real** LLM / embedding / rerank creds from ``.env`` per the
   project test policy.
 - ``async_client``: ``httpx.AsyncClient`` wired into ``create_app()`` with
@@ -32,7 +32,6 @@ Conventions:
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import os
 import shutil
@@ -40,12 +39,17 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from sqlalchemy import text
+
+if TYPE_CHECKING:
+    from everos.service import Application
+    from tests.fakes import StorageView
 
 # Load real .env creds before any everos import touches load_settings().
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -54,38 +58,17 @@ load_dotenv(_PROJECT_ROOT / ".env", override=False)
 _FIXTURE_DIR = _PROJECT_ROOT / "tests" / "fixtures"
 _SEARCH_SEED_DIR = _FIXTURE_DIR / "search_seed"
 
-# Memorize service module-level singletons that survive across tests; we
-# null them out so each test rebuilds against its own ``tmp_path``.
-_MEMORIZE_SINGLETONS: tuple[str, ...] = (
-    "_episode_writer",
-    "_prompt_loader",
-    "_user_pipeline",
-    "_agent_pipeline",
-    "_ome_engine",
-)
 
-# OME strategy modules carry module-level lazy singletons (``_writer`` /
-# ``_reader``) that capture ``MemoryRoot.resolve()`` at first call. They
-# survive across tests, so the second test writes its output to the
-# **first test's** tmp_path. Reset all of them per-test.
-_STRATEGY_SINGLETONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("everos.memory.strategies.extract_atomic_facts", ("_writer",)),
-    ("everos.memory.strategies.extract_foresight", ("_writer",)),
-    ("everos.memory.strategies.extract_user_profile", ("_writer", "_reader")),
-    ("everos.memory.strategies.extract_agent_case", ("_writer",)),
-    ("everos.memory.strategies.extract_agent_skill", ("_writer",)),
-)
+@pytest.fixture(autouse=True)
+def _strongly_consistent_lancedb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every LanceDB read see the latest committed version.
 
-
-def _reset_strategy_singletons(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Null every strategy ``_writer`` / ``_reader`` so the next test
-    rebuilds against its own ``MemoryRoot.resolve()`` (driven by the
-    fresh ``EVEROS_ROOT`` env var set by the calling fixture).
+    The application and the test reach the same tables through separate
+    connections (see ``storage_view``). LanceDB's default never refreshes an
+    open table, so rows one side writes after the other opened the table
+    would stay invisible to it.
     """
-    for mod_name, attrs in _STRATEGY_SINGLETONS:
-        mod = importlib.import_module(mod_name)
-        for attr in attrs:
-            monkeypatch.setattr(mod, attr, None, raising=False)
+    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +95,7 @@ def search_seed() -> dict[str, list[dict]]:
 
 
 # ---------------------------------------------------------------------------
-# Runtime fixture: tmp memory root + singleton reset (no app lifespan)
+# Runtime fixture: tmp memory root (each test builds its own application)
 # ---------------------------------------------------------------------------
 
 
@@ -155,13 +138,15 @@ async def index_backend(
 
     if backend == "milvus":
         from everos.config import load_settings
-        from everos.infra.persistence.index import drop_business_tables, shutdown
+        from everos.infra.persistence import MemoryRoot
+        from everos.infra.persistence.factories import build_derived_index
 
         load_settings.cache_clear()
+        index = build_derived_index(load_settings(), MemoryRoot.resolve())
         try:
-            await drop_business_tables()
+            await index.drop_business_tables()
         finally:
-            await shutdown()
+            await index.shutdown()
 
 
 @pytest_asyncio.fixture
@@ -170,7 +155,7 @@ async def core_pipeline_runtime(
     monkeypatch: pytest.MonkeyPatch,
     index_backend: str,
 ) -> AsyncIterator[Path]:
-    """Prepare clean memory root + reset memorize singletons.
+    """Prepare a clean memory root (each test builds its own application).
 
     Keeps real LLM / embedding settings from ``.env`` (do NOT overwrite
     ``EVEROS_LLM__*`` or ``EVEROS_EMBEDDING__*``).
@@ -181,18 +166,10 @@ async def core_pipeline_runtime(
 
     load_settings.cache_clear()
 
-    svc = importlib.import_module("everos.service.memorize")
-    client_mod = importlib.import_module("everos.component.llm.client")
-
-    for attr in _MEMORIZE_SINGLETONS:
-        monkeypatch.setattr(svc, attr, None, raising=False)
-    monkeypatch.setattr(client_mod, "_llm_client", None, raising=False)
-    _reset_strategy_singletons(monkeypatch)
-
     # The full-app lifespan starts OME, whose config reloader requires an
     # ``ome.toml`` in the memory root (normally created by ``everos init``).
     # Provision the packaged default so the pipeline e2e can boot; OME
-    # strategies are code-registered (see api/lifespans/ome.py), so the
+    # strategies are code-registered (see service/bootstrap.py), so the
     # default config is sufficient for extraction.
     default_ome = files("everos.config") / "default_ome.toml"
     shutil.copyfile(str(default_ome), str(tmp_path / "ome.toml"))
@@ -205,9 +182,18 @@ async def core_pipeline_runtime(
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def e2e_application(core_pipeline_runtime: Path) -> Application:
+    """The application one test's app runs, built over its memory root."""
+    from everos.config import load_settings
+    from everos.service import build_application
+
+    return build_application(load_settings())
+
+
 @pytest_asyncio.fixture
 async def async_client(
-    core_pipeline_runtime: Path,
+    e2e_application: Application,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Bring up the full everos app with lifespan, return an httpx client.
 
@@ -217,7 +203,7 @@ async def async_client(
     """
     from everos.entrypoints.api.app import create_app
 
-    app = create_app()
+    app = create_app(application=e2e_application)
     transport = httpx.ASGITransport(app=app)
 
     # Drive starlette's lifespan_context explicitly — httpx.ASGITransport
@@ -249,14 +235,14 @@ async def _poll(
 
 
 @pytest.fixture
-def cascade_done_poll() -> Callable[..., Awaitable[None]]:
+def cascade_done_poll(
+    core_pipeline_runtime: Path, storage_view: StorageView
+) -> Callable[..., Awaitable[None]]:
     """Wait until ``md_change_state`` queue is drained (no pending/processing)."""
 
     async def _wait(*, deadline_seconds: float = 180.0) -> None:
-        from everos.infra.persistence.sqlite import md_change_state_repo
-
         async def _drained() -> bool:
-            summary = await md_change_state_repo.queue_summary()
+            summary = await storage_view.sqlite.md_change_state.queue_summary()
             # `pending` includes the internal `processing` rows (see QueueSummary).
             return summary.pending == 0
 
@@ -266,7 +252,9 @@ def cascade_done_poll() -> Callable[..., Awaitable[None]]:
 
 
 @pytest.fixture
-def pipeline_done_poll() -> Callable[..., Awaitable[None]]:
+def pipeline_done_poll(
+    e2e_application: Application, storage_view: StorageView
+) -> Callable[..., Awaitable[None]]:
     """Wait until OME strategy runs AND ``md_change_state`` queue both drain.
 
     Composite drain — fixes the trap where :func:`cascade_done_poll`
@@ -278,10 +266,7 @@ def pipeline_done_poll() -> Callable[..., Awaitable[None]]:
     """
 
     async def _wait(*, deadline_seconds: float = 180.0) -> None:
-        from everos.infra.persistence.sqlite import md_change_state_repo
-        from everos.service.memorize import _get_engine
-
-        engine = _get_engine()
+        engine = e2e_application._engine
 
         async def _drained() -> bool:
             # OME side first: cascade can only fire after a strategy
@@ -291,7 +276,7 @@ def pipeline_done_poll() -> Callable[..., Awaitable[None]]:
                 return False
             # `pending` includes the internal `processing` rows (see
             # QueueSummary).
-            summary = await md_change_state_repo.queue_summary()
+            summary = await storage_view.sqlite.md_change_state.queue_summary()
             return summary.pending == 0
 
         await _poll(_drained, deadline_seconds=deadline_seconds)
@@ -305,14 +290,13 @@ def pipeline_done_poll() -> Callable[..., Awaitable[None]]:
 
 
 @pytest.fixture
-def buffer_count() -> Callable[[str], Awaitable[int]]:
+def buffer_count(
+    core_pipeline_runtime: Path, storage_view: StorageView
+) -> Callable[[str], Awaitable[int]]:
     """Return an async callable: ``await buffer_count(session_id) -> int``."""
 
     async def _count(session_id: str) -> int:
-        from everos.infra.persistence.sqlite import get_engine
-
-        engine = get_engine()
-        async with engine.connect() as conn:
+        async with storage_view.database.engine.connect() as conn:
             result = await conn.execute(
                 text("SELECT COUNT(*) FROM unprocessed_buffer WHERE session_id = :sid"),
                 {"sid": session_id},
@@ -323,7 +307,9 @@ def buffer_count() -> Callable[[str], Awaitable[int]]:
 
 
 @pytest.fixture
-def memcell_count() -> Callable[[str], Awaitable[int]]:
+def memcell_count(
+    core_pipeline_runtime: Path, storage_view: StorageView
+) -> Callable[[str], Awaitable[int]]:
     """Return an async callable: ``await memcell_count(user_id_or_session) -> int``.
 
     Counts memcell rows; pass session_id to count by session, or omit to
@@ -331,10 +317,7 @@ def memcell_count() -> Callable[[str], Awaitable[int]]:
     """
 
     async def _count(session_id: str | None = None) -> int:
-        from everos.infra.persistence.sqlite import get_engine
-
-        engine = get_engine()
-        async with engine.connect() as conn:
+        async with storage_view.database.engine.connect() as conn:
             if session_id is None:
                 result = await conn.execute(text("SELECT COUNT(*) FROM memcell"))
             else:

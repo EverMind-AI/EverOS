@@ -1,25 +1,16 @@
 from __future__ import annotations
 
-import datetime as _dt
-import importlib
 import uuid
 from unittest.mock import AsyncMock, patch
 
-import pytest
 import structlog.testing
 from everalgo.types import AgentCase, ChatMessage, MemCell
 
-from everos.core.persistence import EntryId
-from everos.infra.ome.testing import FakeStrategyContext
 from everos.memory.events import AgentCaseExtracted, AgentPipelineStarted
-from everos.memory.strategies.extract_agent_case import extract_agent_case
+from everos.memory.strategies import EXTRACT_AGENT_CASE_SPEC, extract_agent_case
+from tests.fakes import make_deps
 
-
-def _fake_eid() -> EntryId:
-    return EntryId(prefix="ac", date=_dt.date(2026, 5, 17), seq=1)
-
-
-mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
+_EXTRACTOR = "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
 
 
 def _agent_memcell() -> MemCell:
@@ -67,81 +58,60 @@ def _algo_case(
     )
 
 
-async def test_strategy_meta_is_attached() -> None:
-    meta = extract_agent_case.meta
-    assert meta.name == "extract_agent_case"
-    assert AgentPipelineStarted in meta.trigger.on
-    assert meta.emits == frozenset({AgentCaseExtracted})
-    assert meta.max_retries == 2
+def test_spec() -> None:
+    spec = EXTRACT_AGENT_CASE_SPEC
+    assert spec.name == "extract_agent_case"
+    assert AgentPipelineStarted in spec.trigger.on
+    assert spec.emits == frozenset({AgentCaseExtracted})
+    assert spec.max_retries == 2
 
 
-async def test_writes_md_when_algo_returns_a_case(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
+async def test_writes_the_case_and_announces_it() -> None:
+    deps = make_deps()
     case = _algo_case(quality_score=0.9, key_insight="batch-then-summarise")
     with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
         mock_cls.return_value.aextract = AsyncMock(return_value=[case])
-        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
-        ctx = FakeStrategyContext()
-
-        await extract_agent_case(_event(), ctx)
+        events = await extract_agent_case(_event(), deps)
 
     assert mock_cls.return_value.aextract.await_count == 1
-    assert mock_wcls.return_value.append_entry.call_count == 1
-    _, kwargs = mock_wcls.return_value.append_entry.call_args
-    assert kwargs["inline"]["owner_id"] == "agent_42"
-    assert kwargs["inline"]["session_id"] == "s1"
-    assert kwargs["inline"]["parent_type"] == "memcell"
-    assert kwargs["inline"]["parent_id"] == "mc_a"
-    assert kwargs["inline"]["quality_score"] == 0.9
-    assert kwargs["sections"] == {
-        "TaskIntent": "summarise doc",
-        "Approach": "read + condense",
-        "KeyInsight": "batch-then-summarise",
-    }
-    # Chain emit: AgentCaseExtracted fires after the md write.
-    emitted = [e for e in ctx.emitted if isinstance(e, AgentCaseExtracted)]
-    assert len(emitted) == 1
-    assert emitted[0].memcell_id == "mc_a"
-    assert emitted[0].case_entry_id == _fake_eid().format()
-    assert emitted[0].task_intent == "summarise doc"
-    assert emitted[0].quality_score == 0.9
-    assert emitted[0].case_timestamp_ms == 1_700_000_001_000
-    assert emitted[0].agent_id == "agent_42"
+    (stored,) = deps.stores.agent_case.records
+    assert (stored.scope.owner_id, stored.scope.owner_type) == ("agent_42", "agent")
+    assert (stored.item.session_id, stored.item.parent_id) == ("s1", "mc_a")
+    assert stored.item.quality_score == 0.9
+    assert (stored.item.task_intent, stored.item.approach) == (
+        "summarise doc",
+        "read + condense",
+    )
+    assert stored.item.key_insight == "batch-then-summarise"
 
-    matching = [e for e in captured if e.get("event") == "agent_case_extracted"]
-    assert matching, "expected agent_case_extracted log line"
-    assert matching[0]["owner_ids"] == ["agent_42"]
-    assert matching[0]["fanout"] == 1
-    assert matching[0]["quality_score"] == 0.9
+    (announced,) = events
+    assert isinstance(announced, AgentCaseExtracted)
+    assert announced.memcell_id == "mc_a"
+    assert announced.case_entry_id == stored.ref.entry_id
+    assert announced.task_intent == "summarise doc"
+    assert announced.quality_score == 0.9
+    assert announced.case_timestamp_ms == 1_700_000_001_000
+    assert announced.agent_id == "agent_42"
+
+    record = next(e for e in captured if e.get("event") == "agent_case_extracted")
+    assert record["owner_ids"] == ["agent_42"]
+    assert record["fanout"] == 1
+    assert record["quality_score"] == 0.9
 
 
-async def test_fans_out_per_assistant_sender(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """One LLM call, then md write + emit per distinct assistant sender.
+async def test_fans_out_per_assistant_sender() -> None:
+    """One LLM call, then a write + an event per distinct assistant sender.
 
     Case text is third-person (``the agent did X``) so the same body
     is a valid reference experience for every assistant sender that
     participated in the trajectory. Verifies: aextract is called
-    exactly once, md is written once per agent, and an
-    ``AgentCaseExtracted`` event fires per agent so the downstream
+    exactly once, the case is written once per agent, and an
+    ``AgentCaseExtracted`` event is returned per agent so the downstream
     skill clustering chain runs in each agent's own scope.
     """
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
     multi_agent_cell = MemCell(
         items=[
             ChatMessage(
@@ -171,154 +141,82 @@ async def test_fans_out_per_assistant_sender(
     event = AgentPipelineStarted(
         memcell_id="mc_multi", session_id="s_multi", memcell=multi_agent_cell
     )
-    case = _algo_case(quality_score=0.85)
-
-    # writer.append_entry returns a different entry_id per call so the
-    # emitted events carry per-agent entry_ids (cascade keys off owner+entry).
-    eids = [
-        EntryId(prefix="ac", date=_dt.date(2026, 5, 17), seq=1),
-        EntryId(prefix="ac", date=_dt.date(2026, 5, 17), seq=2),
-    ]
-
+    deps = make_deps()
     with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
-        mock_cls.return_value.aextract = AsyncMock(return_value=[case])
-        mock_wcls.return_value.append_entry = AsyncMock(side_effect=eids)
-        ctx = FakeStrategyContext()
-
-        await extract_agent_case(event, ctx)
+        mock_cls.return_value.aextract = AsyncMock(
+            return_value=[_algo_case(quality_score=0.85)]
+        )
+        events = await extract_agent_case(event, deps)
 
     # Exactly one LLM call regardless of agent count.
     assert mock_cls.return_value.aextract.await_count == 1
 
-    # Two md writes (one per distinct assistant sender), in first-seen order.
-    assert mock_wcls.return_value.append_entry.call_count == 2
-    owners_written = [
-        call.kwargs["inline"]["owner_id"]
-        for call in mock_wcls.return_value.append_entry.call_args_list
-    ]
-    assert owners_written == ["agent_lead", "agent_specialist"]
+    # Two writes (one per distinct assistant sender), in first-seen order.
+    stored = deps.stores.agent_case.records
+    assert [s.scope.owner_id for s in stored] == ["agent_lead", "agent_specialist"]
 
-    # Two emits, each tagged with its own agent_id + per-agent entry_id.
-    emitted = [e for e in ctx.emitted if isinstance(e, AgentCaseExtracted)]
-    assert len(emitted) == 2
-    assert [e.agent_id for e in emitted] == ["agent_lead", "agent_specialist"]
-    assert [e.case_entry_id for e in emitted] == [eids[0].format(), eids[1].format()]
+    # Two events, each tagged with its own agent_id + per-agent entry_id.
+    assert [e.agent_id for e in events] == ["agent_lead", "agent_specialist"]
+    assert [e.case_entry_id for e in events] == [s.ref.entry_id for s in stored]
     # Same task body / quality across the fan-out (broadcast semantics).
-    assert {e.task_intent for e in emitted} == {"summarise doc"}
-    assert {e.quality_score for e in emitted} == {0.85}
+    assert {e.task_intent for e in events} == {"summarise doc"}
+    assert {e.quality_score for e in events} == {0.85}
 
-    matching = [e for e in captured if e.get("event") == "agent_case_extracted"]
-    assert matching, "expected agent_case_extracted log line"
-    assert matching[0]["owner_ids"] == ["agent_lead", "agent_specialist"]
-    assert matching[0]["fanout"] == 2
+    record = next(e for e in captured if e.get("event") == "agent_case_extracted")
+    assert record["owner_ids"] == ["agent_lead", "agent_specialist"]
+    assert record["fanout"] == 2
 
 
-async def test_emit_includes_approach_and_key_insight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """1.2.3+ emitters populate the new case-body fields on AgentCaseExtracted."""
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
+async def test_event_includes_approach_and_key_insight() -> None:
+    """1.2.3+ producers populate the case-body fields on AgentCaseExtracted."""
     case = _algo_case(
         task_intent="restore MongoDB replica",
         approach="1. stop node  2. resync  3. verify",
         quality_score=0.75,
         key_insight="watch oplog lag",
     )
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
-    ):
+    with patch(_EXTRACTOR) as mock_cls:
         mock_cls.return_value.aextract = AsyncMock(return_value=[case])
-        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
-        ctx = FakeStrategyContext()
+        (event,) = await extract_agent_case(_event(), make_deps())
 
-        await extract_agent_case(_event(), ctx)
-
-    emitted = [e for e in ctx.emitted if isinstance(e, AgentCaseExtracted)]
-    assert len(emitted) == 1
-    event = emitted[0]
     assert event.approach == "1. stop node  2. resync  3. verify"
     assert event.key_insight == "watch oplog lag"
     assert event.task_intent == "restore MongoDB replica"
     assert event.quality_score == 0.75
 
 
-async def test_omits_key_insight_section_when_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
-    case = _algo_case(key_insight="")
+async def test_empty_key_insight_is_stored_as_absent() -> None:
+    deps = make_deps()
+    with patch(_EXTRACTOR) as mock_cls:
+        mock_cls.return_value.aextract = AsyncMock(
+            return_value=[_algo_case(key_insight="")]
+        )
+        await extract_agent_case(_event(), deps)
+
+    (stored,) = deps.stores.agent_case.records
+    assert not stored.item.key_insight
+    assert stored.item.task_intent == "summarise doc"
+
+
+async def test_skips_when_algo_returns_empty() -> None:
+    """Algo pre-filter rejected the cell — nothing written, a noop line logged."""
+    deps = make_deps()
     with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
-    ):
-        mock_cls.return_value.aextract = AsyncMock(return_value=[case])
-        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
-        await extract_agent_case(_event(), FakeStrategyContext())
-
-    _, kwargs = mock_wcls.return_value.append_entry.call_args
-    assert "KeyInsight" not in kwargs["sections"]
-    assert kwargs["sections"]["TaskIntent"] == "summarise doc"
-
-
-async def test_skips_when_algo_returns_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Algo pre-filter rejected the cell — no md written, log a noop line."""
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
         mock_cls.return_value.aextract = AsyncMock(return_value=[])
-        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
-        await extract_agent_case(_event(), FakeStrategyContext())
+        events = await extract_agent_case(_event(), deps)
 
-    mock_wcls.return_value.append_entry.assert_not_called()
-    matching = [e for e in captured if e.get("event") == "agent_case_skipped_by_algo"]
-    assert matching, "expected agent_case_skipped_by_algo log line"
+    assert events == []
+    assert deps.stores.agent_case.records == []
+    assert any(e.get("event") == "agent_case_skipped_by_algo" for e in captured)
 
 
-async def test_skips_when_no_assistant_sender(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_skips_when_no_assistant_sender() -> None:
     """No assistant in the cell → no agent_id can be inferred; algo not called."""
     user_only = MemCell(
         items=[
@@ -333,29 +231,15 @@ async def test_skips_when_no_assistant_sender(
         timestamp=1_700_000_000_000,
     )
     event = AgentPipelineStarted(memcell_id="mc_b", session_id="s1", memcell=user_only)
-
-    monkeypatch.setattr(mod, "_writer", None, raising=False)
+    deps = make_deps()
     with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.get_llm_client",
-            return_value=object(),
-        ),
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_cls,
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseWriter"
-        ) as mock_wcls,
+        patch(_EXTRACTOR) as mock_cls,
         structlog.testing.capture_logs() as captured,
     ):
-        mock_cls.return_value.aextract = AsyncMock(return_value=[])
-        mock_wcls.return_value.append_entry = AsyncMock(return_value=_fake_eid())
-        await extract_agent_case(event, FakeStrategyContext())
+        events = await extract_agent_case(event, deps)
 
     # Algo extractor must not be invoked at all when there's no agent.
-    mock_cls.return_value.aextract.assert_not_called()
-    mock_wcls.return_value.append_entry.assert_not_called()
-    matching = [
-        e for e in captured if e.get("event") == "agent_case_skipped_no_assistant"
-    ]
-    assert matching, "expected agent_case_skipped_no_assistant log line"
+    mock_cls.assert_not_called()
+    assert events == []
+    assert deps.stores.agent_case.records == []
+    assert any(e.get("event") == "agent_case_skipped_no_assistant" for e in captured)

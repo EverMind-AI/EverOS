@@ -45,14 +45,14 @@ class RunRecord(BaseModel):
         Field(
             min_length=1,
             description="Stable cross-process event identifier in "
-            "``<module>:<class>`` form (see ``BaseEvent.topic()``).",
+            "``<module>:<class>`` form (see ``Event.topic()``).",
         ),
     ]
     event_payload: Annotated[
         str,
         Field(
             min_length=1,
-            description="JSON-encoded event (``BaseEvent.model_dump_json`` output).",
+            description="JSON-encoded event (``Event.model_dump_json`` output).",
         ),
     ]
     max_retries_snapshot: Annotated[int, Field(ge=0)]

@@ -23,15 +23,15 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
+from everos.infra.persistence.index.adapters import AtomicFactIndexAdapter
 from everos.infra.persistence.lancedb import (
     AtomicFact,
     ParentType,
-    atomic_fact_repo,
-    lancedb_manager,
 )
-from everos.infra.persistence.predicate import all_of, eq
+from everos.memory.ports.query import all_of, eq
 from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps
+from tests.fakes.storage import Storage
 
 
 class _WhitespaceTokenizer(Tokenizer):
@@ -74,20 +74,20 @@ def _fact_row(
 async def _reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Isolate LanceDB to a tmp memory root per test."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
     yield
-    await lancedb_manager.dispose_connection()
 
 
-def _recaller() -> AtomicFactRecaller:
-    return AtomicFactRecaller(RecallerDeps(tokenizer=_WhitespaceTokenizer()))
+def _recaller(storage: Storage) -> AtomicFactRecaller:
+    return AtomicFactRecaller(
+        RecallerDeps(tokenizer=_WhitespaceTokenizer()),
+        AtomicFactIndexAdapter(storage.repos.atomic_fact),
+    )
 
 
 _ALICE_WHERE = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
 
 
-async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
+async def test_facts_for_episodes_buckets_by_shared_memcell(storage: Storage) -> None:
     """Two episodes sharing one memcell both see the same fact pool.
 
     Episode-level fan-out (Episode pipeline runs once per cell but emits
@@ -95,7 +95,7 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
     pointing at the same memcell. The bridge must surface every fact
     that hangs off that memcell under both episode ids.
     """
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [
             _fact_row(fid="alice_af_1", memcell_id="mc_shared", fact="likes hiking"),
             _fact_row(fid="alice_af_2", memcell_id="mc_shared", fact="lives in tokyo"),
@@ -108,7 +108,7 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
         "alice_ep_b": ["mc_shared"],
         "alice_ep_c": ["mc_other"],
     }
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         ep_to_parents, _ALICE_WHERE, per_episode=10
     )
 
@@ -124,18 +124,22 @@ async def test_facts_for_episodes_buckets_by_shared_memcell() -> None:
     assert fact1_in_b.parent_episode_id == "alice_ep_b"
 
 
-async def test_facts_for_episodes_returns_empty_for_no_episodes() -> None:
-    out: dict = await _recaller().facts_for_episodes({}, _ALICE_WHERE, per_episode=10)
+async def test_facts_for_episodes_returns_empty_for_no_episodes(
+    storage: Storage,
+) -> None:
+    out: dict = await _recaller(storage).facts_for_episodes(
+        {}, _ALICE_WHERE, per_episode=10
+    )
     assert out == {}
 
 
-async def test_facts_for_episodes_skips_unknown_memcells() -> None:
+async def test_facts_for_episodes_skips_unknown_memcells(storage: Storage) -> None:
     """Episodes whose memcell has no facts simply don't appear in the result."""
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [_fact_row(fid="alice_af_1", memcell_id="mc_a", fact="hello")]
     )
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": ["mc_a"], "alice_ep_b": ["mc_missing"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -145,9 +149,9 @@ async def test_facts_for_episodes_skips_unknown_memcells() -> None:
     assert [f.id for f in out["alice_ep_a"]] == ["alice_af_1"]
 
 
-async def test_facts_for_episodes_filters_by_where_clause() -> None:
+async def test_facts_for_episodes_filters_by_where_clause(storage: Storage) -> None:
     """The caller's where clause is preserved (e.g. owner pinning)."""
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [
             _fact_row(
                 fid="alice_af_1",
@@ -164,7 +168,7 @@ async def test_facts_for_episodes_filters_by_where_clause() -> None:
         ]
     )
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": ["mc_a"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -172,7 +176,7 @@ async def test_facts_for_episodes_filters_by_where_clause() -> None:
     assert [f.id for f in out["alice_ep_a"]] == ["alice_af_1"]
 
 
-async def test_facts_for_episodes_drops_empty_parent_ids() -> None:
+async def test_facts_for_episodes_drops_empty_parent_ids(storage: Storage) -> None:
     """Episodes whose parent_id list contains only empty strings are dropped.
 
     Real-world cause: a candidate row that lost its ``parent_id`` (data
@@ -180,11 +184,11 @@ async def test_facts_for_episodes_drops_empty_parent_ids() -> None:
     emit ``parent_id IN ('')`` — which would match every empty-string
     row in the table.
     """
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [_fact_row(fid="alice_af_1", memcell_id="", fact="orphan fact")]
     )
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": [""]},
         _ALICE_WHERE,
         per_episode=10,
@@ -208,7 +212,9 @@ def _unit_vector(direction: int, dim: int = 1024) -> list[float]:
     return out
 
 
-async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() -> None:
+async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector(
+    storage: Storage,
+) -> None:
     """Regression: ``query_vector`` triggers cosine ANN, not flat scan.
 
     Pre-fix, ``facts_for_episodes`` only ran ``where parent_id IN (...)``
@@ -230,9 +236,9 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() 
     row_a.vector = _unit_vector(0)
     row_b = _fact_row(fid="alice_af_2", memcell_id="mc_shared", fact="far fact")
     row_b.vector = _unit_vector(1)
-    await atomic_fact_repo.upsert([row_a, row_b])
+    await storage.repos.atomic_fact.upsert([row_a, row_b])
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": ["mc_shared"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -248,7 +254,9 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector() 
     assert facts[1].score < 0.5, "orthogonal vectors should score close to 0"
 
 
-async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
+async def test_facts_for_episodes_score_zero_without_query_vector(
+    storage: Storage,
+) -> None:
     """Backward-compat: omitting ``query_vector`` falls back to flat scan.
 
     Callers that don't need fact-level relevance (e.g. KV-style fetch
@@ -258,9 +266,9 @@ async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
     """
     row = _fact_row(fid="alice_af_1", memcell_id="mc_a", fact="anything")
     row.vector = _unit_vector(0)
-    await atomic_fact_repo.upsert([row])
+    await storage.repos.atomic_fact.upsert([row])
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": ["mc_a"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -273,7 +281,9 @@ async def test_facts_for_episodes_score_zero_without_query_vector() -> None:
 # ── Dual parent_id (post-1.5 migration) ────────────────────────────────
 
 
-async def test_facts_for_episodes_dual_parent_id_finds_both_eras() -> None:
+async def test_facts_for_episodes_dual_parent_id_finds_both_eras(
+    storage: Storage,
+) -> None:
     """Dual parent_id: facts linked by entry_id AND memcell_id are both found.
 
     Post-1.5 facts use ``parent_id = episode_entry_id``; pre-1.5 facts
@@ -281,14 +291,14 @@ async def test_facts_for_episodes_dual_parent_id_finds_both_eras() -> None:
     parent_ids in the list, and facts from both eras appear in the
     result bucket.
     """
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [
             _fact_row(fid="alice_af_old", memcell_id="mc_1", fact="old era fact"),
             _fact_row(fid="alice_af_new", memcell_id="ep_entry_1", fact="new era fact"),
         ]
     )
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {"alice_ep_a": ["ep_entry_1", "mc_1"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -300,20 +310,22 @@ async def test_facts_for_episodes_dual_parent_id_finds_both_eras() -> None:
     ]
 
 
-async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes() -> None:
+async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes(
+    storage: Storage,
+) -> None:
     """Two episodes sharing one parent_id each see the same fact pool.
 
     Episode A has [ep_entry_1, mc_shared]; Episode B has [ep_entry_2, mc_shared].
     A fact with parent_id=mc_shared should appear under both episodes.
     """
-    await atomic_fact_repo.upsert(
+    await storage.repos.atomic_fact.upsert(
         [
             _fact_row(fid="alice_af_1", memcell_id="mc_shared", fact="shared fact"),
             _fact_row(fid="alice_af_2", memcell_id="ep_entry_1", fact="ep_a only fact"),
         ]
     )
 
-    out = await _recaller().facts_for_episodes(
+    out = await _recaller(storage).facts_for_episodes(
         {
             "alice_ep_a": ["ep_entry_1", "mc_shared"],
             "alice_ep_b": ["ep_entry_2", "mc_shared"],

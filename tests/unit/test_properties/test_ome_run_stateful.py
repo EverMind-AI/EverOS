@@ -51,10 +51,14 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from everos.component.utils.datetime import get_utc_now, to_iso_format
-from everos.infra.ome import BaseEvent, Immediate, RunStatus, offline_strategy
+from everos.infra.ome import RunStatus
 from everos.infra.ome._dispatch import runner as runner_mod
 from everos.infra.ome._stores import storage as storage_mod
 from everos.infra.ome.testing import StrategyTestHarness
+from everos.memory.deps import MemoryDeps
+from everos.memory.ports import Event, Immediate
+from tests.fakes import make_deps
+from tests.helpers.ome import strategy_spec
 
 settings.register_profile(
     "ci",
@@ -95,11 +99,11 @@ def event(label: str) -> None:
         _hypothesis_event(label)
 
 
-class _Job(BaseEvent):
+class _Job(Event):
     plan: str
 
 
-class _Undeclared(BaseEvent):
+class _Undeclared(Event):
     """Never in ``emits``: emitting it is a contract violation."""
 
 
@@ -127,20 +131,20 @@ async def _registered_connect(self: Any) -> Any:
 storage_mod.OMEStorage.connect = _registered_connect  # type: ignore[method-assign]
 
 
-@offline_strategy(
+@strategy_spec(
     name="scripted",
     trigger=Immediate(on=[_Job]),
     emits=[],
     max_retries=MAX_RETRIES,
 )
-async def _scripted(event: BaseEvent, ctx: Any) -> None:
+async def _scripted(event: Event, deps: MemoryDeps) -> list[Event]:
     assert isinstance(event, _Job)
     _calls[event.event_id] += 1
     n = _calls[event.event_id]
     if event.plan == "ok" or (event.plan == "flaky" and n > 1):
-        return
+        return []
     if event.plan == "contract":
-        await ctx.emit(_Undeclared())
+        return [_Undeclared()]
     if event.plan == "slow":
         await asyncio.sleep(5.0)  # the run timeout cuts this short
     raise RuntimeError(f"{event.plan}: attempt {n} fails")
@@ -157,7 +161,7 @@ class OmeRunMachine(RuleBasedStateMachine):
         # it out of reach of anything one sequence can write (a deep
         # sequence writes a few hundred rows, the default cap is 100).
         self.h._engine._config.max_records_per_strategy = 100_000
-        self.h.register(_scripted)
+        self.h.register(_scripted, make_deps())
         self.run(self.h.start())
         self.expected: dict[str, list[tuple[RunStatus, int]]] = {}
         self.plan_of: dict[str, str] = {}

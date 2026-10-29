@@ -1,6 +1,7 @@
-"""End-to-end memorize runner — in-process call into ``service.memorize``.
+"""End-to-end memorize runner — in-process call into ``MemoryService``.
 
-Calls ``service.memorize.memorize()`` directly (not via HTTP) so this works
+Builds and starts the application, then calls
+``application.memory.memorize()`` directly (not via HTTP) so this works
 without ``everos server start``. Drives a fixture through ``/add`` in
 N-sized batches, then triggers ``/flush`` to drain the tail.
 
@@ -32,27 +33,24 @@ import time
 import uuid
 from pathlib import Path
 
-from sqlmodel import SQLModel
-
-from everos.component.llm import get_llm_client
 from everos.config import load_settings
-from everos.core.persistence import MemoryRoot
-from everos.infra.persistence.sqlite import dispose_engine, get_engine
-from everos.service.memorize import _get_engine as _get_ome_engine
-from everos.service.memorize import memorize
+from everos.infra.persistence import MemoryRoot
+from everos.service import build_application, build_providers
 
 
 def _chunks(items: list[dict], n: int) -> list[list[dict]]:
     return [items[i : i + n] for i in range(0, len(items), n)]
 
 
-def _print_header(mode: str, fixture_path: Path, session_id: str) -> None:
+def _print_header(
+    mode: str, fixture_path: Path, session_id: str, *, llm_configured: bool
+) -> None:
     print("=" * 72)
     print(f"  everos e2e memorize  ·  mode={mode}")
     print(f"  fixture     : {fixture_path.name}")
     print(f"  session_id  : {session_id}")
     print(f"  memory root : {MemoryRoot.resolve().root}")
-    llm_state = "<configured>" if get_llm_client() else "<None — pipeline will skip>"
+    llm_state = "<configured>" if llm_configured else "<None — pipeline will skip>"
     print(f"  llm_client  : {llm_state}")
     print("=" * 72)
 
@@ -77,24 +75,6 @@ def _list_written_files(session_id: str, mode: str) -> None:
     print(f"Tip: grep '{session_id}' in any episode md to find this run's entries.")
 
 
-async def _setup() -> None:
-    """Create sqlite schema + start OME engine — the bits the HTTP lifespan
-    normally handles. LanceDB is not needed for the memorize sync path
-    (only cascade reads it), so we skip it.
-    """
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    ome = _get_ome_engine()
-    await ome.start()
-
-
-async def _teardown() -> None:
-    ome = _get_ome_engine()
-    await ome.stop()
-    await dispose_engine()
-
-
 async def _run(args: argparse.Namespace) -> None:
     settings = load_settings()
     mode = settings.memorize.mode
@@ -107,11 +87,16 @@ async def _run(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     fixture_path = Path(args.fixture).resolve()  # noqa: ASYNC240
-    fixture = json.loads(fixture_path.read_text())  # noqa: ASYNC230
+    fixture = json.loads(fixture_path.read_text())
     messages: list[dict] = fixture["messages"]
     session_id = f"{fixture.get('session_id_hint', 'e2e')}_{uuid.uuid4().hex[:8]}"
 
-    _print_header(mode, fixture_path, session_id)
+    _print_header(
+        mode,
+        fixture_path,
+        session_id,
+        llm_configured=build_providers(settings).llm is not None,
+    )
 
     if args.dry_run:
         for i, batch in enumerate(_chunks(messages, args.batch_size), start=1):
@@ -122,7 +107,9 @@ async def _run(args: argparse.Namespace) -> None:
         print("[dry] would flush at the end")
         return
 
-    await _setup()
+    application = build_application(settings)
+    await application.start()
+    memorize = application.memory.memorize
     try:
         batches = _chunks(messages, args.batch_size)
         for i, batch in enumerate(batches, start=1):
@@ -152,7 +139,7 @@ async def _run(args: argparse.Namespace) -> None:
 
         _list_written_files(session_id, mode)
     finally:
-        await _teardown()
+        await application.aclose()
 
 
 def main() -> None:

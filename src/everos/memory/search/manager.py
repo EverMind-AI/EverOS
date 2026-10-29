@@ -28,7 +28,6 @@ The manager never writes to storage; it only reads LanceDB + markdown.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -36,8 +35,6 @@ from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate, RankInput
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.rerank import get_rerank_capability
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.context import resolve_request_id
@@ -50,11 +47,8 @@ from everos.core.observability.tracing import (
     emit_recall_scores,
     memory_span,
 )
-from everos.infra.persistence.index import Predicate
-from everos.infra.persistence.sqlite import (
-    UnprocessedBuffer,
-    unprocessed_buffer_repo,
-)
+from everos.memory.models import CanonicalMessage
+from everos.memory.ports import ClusterStore, Filter, SessionBufferStore, SessionKey
 
 from .adapter import resolve_pipeline
 from .agentic import search_episodes_agentic
@@ -133,7 +127,6 @@ _MAXSIM_FACT_POOL_CAP = 2000
 # shared track because boundary detection is single-pass — switching mode
 # requires a fresh process. Hard-coded here (instead of importing) to keep
 # the memory layer free of service-layer imports per the DDD direction rule.
-_UNPROCESSED_TRACK = "memorize"
 
 
 def _top_score(data: SearchData) -> float:
@@ -165,6 +158,8 @@ class SearchManager:
         agent_case_recaller: AgentCaseRecaller,
         agent_skill_recaller: AgentSkillRecaller,
         profile_recaller: ProfileRecaller,
+        session_buffer: SessionBufferStore,
+        cluster_store: ClusterStore,
         embedding: EmbeddingProvider | None,
         reranker: RerankProvider | None,
         llm_client: LLMClient | None,
@@ -176,6 +171,8 @@ class SearchManager:
         self._case = agent_case_recaller
         self._skill = agent_skill_recaller
         self._profile = profile_recaller
+        self._session_buffer = session_buffer
+        self._clusters = cluster_store
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
@@ -295,18 +292,16 @@ class SearchManager:
         session_id = _extract_top_level_session_id(req.filters)
         if session_id is None:
             return []
-        rows = await unprocessed_buffer_repo.list_for_track(
-            session_id,
-            _UNPROCESSED_TRACK,
-            app_id=req.app_id,
-            project_id=req.project_id,
+        session = SessionKey(
+            app_id=req.app_id, project_id=req.project_id, session_id=session_id
         )
-        return [_unprocessed_buffer_to_dto(r) for r in rows]
+        messages = await self._session_buffer.list(session)
+        return [_unprocessed_message_to_dto(m, session) for m in messages]
 
     # ── Agent partition ─────────────────────────────────────────────
 
     async def _search_cases_and_skills(
-        self, req: SearchRequest, where: Predicate
+        self, req: SearchRequest, where: Filter
     ) -> tuple[list[SearchAgentCaseItem], list[SearchAgentSkillItem]]:
         """Cases + skills, serial when bridging.
 
@@ -362,7 +357,7 @@ class SearchManager:
     async def _search_episodes(
         self,
         req: SearchRequest,
-        where: Predicate,
+        where: Filter,
         *,
         decider: RoundDecider | None = None,
     ) -> list[SearchEpisodeItem]:
@@ -375,6 +370,7 @@ class SearchManager:
                 project_id=req.project_id,
                 episode_recaller=self._ep,
                 atomic_fact_recaller=self._fact,
+                cluster_store=self._clusters,
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
@@ -488,7 +484,7 @@ class SearchManager:
     # ── Agent cases ─────────────────────────────────────────────────
 
     async def _search_agent_cases(
-        self, req: SearchRequest, where: Predicate
+        self, req: SearchRequest, where: Filter
     ) -> list[SearchAgentCaseItem]:
         if req.method == SearchMethod.AGENTIC:
             return await search_agent_cases_agentic(
@@ -544,7 +540,7 @@ class SearchManager:
     async def _search_agent_skills(
         self,
         req: SearchRequest,
-        where: Predicate,
+        where: Filter,
         *,
         bridge_cases: list[Candidate] | None = None,
     ) -> list[SearchAgentSkillItem]:
@@ -638,7 +634,7 @@ class SearchManager:
         self,
         recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
         req: SearchRequest,
-        where: Predicate,
+        where: Filter,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
@@ -662,7 +658,7 @@ class SearchManager:
         self,
         recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
         req: SearchRequest,
-        where: Predicate,
+        where: Filter,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
@@ -692,7 +688,7 @@ class SearchManager:
             return sparse, dense, vector
 
     async def _maxsim_atomic_recall(
-        self, req: SearchRequest, where: Predicate, top_k: int
+        self, req: SearchRequest, where: Filter, top_k: int
     ) -> list[Candidate]:
         """MaxSim-style: ANN atomic_facts → max-pool by episode → batch fetch episodes.
 
@@ -748,7 +744,7 @@ class SearchManager:
     async def _case_bridged_skills(
         self,
         bridge_cases: list[Candidate] | None,
-        where: Predicate,
+        where: Filter,
         top_k: int,
     ) -> list[Candidate]:
         """Reverse-resolve lineage skills and max-pool their source-case
@@ -851,36 +847,14 @@ class SearchManager:
         :class:`ProviderNotConfiguredError` -> HTTP 422 with a toml-pointing
         message; vocabulary is uniform across the three.
 
-        Embedding and rerank checks read BOTH the process-wide capability
-        singletons AND this manager's own injected providers. Either side
-        being "missing" is enough to fail the guard: accessor
-        says-unavailable means the tier never had it; ``self._embedding``
-        is ``None`` means whoever built this manager didn't wire one in.
-        Because dispatch reads ``self._embedding`` directly, letting an
-        accessor-says-available-but-self-is-None case through would
-        produce an opaque ``AttributeError('NoneType')`` deep in recall
-        instead of a clean 422. Single source of truth = both must agree
-        the provider exists.
+        Each check reads the provider this manager was built with: a
+        ``None`` provider is an unconfigured tier, and refusing it here gives
+        a clean 422 instead of an opaque ``AttributeError('NoneType')`` deep
+        in recall.
 
         Agent HYBRID has two rerank lanes selected by ``enable_llm_rerank``:
         the LLM lane (``True``) reranks via the LLM and needs no rerank
         provider; the cross-encoder lane (``False``, default) does.
-
-        Design contract (PR #361 round-3 review #6): this manager is
-        instantiated by ``service.search`` — a single caller that always
-        sources its providers from the same capability accessors this
-        guard reads. On that path DI-injected provider and accessor
-        state cannot disagree, so the belt-and-suspenders check is a
-        near-no-op; it only fires on pathological drift (a subclass or
-        a test that constructs a manager with mismatched inputs).
-        Library consumers that embed :class:`SearchManager` directly
-        and hand it their OWN provider will hit 422 even when their
-        provider is valid, because the accessor reflects the
-        process-wide toml. This is an accepted limitation of the
-        current DI shape — the guard prefers false-positives
-        (over-refuse) to false-negatives (dispatch with a ``None``
-        provider) because the latter surfaces as an opaque
-        ``AttributeError('NoneType')`` deep in recall.
         """
         method = req.method
         is_agent_hybrid = method == SearchMethod.HYBRID and req.owner_type == "agent"
@@ -891,9 +865,7 @@ class SearchManager:
             SearchMethod.AGENTIC,
             SearchMethod.LLM_MULTIROUND,
         )
-        if needs_embedding and (
-            not get_embedding_capability().available or self._embedding is None
-        ):
+        if needs_embedding and self._embedding is None:
             raise ProviderNotConfiguredError(
                 provider="embedding",
                 feature=_feature_name(method, req.owner_type),
@@ -915,11 +887,7 @@ class SearchManager:
         # default) reaches ``search_agent_skills_hybrid``, which needs a
         # real rerank provider; the LLM lane reranks via the LLM instead
         # and is exempt.
-        if (
-            is_agent_hybrid
-            and not req.enable_llm_rerank
-            and (not get_rerank_capability().available or self._reranker is None)
-        ):
+        if is_agent_hybrid and not req.enable_llm_rerank and self._reranker is None:
             raise ProviderNotConfiguredError(
                 provider="rerank",
                 feature="agent_hybrid",
@@ -930,16 +898,12 @@ class SearchManager:
                 ),
             )
 
-        if method == SearchMethod.AGENTIC and (
-            not get_rerank_capability().available or self._reranker is None
-        ):
+        if method == SearchMethod.AGENTIC and self._reranker is None:
             raise ProviderNotConfiguredError(
                 provider="rerank", feature="agentic_search"
             )
 
-        # LLM has no Capability wrapper yet; guard on the injected client
-        # directly. Belt-and-suspenders with the embedding/rerank branches
-        # above -- same 422 vocabulary via ProviderNotConfiguredError.
+        # Same 422 vocabulary as the embedding / rerank branches above.
         is_hybrid_llm_lane = method == SearchMethod.HYBRID and req.enable_llm_rerank
         if is_hybrid_llm_lane and self._llm is None:
             raise ProviderNotConfiguredError(
@@ -1040,18 +1004,19 @@ def _extract_top_level_session_id(filters: FilterNode | None) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _unprocessed_buffer_to_dto(row: UnprocessedBuffer) -> UnprocessedMessageDTO:
-    """Render one ``unprocessed_buffer`` row as its public DTO.
+def _unprocessed_message_to_dto(
+    message: CanonicalMessage, session: SessionKey
+) -> UnprocessedMessageDTO:
+    """Render one buffered message as its public DTO.
 
     Mirrors :class:`MessageItemDTO`'s ``content`` shorthand: a single-item
     ``[{"type":"text","text":...}]`` payload collapses to the inner string;
     every other shape stays as the opaque ``list[dict]`` so multimodal
     payloads round-trip without lossy flattening.
     """
-    content_items = json.loads(row.content_items_json)
+    content_items = message.content_items
     if (
-        isinstance(content_items, list)
-        and len(content_items) == 1
+        len(content_items) == 1
         and isinstance(content_items[0], dict)
         and content_items[0].get("type") == "text"
         and isinstance(content_items[0].get("text"), str)
@@ -1060,20 +1025,22 @@ def _unprocessed_buffer_to_dto(row: UnprocessedBuffer) -> UnprocessedMessageDTO:
     else:
         content = content_items
     tool_calls = (
-        json.loads(row.tool_calls_json) if row.tool_calls_json is not None else None
+        [tc.model_dump() for tc in message.tool_calls]
+        if message.tool_calls is not None
+        else None
     )
     return UnprocessedMessageDTO(
-        id=row.message_id,
-        app_id=row.app_id,
-        project_id=row.project_id,
-        session_id=row.session_id,
-        sender_id=row.sender_id,
-        sender_name=row.sender_name,
-        role=row.role,  # type: ignore[arg-type]
+        id=message.message_id,
+        app_id=session.app_id,
+        project_id=session.project_id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender_name=message.sender_name,
+        role=message.role,
         content=content,
-        timestamp=to_display_tz(row.timestamp),
+        timestamp=to_display_tz(message.timestamp),
         tool_calls=tool_calls,
-        tool_call_id=row.tool_call_id,
+        tool_call_id=message.tool_call_id,
     )
 
 

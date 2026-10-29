@@ -1,13 +1,22 @@
-"""Domain events emitted by memory pipelines, consumed by OME strategies."""
+"""Domain events produced by the memory pipelines and strategies.
+
+Every event is an :class:`~everos.memory.ports.Event`: frozen, and
+round-trippable through JSON, because the scheduler persists the triggering
+event of each run and replays it after a crash. Fields added later carry
+defaults so payloads persisted by an older release still validate.
+"""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from everalgo.types import MemCell
+from pydantic import BaseModel, ConfigDict, Field
 
-from everos.infra.ome.events import BaseEvent
+from everos.memory.ports import Event
 
 
-class UserPipelineStarted(BaseEvent):
+class UserPipelineStarted(Event):
     """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
 
     Hot-path emit, so atomic_fact / foresight / clustering strategies can
@@ -23,7 +32,7 @@ class UserPipelineStarted(BaseEvent):
     memcell: MemCell
 
 
-class AgentPipelineStarted(BaseEvent):
+class AgentPipelineStarted(Event):
     """Fired at the start of :class:`AgentMemoryPipeline.run`, once per cell.
 
     Only emitted in ``mode="agent"`` (the agent pipeline does not run in
@@ -39,7 +48,45 @@ class AgentPipelineStarted(BaseEvent):
     memcell: MemCell
 
 
-class EpisodeExtracted(BaseEvent):
+class ReflectedEpisode(BaseModel):
+    """One cluster member a Reflection merge replaces, located in markdown."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entry_id: str
+    md_path: str
+    parent_id: str
+
+
+class ReflectionContext(BaseModel):
+    """What finishing one Reflection merge needs, captured when it was merged.
+
+    The merge step writes the merged episode and publishes it for fact
+    extraction; the finishing step runs only after the facts exist, so the
+    snapshot it acts on travels with the events instead of living in a
+    waiting coroutine.
+
+    Attributes:
+        cluster_id: The cluster that was merged.
+        mode: ``"init"`` for a first merge, ``"update"`` when the cluster
+            already held a merged episode.
+        source_members: ``(member_id, member_type)`` pairs at merge time.
+        episodes: The member episodes as they were read for the merge.
+        merged_episode: Text of the merged episode (the new centroid source).
+        last_ts: Newest member timestamp, epoch milliseconds.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cluster_id: str
+    mode: Literal["init", "update"]
+    source_members: list[tuple[str, str]]
+    episodes: list[ReflectedEpisode]
+    merged_episode: str
+    last_ts: int
+
+
+class EpisodeExtracted(Event):
     """Fired once per Episode after :class:`UserMemoryPipeline` writes its md.
 
     Carries ``episode_text`` so downstream clustering can embed it without
@@ -60,9 +107,30 @@ class EpisodeExtracted(BaseEvent):
     app_id: str = "default"
     project_id: str = "default"
     source: str = "pipeline"
+    reflection: ReflectionContext | None = None
+    """Set on Reflection's merged episode (``source="reflection"``); carried
+    through to :class:`AtomicFactsExtracted` so the step that finishes the
+    merge knows what to deprecate."""
 
 
-class AgentCaseExtracted(BaseEvent):
+class AtomicFactsExtracted(Event):
+    """Fired by ``extract_atomic_facts`` once an episode's facts are written.
+
+    Fired even when the episode yielded no facts: Reflection finishes a
+    merge on this event, and a merged episode without facts must still
+    retire the members it replaced.
+    """
+
+    episode_entry_id: str
+    owner_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+    source: str = "pipeline"
+    fact_entry_ids: list[str] = Field(default_factory=list)
+    reflection: ReflectionContext | None = None
+
+
+class AgentCaseExtracted(Event):
     """Fired by ``extract_agent_case`` after the AgentCase md is written.
 
     Carries the full case body (``task_intent`` / ``approach`` / ``key_insight``)
@@ -92,7 +160,7 @@ class AgentCaseExtracted(BaseEvent):
     project_id: str = "default"
 
 
-class ProfileClusterUpdated(BaseEvent):
+class ProfileClusterUpdated(Event):
     """Fired after the user-memory cluster strategy has merged a new
     memcell into a cluster.
 
@@ -107,7 +175,7 @@ class ProfileClusterUpdated(BaseEvent):
     project_id: str = "default"
 
 
-class SkillClusterUpdated(BaseEvent):
+class SkillClusterUpdated(Event):
     """Fired after the agent-case cluster strategy has merged a new
     case into a cluster.
 

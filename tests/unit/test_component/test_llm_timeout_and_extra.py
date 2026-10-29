@@ -85,11 +85,11 @@ def test_client_passes_both_through_to_the_provider_config(
 ) -> None:
     """The settings must reach the provider's config -- the step that was missing.
 
-    Asserted against the config handed to ``build_llm_provider``, because that is
-    the boundary where the values were being dropped: the settings were correct and
+    Asserted against the config the factory receives, because that is the
+    boundary where the values were being dropped: the settings were correct and
     the client honoured what it was given, but nothing carried one to the other.
     """
-    import everos.component.llm.client as client_mod
+    from everos.component.llm import resolve_llm_config
 
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
     monkeypatch.setenv("EVEROS_LLM__BASE_URL", "http://gw.invalid/v1")
@@ -97,16 +97,7 @@ def test_client_passes_both_through_to_the_provider_config(
     monkeypatch.setenv("EVEROS_LLM__EXTRA", NO_THINK)
     load_settings.cache_clear()
 
-    seen: list[Any] = []
-    monkeypatch.setattr(client_mod, "_llm_client", None)
-    monkeypatch.setattr(
-        client_mod,
-        "build_llm_provider",
-        lambda cfg, **_: seen.append(cfg) or object(),
-    )
-    client_mod.get_llm_client()
-
-    (cfg,) = seen
+    cfg = resolve_llm_config(load_settings())
     assert cfg.timeout == 300.0
     assert cfg.extra == NO_THINK_PARSED
 
@@ -117,7 +108,7 @@ def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> 
     Asserted on the resolved config, the one object both the decider client and the
     benchmark's pre-flight probe are built from.
     """
-    import everos.component.llm.client as client_mod
+    from everos.component.llm import resolve_decider_config
 
     monkeypatch.setenv("EVEROS_LLM__API_KEY", "k")
     monkeypatch.setenv("EVEROS_LLM__BASE_URL", "http://gw.invalid/v1")
@@ -126,7 +117,7 @@ def test_decider_client_passes_both_through(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("EVEROS_DECIDER__EXTRA", NO_THINK)
     load_settings.cache_clear()
 
-    cfg = client_mod.resolve_decider_config()
+    cfg = resolve_decider_config(load_settings())
     assert cfg.timeout == 120.0
     assert cfg.extra == NO_THINK_PARSED
 

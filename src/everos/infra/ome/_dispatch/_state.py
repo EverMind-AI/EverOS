@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
-from everos.infra.ome.decorator import StrategyMeta
+from everos.infra.ome._dispatch.strategy import StrategyMeta
 
 _CURRENT_STRATEGY: ContextVar[StrategyMeta | None] = ContextVar(
     "current_strategy", default=None

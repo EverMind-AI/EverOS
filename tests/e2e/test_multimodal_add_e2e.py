@@ -28,16 +28,17 @@ import httpx
 import pytest
 from sqlalchemy import text as sql_text
 
+from tests.fakes.storage import StorageView
+
 pytest.importorskip("everalgo.parser")
 
 pytestmark = pytest.mark.live_llm
 
 
-async def _buffer_text(session_id: str) -> str:
+async def _buffer_text(storage_view: StorageView, session_id: str) -> str:
     """Concatenated derived ``text`` of all buffer rows for a session."""
-    from everos.infra.persistence.sqlite import get_engine
 
-    async with get_engine().connect() as conn:
+    async with storage_view.database.engine.connect() as conn:
         rows = (
             await conn.execute(
                 sql_text("SELECT text FROM unprocessed_buffer WHERE session_id = :sid"),
@@ -48,7 +49,7 @@ async def _buffer_text(session_id: str) -> str:
 
 
 async def test_add_html_base64_parsed_into_buffer(
-    async_client: httpx.AsyncClient,
+    async_client: httpx.AsyncClient, storage_view: StorageView
 ) -> None:
     """A base64 HTML file is parsed and its text lands in the buffer."""
     html = (
@@ -79,12 +80,12 @@ async def test_add_html_base64_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(sid)
+    buffered = await _buffer_text(storage_view, sid)
     assert "9.9.9" in buffered
 
 
 async def test_add_html_https_uri_parsed_into_buffer(
-    async_client: httpx.AsyncClient,
+    async_client: httpx.AsyncClient, storage_view: StorageView
 ) -> None:
     """An https uri is fetched + parsed and its text lands in the buffer."""
     sid = "e2e-mm-html-uri"
@@ -104,7 +105,7 @@ async def test_add_html_https_uri_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(sid)
+    buffered = await _buffer_text(storage_view, sid)
     # example.com's markup is not a stable fixture: the <h1>Example Domain</h1>
     # that used to sit in its body is gone (2026-10), leaving that string only
     # in <title>, which the body-text parser does not emit. Assert what this
@@ -121,8 +122,7 @@ async def test_add_html_https_uri_parsed_into_buffer(
 
 
 async def test_add_html_file_uri_parsed_into_buffer(
-    async_client: httpx.AsyncClient,
-    tmp_path: Path,
+    async_client: httpx.AsyncClient, tmp_path: Path, storage_view: StorageView
 ) -> None:
     """A file:// html asset is read locally (hydrated) + parsed into buffer.
 
@@ -148,5 +148,5 @@ async def test_add_html_file_uri_parsed_into_buffer(
     )
     assert resp.status_code == 200, resp.text
 
-    buffered = await _buffer_text(sid)
+    buffered = await _buffer_text(storage_view, sid)
     assert "9.9.9" in buffered

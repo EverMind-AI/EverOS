@@ -8,10 +8,10 @@ remaining)`` to atomically rewrite the (session, track) slice each turn.
 from __future__ import annotations
 
 from sqlalchemy import Index
+from sqlmodel import Field
 
 from everos.component.utils.datetime import UtcDatetime
-from everos.core.persistence.sqlite import BaseTable, Field
-from everos.core.persistence.sqlite.base import UtcDateTimeColumn
+from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
 
 
 class UnprocessedBuffer(BaseTable, table=True):

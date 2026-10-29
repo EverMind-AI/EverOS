@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from everos.component.utils.config_hints import missing_config_error
-from everos.config import EmbeddingSettings
+from everos.config import EmbeddingSettings, missing_config_error
 
 from .openai_provider import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider

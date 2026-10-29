@@ -6,7 +6,7 @@ name against the one recorded when the index was built. (The third -- the
 column's own width against configuration -- belongs to each backend's schema
 verification.)
 
-Every case drives ``verify_embedding_provenance`` with a stub store, because
+Every case drives ``EmbeddingProvenance.verify`` with a stub store, because
 what is under test is the decision, not where a backend keeps the record;
 ``test_embedding_provenance_store.py`` covers the storage half against a real
 table.
@@ -18,8 +18,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from everos.config import load_settings
 from everos.core.errors import EmbeddingProvenanceError
-from everos.infra.persistence.index import _provenance
+from everos.infra.persistence.index import EmbeddingProvenance, _provenance
+from tests.fakes import UnusedPort
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -43,55 +45,44 @@ class _Store:
         self._recorded = model
 
 
+class _Probe:
+    """Controls the measured width and counts how often it was measured."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.returns: int | None = None
+
+
+class _ProbedProvenance(EmbeddingProvenance):
+    """The real check with the network probe answered by a :class:`_Probe`."""
+
+    def __init__(self, probe: _Probe, *, configured: bool) -> None:
+        super().__init__(load_settings().embedding, configured=configured)
+        self._probe = probe
+
+    async def probe_dimension(self) -> int | None:
+        self._probe.calls += 1
+        return self._probe.returns
+
+
 @pytest.fixture
-def probe(monkeypatch: pytest.MonkeyPatch):
-    """Control the measured width and count how often it was measured."""
-
-    class _Probe:
-        def __init__(self) -> None:
-            self.calls = 0
-            self.returns: int | None = None
-
-        async def __call__(self) -> int | None:
-            self.calls += 1
-            return self.returns
-
-    spy = _Probe()
-    monkeypatch.setattr(_provenance, "probe_embedding_dimension", spy)
-    return spy
+def probe() -> _Probe:
+    return _Probe()
 
 
 @pytest.fixture(autouse=True)
 def _configured(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """A complete embedding configuration, so the keyword-only gate stays open.
-
-    The root conftest pre-seeds the capability singleton to
-    ``available=False`` to keep the suite off the host's settings, and says
-    tests opt in by re-assigning it — so setting the env alone is not enough.
-    """
+    """A complete embedding configuration for the settings under check."""
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "fake-768")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
-    import everos.component.embedding.accessor as accessor
-    from everos.component.embedding import EmbeddingCapability
-
-    accessor._capability = EmbeddingCapability(provider=_UnusedProvider())
     yield
 
 
-class _UnusedProvider:
-    """Stands in for a built provider; the probe itself is stubbed per test."""
-
-    dim = 768
-
-    async def embed(self, text: str) -> list[float]:  # pragma: no cover
-        raise AssertionError("the probe is stubbed in these tests")
-
-    async def embed_query(self, text: str) -> list[float]:  # pragma: no cover
-        raise AssertionError("the probe is stubbed in these tests")
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        raise AssertionError("the probe is stubbed in these tests")
+def _provenance_for(probe: _Probe, *, configured: bool = True) -> _ProbedProvenance:
+    """Built after the test set its env, as the bootstrap builds it at startup."""
+    load_settings.cache_clear()
+    return _ProbedProvenance(probe, configured=configured)
 
 
 def _set_dim(monkeypatch: pytest.MonkeyPatch, dim: int) -> None:
@@ -110,7 +101,7 @@ async def test_narrower_model_aborts_naming_both_widths(
     _set_dim(monkeypatch, 1024)
     probe.returns = 768
     with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        await _provenance.verify_embedding_provenance(_Store())
+        await _provenance_for(probe).verify(_Store())
     message = str(excinfo.value)
     assert "768" in message
     assert "1024" in message
@@ -123,7 +114,7 @@ async def test_wider_model_warns_and_starts(
     """Truncation is a supported arrangement, so warn rather than refuse."""
     _set_dim(monkeypatch, 1024)
     probe.returns = 1536
-    warnings = await _provenance.verify_embedding_provenance(_Store())
+    warnings = await _provenance_for(probe).verify(_Store())
     assert any("truncated" in warning for warning in warnings)
 
 
@@ -134,7 +125,7 @@ async def test_changed_model_aborts_naming_both(
     probe.returns = 768
     store = _Store(recorded="nomic-embed-text")
     with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        await _provenance.verify_embedding_provenance(store)
+        await _provenance_for(probe).verify(store)
     message = str(excinfo.value)
     assert "nomic-embed-text" in message
     assert "fake-768" in message
@@ -147,7 +138,7 @@ async def test_unattested_index_is_recorded(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(recorded=None)
-    await _provenance.verify_embedding_provenance(store)
+    await _provenance_for(probe).verify(store)
     assert store.writes == ["fake-768"]
 
 
@@ -157,7 +148,7 @@ async def test_matching_model_writes_nothing(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(recorded="fake-768")
-    assert await _provenance.verify_embedding_provenance(store) == []
+    assert await _provenance_for(probe).verify(store) == []
     assert store.writes == []
 
 
@@ -171,12 +162,8 @@ async def test_unconfigured_embedding_skips_everything(
     model-only gate would attest a model that never produced a vector -- and
     then refuse to start once a real one was configured.
     """
-    import everos.component.embedding.accessor as accessor
-    from everos.component.embedding import EmbeddingCapability
-
-    accessor._capability = EmbeddingCapability(provider=None)
     store = _Store(recorded="fake-768")
-    await _provenance.verify_embedding_provenance(store)
+    await _provenance_for(probe, configured=False).verify(store)
     assert probe.calls == 0
     assert store.writes == []
 
@@ -191,11 +178,12 @@ async def test_probe_failure_starts_and_keeps_the_other_checks(
     """
     _set_dim(monkeypatch, 768)
     probe.returns = None
-    await _provenance.verify_embedding_provenance(_Store(recorded="fake-768"))
-    assert _provenance.last_probe() is None
+    provenance = _provenance_for(probe)
+    await provenance.verify(_Store(recorded="fake-768"))
+    assert provenance.last_probe is None
 
     with pytest.raises(EmbeddingProvenanceError, match="nomic"):
-        await _provenance.verify_embedding_provenance(_Store(recorded="nomic"))
+        await provenance.verify(_Store(recorded="nomic"))
 
 
 async def test_unreadable_record_is_not_overwritten(
@@ -209,7 +197,7 @@ async def test_unreadable_record_is_not_overwritten(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(read_raises=True)
-    warnings = await _provenance.verify_embedding_provenance(store)
+    warnings = await _provenance_for(probe).verify(store)
     assert store.writes == []
     assert any("could not read" in warning for warning in warnings)
 
@@ -222,7 +210,7 @@ async def test_both_mismatches_are_reported_together(
     probe.returns = 768
     store = _Store(recorded="nomic-embed-text")
     with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        await _provenance.verify_embedding_provenance(store)
+        await _provenance_for(probe).verify(store)
     message = str(excinfo.value)
     assert "configured dim is 1024" in message
     assert "nomic-embed-text" in message
@@ -236,7 +224,7 @@ async def test_dimensions_mismatch_only_warns(
     monkeypatch.setenv("EVEROS_EMBEDDING__DIMENSIONS", "512")
     probe.returns = 768
     store = _Store(recorded="fake-768")
-    warnings = await _provenance.verify_embedding_provenance(store)
+    warnings = await _provenance_for(probe).verify(store)
     assert any("dimensions=512" in warning for warning in warnings)
 
 
@@ -246,8 +234,9 @@ async def test_last_probe_reports_the_measured_width(
     """``/health`` reads this; a stale ``None`` makes it report embed: false."""
     _set_dim(monkeypatch, 768)
     probe.returns = 768
-    await _provenance.verify_embedding_provenance(_Store(recorded="fake-768"))
-    assert _provenance.last_probe() == 768
+    provenance = _provenance_for(probe)
+    await provenance.verify(_Store(recorded="fake-768"))
+    assert provenance.last_probe == 768
 
 
 def test_probe_defeats_client_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,14 +257,13 @@ def test_probe_defeats_client_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
 
     import asyncio
 
-    assert asyncio.run(_provenance.probe_embedding_dimension()) is None
+    provenance = EmbeddingProvenance(load_settings().embedding, configured=True)
+    assert asyncio.run(provenance.probe_dimension()) is None
     assert captured["dim"] is not None
     assert captured["dim"] > 100_000
 
 
-async def test_dim_disagreement_between_the_two_readers_aborts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_dim_disagreement_between_the_two_readers_aborts() -> None:
     """The record classes and Settings must not quietly diverge on the width.
 
     The record classes resolve ``[embedding] dim`` with a narrow reader of
@@ -283,33 +271,29 @@ async def test_dim_disagreement_between_the_two_readers_aborts(
     Two readers can disagree -- a different root, a key one of them cannot
     parse -- and the symptom would otherwise be tables silently built at the
     wrong width. The width is frozen at import, so the disagreement is
-    constructed from the Settings side.
+    constructed from the Settings side: the dim the index is built with.
     """
-    from everos.config import load_settings
-    from everos.infra.persistence.index import assert_record_dim_matches_settings
+    from everos.infra.persistence.index import DerivedIndex
     from everos.infra.persistence.records.episode import Episode
 
     baked = Episode.to_arrow_schema().field("vector").type.list_size
-    monkeypatch.setenv("EVEROS_EMBEDDING__DIM", str(baked + 256))
-    load_settings.cache_clear()
+    index = DerivedIndex(UnusedPort("index backend"), embedding_dim=baked + 256)
 
     with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        assert_record_dim_matches_settings()
+        index.assert_record_dim_matches_settings()
     message = str(excinfo.value)
     assert str(baked) in message
     assert str(baked + 256) in message
 
 
-async def test_matching_dim_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_matching_dim_passes() -> None:
     """The guard must not fire on the normal case."""
-    from everos.config import load_settings
-    from everos.infra.persistence.index import assert_record_dim_matches_settings
+    from everos.infra.persistence.index import DerivedIndex
     from everos.infra.persistence.records.episode import Episode
 
     baked = Episode.to_arrow_schema().field("vector").type.list_size
-    monkeypatch.setenv("EVEROS_EMBEDDING__DIM", str(baked))
-    load_settings.cache_clear()
-    assert_record_dim_matches_settings()
+    index = DerivedIndex(UnusedPort("index backend"), embedding_dim=baked)
+    index.assert_record_dim_matches_settings()
 
 
 async def test_a_refused_start_does_not_attest(
@@ -326,7 +310,7 @@ async def test_a_refused_start_does_not_attest(
     probe.returns = 512
     store = _Store(recorded=None)
     with pytest.raises(EmbeddingProvenanceError):
-        await _provenance.verify_embedding_provenance(store)
+        await _provenance_for(probe).verify(store)
     assert store.writes == []
     assert await store.read_embedding_model() is None
 
@@ -343,7 +327,7 @@ async def test_read_only_phases_do_not_attest(
     _set_dim(monkeypatch, 768)
     probe.returns = 768
     store = _Store(recorded=None)
-    findings = await _provenance.verify_embedding_provenance(store, may_attest=False)
+    findings = await _provenance_for(probe).verify(store, may_attest=False)
     assert store.writes == []
     assert any("no recorded embedding model" in finding for finding in findings)
 
@@ -359,7 +343,7 @@ async def test_a_failed_write_does_not_stop_startup(
         async def write_embedding_model(self, model: str) -> None:
             raise PermissionError("read-only index mount")
 
-    findings = await _provenance.verify_embedding_provenance(_ReadOnly(recorded=None))
+    findings = await _provenance_for(probe).verify(_ReadOnly(recorded=None))
     assert any("could not record" in finding for finding in findings)
 
 
@@ -380,6 +364,7 @@ def test_the_probe_does_not_inherit_the_write_budget(
 
     import asyncio
 
-    asyncio.run(_provenance.probe_embedding_dimension())
+    provenance = EmbeddingProvenance(load_settings().embedding, configured=True)
+    asyncio.run(provenance.probe_dimension())
     assert captured["retries"] == 0
     assert captured["timeout"] < 30.0

@@ -18,7 +18,7 @@ logic and easier to test.
 
 ``category_id`` / ``topic`` come from parsed source documents (untrusted
 free text), so both are routed through
-:func:`everos.core.persistence.markdown.sanitize_dirname` before becoming
+:func:`everos.infra.persistence.markdown.sanitize_dirname` before becoming
 a directory/file segment — the same shared helper
 ``AgentSkillFrontmatter.skill_dir_name`` uses for LLM-generated skill
 names, so there is one CWE-22 path-traversal defense for md directory
@@ -35,7 +35,7 @@ import yaml
 from everalgo.types import KnowledgeMemory
 
 from everos.core.observability.logging import get_logger
-from everos.core.persistence.markdown import sanitize_dirname
+from everos.infra.persistence.markdown.base.path_safety import sanitize_dirname
 
 logger = get_logger(__name__)
 

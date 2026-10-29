@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**One place builds the application.** Providers, storage adapters, the OME
+engine, the cascade and the domain objects are now assembled once, by
+`everos.service.build_application(settings)`, and the HTTP server and the CLI
+both use the resulting `Application` through three facades:
+`MemoryService`, `KnowledgeService` and `OpsService`.
+
+### Changed
+
+- **The service layer's module-level functions are gone.** `everos.service`
+  no longer exports `memorize`, `search`, `get`, `get_task`, `list_tasks` or
+  the knowledge functions (`create_document`, `search_knowledge`, ...); build
+  an `Application` and call `application.memory.*`, `application.knowledge.*`
+  or `application.ops.*`. `everos.service.memorize`, `.search`, `.get` and
+  the `everos.core.lifespan` / `everos.entrypoints.api.lifespans` packages
+  are removed. `create_app()` takes `settings` or a pre-built `application`
+  instead of `lifespan_providers`.
+- **The process-wide provider accessors are gone.**
+  `everos.component.llm.get_llm_client` / `get_decider_llm_client` /
+  `get_multimodal_llm_client`, `everos.component.embedding.get_embedding_capability`
+  and `EmbeddingCapability`, `everos.component.rerank.get_rerank_capability` and
+  `RerankCapability`, and the `everos.component.multimodal` package are removed.
+  Take providers from `everos.service.build_providers(settings)` (a provider
+  that is not configured is `None`) or build one with the component factories;
+  `resolve_decider_config` now requires its `settings` argument.
+  `everos.component.parser.aparse_file` takes the multimodal LLM as `llm=`.
+  `missing_config_error` moved from `everos.component.utils.config_hints` to
+  `everos.config`. `set_metrics_registry` / `reset_metrics_registry` are
+  replaced by `configure_metrics(registry)`.
+- **The storage singletons are gone.** The module-level repository
+  instances (`episode_repo`, `atomic_fact_repo`, ..., `md_change_state_repo`,
+  `cluster_repo`, `knowledge_document_repo`, ...), the engine / connection
+  accessors (`everos.infra.persistence.sqlite.get_engine` /
+  `get_session_factory` / `dispose_engine`,
+  `everos.infra.persistence.lancedb.get_table` / `get_connection` /
+  `dispose_connection`, the Milvus `get_client` / `dispose_connection`) and the
+  index facade functions (`startup`, `shutdown`, `ensure_business_indexes`,
+  `drop_business_tables`, `read_embedding_model`, ...) are removed, together
+  with `everos.infra.persistence.index.router` and the `lancedb.indexes` /
+  `milvus.indexes` modules. Storage is now a set of objects built over one
+  memory root: `SqliteDatabase` + `SqliteRepos.over(database)`,
+  `LanceDbConnection` / `MilvusConnection`, and the `DerivedIndex` returned by
+  `everos.infra.persistence.factories.build_derived_index(settings, root)`,
+  whose `repositories` replace the old index instances. The SQLite repository
+  classes are public (`ClusterRepo`, `MdChangeStateRepo`, ...; the knowledge
+  topic row repository is `KnowledgeTopicRowRepo`) and take their session
+  factory in the constructor. `CascadeOrchestrator`, `CascadeAdmin`,
+  `CascadeScanner`, `CascadeWatcher`, `CascadeWorker`, `HandlerDeps` and
+  `KnowledgeService` take the storage they use as constructor arguments, and
+  `KindSpec.index_repo` is removed (a handler's repository comes from
+  `HandlerDeps.index`).
+- **One embedding provider per process.** The cascade handlers and the startup
+  provenance check use the application's embedding provider instead of
+  building a second one, so `[embedding] max_concurrent` is no longer doubled
+  in practice.
+- **`OMEConfig.jobstore_path` is required.** The engine no longer resolves the
+  memory root on its own; the application passes `<root>/.index/sqlite/ome.db`.
+- **Backfill logs under `everos.service.backfill`** (was
+  `everos.memory.cascade._backfill`); update log filters keyed on the old name.
+- **A merged episode with an empty subject no longer writes an empty
+  `### Subject` section** to its markdown.
+- **A profile JSON column that does not decode to a list reads as empty**
+  instead of being passed through as-is.
+- **Reflection runs in two steps.** `reflect_episodes` writes the merged
+  episode; the new `finish_reflection` strategy deprecates the source episodes
+  once the merged episode's atomic facts exist. If fact extraction for the
+  merged episode dead-letters, the sources now stay searchable (they used to
+  be deprecated anyway), and the old 120 s wait is gone.
+- **`UserPipelineStarted` is published after its cell's episode is extracted**
+  (it used to be published before any cell ran). Its only subscriber,
+  `extract_foresight`, ships disabled.
+
+### Upgrade
+
+Code that imports `everos.service.memorize` / `search` / `get` or calls
+`create_app(lifespan_providers=...)` must switch to `build_application` and
+the facades. Nothing on disk changes.
+
 ## [1.5.1] - 2026-10-22
 
 **Hybrid and vector search keep up with 10 requests a second out of the box.**

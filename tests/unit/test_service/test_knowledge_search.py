@@ -2,14 +2,14 @@
 
 White-box surfaces mocked:
     ``acategory_retrieve`` (the everalgo facade)
-    ``knowledge_document_repo`` (get_documents_by_ids)
-    ``_get_embedding`` (embedding provider)
-    ``_get_reranker`` (rerank provider)
-    ``load_settings`` (knowledge search settings)
+    ``documents`` repo (get_documents_by_ids)
+    the embedding / rerank providers, the recaller and the search settings
+    the ``KnowledgeService`` is built with
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,13 +22,13 @@ from everos.infra.persistence.sqlite.tables.knowledge import (
 )
 from everos.service.knowledge import (
     DocumentContext,
+    KnowledgeService,
     SearchKnowledgeResult,
     compile_knowledge_where,
-    search_knowledge,
 )
+from tests.fakes import make_knowledge_service
 
 _MOD = "everos.service.knowledge"
-_CONFIG_MOD = "everos.config"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -129,6 +129,18 @@ def _patch_stack(
     }
 
 
+def _service(mocks: dict, **overrides: object) -> KnowledgeService:
+    """A service over the mocks of :func:`_patch_stack`; overrides replace one."""
+    fields = {
+        "embedding": mocks["embedder"],
+        "reranker": mocks["reranker"],
+        "recaller": mocks["recaller"],
+        "search_config": mocks["settings"].knowledge.search,
+        "documents": mocks["doc_repo"],
+    }
+    return make_knowledge_service(root=Path("/unused"), **{**fields, **overrides})
+
+
 # ── compile_knowledge_where ──────────────────────────────────────────────────
 
 
@@ -191,16 +203,13 @@ class TestSearchKnowledgeFacadeWiring:
         mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch(
                 "everalgo.rank.acategory_retrieve", mocks["acategory"]
             ) as mock_facade,
         ):
-            await search_knowledge(query="neural nets", method="keyword")
+            await _service(mocks).search_knowledge(
+                query="neural nets", method="keyword"
+            )
 
         mock_facade.assert_awaited_once()
         call_kwargs = mock_facade.call_args
@@ -215,17 +224,13 @@ class TestSearchKnowledgeFacadeWiring:
         mocks = _patch_stack(doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch(
                 "everalgo.rank.acategory_retrieve", mocks["acategory"]
             ) as mock_facade,
         ):
-            # top_k=200 but top_k_cap=100 → effective_k=100
-            await search_knowledge(query="test", method="keyword", top_k=200)
+            await _service(mocks).search_knowledge(
+                query="test", method="keyword", top_k=200
+            )
 
         assert mock_facade.call_args[1]["top_n"] == 100
 
@@ -241,14 +246,11 @@ class TestSearchKnowledgeResults:
         mocks = _patch_stack(facade_return=[c1, c2], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="neural networks", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="neural networks", method="keyword"
+            )
 
         assert isinstance(result, SearchKnowledgeResult)
         assert len(result.hits) == 2
@@ -258,14 +260,11 @@ class TestSearchKnowledgeResults:
         mocks = _patch_stack()
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="nothing", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="nothing", method="keyword"
+            )
 
         assert result.hits == []
         assert result.total == 0
@@ -278,14 +277,9 @@ class TestSearchKnowledgeIncludeContent:
         mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(
+            result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", include_content=True
             )
 
@@ -296,14 +290,9 @@ class TestSearchKnowledgeIncludeContent:
         mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(
+            result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", include_content=False
             )
 
@@ -317,14 +306,9 @@ class TestSearchKnowledgeScoreThreshold:
         mocks = _patch_stack(facade_return=[high, low], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(
+            result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", score_threshold=0.5
             )
 
@@ -337,14 +321,11 @@ class TestSearchKnowledgeScoreThreshold:
         mocks = _patch_stack(facade_return=[c1, c2], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="test", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="test", method="keyword"
+            )
 
         assert len(result.hits) == 2
 
@@ -356,14 +337,11 @@ class TestSearchKnowledgeDocumentContext:
         mocks = _patch_stack(facade_return=[c], doc_rows=[doc])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="AI", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="AI", method="keyword"
+            )
 
         hit = result.hits[0]
         assert isinstance(hit.document, DocumentContext)
@@ -377,14 +355,11 @@ class TestSearchKnowledgeTookMs:
         mocks = _patch_stack()
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="test", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="test", method="keyword"
+            )
 
         assert result.took_ms >= 0
 
@@ -407,14 +382,11 @@ class TestSearchKnowledgeReturnFields:
         mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
 
         with (
-            patch(f"{_MOD}._build_recaller", return_value=mocks["recaller"]),
-            patch(f"{_MOD}.knowledge_document_repo", mocks["doc_repo"]),
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
             patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
         ):
-            result = await search_knowledge(query="neural", method="keyword")
+            result = await _service(mocks).search_knowledge(
+                query="neural", method="keyword"
+            )
 
         hit = result.hits[0]
         assert hit.topic_id == "n_001"
@@ -433,21 +405,15 @@ class TestSearchKnowledgeProviderRequired:
     async def test_raises_without_embedding(self) -> None:
         mocks = _patch_stack()
 
-        with (
-            patch(f"{_MOD}._get_embedding", return_value=None),
-            patch(f"{_MOD}._get_reranker", return_value=mocks["reranker"]),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
-            pytest.raises(ProviderNotConfiguredError, match="embedding"),
-        ):
-            await search_knowledge(query="test", method="keyword")
+        with pytest.raises(ProviderNotConfiguredError, match="embedding"):
+            await _service(mocks, embedding=None).search_knowledge(
+                query="test", method="keyword"
+            )
 
     async def test_raises_without_reranker(self) -> None:
         mocks = _patch_stack()
 
-        with (
-            patch(f"{_MOD}._get_embedding", return_value=mocks["embedder"]),
-            patch(f"{_MOD}._get_reranker", return_value=None),
-            patch(f"{_CONFIG_MOD}.load_settings", return_value=mocks["settings"]),
-            pytest.raises(ProviderNotConfiguredError, match="rerank"),
-        ):
-            await search_knowledge(query="test", method="keyword")
+        with pytest.raises(ProviderNotConfiguredError, match="rerank"):
+            await _service(mocks, reranker=None).search_knowledge(
+                query="test", method="keyword"
+            )

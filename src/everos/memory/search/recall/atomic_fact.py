@@ -17,17 +17,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from everalgo.types import Candidate
 
-from everos.infra.persistence.index import (
-    AtomicFact,
-    Predicate,
-    all_of,
-    atomic_fact_repo,
-    one_of,
-)
+from everos.memory.ports import AtomicFactIndex, Filter, IndexHit, all_of, one_of
 from everos.memory.search._candidates import FactCandidate
 
 from .base import (
@@ -42,32 +36,35 @@ _NOISE_COLUMNS = frozenset(
 
 
 class AtomicFactRecaller:
-    """BM25 + vector recall over the LanceDB ``atomic_fact`` table."""
+    """BM25 + vector recall over the atomic-fact index.
+
+    Args:
+        deps: Shared recaller dependencies (tokenizer).
+        index: The atomic-fact index port.
+    """
 
     kind: ClassVar[str] = "atomic_fact"
     everalgo_memory_type: ClassVar[str] = "episodic"
     text_field: ClassVar[str] = "fact"
 
-    def __init__(self, deps: RecallerDeps) -> None:
+    def __init__(self, deps: RecallerDeps, index: AtomicFactIndex) -> None:
         self._deps = deps
+        self._index = index
 
     async def sparse_recall(
-        self, query: str, where: Predicate, *, limit: int
+        self, query: str, where: Filter, *, limit: int
     ) -> list[Candidate]:
         """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring)."""
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return []
-        rows = await atomic_fact_repo.sparse_search(
-            terms, where, columns=AtomicFact.BM25_FIELDS, limit=limit
-        )
+        hits = await self._index.sparse_search(terms, where, limit=limit)
         return [
-            row_to_candidate(r, source="keyword", score=float(r.get("_score", 0.0)))
-            for r in rows
+            row_to_candidate(h, source="keyword", score=h.score or 0.0) for h in hits
         ]
 
     async def dense_recall(
-        self, vector: Sequence[float], where: Predicate, *, limit: int
+        self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[Candidate]:
         """Cosine ANN recall over the atomic_fact table.
 
@@ -81,20 +78,20 @@ class AtomicFactRecaller:
         """
         if not vector:
             return []
-        rows = await atomic_fact_repo.dense_search(vector, where, limit=limit)
+        hits = await self._index.dense_search(vector, where, limit=limit)
         return [
             row_to_candidate(
-                r,
+                h,
                 source="vector",
-                score=cosine_score_from_distance(r.get("_distance")),
+                score=cosine_score_from_distance(h.fields.get("_distance")),
             )
-            for r in rows
+            for h in hits
         ]
 
     async def facts_for_episodes(
         self,
         ep_to_parents: Mapping[str, Sequence[str]],
-        where: Predicate,
+        where: Filter,
         *,
         per_episode: int,
         query_vector: Sequence[float] | None = None,
@@ -122,27 +119,30 @@ class AtomicFactRecaller:
         if not parent_to_eps:
             return {}
 
-        rows = await self._query_facts_for_parents(
+        hits = await self._query_facts_for_parents(
             parent_to_eps, where, per_episode=per_episode, query_vector=query_vector
         )
 
-        # Bucket rows by episode and cap each bucket.
+        # Bucket hits by episode and cap each bucket.
         buckets: dict[str, list[FactCandidate]] = defaultdict(list)
-        for r in rows:
-            fact_parent_id = r.get("parent_id")
-            fid = r.get("id")
-            if not isinstance(fact_parent_id, str) or not isinstance(fid, str):
+        for hit in hits:
+            fact_parent_id = hit.fields.get("parent_id")
+            if not isinstance(fact_parent_id, str):
                 continue
             metadata = {
-                k: v for k, v in r.items() if k not in _NOISE_COLUMNS and k != "id"
+                k: v
+                for k, v in hit.fields.items()
+                if k not in _NOISE_COLUMNS and k != "id"
             }
             score = (
-                cosine_score_from_distance(r.get("_distance")) if query_vector else 0.0
+                cosine_score_from_distance(hit.fields.get("_distance"))
+                if query_vector
+                else 0.0
             )
             for ep_id in parent_to_eps.get(fact_parent_id, ()):
                 buckets[ep_id].append(
                     FactCandidate(
-                        id=fid,
+                        id=hit.id,
                         parent_episode_id=ep_id,
                         score=score,
                         metadata=metadata,
@@ -155,19 +155,17 @@ class AtomicFactRecaller:
     async def _query_facts_for_parents(
         self,
         parent_to_eps: dict[str, list[str]],
-        where: Predicate,
+        where: Filter,
         *,
         per_episode: int,
         query_vector: Sequence[float] | None,
-    ) -> list[dict[str, Any]]:
-        """Construct and execute the LanceDB query for parent_id IN (...)."""
+    ) -> list[IndexHit]:
+        """Query the facts whose ``parent_id`` is one of the given parents."""
         full_where = all_of(where, one_of("parent_id", list(parent_to_eps)))
         limit = per_episode * max(len(parent_to_eps), 1)
         if query_vector:
-            return await atomic_fact_repo.dense_search(
-                query_vector, full_where, limit=limit
-            )
-        return await atomic_fact_repo.search(where=full_where, limit=limit)
+            return await self._index.dense_search(query_vector, full_where, limit=limit)
+        return await self._index.find(full_where, limit=limit)
 
 
 def _build_parent_to_episode_map(

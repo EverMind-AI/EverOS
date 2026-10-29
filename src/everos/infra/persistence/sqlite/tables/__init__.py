@@ -3,7 +3,7 @@
 Each business table lives in its own module here (e.g. ``memcell.py``,
 ``unprocessed_buffer.py``). The package ``__init__`` re-exports them so
 ``SQLModel.metadata.create_all`` (run by
-:class:`everos.core.lifespan.SqliteLifespanProvider` at startup) sees
+:meth:`everos.service.Application.start`) sees
 every registered table.
 """
 

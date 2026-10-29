@@ -18,13 +18,14 @@ differs only by the version segment.
 from __future__ import annotations
 
 from everos.entrypoints.api.app import create_app
+from tests.fakes import make_application
 
 _V1 = "/api/v1/"
 _V2 = "/api/v2/"
 
 
 def _openapi_paths() -> dict[str, dict]:
-    app = create_app(lifespan_providers=[])
+    app = create_app(application=make_application())
     return app.openapi()["paths"]
 
 

@@ -7,7 +7,7 @@ override.
 
 > **Status (2026-05-07)**: Layer 1 (bundled defaults under
 > `config/prompt_slots/`) is live — `PromptLoader` is integrated into the
-> memorize pipeline (`service/memorize.py`). Two slots ship today —
+> memorize pipeline (`service/bootstrap.py` builds the loader for `MemoryService`). Two slots ship today —
 > `boundary_detection` and `episode_extract`; other extractors use their
 > algo-bundled defaults. Layers 2-3 (app-level overlay from
 > `~/.everos/prompt_slots/` and per-call runtime override) are still pending.

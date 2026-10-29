@@ -9,8 +9,8 @@
 │  entrypoints/  (Presentation)                         │
 │    cli + api                                          │
 ├──────────────────────────────────────────────────────┤
-│  service/      (Application — Use Case orchestration) │
-│    memorize / search / get / knowledge                │
+│  service/      (Application — assembly + use cases)   │
+│    bootstrap + MemoryService / KnowledgeService / Ops │
 ├──────────────────────────────────────────────────────┤
 │  memory/       (Domain — Business core)               │
 │    models + extract + search + cascade + prompt_slots │
@@ -22,24 +22,33 @@
 
 Cross-cutting (used by all layers, depends on none):
   component/  ← Injectable providers (LLM / Embedding / parser / config / utils)
-  core/       ← Runtime base (observability / lifespan / context / errors / persistence / middleware)
+  core/       ← Runtime base (observability / context / errors / middleware)
   config/     ← Configuration data (Settings schema + default.toml)
 ```
 
 ## Dependency direction (single-direction, enforced)
 
 ```
-entrypoints → service → memory → infra
+entrypoints → service → memory ← infra
+                         (ports)
 ```
+
+The domain owns its storage contracts. `memory/ports` declares what the
+domain needs from storage; `infra` implements those ports and depends on the
+domain, never the other way round (dependency inversion).
 
 | from → to | Allowed? |
 |---|---|
 | entrypoints → service | ✅ |
 | entrypoints → memory / infra | ❌ (must go through service) |
 | service → memory | ✅ |
-| memory → infra | ✅ |
+| memory → infra | ❌ (go through `memory/ports`) |
 | memory → service | ❌ |
-| infra → memory | ❌ |
+| infra → memory.ports / models / events / mappers | ✅ (adapters implement the ports in domain types) |
+| infra → any other memory module, service, entrypoints | ❌ |
+| infra.ome → memory.ports | ✅ (`infra.ome` imports only `everos.memory.ports` — the types the domain declares for it); any other memory module ❌ |
+| service.bootstrap → infra / component implementations | ✅ — the one module that builds adapters and providers and injects them (`service-usecases-forbidden`) |
+| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only. Two registered exceptions: `service.knowledge` (removed in stage 5) and `service.backfill` (removed in stage 6) |
 | infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
 | any → component / core / config | ✅ (cross-cutting) |
 | `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` uses `component` only for `utils.datetime`. |
@@ -57,9 +66,66 @@ layers = [
     "everos.entrypoints",
     "everos.service",
     "everos.memory",
-    "everos.infra",
 ]
+
+# plus forbidden contracts: infra-inverted, memory-forbidden,
+# core-forbidden, component-forbidden, mappers-pure, ome-ports-only,
+# service-usecases-forbidden, no-bypass-facade (see pyproject.toml)
 ```
+
+`make lint` also runs `scripts/check_singletons.py`: no module-level lazy
+singleton slot (`_x: X | None = None`), no no-argument `get_*()` accessor and
+no import-time `*_repo` instance in `src/`. Objects are built by the
+application bootstrap and injected.
+
+### Storage ports
+
+`memory/ports` is the domain's declaration of what it needs from the outside
+world, in domain types only — storage, and the event / strategy vocabulary
+the scheduler runs:
+
+| Module | Contents |
+|---|---|
+| `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `IndexHit` |
+| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ForesightStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore` |
+| `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AtomicFactIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
+| `ports/events.py` | `Event` (frozen, JSON round-trippable, identified by `topic()`) and the scheduler ticks `CronTick` / `IdleTick` / `ManualTick` |
+| `ports/strategy.py` | the triggers `Immediate` / `Cron` / `Idle`, the `Counter` gate, and `StrategySpec` — one strategy's name, function, trigger, `emits`, `applies_to`, gate, retries and enabled flag |
+| `ports/event_bus.py` | `EventBus`, the port through which the service publishes events |
+
+`memory/deps.py` bundles what a strategy may use into `MemoryDeps`: the LLM
+and embedding providers (`None` when not configured) and the `Stores` /
+`Indexes` containers of ports.
+
+Adapters: `Markdown*Store` (`infra/persistence/markdown/stores.py`),
+`Sqlite*Store` (`infra/persistence/sqlite/stores.py`), and one
+backend-neutral `*IndexAdapter` per kind
+(`infra/persistence/index/adapters.py`). Index writes and housekeeping are not
+domain concerns: they go through `IndexMaintenance`
+(`infra/persistence/index/maintenance.py`), used only by the cascade engine
+and backfill. The domain never writes an index; it writes markdown and the
+cascade projects it.
+
+### Storage objects
+
+Every storage handle is an object the bootstrap builds over one memory root
+and passes down; nothing is reached through a module-level instance.
+
+| Object | Owns | Opens |
+|---|---|---|
+| `SqliteDatabase` (`sqlite/sqlite_manager.py`) | the `system.db` engine and session factory | the file on first connection |
+| `SqliteRepos` (`sqlite/repositories.py`) | one repository per system table, built by `SqliteRepos.over(database)` | — |
+| `LanceDbConnection` / `MilvusConnection` | the engine connection and, for LanceDB, the table-handle cache | on first use |
+| `LanceIndexBackend` / `MilvusIndexBackend` | the engine's `IndexRepositories` and its migrations / schema checks | — |
+| `DerivedIndex` (`index/derived_index.py`) | the selected backend plus the engine-neutral checks: record width, primary keys, configuration verification | — |
+
+`infra/persistence/factories.py` builds the engine-dependent pieces:
+`build_derived_index(settings, root)` picks the backend once,
+`build_stores(root, sqlite)` and `build_indexes(index)` wrap the repositories
+in the domain ports. Why objects rather than module instances: a test or a
+second root gets its own storage by building another set, a repository's
+database is visible at its construction, and closing is the owner's call
+(`Application.aclose`, `OpsService.index_session`), not a process-wide reset.
 
 ## Storage three-piece set
 
@@ -89,7 +155,7 @@ layers = [
 External message
        │
        ▼
-1. service.memorize           (entrypoint of write path)
+1. MemoryService.memorize     (entrypoint of write path)
        │
        ▼
 2. memory.extract.pipeline    (calls everalgo)
@@ -101,7 +167,7 @@ External message
    ┌───┴────┐
    │        │
    ▼        ▼
-4a. SQLite   4b. memory.cascade  (async daemon)
+4a. SQLite   4b. infra.cascade  (async daemon)
     audit        watches md → diff entries → index sync
 ```
 
@@ -116,7 +182,7 @@ recovery.
 User query
    │
    ▼
-1. service.search
+1. MemoryService.search
    │
    ▼
 2. memory.search (hybrid)     BM25 + vector ANN + scalar filter
@@ -131,6 +197,55 @@ User query
 
 ## Key components
 
+### `service/`
+
+The application layer has two jobs, kept in separate modules:
+
+- **Assembly** — `service/bootstrap.py`. `build_application(settings)` builds
+  every provider (`build_providers`), storage adapter, the OME engine with all
+  strategies registered, the event bus, the cascade orchestrator and the domain
+  pipelines and managers, and returns an `Application`: three facades plus a
+  `Capabilities` snapshot of which optional providers were configured. Building
+  opens nothing; `Application.start()` brings up the system DB, the index, the
+  cascade, OME and the `async_mode` queue in that order (the queue publishes
+  into OME, so it starts last and stops first), and `aclose()` unwinds what was
+  started. Tracing and metrics are configured once here (`configure_tracing` /
+  `configure_metrics`).
+- **Use cases** — one facade per kind of caller, one method per use case:
+  `MemoryService` (memorize / flush / search / get, plus the `async_mode`
+  queue), `KnowledgeService` (document CRUD and knowledge search) and
+  `OpsService` (cascade status / sync / fix / rebuild / quiesce / backfill, OME
+  trigger, health signals, task readers). They receive their collaborators;
+  none builds or looks one up.
+
+Entry points hold the one `Application`: the HTTP lifespan builds and starts it
+(`app.state.application`), routes call its facades, and a CLI command builds it
+without starting it and opens storage per command through
+`OpsService.index_session`. Why one assembly point: every object's
+construction is visible in one file, a test swaps any provider by passing
+`Providers`, and no module can reach a half-configured singleton.
+
+### `component/`
+
+Each injectable capability exposes three things: a protocol, its
+implementations, and a factory — no process-wide accessor.
+
+| Package | Protocol | Implementations | Factory |
+|---|---|---|---|
+| `llm` | `everalgo.llm.LLMClient` | `OpenAIProvider` | `build_llm_provider(resolve_*_config(settings), observer=observer_for(settings))` |
+| `embedding` | `EmbeddingProvider` | `OpenAIEmbeddingProvider` | `build_embedding_provider(settings.embedding)` |
+| `rerank` | `RerankProvider` | DeepInfra / vLLM / DashScope providers | `build_rerank_provider(settings.rerank)` |
+| `parser` | everalgo parser entry | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
+
+A factory raises when its section is missing or wrong
+(`LLMNotConfiguredError` / `ValueError`); the bootstrap's `build_providers`
+turns that into `None` with a warning, and the `None` is the whole
+"not configured" signal: search refuses with a 422, cascade writes rows
+without vectors, knowledge uploads refuse, and the server's `start()` refuses
+to run without an extraction LLM. Why the bootstrap decides and the factory
+does not: "absent" is an application decision, while "misconfigured" must
+stay visible to whoever builds the provider.
+
 ### `memory/extract/`
 
 ```
@@ -141,7 +256,7 @@ extract/
 └── evolution/   Async memory evolution (event/counter/cron triggers)
 ```
 
-### `memory/cascade/`
+### `infra/cascade/`
 
 Daemon that watches markdown changes and syncs to the configured derived
 index backend:
@@ -170,27 +285,52 @@ Extractors may accept a prompt-override parameter; EverOS supplies overrides for
 
 ### `memory/reflection/`
 
-Offline memory self-improvement. The orchestrator (`orchestrator.py`)
-implements the Select → Merge → Re-extract → Deprecate pipeline, merging
-fragmented episodes within a cluster into a single coherent narrative. Driven
-by the `reflect_episodes` OME strategy (cron, disabled by default).
+Offline memory self-improvement (`orchestrator.py`): Select → Merge →
+Re-extract → Deprecate, merging fragmented episodes within a cluster into a
+single coherent narrative. `ReflectionOrchestrator` selects and merges, driven
+by the `reflect_episodes` OME strategy (cron, disabled by default), and returns
+the merged episode with a `ReflectionContext`; once `extract_atomic_facts` has
+re-extracted its facts, `finish_reflection` hands that context to
+`ReflectionFinisher`, which deprecates the replaced members.
 
 ### `memory/strategies/`
 
-OME strategy implementations — one file per strategy:
+OME strategy implementations — one file per strategy. A strategy is an async
+function `fn(event, deps: MemoryDeps) -> list[Event]`: it works only through
+`deps` and returns its follow-up events instead of publishing them. Each file
+declares its `StrategySpec` next to the function; `STRATEGY_SPECS` collects
+them. Strategy names are stable — run records and `ome.toml` overrides key on
+them.
 
 - `extract_atomic_facts` / `extract_foresight` / `extract_user_profile` — user pipeline
 - `extract_agent_case` / `extract_agent_skill` — agent pipeline
-- `reflect_episodes` — offline episode consolidation (cron)
+- `reflect_episodes` / `finish_reflection` — offline episode consolidation
+  (cron merge, then deprecation once the merged episode's facts exist)
 - `trigger_profile_clustering` / `trigger_skill_clustering` — clustering triggers
+
+Who publishes: the domain never does. The memorize service publishes each
+pipeline cell's events on the `EventBus` (`OmeEventBus` over the engine), and
+`infra/ome/adapter.py` (`to_ome_strategy`) binds the deps into a spec, checks
+every returned event against its `emits` and publishes them for the run. Why
+this shape: a strategy is testable as a plain function with in-memory doubles
+(`tests/fakes`), and the emit contract is enforced in one place instead of in
+every strategy body.
 
 ### `core/observability/`
 
 Three-piece observability:
 
-- `metrics/` — Prometheus counter / gauge / histogram + global registry
-- `logging/` — structlog with context processor (trace_id propagation)
-- `tracing/` — OpenTelemetry tracer + span helpers
+- `metrics/` — Prometheus counter / gauge / histogram over the registry
+  `configure_metrics` settles
+- `logging/` — structlog with context processor (trace_id propagation);
+  `bound_log_context` adds fields to every event in a block
+- `tracing/` — OpenTelemetry tracer + span helpers; the recall-score sink is
+  installed by `init_score_sink` and is a no-op until then
+
+These are the facades: business layers (`entrypoints` / `service` / `memory` /
+`infra`) never import `structlog`, `logging` or `opentelemetry` directly
+(`no-bypass-facade`), so a backend is swapped where it is configured — once,
+in the bootstrap — not where it is called.
 
 ## Markdown layout
 

@@ -1,6 +1,6 @@
 """Repositories for ``knowledge_documents`` and ``knowledge_topics`` tables.
 
-Two singleton repos — one per table — wired to the process-wide SQLite engine.
+One repo per table, each bound to the session factory it is built with.
 Callers construct rows and pass them in; these repos handle persistence only.
 """
 
@@ -10,12 +10,11 @@ import dataclasses
 
 from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from everos.component.utils.datetime import get_utc_now
-from everos.core.persistence.sqlite import RepoBase, session_scope
+from everos.infra.persistence.sqlite.base.repository import RepoBase
+from everos.infra.persistence.sqlite.base.session import session_scope
 
-from ..sqlite_manager import get_session_factory
 from ..tables.knowledge import KnowledgeDocumentRow, KnowledgeTopicRow
 
 _SORTABLE_COLUMNS: dict[str, object] = {
@@ -69,13 +68,10 @@ class TopicUpsertPayload:
     md_path: str
 
 
-class _KnowledgeDocumentRepo(RepoBase[KnowledgeDocumentRow]):
+class KnowledgeDocumentRepo(RepoBase[KnowledgeDocumentRow]):
     """SQLite repository for ``knowledge_documents`` table."""
 
     model = KnowledgeDocumentRow
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def get_by_doc_id(self, doc_id: str) -> KnowledgeDocumentRow | None:
         """Return the document row for ``doc_id``, or ``None`` if absent."""
@@ -216,13 +212,10 @@ class _KnowledgeDocumentRepo(RepoBase[KnowledgeDocumentRow]):
             await s.commit()
 
 
-class _KnowledgeTopicRepo(RepoBase[KnowledgeTopicRow]):
+class KnowledgeTopicRowRepo(RepoBase[KnowledgeTopicRow]):
     """SQLite repository for ``knowledge_topics`` table."""
 
     model = KnowledgeTopicRow
-
-    def _factory_lookup(self) -> async_sessionmaker[AsyncSession]:
-        return get_session_factory()
 
     async def get_topics_by_ids(self, node_ids: list[str]) -> list[KnowledgeTopicRow]:
         """Batch-fetch topic rows by node id list — preserves caller order."""
@@ -310,7 +303,3 @@ class _KnowledgeTopicRepo(RepoBase[KnowledgeTopicRow]):
         async with session_scope(self._factory) as s:
             await s.execute(stmt)
             await s.commit()
-
-
-knowledge_document_repo = _KnowledgeDocumentRepo()
-knowledge_topic_sqlite_repo = _KnowledgeTopicRepo()

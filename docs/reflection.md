@@ -126,9 +126,12 @@ Select ─→ Merge ─→ Re-extract ─→ Deprecate
    narrative.
 3. **Re-extract** — the merged narrative is written to Markdown and triggers
    re-extraction of atomic facts, keeping derived data consistent with it.
-4. **Deprecate** — the replaced original Episodes and their atomic facts get
-   `deprecated_by` pointing at the new narrative; cluster membership is
-   updated; an audit record is written.
+4. **Deprecate** — once those facts exist, the `finish_reflection` strategy
+   gives the replaced original Episodes and their atomic facts
+   `deprecated_by` pointing at the new narrative, updates cluster membership,
+   and writes an audit record. If fact extraction never succeeds, nothing is
+   deprecated: the originals stay searchable rather than being replaced by a
+   narrative without facts.
 
 The result:
 

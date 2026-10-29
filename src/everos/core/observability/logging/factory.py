@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import AbstractContextManager
 from typing import Any
 
 import structlog
@@ -30,6 +31,15 @@ import structlog
 def get_logger(name: str) -> Any:
     """Return a structlog logger bound to the given module name."""
     return structlog.get_logger(name)
+
+
+def bound_log_context(**fields: Any) -> AbstractContextManager[None]:
+    """Add ``fields`` to every log event inside the ``with`` block.
+
+    Bound through context variables, so the fields follow the current task
+    and are restored to their previous values on exit.
+    """
+    return structlog.contextvars.bound_contextvars(**fields)  # type: ignore[return-value]  # structlog types it as a Generator; @contextmanager wraps it at runtime
 
 
 def configure_logging(level: str = "INFO") -> None:

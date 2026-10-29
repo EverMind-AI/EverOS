@@ -7,7 +7,7 @@ already correct. (AtomicFact, by contrast, uses a subject-agnostic
 one-call fan-out.)
 
 Per-owner batching: each sender's full foresight list is appended in
-one batched ``append_entries`` call rather than ``N`` single appends,
+one batched ``append_many`` call rather than ``N`` single appends,
 dropping IO complexity to ``O(N)`` per owner and narrowing the
 per-path lock window.
 
@@ -45,42 +45,23 @@ and not what the default-off above is about.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
 
 from everalgo.types import ChatMessage
 from everalgo.user_memory import ForesightExtractor
 
-from everos.component.llm import get_llm_client
-from everos.component.utils.datetime import from_timestamp, to_iso_format
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.markdown import ForesightWriter
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import UserPipelineStarted
 from everos.memory.models import Foresight
+from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
 
-_writer: ForesightWriter | None = None
 
-
-def _get_writer() -> ForesightWriter:
-    global _writer
-    if _writer is None:
-        _writer = ForesightWriter(root=MemoryRoot.resolve())
-    return _writer
-
-
-@offline_strategy(
-    name="extract_foresight",
-    trigger=Immediate(on=[UserPipelineStarted]),
-    emits=[],
-    max_retries=2,
-    enabled=False,
-)
-async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) -> None:
+async def extract_foresight(
+    event: UserPipelineStarted, deps: MemoryDeps
+) -> list[Event]:
+    """Extract foresights per user sender and persist them under each sender."""
     # 1. List the user senders in this memcell.
     memcell = event.memcell
     sender_ids = sorted(
@@ -90,7 +71,7 @@ async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) ->
             if isinstance(m, ChatMessage) and m.role == "user"
         }
     )
-    extractor = ForesightExtractor(llm=get_llm_client()) if sender_ids else None
+    extractor = ForesightExtractor(llm=deps.require_llm()) if sender_ids else None
 
     # 2. Run the LLM extractor once per sender (prompt is per-sender).
     foresights: list[Foresight] = []
@@ -107,18 +88,19 @@ async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) ->
 
     # 3. Group foresights by owner so each sender's full list lands in one
     #    batched write.
-    by_owner: dict[str, list[tuple[Mapping[str, object], Mapping[str, str]]]] = (
-        defaultdict(list)
-    )
+    by_owner: dict[str, list[Foresight]] = defaultdict(list)
     for fs in foresights:
-        by_owner[fs.owner_id].append(_foresight_to_entry_body(fs))
+        by_owner[fs.owner_id].append(fs)
 
-    # 4. Write each owner's full list with one batched append_entries.
-    writer = _get_writer()
+    # 4. Write each owner's full list with one batched append.
     for owner_id, items in by_owner.items():
-        await writer.append_entries(
-            owner_id, items, app_id=event.app_id, project_id=event.project_id
+        scope = Scope(
+            app_id=event.app_id,
+            project_id=event.project_id,
+            owner_id=owner_id,
+            owner_type="user",
         )
+        await deps.stores.foresight.append_many(scope, items)
 
     logger.info(
         "foresights_extracted",
@@ -127,29 +109,13 @@ async def extract_foresight(event: UserPipelineStarted, ctx: StrategyContext) ->
         count=len(foresights),
         owner_ids=sorted({f.owner_id for f in foresights}),
     )
+    return []
 
 
-def _foresight_to_entry_body(
-    fs: Foresight,
-) -> tuple[dict[str, object], dict[str, str]]:
-    """Split a domain Foresight into ``(inline, sections)`` for md rendering.
-
-    Mirrors ``_episode_to_entry_body`` / ``_atomic_fact_to_entry_body``.
-    Optional time-window fields (``start_time`` / ``end_time`` /
-    ``duration_days``) are emitted only when set so md stays compact.
-    """
-    inline: dict[str, object] = {
-        "owner_id": fs.owner_id,
-        "session_id": fs.session_id,
-        "timestamp": to_iso_format(from_timestamp(fs.timestamp)),
-        "parent_type": "memcell",
-        "parent_id": fs.parent_id,
-    }
-    if fs.start_time:
-        inline["start_time"] = fs.start_time
-    if fs.end_time:
-        inline["end_time"] = fs.end_time
-    if fs.duration_days is not None:
-        inline["duration_days"] = fs.duration_days
-    sections = {"Foresight": fs.foresight, "Evidence": fs.evidence}
-    return inline, sections
+EXTRACT_FORESIGHT_SPEC = StrategySpec(
+    name="extract_foresight",
+    fn=extract_foresight,
+    trigger=Immediate(on=[UserPipelineStarted]),
+    max_retries=2,
+    enabled=False,
+)

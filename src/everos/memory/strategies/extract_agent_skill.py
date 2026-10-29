@@ -4,9 +4,9 @@ Triggered by :class:`SkillClusterUpdated` after ``trigger_skill_clustering``
 has assigned the fresh case to its cluster. The strategy:
 
 1. Reconstructs the target case directly from the event payload
-   (:func:`_to_algo_case_from_event`) — no LanceDB read. This is the
-   cascade-lag rescue: the previous implementation probed
-   ``agent_case_repo.find_by_owner_entry`` for the freshly-written case
+   (:func:`_to_algo_case_from_event`) — no index read. This is the
+   cascade-lag rescue: the previous implementation probed the agent-case
+   index for the freshly-written case
    and raised a retry-class error when cascade hadn't indexed it yet,
    which under sustained cascade lag meant the run died after
    ``max_retries`` and OME dead-lettered it — the case was never
@@ -15,18 +15,18 @@ has assigned the fresh case to its cluster. The strategy:
 2. Selects the ``existing_relevant_skills`` slice for this cluster,
    **md-first** (:func:`_select_existing_skills`):
 
-   * ``AgentSkillReader.list_by_cluster`` is the source of truth for
+   * the skill store's ``list_by_cluster`` is the source of truth for
      "which skills exist in this cluster" — md is strongly consistent,
-     LanceDB is cascade-lagged and must not be used for existence
+     the index is cascade-lagged and must not be used for existence
      checks (a stale index previously made the LLM emit ``add()`` for a
      skill that already existed in md, silently clobbering it on
      write-back);
    * cluster size ``≤ MAX_SKILLS_IN_PROMPT`` → every md skill is used
      (ranking would be pointless on a fully-inclusive set);
    * cluster size ``> MAX_SKILLS_IN_PROMPT`` and the event carries a
-     ``case_vector`` → LanceDB ranks by cosine relevance, md hydrates
-     the winning ids' content (LanceDB is a ranking index here, never
-     an existence check);
+     ``case_vector`` → the skill index ranks by cosine relevance, md
+     hydrates the winning names' content (the index ranks here, it is
+     never an existence check);
    * cluster size ``> MAX_SKILLS_IN_PROMPT`` but no ``case_vector`` is
      available (pre-1.2.3 event, or embedding was unavailable upstream)
      → md ordering capped at K (logged warning so truncation without
@@ -39,12 +39,12 @@ has assigned the fresh case to its cluster. The strategy:
    ranked ``(quality_score desc, timestamp desc)`` and capped at
    ``MAX_SUPPORTING_CASES`` to keep the prompt bounded as a cluster
    grows. Unlike the target case and existing skills, this lineage read
-   stays LanceDB-backed: an un-indexed supporting case only means a
+   stays index-backed: an un-indexed supporting case only means a
    thinner prompt this run (non-corrupting; the next run catches up),
    not a wrong write.
 4. Feeds the target + existing + supporting trio to
    :class:`everalgo.agent_memory.AgentSkillExtractor`, then writes the
-   emitted skills back via :class:`AgentSkillWriter` and reaps the
+   emitted skills back through the skill store and reaps the
    directory an update left behind when it renamed a skill (see
    :func:`_reap_renamed_skills`).
 
@@ -76,28 +76,20 @@ from everalgo.agent_memory import AgentSkillExtractor
 from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
-from everos.component.embedding import get_embedding_capability
-from everos.component.llm import get_llm_client
 from everos.core.observability.logging import get_logger
-from everos.core.persistence import MemoryRoot
-from everos.infra.ome.context import StrategyContext
-from everos.infra.ome.decorator import offline_strategy
-from everos.infra.ome.triggers import Immediate
-from everos.infra.persistence.index import (
-    AgentCase as LanceAgentCase,
-)
-from everos.infra.persistence.index import (
-    agent_case_repo,
-    agent_skill_repo,
-)
-from everos.infra.persistence.markdown import (
-    AgentSkillFrontmatter,
-    AgentSkillReader,
-    AgentSkillWriter,
-)
-from everos.infra.persistence.sqlite import cluster_repo
 from everos.memory._partition_locks import get_partition_lock
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import SkillClusterUpdated
+from everos.memory.mappers import agent_skill as agent_skill_mapper
+from everos.memory.models import AgentCase, AgentSkill
+from everos.memory.ports import (
+    AgentSkillStore,
+    Event,
+    Immediate,
+    Scope,
+    Stored,
+    StrategySpec,
+)
 
 logger = get_logger(__name__)
 
@@ -125,36 +117,19 @@ class _ClusterMissingError(RuntimeError):
     """Race with the cluster strategy; OME retry will catch up."""
 
 
-_writer: AgentSkillWriter | None = None
-_reader: AgentSkillReader | None = None
+class _ClusterMissingError(RuntimeError):
+    """Race with the cluster strategy; OME retry will catch up."""
 
 
-def _get_writer() -> AgentSkillWriter:
-    global _writer
-    if _writer is None:
-        _writer = AgentSkillWriter(root=MemoryRoot.resolve())
-    return _writer
-
-
-def _get_reader() -> AgentSkillReader:
-    global _reader
-    if _reader is None:
-        _reader = AgentSkillReader(root=MemoryRoot.resolve())
-    return _reader
-
-
-@offline_strategy(
-    name="extract_agent_skill",
-    trigger=Immediate(on=[SkillClusterUpdated]),
-    emits=[],
-    max_retries=3,
-)
-async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) -> None:
+async def extract_agent_skill(
+    event: SkillClusterUpdated, deps: MemoryDeps
+) -> list[Event]:
+    """Distil or update the agent's skills for the case's cluster."""
     # Body-guard: this strategy no longer embeds anything (the query
     # vector rides the event), so the guard is not protecting a local
     # call — it keeps the whole agent-skill track consistent with the
     # tier the deployment is actually running. Upstream
-    # trigger_skill_clustering gates on the same capability, so no
+    # trigger_skill_clustering gates on the same provider, so no
     # SkillClusterUpdated normally exists without an embedder; the guard
     # covers a direct emit (tests, future features), which should degrade
     # cleanly rather than take an owner lock and produce skills the
@@ -164,79 +139,73 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
     # ``debug`` level (not ``info``) is intentional; see the body-guard
     # in :func:`everos.memory.strategies.trigger_profile_clustering` for
     # the shared rationale (PR #361 round-3 review #8).
-    if not get_embedding_capability().available:
+    if deps.embedding is None:
         logger.debug(
             "strategy_gated_off_embedding_unavailable",
             strategy_name="extract_agent_skill",
             agent_id=event.agent_id,
         )
-        return
+        return []
 
-    # Serialise on agent_id: SKILL.md is addressed by (agent_id, skill_name)
+    scope = Scope(
+        app_id=event.app_id,
+        project_id=event.project_id,
+        owner_id=event.agent_id,
+        owner_type="agent",
+    )
+    # Serialise on agent_id: a skill is addressed by (agent_id, skill_name)
     # — concurrent runs across different clusters of the same agent can
     # both decide to add the same skill_name and clobber the file. Different
     # agents run fully in parallel.
-    # Lock per (app, project, agent): SKILL.md is addressed by (agent, name)
+    # Lock per (app, project, agent): a skill is addressed by (agent, name)
     # within a space; different spaces run in parallel.
     partition = f"{event.app_id}:{event.project_id}:{event.agent_id}"
     async with get_partition_lock("extract_agent_skill", partition):
         # 1. Check the cluster row exists.
-        await _ensure_cluster_exists(event.cluster_id, event.case_entry_id)
+        if await deps.stores.cluster.get(event.cluster_id) is None:
+            # Same-transaction race with trigger_skill_clustering; OME retries.
+            raise _ClusterMissingError(
+                f"cluster_id={event.cluster_id} not found yet for case "
+                f"{event.case_entry_id}; retrying"
+            )
 
         # 2. Reconstruct the target AgentCase from the event payload — no
-        #    LanceDB probe, so the strategy never races cascade indexing.
+        #    index probe, so the strategy never races cascade indexing.
         target = _to_algo_case_from_event(event)
 
         # 3. Pick the top-K relevant existing skills in this cluster, md-first.
         #    (Cluster-scoped queries are implicitly space-scoped: cluster_id
         #    is globally unique to one (app, project, owner) cluster set.)
         existing_skills = await _select_existing_skills(
-            agent_id=event.agent_id,
-            cluster_id=event.cluster_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
-            case_vector=event.case_vector,
+            deps, scope, event.cluster_id, event.case_vector
         )
 
         # 4. Pull the supporting cases referenced by those skills.
-        supporting_lance = await _select_supporting_cases(
-            existing_skills,
-            agent_id=event.agent_id,
-            exclude_entry_id=event.case_entry_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
+        supporting = await _select_supporting_cases(
+            deps, scope, existing_skills, exclude_entry_id=event.case_entry_id
         )
 
         # 5. Run the LLM extractor. Emits add / update ops; a retire op comes
         #    back as an ordinary skill with confidence < retire_confidence and
         #    is NOT honoured here — see the module docstring.
-        extractor = AgentSkillExtractor(llm=get_llm_client())
+        extractor = AgentSkillExtractor(llm=deps.require_llm())
         emitted_skills = await extractor.aextract(
             target,
-            existing_relevant_skills=existing_skills,
-            supporting_cases=[_to_algo_case(c) for c in supporting_lance],
+            existing_relevant_skills=[
+                agent_skill_mapper.to_algo(s.item) for s in existing_skills
+            ],
+            supporting_cases=[_to_algo_case(c) for c in supporting],
         )
 
-        # 6. Write each emitted skill back to its SKILL.md, then reap the
-        #    directories that a rename left behind.
-        writer = _get_writer()
+        # 6. Write each emitted skill back, then reap the documents that a
+        #    rename left behind.
         written_names: dict[str, str] = {}
         for skill in emitted_skills:
             written_names[skill.id] = await _persist_skill(
-                writer,
-                skill,
-                agent_id=event.agent_id,
-                cluster_id=event.cluster_id,
-                app_id=event.app_id,
-                project_id=event.project_id,
+                deps.stores.agent_skill, scope, skill, cluster_id=event.cluster_id
             )
         await _reap_renamed_skills(
-            writer,
-            written_names,
-            existing_skills=existing_skills,
-            agent_id=event.agent_id,
-            app_id=event.app_id,
-            project_id=event.project_id,
+            deps.stores.agent_skill, scope, written_names, existing_skills
         )
     logger.info(
         "agent_skills_extracted",
@@ -245,125 +214,96 @@ async def extract_agent_skill(event: SkillClusterUpdated, ctx: StrategyContext) 
         agent_id=event.agent_id,
         emitted=len(emitted_skills),
     )
+    return []
 
 
 # ── orchestration helpers ────────────────────────────────────────────────
 
 
-async def _ensure_cluster_exists(cluster_id: str, case_entry_id: str) -> None:
-    """Bail with a retry-class error when the cluster row is not yet there."""
-    cluster = await cluster_repo.get_with_members(cluster_id)
-    if cluster is None:
-        # Same-transaction race with trigger_skill_clustering; OME retries.
-        raise _ClusterMissingError(
-            f"cluster_id={cluster_id} not found yet for case {case_entry_id}; retrying"
-        )
-
-
 async def _select_existing_skills(
-    *,
-    agent_id: str,
+    deps: MemoryDeps,
+    scope: Scope,
     cluster_id: str,
-    app_id: str,
-    project_id: str,
     case_vector: list[float] | None,
-) -> list[AlgoAgentSkill]:
+) -> list[Stored[AgentSkill]]:
     """Pick at most ``MAX_SKILLS_IN_PROMPT`` existing skills for the prompt.
 
     md is the source of truth for existence — this avoids the
     stale-index clobber where a skill was written last run but hadn't
-    been indexed into LanceDB yet, causing the LLM to see no existing
-    skill and emit ``add()`` for one that already exists. LanceDB is
+    been indexed yet, causing the LLM to see no existing
+    skill and emit ``add()`` for one that already exists. The index is
     only consulted for relevance ordering when the cluster's md skill
     count exceeds ``MAX_SKILLS_IN_PROMPT`` and ``case_vector`` is
     available; when it isn't (pre-1.2.3 event, or embedding was
     unavailable upstream), fall back to md ordering.
 
-    ``list_by_cluster`` returns each skill's frontmatter *and* body
-    together, so there is no second, name-based read to hydrate
-    ``content`` — a prior version re-read each selected skill by
-    ``fm.name`` via ``read_main``, which re-derives (and re-sanitizes) a
-    path from that name and would silently miss a skill whose on-disk
-    directory suffix isn't itself a sanitizer fixpoint, even though the
-    first, path-based enumeration found it. See
-    ``AgentSkillReader.list_by_cluster``'s docstring.
+    ``list_by_cluster`` returns each skill with its content, so there is
+    no second, name-based read to hydrate ``content`` — a prior version
+    re-read each selected skill by name, which re-derives (and
+    re-sanitizes) a path from that name and would silently miss a skill
+    whose on-disk directory suffix isn't itself a sanitizer fixpoint,
+    even though the first, path-based enumeration found it.
     """
-    reader = _get_reader()
-    md_skills = await reader.list_by_cluster(
-        agent_id, cluster_id, app_id=app_id, project_id=project_id
-    )
-    if not md_skills:
-        return []
-
+    md_skills = await deps.stores.agent_skill.list_by_cluster(scope, cluster_id)
     if len(md_skills) <= MAX_SKILLS_IN_PROMPT:
-        selected = md_skills
-    elif case_vector is not None:
-        selected = await _rank_skills_by_relevance(
-            md_skills,
-            agent_id=agent_id,
-            cluster_id=cluster_id,
-            case_vector=case_vector,
+        return md_skills
+    if case_vector is not None:
+        return await _rank_skills_by_relevance(
+            deps, scope, cluster_id, md_skills, case_vector
         )
-    else:
-        logger.warning(
-            "agent_skill_topk_no_query_vector_md_fallback",
-            agent_id=agent_id,
-            cluster_id=cluster_id,
-            md_count=len(md_skills),
-        )
-        selected = md_skills[:MAX_SKILLS_IN_PROMPT]
-
-    return [_md_to_algo_skill(fm, body) for fm, body in selected]
+    logger.warning(
+        "agent_skill_topk_no_query_vector_md_fallback",
+        agent_id=scope.owner_id,
+        cluster_id=cluster_id,
+        md_count=len(md_skills),
+    )
+    return md_skills[:MAX_SKILLS_IN_PROMPT]
 
 
 async def _rank_skills_by_relevance(
-    md_skills: list[tuple[AgentSkillFrontmatter, str]],
-    *,
-    agent_id: str,
+    deps: MemoryDeps,
+    scope: Scope,
     cluster_id: str,
+    md_skills: list[Stored[AgentSkill]],
     case_vector: list[float],
-) -> list[tuple[AgentSkillFrontmatter, str]]:
-    """Ask LanceDB to rank the md skills by cosine relevance, capped at K.
+) -> list[Stored[AgentSkill]]:
+    """Ask the skill index to rank the md skills by cosine relevance, capped at K.
 
-    LanceDB is used purely as a ranking index here, never as the
-    existence check — the candidate set is always the md list. A LanceDB
-    row with no matching md name is stale and skipped; md skills LanceDB
-    didn't return (also stale index) then backfill in md order until the
+    The index is used purely for ranking here, never as the existence
+    check — the candidate set is always the md list. An index row with no
+    matching md name is stale and skipped; md skills the index didn't
+    return (also stale index) then backfill in md order until the
     ``MAX_SKILLS_IN_PROMPT`` budget is full. That backfill keeps a lagging
     index from *under*-filling the prompt; it does not make the selection
     lossless — this function only runs when the cluster already holds more
     skills than the budget admits, so skills beyond K are dropped by
     design either way.
     """
-    md_by_name = {fm.name: (fm, body) for fm, body in md_skills}
-    ranked_lance = await agent_skill_repo.find_topk_relevant_in_cluster(
-        owner_id=agent_id,
-        cluster_id=cluster_id,
-        query_vector=case_vector,
-        top_k=MAX_SKILLS_IN_PROMPT,
+    md_by_name = {s.item.name: s for s in md_skills}
+    ranked = await deps.indexes.agent_skill.top_k_in_cluster(
+        scope, cluster_id, case_vector, MAX_SKILLS_IN_PROMPT
     )
-    selected: list[tuple[AgentSkillFrontmatter, str]] = []
+    selected: list[Stored[AgentSkill]] = []
     seen_names: set[str] = set()
-    for lance_row in ranked_lance:
-        pair = md_by_name.get(lance_row.name)
-        if pair is not None and pair[0].name not in seen_names:
-            selected.append(pair)
-            seen_names.add(pair[0].name)
-    for fm, body in md_skills:
-        if fm.name not in seen_names and len(selected) < MAX_SKILLS_IN_PROMPT:
-            selected.append((fm, body))
-            seen_names.add(fm.name)
+    for row in ranked:
+        hit = md_by_name.get(row.item.name)
+        if hit is not None and hit.item.name not in seen_names:
+            selected.append(hit)
+            seen_names.add(hit.item.name)
+    for skill in md_skills:
+        if skill.item.name not in seen_names and len(selected) < MAX_SKILLS_IN_PROMPT:
+            selected.append(skill)
+            seen_names.add(skill.item.name)
     return selected
 
 
 async def _select_supporting_cases(
-    skills: list[AlgoAgentSkill],
+    deps: MemoryDeps,
+    scope: Scope,
+    skills: list[Stored[AgentSkill]],
     *,
-    agent_id: str,
     exclude_entry_id: str,
-    app_id: str,
-    project_id: str,
-) -> list[LanceAgentCase]:
+) -> list[Stored[AgentCase]]:
     """Hydrate, rank, and cap supporting cases from skills' lineage.
 
     ``exclude_entry_id`` drops the target case's own entry id so the
@@ -373,25 +313,25 @@ async def _select_supporting_cases(
     :data:`MAX_SUPPORTING_CASES`.
     """
     # 1. Collect source case ids from the chosen skills (dedup, drop target).
-    entry_ids = _collect_supporting_entry_ids(skills, exclude=exclude_entry_id)
+    entry_ids = _collect_supporting_entry_ids(
+        [s.item for s in skills], exclude=exclude_entry_id
+    )
     if not entry_ids:
         return []
 
-    # 2. Bulk-fetch those cases from LanceDB (scoped to space).
-    hydrated = await agent_case_repo.find_by_owner_entries(
-        agent_id, entry_ids, app_id=app_id, project_id=project_id, skip_vectors=True
-    )
+    # 2. Bulk-fetch those cases from the index (scoped to space).
+    hydrated = await deps.indexes.agent_case.find_by_entry_ids(scope, entry_ids)
 
     # 3. Sort by (quality, timestamp) desc, then cap.
     hydrated.sort(
-        key=lambda c: (c.quality_score or 0.0, c.timestamp),
+        key=lambda c: (c.item.quality_score or 0.0, c.item.timestamp),
         reverse=True,
     )
     return hydrated[:MAX_SUPPORTING_CASES]
 
 
 def _collect_supporting_entry_ids(
-    skills: list[AlgoAgentSkill], *, exclude: str
+    skills: list[AgentSkill], *, exclude: str
 ) -> list[str]:
     """Dedup ``source_case_ids`` across ``skills``, preserving first-seen order."""
     seen: list[str] = []
@@ -405,22 +345,22 @@ def _collect_supporting_entry_ids(
     return seen
 
 
-# ── algo / persistence projection ────────────────────────────────────────
+# ── algo projection and persistence ──────────────────────────────────────
 
 
-def _to_algo_case(lance: LanceAgentCase) -> AlgoAgentCase:
-    """Project the LanceDB row onto the algo-side AgentCase type.
+def _to_algo_case(case: Stored[AgentCase]) -> AlgoAgentCase:
+    """Project an indexed case onto the algo-side AgentCase type.
 
     Used only for ``supporting_cases`` — that lineage read stays
-    LanceDB-backed (see module docstring, point 3).
+    index-backed (see module docstring, point 3).
     """
     return AlgoAgentCase(
-        id=lance.entry_id,
-        timestamp=int(lance.timestamp.timestamp() * 1000),
-        task_intent=lance.task_intent,
-        approach=lance.approach,
-        quality_score=lance.quality_score,
-        key_insight=lance.key_insight or "",
+        id=case.ref.entry_id,
+        timestamp=case.item.timestamp,
+        task_intent=case.item.task_intent,
+        approach=case.item.approach,
+        quality_score=case.item.quality_score,
+        key_insight=case.item.key_insight or "",
     )
 
 
@@ -442,34 +382,11 @@ def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
     )
 
 
-def _md_to_algo_skill(fm: AgentSkillFrontmatter, body: str) -> AlgoAgentSkill:
-    """Project a SKILL.md frontmatter + body onto everalgo's AgentSkill type.
-
-    ``body`` populates ``AlgoAgentSkill.content`` so the extractor prompt's
-    existing-skills block (``everalgo.agent_memory.skill_ops._format_existing_skills``)
-    carries the real skill definition, not an empty placeholder — without it
-    the LLM cannot distinguish "add new" from "update existing".
-    """
-    return AlgoAgentSkill(
-        id=fm.id,
-        cluster_id=fm.cluster_id or "",
-        name=fm.name,
-        description=fm.description,
-        content=body,
-        confidence=fm.confidence,
-        maturity_score=fm.maturity_score,
-        source_case_ids=list(fm.source_case_ids),
-    )
-
-
 async def _reap_renamed_skills(
-    writer: AgentSkillWriter,
+    store: AgentSkillStore,
+    scope: Scope,
     written_names: Mapping[str, str],
-    *,
-    existing_skills: Sequence[AlgoAgentSkill],
-    agent_id: str,
-    app_id: str,
-    project_id: str,
+    existing_skills: Sequence[Stored[AgentSkill]],
 ) -> None:
     """Delete the directory an update left behind when it renamed a skill.
 
@@ -477,15 +394,15 @@ async def _reap_renamed_skills(
     (``skill_ops._apply_update`` computes ``name_changed`` and returns
     ``prior.model_copy(update={"name": eff_name, ...})``), so the emitted
     skill keeps ``prior.id`` while carrying the new name. ``_persist_skill``
-    writes it to ``skill_<new_name>/`` and the old directory would survive
+    writes it under its new name and the old document would survive
     with the same ``cluster_id``.
 
     That matters more here than it looks. Since this release the input to
-    the next extraction is the markdown enumeration, not LanceDB — so a
+    the next extraction is the markdown enumeration, not the index — so a
     surviving pre-rename directory does not merely sit on disk, it comes
     back in the next run's ``existing_relevant_skills`` as a duplicate of a
     skill the LLM already renamed. Shown its own stale copy, the LLM emits
-    ``add`` for something that exists, and ``write_main`` full-replaces —
+    ``add`` for something that exists, and the write full-replaces —
     which is precisely the clobber this release set out to close. Left
     unreaped, every rename adds another one.
 
@@ -501,17 +418,15 @@ async def _reap_renamed_skills(
     """
     claimed = set(written_names.values())
     for prior in existing_skills:
-        new_name = written_names.get(prior.id)
-        prior_name = AgentSkillFrontmatter.sanitize_skill_name(prior.name)
+        new_name = written_names.get(prior.item.id)
+        prior_name = prior.ref.entry_id
         if new_name is None or new_name == prior_name or prior_name in claimed:
             continue
-        removed = await writer.delete_skill(
-            agent_id, prior_name, app_id=app_id, project_id=project_id
-        )
+        removed = await store.delete(scope, prior_name)
         logger.info(
             "agent_skill_renamed_directory_reaped",
-            agent_id=agent_id,
-            skill_id=prior.id,
+            agent_id=scope.owner_id,
+            skill_id=prior.item.id,
             old_name=prior_name,
             new_name=new_name,
             removed=removed,
@@ -519,48 +434,30 @@ async def _reap_renamed_skills(
 
 
 async def _persist_skill(
-    writer: AgentSkillWriter,
+    store: AgentSkillStore,
+    scope: Scope,
     skill: AlgoAgentSkill,
     *,
-    agent_id: str,
     cluster_id: str,
-    app_id: str,
-    project_id: str,
 ) -> str:
-    """Write one ``SKILL.md`` with the post-stamped ``cluster_id``.
+    """Write one skill with the post-stamped ``cluster_id``.
 
-    Returns the sanitized name it wrote under, so the caller can
-    reconcile renames without re-deriving it.
-
-    ``skill.name`` is LLM output and is sanitized once, up front, via
-    :meth:`AgentSkillFrontmatter.sanitize_skill_name` — the same helper
-    :meth:`AgentSkillFrontmatter.skill_dir_name` uses for the directory
-    segment. Sanitizing here (rather than handing the raw name to the
-    frontmatter constructor) keeps ``frontmatter.name`` byte-identical to
-    the on-disk directory name, and means a traversal-shaped LLM name
-    (reachable via prompt injection, since the LLM's input is user
-    conversation content) is made filesystem-safe *before* it reaches
-    ``AgentSkillFrontmatter``, instead of tripping the read-side traversal
-    validator and dead-lettering the whole extraction run for a name the
-    writer would have sanitized safely anyway.
+    Returns the storage-safe name it was written under (the ref's
+    ``entry_id``), so the caller can reconcile renames without re-deriving
+    it. ``skill.name`` is LLM output — reachable via prompt injection,
+    since the LLM's input is user conversation content — and the store
+    makes it filesystem-safe before it addresses anything.
     """
-    sanitized_name = AgentSkillFrontmatter.sanitize_skill_name(skill.name)
-    frontmatter = AgentSkillFrontmatter(
-        id=f"{agent_id}_{sanitized_name}",
-        agent_id=agent_id,
-        name=sanitized_name,
-        description=skill.description,
-        confidence=skill.confidence,
-        maturity_score=skill.maturity_score,
-        source_case_ids=list(skill.source_case_ids),
-        cluster_id=cluster_id,
+    stamped = agent_skill_mapper.from_algo(skill).model_copy(
+        update={"cluster_id": cluster_id}
     )
-    await writer.write_main(
-        agent_id,
-        sanitized_name,
-        frontmatter=frontmatter,
-        body=skill.content,
-        app_id=app_id,
-        project_id=project_id,
-    )
-    return sanitized_name
+    ref = await store.write(scope, stamped)
+    return ref.entry_id
+
+
+EXTRACT_AGENT_SKILL_SPEC = StrategySpec(
+    name="extract_agent_skill",
+    fn=extract_agent_skill,
+    trigger=Immediate(on=[SkillClusterUpdated]),
+    max_retries=3,
+)

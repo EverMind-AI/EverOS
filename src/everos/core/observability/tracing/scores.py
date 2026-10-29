@@ -129,11 +129,26 @@ class RecallScoreSink:
                 await self._closer()
 
 
-# ── Module-level lifecycle (mirrors the tracer provider pattern) ─────────
-_sink: RecallScoreSink | None = None
+class _DisabledSink:
+    """The sink while scores are off: every score is discarded."""
+
+    def enqueue(self, record: ScoreRecord) -> None:
+        """Discard ``record``."""
+
+    async def stop(self) -> None:
+        """Nothing to drain."""
 
 
-async def init_score_sink(settings: ObservabilitySettings) -> bool:
+_DISABLED = _DisabledSink()
+
+# Process-wide, like the tracer provider: ``init_score_sink`` installs the
+# live sink and ``shutdown_score_sink`` puts the disabled one back.
+_sink: RecallScoreSink | _DisabledSink = _DISABLED
+
+
+async def init_score_sink(
+    settings: ObservabilitySettings, *, sender: Sender | None = None
+) -> bool:
     """Build + start the sink when Langfuse creds + emit_recall_scores are set.
 
     Returns True if a sink was installed, False otherwise (disabled, scores
@@ -141,6 +156,11 @@ async def init_score_sink(settings: ObservabilitySettings) -> bool:
 
     Idempotent: a re-init without an intervening shutdown tears down the
     previous sink first, so its worker task + httpx client are not orphaned.
+
+    Args:
+        settings: The ``[observability]`` section.
+        sender: Where each score payload goes; ``None`` posts it to the
+            Langfuse scores API ``settings`` points at.
     """
     global _sink
     if not settings.enabled or not settings.emit_recall_scores:
@@ -151,13 +171,21 @@ async def init_score_sink(settings: ObservabilitySettings) -> bool:
     if not (pk and sk and host):
         return False
 
-    if _sink is not None:
-        await shutdown_score_sink()
+    await shutdown_score_sink()
+    if sender is None:
+        _sink = _langfuse_sink(host, pk, sk.get_secret_value())
+    else:
+        _sink = RecallScoreSink(sender=sender)
+    _sink.start()
+    return True
 
-    import httpx
+
+def _langfuse_sink(host: str, public_key: str, secret_key: str) -> RecallScoreSink:
+    """A sink that POSTs each score to the Langfuse scores API at ``host``."""
+    import httpx  # Deferred: only a deployment that pushes scores needs it.
 
     endpoint = host.rstrip("/") + "/api/public/scores"
-    token = base64.b64encode(f"{pk}:{sk.get_secret_value()}".encode()).decode()
+    token = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
     auth = f"Basic {token}"
     client = httpx.AsyncClient(timeout=5.0)
 
@@ -167,10 +195,8 @@ async def init_score_sink(settings: ObservabilitySettings) -> bool:
         )
         resp.raise_for_status()
 
-    _sink = RecallScoreSink(sender=sender, closer=client.aclose)
-    _sink.start()
     logger.info("recall_score_sink_started", endpoint=endpoint)
-    return True
+    return RecallScoreSink(sender=sender, closer=client.aclose)
 
 
 def emit_recall_scores(
@@ -192,8 +218,6 @@ def emit_recall_scores(
     ``method`` rides along as score metadata (a structured field Langfuse
     persists) as well as in the human-readable comment.
     """
-    if _sink is None:
-        return
     calibrated = hit is not None
     comment = f"method={method}"
     metadata: dict[str, object] = {"method": method, "calibrated": calibrated}
@@ -223,6 +247,5 @@ def emit_recall_scores(
 async def shutdown_score_sink() -> None:
     """Drain + tear down the sink; safe when uninitialized."""
     global _sink
-    if _sink is not None:
-        await _sink.stop()
-        _sink = None
+    await _sink.stop()
+    _sink = _DISABLED

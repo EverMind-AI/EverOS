@@ -36,7 +36,6 @@ drawn timeout).
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import os
 import random
@@ -58,25 +57,26 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings, load_settings
 from everos.core.errors import SessionBufferQuarantinedError
-from everos.core.persistence import (
-    MemoryRoot,
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import (
+    SqliteMemcellStore,
+    SqliteSessionBufferStore,
     create_session_factory,
     create_system_engine,
 )
 from everos.infra.persistence.sqlite.repos.conversation_status import (
-    _ConversationStatusRepo,
+    ConversationStatusRepo,
 )
-from everos.infra.persistence.sqlite.repos.memcell import _MemcellRepo
+from everos.infra.persistence.sqlite.repos.memcell import MemcellRepo
 from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
-    _UnprocessedBufferRepo,
+    UnprocessedBufferRepo,
 )
 from everos.infra.persistence.sqlite.tables import Memcell
+from everos.memory.extract.pipeline import CellOutcome
 from everos.service import _boundary as boundary_mod
 from everos.service import _session_lock as session_lock_mod
-
-memorize_mod = importlib.import_module(
-    "everos.service.memorize"
-)  # the package re-exports the function
+from tests.fakes import make_memory_service
+from tests.fakes.deps import make_stores
 
 settings.register_profile(
     "ci", max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow]
@@ -156,19 +156,20 @@ class _Run:
         )
         return DetectionResult(cells=cells, tail=list(messages[k:]))
 
-    async def pipeline_run(
-        self, ingested: Any, cells: Any, memcell_ids: Any, per_cell_all_senders: Any
-    ) -> Any:
+    async def pipeline_run_cell(self, ingested: Any, prepared: Any) -> Any:
         self.pipelines_active += 1
         try:
             await asyncio.sleep(self.rng.random() * 0.01)
         finally:
             self.pipelines_active -= 1
-        self.pipeline_log.append((ingested.session_id, tuple(memcell_ids)))
-        self.note(f"  pipeline: {ingested.session_id} {list(memcell_ids)}")
-        return SimpleNamespace(
-            status="extracted", track="user", message_count=len(cells)
-        )
+        self.pipeline_log.append((ingested.session_id, (prepared.memcell_id,)))
+        self.note(f"  pipeline: {ingested.session_id} {prepared.memcell_id}")
+        return CellOutcome(status="extracted", message_count=1)
+
+
+class _NullBus:
+    async def publish(self, events: Any) -> None:
+        return None
 
 
 async def _jittered(
@@ -191,9 +192,9 @@ async def _jittered(
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    buffer_repo = _UnprocessedBufferRepo(session_factory=factory)
-    memcell_repo = _MemcellRepo(session_factory=factory)
-    status_repo = _ConversationStatusRepo(session_factory=factory)
+    buffer_repo = UnprocessedBufferRepo(session_factory=factory)
+    memcell_repo = MemcellRepo(session_factory=factory)
+    status_repo = ConversationStatusRepo(session_factory=factory)
     base = load_settings()
     cfg = base.model_copy(
         update={
@@ -202,20 +203,20 @@ async def _jittered(
             )
         }
     )
-    pipeline = SimpleNamespace(run=run.pipeline_run)
-    patches = [
-        mock.patch.object(boundary_mod, "unprocessed_buffer_repo", buffer_repo),
-        mock.patch.object(boundary_mod, "memcell_repo", memcell_repo),
-        mock.patch.object(boundary_mod, "conversation_status_repo", status_repo),
-        mock.patch.object(boundary_mod, "detect_boundaries", run.detect),
-        mock.patch.object(memorize_mod, "load_settings", lambda: cfg),
-        mock.patch.object(memorize_mod, "get_llm_client", lambda: object()),
-        mock.patch.object(
-            memorize_mod,
-            "_get_prompt_loader",
-            lambda: SimpleNamespace(load=lambda name: "p"),
+    pipeline = SimpleNamespace(run_cell=run.pipeline_run_cell)
+    memorize_mod = make_memory_service(
+        settings=cfg,
+        llm=object(),
+        prompt_loader=SimpleNamespace(load=lambda name: "p"),
+        stores=make_stores(
+            session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo),
+            memcell=SqliteMemcellStore(memcell_repo),
         ),
-        mock.patch.object(memorize_mod, "_get_user_pipeline", lambda: pipeline),
+        user_pipeline=pipeline,
+        bus=_NullBus(),
+    )
+    patches = [
+        mock.patch.object(boundary_mod, "detect_boundaries", run.detect),
     ]
     for p in patches:
         p.start()

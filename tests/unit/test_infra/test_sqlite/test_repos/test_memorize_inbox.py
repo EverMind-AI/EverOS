@@ -1,4 +1,4 @@
-"""Tests for :class:`_MemorizeInboxRepo` — the async memorize queue table.
+"""Tests for :class:`MemorizeInboxRepo` — the async memorize queue table.
 
 Pins the queue contract the worker relies on:
 
@@ -24,24 +24,21 @@ from sqlmodel import SQLModel
 
 from everos.component.utils.datetime import get_utc_now
 from everos.config import SqliteSettings
-from everos.core.persistence import (
-    MemoryRoot,
-    create_session_factory,
-    create_system_engine,
-)
-from everos.infra.persistence.sqlite.repos.memorize_inbox import _MemorizeInboxRepo
+from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
+from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> _MemorizeInboxRepo:
+async def repo(tmp_path: Path) -> MemorizeInboxRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return _MemorizeInboxRepo(session_factory=factory)
+    return MemorizeInboxRepo(session_factory=factory)
 
 
 _SEQ = iter(range(1, 10_000))
@@ -59,7 +56,7 @@ def _row(session_id: str = "s1", **overrides: object) -> MemorizeInbox:
 
 
 async def test_claim_next_returns_rows_in_insertion_order(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     first = await repo.add(_row(session_id="a"))
     second = await repo.add(_row(session_id="b"))
@@ -71,7 +68,7 @@ async def test_claim_next_returns_rows_in_insertion_order(
     assert await repo.claim_next() is None
 
 
-async def test_claim_next_flips_row_to_processing(repo: _MemorizeInboxRepo) -> None:
+async def test_claim_next_flips_row_to_processing(repo: MemorizeInboxRepo) -> None:
     row = await repo.add(_row())
 
     claimed = await repo.claim_next()
@@ -83,7 +80,7 @@ async def test_claim_next_flips_row_to_processing(repo: _MemorizeInboxRepo) -> N
 
 
 async def test_count_pending_counts_queued_and_processing_only(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     await repo.add(_row(session_id="s1"))
     await repo.add(_row(session_id="s1", status="processing"))
@@ -96,7 +93,7 @@ async def test_count_pending_counts_queued_and_processing_only(
 
 
 async def test_mark_updates_status_attempt_and_error(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     row = await repo.add(_row())
     assert row.id is not None
@@ -114,7 +111,7 @@ async def test_mark_updates_status_attempt_and_error(
 
 
 async def test_requeue_processing_returns_stale_rows_to_queued(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     await repo.add(_row(status="processing"))
     await repo.add(_row(status="processing"))
@@ -126,7 +123,7 @@ async def test_requeue_processing_returns_stale_rows_to_queued(
 
 
 async def test_requeue_processing_gives_up_after_max_replays(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     """Each replay bumps ``attempt``; at ``max_replays`` the row is failed."""
     poison = await repo.add(_row(status="processing", attempt=2))
@@ -144,7 +141,7 @@ async def test_requeue_processing_gives_up_after_max_replays(
 
 
 async def test_purge_expired_deletes_old_rows_except_processing(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     old = get_utc_now() - timedelta(hours=48)
     await repo.add(_row(status="success", created_at=old))
@@ -162,14 +159,14 @@ async def test_purge_expired_deletes_old_rows_except_processing(
     assert remaining == {kept_processing.id, kept_fresh.id}
 
 
-async def test_request_id_is_unique(repo: _MemorizeInboxRepo) -> None:
+async def test_request_id_is_unique(repo: MemorizeInboxRepo) -> None:
     await repo.add(_row(request_id="dup"))
     with pytest.raises(IntegrityError):
         await repo.add(_row(request_id="dup"))
 
 
 async def test_fail_abandoned_marks_every_processing_row(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     """Called only when no row is in flight: every processing row lost its write."""
     lost = await repo.add(_row(status="processing"))
@@ -184,7 +181,7 @@ async def test_fail_abandoned_marks_every_processing_row(
 
 
 async def test_list_tasks_scopes_filters_and_pages_newest_first(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     r1 = await repo.add(_row(session_id="s1"))
     r2 = await repo.add(_row(session_id="s1", status="failed"))
@@ -202,7 +199,7 @@ async def test_list_tasks_scopes_filters_and_pages_newest_first(
     assert total == 5
 
 
-async def test_claim_next_skips_sessions_in_flight(repo: _MemorizeInboxRepo) -> None:
+async def test_claim_next_skips_sessions_in_flight(repo: MemorizeInboxRepo) -> None:
     """The smallest-id queued row outside the busy sessions, or None."""
     a1 = await repo.add(_row("a"))
     b1 = await repo.add(_row("b"))
@@ -219,7 +216,7 @@ async def test_claim_next_skips_sessions_in_flight(repo: _MemorizeInboxRepo) -> 
 
 
 async def test_fail_abandoned_spares_the_rows_in_flight(
-    repo: _MemorizeInboxRepo,
+    repo: MemorizeInboxRepo,
 ) -> None:
     running = await repo.add(_row("a", status="processing"))
     stuck = await repo.add(_row("b", status="processing"))

@@ -19,7 +19,7 @@ from typing import ClassVar, Literal
 
 from pydantic import Field
 
-from everos.core.persistence.markdown import (
+from everos.infra.persistence.markdown.base.frontmatter import (
     DailyLogPathMixin,
     UserScopedFrontmatter,
 )

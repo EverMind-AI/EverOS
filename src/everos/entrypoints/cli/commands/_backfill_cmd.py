@@ -1,9 +1,9 @@
 """CLI-side orchestration for ``everos cascade backfill``.
 
 Presentation half of PR #361 review finding M11. The memory-layer phase
-runners (``memory/cascade/_backfill.py``) are pure — every user-facing
+runners (``service/backfill.py``) are pure — every user-facing
 string, colour, and confirmation prompt lives here, behind the
-:class:`~everos.memory.cascade._backfill.BackfillPresenter` Protocol.
+:class:`~everos.service.backfill.BackfillPresenter` Protocol.
 :class:`TyperPresenter` is the typer-backed implementation; tests can
 substitute any structurally-compatible stub.
 
@@ -36,15 +36,8 @@ import typer
 
 from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
-
-# Module reference (not name-level imports of the phase runners): tests
-# monkeypatch the runners on this module to inject Ctrl-C / boundary
-# behaviour, and re-binding names on the source module only affects the
-# entrypoints layer if we resolve them through the module attribute at
-# call time.
-from everos.memory.cascade import _backfill as _phase_runners
-from everos.memory.cascade._backfill import (
-    BackfillPhase,
+from everos.service import BackfillPhase, OpsService
+from everos.service.backfill import (
     _BackfillSummary,
     _count_failed_rows,
     _format_tokens,
@@ -205,7 +198,7 @@ def _print_summary(summary: _BackfillSummary, *, exit_code: int) -> None:
     actually tracks — e.g. Phase 3 reports "agent cases processed"
     (``events_emitted``) rather than "clusters processed", since the
     distinct cluster count isn't retained on
-    :class:`~everos.memory.cascade._backfill._SkillPhaseResult`.
+    :class:`~everos.service.backfill._SkillPhaseResult`.
 
     On ``exit_code == 4`` (COMPLETED_WITH_FAILURES) also emits a hint
     pointing operators at the per-row failure log events so they can
@@ -315,8 +308,8 @@ class TyperPresenter:
         )
 
 
-async def run_backfill(*, phase: str, auto_yes: bool) -> int:
-    """Run backfill phases interactively; return an exit code.
+async def run_backfill(ops: OpsService, *, phase: str, auto_yes: bool) -> int:
+    """Run backfill phases through ``ops`` interactively; return an exit code.
 
     ``phase`` is ``"all"`` or one of :data:`PHASES`'s ``slug`` values.
     Exit codes: see :data:`_EXIT_LABELS`.
@@ -349,8 +342,8 @@ async def run_backfill(*, phase: str, auto_yes: bool) -> int:
             current_phase = p
             _print_phase_header(p)
             if p.slug == "vectors":
-                result = await _phase_runners._run_phase_vectors(
-                    auto_yes=auto_yes, presenter=presenter
+                result = await ops.backfill(
+                    p.slug, auto_yes=auto_yes, presenter=presenter
                 )
                 summary.vectors = result
                 if result.blocked_by_capability:
@@ -388,8 +381,8 @@ async def run_backfill(*, phase: str, auto_yes: bool) -> int:
                     return 1
                 continue
             if p.slug == "clusters":
-                cluster_result = await _phase_runners._run_phase_clusters(
-                    auto_yes=auto_yes, presenter=presenter
+                cluster_result = await ops.backfill(
+                    p.slug, auto_yes=auto_yes, presenter=presenter
                 )
                 summary.clusters = cluster_result
                 if cluster_result.blocked_by_capability:
@@ -411,8 +404,8 @@ async def run_backfill(*, phase: str, auto_yes: bool) -> int:
                     return 1
                 continue
             if p.slug == "skills":
-                skill_result = await _phase_runners._run_phase_skills(
-                    auto_yes=auto_yes, presenter=presenter
+                skill_result = await ops.backfill(
+                    p.slug, auto_yes=auto_yes, presenter=presenter
                 )
                 summary.skills = skill_result
                 if skill_result.blocked_by_capability:

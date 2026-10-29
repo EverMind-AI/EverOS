@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Sequence
 from typing import Any, ClassVar
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -19,6 +19,9 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
 
 from everos.component.utils.datetime import from_timestamp
+from everos.memory.mappers import cluster as cluster_mapper
+from everos.memory.models import Cluster as DomainCluster
+from everos.memory.ports import Scope
 from everos.memory.search.agentic import (
     _restore_shaper_metadata,
     _to_everalgo_doc_metadata,
@@ -159,9 +162,19 @@ def fact_recaller(fact_cand: Candidate) -> _StubFactRecaller:
     return _StubFactRecaller([fact_cand])
 
 
+class _StubClusterStore:
+    """Serves a fixed cluster set for any owner."""
+
+    def __init__(self, clusters: list[Cluster]) -> None:
+        self._clusters = [cluster_mapper.from_algo(c) for c in clusters]
+
+    async def list_for_owner(self, scope: Scope, kind: str) -> list[DomainCluster]:
+        return list(self._clusters)
+
+
 @pytest.fixture()
 def clusters() -> list[Cluster]:
-    # ``cluster_repo.list_for_owner`` is mocked in every test, so cluster
+    # The cluster store is stubbed in every test, so cluster
     # contents are never exercised by everalgo; we only need a valid instance
     # that satisfies the everalgo ``Cluster`` schema (ndarray centroid + last_ts).
     return [
@@ -217,10 +230,6 @@ async def test_agentic_search_wires_benchmark_hyperparams(
 
     with (
         patch("everos.memory.search.agentic.aagentic_retrieve", fake_aagentic),
-        patch(
-            "everos.memory.search.agentic.cluster_repo.list_for_owner",
-            AsyncMock(return_value=clusters),
-        ),
     ):
         await search_episodes_agentic(
             "What did Alice eat?",
@@ -230,6 +239,7 @@ async def test_agentic_search_wires_benchmark_hyperparams(
             project_id="test_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
+            cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -250,7 +260,7 @@ async def test_agentic_search_loads_user_memory_clusters(
     ep_recaller: _StubEpisodeRecaller,
     fact_recaller: _StubFactRecaller,
 ) -> None:
-    """cluster_repo.list_for_owner must be called with kind='user_memory'."""
+    """The cluster store is asked for the owner's user-memory clusters."""
     mock_list = AsyncMock(return_value=[])
 
     async def fake_embed(q: str) -> list[float]:
@@ -261,7 +271,6 @@ async def test_agentic_search_loads_user_memory_clusters(
             "everos.memory.search.agentic.aagentic_retrieve",
             AsyncMock(return_value=([], AgenticDecision(is_multi_round=False))),
         ),
-        patch("everos.memory.search.agentic.cluster_repo.list_for_owner", mock_list),
     ):
         await search_episodes_agentic(
             "q",
@@ -271,6 +280,7 @@ async def test_agentic_search_loads_user_memory_clusters(
             project_id="bench_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
+            cluster_store=MagicMock(list_for_owner=mock_list),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -278,10 +288,13 @@ async def test_agentic_search_loads_user_memory_clusters(
         )
 
     mock_list.assert_called_once_with(
-        "alice",
+        Scope(
+            app_id="bench_app",
+            project_id="bench_proj",
+            owner_id="alice",
+            owner_type="user",
+        ),
         "user_memory",
-        app_id="bench_app",
-        project_id="bench_proj",
     )
 
 
@@ -303,10 +316,6 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
 
     with (
         patch("everos.memory.search.agentic.aagentic_retrieve", fake_aagentic),
-        patch(
-            "everos.memory.search.agentic.cluster_repo.list_for_owner",
-            AsyncMock(return_value=clusters),
-        ),
     ):
         result = await search_episodes_agentic(
             "What did Alice eat?",
@@ -316,6 +325,7 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
             project_id="test_proj",
             episode_recaller=ep_recaller,
             atomic_fact_recaller=fact_recaller,
+            cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -411,10 +421,6 @@ async def test_agentic_emits_recall_and_rank_spans(
     try:
         with (
             patch("everos.memory.search.agentic.aagentic_retrieve", exercising_driver),
-            patch(
-                "everos.memory.search.agentic.cluster_repo.list_for_owner",
-                AsyncMock(return_value=clusters),
-            ),
         ):
             await search_episodes_agentic(
                 "What did Alice eat?",
@@ -424,6 +430,7 @@ async def test_agentic_emits_recall_and_rank_spans(
                 project_id="test_proj",
                 episode_recaller=ep_recaller,
                 atomic_fact_recaller=fact_recaller,
+                cluster_store=_StubClusterStore(clusters),
                 embed_query_fn=fake_embed,
                 reranker=_StubReranker(),
                 llm=FakeLLMClient(responses=[]),

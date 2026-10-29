@@ -7,7 +7,7 @@ this module verifies the *wiring under test* — that
 :func:`memory_root_lock` as their outer context manager, and that
 the marker is re-checked inside the lock so a loser no-ops. To make
 those assertions tractable in-process, every test here
-``monkeypatch.setattr(lancedb_infra, "memory_root_lock", <fake>)``
+``monkeypatch.setattr(lancedb_backend, "memory_root_lock", <fake>)``
 with either a tracking async context manager or a single-process
 ``asyncio.Lock`` stand-in.
 
@@ -54,14 +54,10 @@ from typing import Any
 
 import pytest
 
-import everos.infra.persistence.lancedb as lancedb_infra
-from everos.infra.persistence.lancedb import (
-    _TABLE_SCHEMA_VERSION,
-    Episode,
-    LanceDBMigrationError,
-    migrate_fts_indexes,
-    migrate_table_schemas,
-)
+import everos.infra.persistence.lancedb.backend as lancedb_backend
+from everos.infra.persistence.lancedb import Episode, LanceDBMigrationError
+from everos.infra.persistence.lancedb.backend import _TABLE_SCHEMA_VERSION
+from tests.fakes.storage import Storage
 
 
 class _TrackingLock:
@@ -144,11 +140,11 @@ def _fake_table(nullable: bool, alter: Callable[..., Any] | None = None) -> Any:
 
 
 async def test_migrate_table_schemas_acquires_memory_root_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """The migration must enter :func:`memory_root_lock` exactly once."""
     lock = _TrackingLock()
-    monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock)
+    monkeypatch.setattr(lancedb_backend, "memory_root_lock", lock)
 
     # Pre-write the marker to short-circuit inside the lock so we don't
     # exercise the LanceDB code path — we only care that the lock is
@@ -157,19 +153,19 @@ async def test_migrate_table_schemas_acquires_memory_root_lock(
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(_TABLE_SCHEMA_VERSION))
 
-    await migrate_table_schemas()
+    await storage.backend.migrate_table_schemas()
 
     assert lock.entered == 1
     assert lock.exited == 1
 
 
 async def test_migrate_table_schemas_rechecks_marker_after_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Marker at target version → migration is a no-op even though the
-    lock was acquired. No calls to ``get_table`` / ``alter_columns``."""
+    lock was acquired. No calls to ``LanceDbConnection.table`` / ``alter_columns``."""
     lock = _TrackingLock()
-    monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock)
+    monkeypatch.setattr(lancedb_backend, "memory_root_lock", lock)
 
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -181,22 +177,22 @@ async def test_migrate_table_schemas_rechecks_marker_after_lock(
         get_table_calls.append(name)
         return _fake_table(nullable=True)
 
-    monkeypatch.setattr(lancedb_infra, "get_table", _get_table)
+    monkeypatch.setattr(storage.lance, "table", _get_table)
 
-    await migrate_table_schemas()
+    await storage.backend.migrate_table_schemas()
 
     assert lock.entered == 1
     assert get_table_calls == []
 
 
 async def test_migrate_table_schemas_still_raises_on_alter_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Fail-loud regression: a genuine ``alter_columns`` failure still
     raises :class:`LanceDBMigrationError`, and the message lists the
     escalating recovery steps in order (restart, then ``cascade rebuild``)."""
     lock = _TrackingLock()
-    monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock)
+    monkeypatch.setattr(lancedb_backend, "memory_root_lock", lock)
 
     async def _raise_alter(*_alterations: Any) -> None:
         raise RuntimeError("simulated alter_columns failure")
@@ -209,10 +205,10 @@ async def test_migrate_table_schemas_still_raises_on_alter_failure(
             return _fake_table(nullable=False, alter=_raise_alter)
         return _fake_table(nullable=True)
 
-    monkeypatch.setattr(lancedb_infra, "get_table", _get_table)
+    monkeypatch.setattr(storage.lance, "table", _get_table)
 
     with pytest.raises(LanceDBMigrationError) as excinfo:
-        await migrate_table_schemas()
+        await storage.backend.migrate_table_schemas()
 
     message = str(excinfo.value)
     assert Episode.TABLE_NAME in message
@@ -237,33 +233,33 @@ async def test_migrate_table_schemas_still_raises_on_alter_failure(
 
 
 async def test_migrate_fts_indexes_acquires_memory_root_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Sibling migration is symmetric: wrapped in the same lock, and the
     marker re-check inside the lock short-circuits a duplicate run."""
     lock = _TrackingLock()
-    monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock)
+    monkeypatch.setattr(lancedb_backend, "memory_root_lock", lock)
 
     marker = tmp_path / ".index" / "lancedb" / ".fts_index_version"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(str(lancedb_infra._FTS_INDEX_SCHEMA_VERSION))
+    marker.write_text(str(lancedb_backend._FTS_INDEX_SCHEMA_VERSION))
 
     get_table_calls: list[str] = []
 
     async def _get_table(name: str, _schema: Any) -> Any:
         get_table_calls.append(name)
-        raise AssertionError("get_table must not be invoked in the no-op path")
+        raise AssertionError("table() must not be invoked in the no-op path")
 
-    monkeypatch.setattr(lancedb_infra, "get_table", _get_table)
+    monkeypatch.setattr(storage.lance, "table", _get_table)
 
-    await migrate_fts_indexes()
+    await storage.backend.migrate_fts_indexes()
 
     assert lock.entered == 1
     assert get_table_calls == []
 
 
 async def test_concurrent_migrations_serialize_through_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
 ) -> None:
     """Two concurrent asyncio tasks calling ``migrate_table_schemas``
     must not overlap the critical section. Uses an ``asyncio.Lock``
@@ -272,7 +268,7 @@ async def test_concurrent_migrations_serialize_through_the_lock(
     test is identical — hold the lock around marker read + work +
     marker write."""
     lock_cm, max_concurrent = _serialising_lock_factory()
-    monkeypatch.setattr(lancedb_infra, "memory_root_lock", lock_cm)
+    monkeypatch.setattr(lancedb_backend, "memory_root_lock", lock_cm)
 
     # Track how many tasks actually reached the work section (i.e. saw
     # marker < target). Exactly one should; the other must see the
@@ -286,14 +282,14 @@ async def test_concurrent_migrations_serialize_through_the_lock(
         await asyncio.sleep(0)
         return _fake_table(nullable=True)
 
-    monkeypatch.setattr(lancedb_infra, "get_table", _get_table)
+    monkeypatch.setattr(storage.lance, "table", _get_table)
 
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(migrate_table_schemas())
-        tg.create_task(migrate_table_schemas())
+        tg.create_task(storage.backend.migrate_table_schemas())
+        tg.create_task(storage.backend.migrate_table_schemas())
 
     assert max_concurrent[0] == 1
     # One task wrote the marker; the other saw it and short-circuited.
-    assert reached_work["n"] == len(lancedb_infra.BUSINESS_SCHEMAS_WITH_VECTOR)
+    assert reached_work["n"] == len(lancedb_backend.BUSINESS_SCHEMAS_WITH_VECTOR)
     marker = tmp_path / ".index" / "lancedb" / ".table_schema_version"
     assert int(marker.read_text().strip()) == _TABLE_SCHEMA_VERSION

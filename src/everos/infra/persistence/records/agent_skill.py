@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from everos.core.persistence.lancedb import BaseLanceTable, Vector
+from lancedb.pydantic import Vector
+
+from everos.infra.persistence.records.table_chassis import BaseLanceTable
 
 from ._dim import configured_dim
 

@@ -12,45 +12,27 @@ isolated ``EVEROS_ROOT`` and drives ``verify_business_schemas`` /
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import lancedb
 import pyarrow as pa
 import pytest
 
-from everos.core.persistence import MemoryRoot
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import (
     LanceDBSchemaMismatchError,
-    drop_business_tables,
-    ensure_business_indexes,
-    get_connection,
-    get_table,
-    lancedb_manager,
-    verify_business_schemas,
 )
 from everos.infra.persistence.records.episode import Episode
+from tests.fakes.storage import Storage
 
 
-@pytest.fixture(autouse=True)
-async def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Point the manager singleton at an isolated memory root."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
-    yield
-    await lancedb_manager.dispose_connection()
-
-
-async def _create_episode_table_on_disk(arrow_schema: pa.Schema) -> None:
-    """Create the ``episode`` table straight on disk, then drop the
-    connection so the manager reopens it from disk on next use."""
-    root = MemoryRoot.resolve()
+async def _create_episode_table_on_disk(
+    root: MemoryRoot, arrow_schema: pa.Schema
+) -> None:
+    """Create the ``episode`` table straight on disk through a separate
+    connection, so the storage under test opens it from disk on first use."""
     root.ensure()
     conn = await lancedb.connect_async(str(root.lancedb_dir))
     await conn.create_table("episode", schema=arrow_schema)
     conn.close()
-    lancedb_manager._conn = None
-    lancedb_manager._tables.clear()
 
 
 def _episode_schema_with_subject_vector_as(dtype: pa.DataType) -> pa.Schema:
@@ -65,7 +47,7 @@ def _episode_schema_with_subject_vector_as(dtype: pa.DataType) -> pa.Schema:
     )
 
 
-async def test_verify_passes_on_healthy_tables() -> None:
+async def test_verify_passes_on_healthy_tables(storage: Storage) -> None:
     """A table built from the current schema must NOT trip the guard.
 
     Guards against a type comparison that false-positives (e.g. on the
@@ -73,65 +55,66 @@ async def test_verify_passes_on_healthy_tables() -> None:
     # verify_business_schemas creates every business table fresh via
     # get_table, then re-reads and compares — so a clean run proves no
     # false positive across ALL business schemas.
-    await verify_business_schemas()
+    await storage.backend.verify_business_schemas()
     # A second run over the now-existing tables must also pass.
-    await verify_business_schemas()
+    await storage.backend.verify_business_schemas()
 
 
-async def test_verify_raises_on_subject_vector_string_drift() -> None:
+async def test_verify_raises_on_subject_vector_string_drift(storage: Storage) -> None:
     """#337: subject_vector left as `string` must be caught by type."""
     await _create_episode_table_on_disk(
-        _episode_schema_with_subject_vector_as(pa.string())
+        storage.root, _episode_schema_with_subject_vector_as(pa.string())
     )
     with pytest.raises(LanceDBSchemaMismatchError) as exc:
-        await verify_business_schemas()
+        await storage.backend.verify_business_schemas()
     msg = str(exc.value)
     assert "episode" in msg
     assert "type_drift" in msg
     assert "subject_vector" in msg
 
 
-async def test_verify_raises_on_subject_vector_null_drift() -> None:
+async def test_verify_raises_on_subject_vector_null_drift(storage: Storage) -> None:
     """A `null`-typed subject_vector (data-inferred all-None) is also drift."""
     await _create_episode_table_on_disk(
-        _episode_schema_with_subject_vector_as(pa.null())
+        storage.root, _episode_schema_with_subject_vector_as(pa.null())
     )
     with pytest.raises(LanceDBSchemaMismatchError) as exc:
-        await verify_business_schemas()
+        await storage.backend.verify_business_schemas()
     assert "subject_vector" in str(exc.value)
 
 
-async def test_verify_raises_on_missing_column() -> None:
+async def test_verify_raises_on_missing_column(storage: Storage) -> None:
     """A table missing a current column is caught by name (unchanged)."""
     reduced = pa.schema(
         [f for f in Episode.to_arrow_schema() if f.name != "subject_vector"]
     )
-    await _create_episode_table_on_disk(reduced)
+    await _create_episode_table_on_disk(storage.root, reduced)
     with pytest.raises(LanceDBSchemaMismatchError) as exc:
-        await verify_business_schemas()
+        await storage.backend.verify_business_schemas()
     assert "missing" in str(exc.value)
     assert "subject_vector" in str(exc.value)
 
 
-async def test_drop_business_tables_removes_then_recreatable() -> None:
+async def test_drop_business_tables_removes_then_recreatable(storage: Storage) -> None:
     """drop_business_tables drops existing business tables + clears the cache;
     the next get_table recreates a fresh, current-schema table."""
     # Materialise a drifted episode table + the rest of the business set.
     await _create_episode_table_on_disk(
-        _episode_schema_with_subject_vector_as(pa.string())
+        storage.root, _episode_schema_with_subject_vector_as(pa.string())
     )
-    await ensure_business_indexes()  # create the remaining business tables
-    conn = await get_connection()
+    # Create the remaining business tables.
+    await storage.index.ensure_business_indexes()
+    conn = await storage.lance.connect()
     assert "episode" in set((await conn.list_tables()).tables)
 
-    dropped = await drop_business_tables()
+    dropped = await storage.index.drop_business_tables()
 
     assert "episode" in dropped
-    conn = await get_connection()
+    conn = await storage.lance.connect()
     assert "episode" not in set((await conn.list_tables()).tables)
-    assert "episode" not in lancedb_manager._tables  # cache evicted
     # Recreated fresh from the current schema → correct vector type, not string.
-    tbl = await get_table("episode", Episode)
+    # A stale cached handle would still carry the drifted string column.
+    tbl = await storage.lance.table("episode", Episode)
     assert (
         (await tbl.schema())
         .field("subject_vector")
