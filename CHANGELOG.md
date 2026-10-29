@@ -341,6 +341,21 @@ both use the resulting `Application` through three facades:
   `everos.service.backfill`; update log filters that matched the old name.
   `BackfillDeps` takes a `vectors` backfill object in place of its
   `tokenizer` and `prune_retention` fields.
+- **The vector width is read from `[embedding] dim` once, by the
+  application, and nowhere else.** The index record classes no longer read
+  the configuration while they are imported; they mark their embedding
+  columns (`DenseVector`) without a width, and each backend builds its tables
+  at the width the application hands it (`schema_for(model, dim=...)`,
+  `LanceIndexBackend(connection, dim=...)`, `MilvusIndexBackend(connection,
+  dim=...)`). The startup error "the index record classes were built for
+  dim=... but configuration reports dim=..." can no longer occur, and the CLI
+  no longer pre-scans `--root` before parsing its arguments. A table built at
+  another width is still refused at startup, as schema drift. For code that
+  imports the persistence package: `everos.infra.persistence.records` no
+  longer exports `LanceModel` / `Vector`, `BaseLanceTable` is now
+  `IndexRecord` (a plain pydantic model with no `to_arrow_schema`), and the
+  LanceDB Arrow schema comes from
+  `everos.infra.persistence.lancedb.base.arrow_schema_for`.
 
 ### Removed
 

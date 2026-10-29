@@ -1,6 +1,6 @@
-"""LanceDB ``atomic_fact`` table schema.
+"""Derived-index ``atomic_fact`` record.
 
-Field set for the atomic-fact LanceDB row. Each row carries one
+Field set for the atomic-fact index row. Each row carries one
 atomic fact extracted by the algo layer; the parent is always the source
 MemCell — recorded via ``parent_type`` / ``parent_id``.
 """
@@ -10,18 +10,14 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
-from lancedb.pydantic import Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from everos.infra.persistence.records.table_chassis import BaseLanceTable
-
-from ._dim import configured_dim
 from ._parent_type import ParentType
+from .vector import DenseVector
 
-_DIM = configured_dim()
 
-
-class AtomicFact(BaseLanceTable):
-    """One atomic fact indexed in LanceDB."""
+class AtomicFact(IndexRecord):
+    """One atomic fact in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "atomic_fact"
     BM25_FIELDS: ClassVar[list[str]] = ["fact_tokens"]
@@ -69,4 +65,4 @@ class AtomicFact(BaseLanceTable):
     consolidated. Value is the cluster entry_id that supersedes this
     row. ``NULL`` means the row is still active."""
 
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
+    vector: DenseVector | None = None

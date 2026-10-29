@@ -3,9 +3,9 @@ every opening of it runs.
 
 :class:`DerivedIndex` wraps the configured engine's backend (LanceDB or
 Milvus). The backend knows its engine; this class knows what is the same on
-both -- primary-key declarations, the record-width check, the configuration
-check against an :class:`EmbeddingProvenance`, row counts -- so the server
-and every CLI phase run one sequence instead of each repeating it.
+both -- primary-key declarations, the configuration check against an
+:class:`EmbeddingProvenance`, row counts -- so the server and every CLI phase
+run one sequence instead of each repeating it.
 """
 
 from __future__ import annotations
@@ -15,9 +15,6 @@ __all__ = ["DerivedIndex", "check_primary_keys"]
 from collections.abc import Iterable
 from typing import Any
 
-from everos.core.errors import EmbeddingProvenanceError
-
-from ..records import Episode
 from ._provenance import EmbeddingProvenance
 from .protocols import IndexBackend
 from .repositories import IndexRepositories
@@ -31,7 +28,7 @@ class DerivedIndex:
         backend: The engine's backend, built over the application's
             connection.
         embedding_dim: ``[embedding] dim`` as the application's settings
-            report it, checked against the width the record classes baked in.
+            report it -- the width the backend builds its vector columns at.
     """
 
     def __init__(self, backend: IndexBackend, *, embedding_dim: int) -> None:
@@ -54,34 +51,10 @@ class DerivedIndex:
     async def shutdown(self) -> None:
         await self._backend.shutdown()
 
-    def assert_record_dim_matches_settings(self) -> None:
-        """Fail loud if the record classes and ``Settings`` disagree on the width.
-
-        The record classes resolve ``[embedding] dim`` with a narrow reader of
-        their own, because the width has to be known while they are being
-        imported (``Vector(dim)`` bakes it into the pydantic core schema) and
-        building ``Settings`` on that path would make a malformed config break
-        every CLI command. Two readers means they can diverge -- a different
-        memory root, a key one of them cannot parse -- and the symptom would
-        otherwise be tables quietly built at the wrong width.
-
-        Public rather than private because it has to run on paths that skip
-        the rest of verification: ``cascade rebuild`` passes ``verify=False``,
-        and it is the one command that unconditionally creates tables --
-        exactly where a disagreement would bake the wrong width into fresh
-        tables.
-
-        Raises:
-            EmbeddingProvenanceError: The two readers disagree.
-        """
-        baked = Episode.to_arrow_schema().field("vector").type.list_size
-        if baked != self._embedding_dim:
-            raise EmbeddingProvenanceError(
-                f"the index record classes were built for dim={baked} but "
-                f"configuration reports dim={self._embedding_dim}.\n"
-                f"  The two readers disagree -- check EVEROS_ROOT and "
-                f"<root>/everos.toml, then start again."
-            )
+    @property
+    def embedding_dim(self) -> int:
+        """The configured vector width the backend's tables are built at."""
+        return self._embedding_dim
 
     async def verify_configuration(
         self, provenance: EmbeddingProvenance, *, may_attest: bool = True
@@ -94,13 +67,11 @@ class DerivedIndex:
         rebuild`` has to skip the middle step.
 
         Raises:
-            EmbeddingProvenanceError: the record classes and ``Settings``
-                disagree on the vector width, or the configured embedding
-                cannot have produced the stored vectors.
+            EmbeddingProvenanceError: the configured embedding cannot have
+                produced the stored vectors.
             IndexSchemaMismatchError: a stored table's columns drifted from the
                 current schema.
         """
-        self.assert_record_dim_matches_settings()
         await self._backend.verify_business_schemas()
         await provenance.verify(self._backend, may_attest=may_attest)
 
@@ -114,14 +85,14 @@ class DerivedIndex:
         there is no point building indexes on a store that is about to be
         rejected.
         """
-        check_primary_keys(repo.schema for repo in self.repositories.all())
+        self._check_primary_keys()
         connection = await self.connect()
         await self.verify_configuration(provenance)
         await self.ensure_business_indexes()
         return connection
 
     async def ensure_business_indexes(self) -> None:
-        check_primary_keys(repo.schema for repo in self.repositories.all())
+        self._check_primary_keys()
         await self._backend.ensure_business_indexes()
 
     async def verify_business_schemas(self) -> None:
@@ -152,8 +123,14 @@ class DerivedIndex:
         """
         return {repo.table_name: await repo.count() for repo in self.repositories.all()}
 
+    def _check_primary_keys(self) -> None:
+        check_primary_keys(
+            (repo.schema for repo in self.repositories.all()),
+            dim=self._embedding_dim,
+        )
 
-def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
+
+def check_primary_keys(schemas: Iterable[type[Any]], *, dim: int) -> None:
     """Fail at startup, not at first write, when a table has no PRIMARY_KEY.
 
     For an undeclared table ``schema_for`` raises the same "has no
@@ -162,4 +139,4 @@ def check_primary_keys(schemas: Iterable[type[Any]]) -> None:
     the last line of defence.
     """
     for schema in schemas:
-        schema_for(schema)
+        schema_for(schema, dim=dim)

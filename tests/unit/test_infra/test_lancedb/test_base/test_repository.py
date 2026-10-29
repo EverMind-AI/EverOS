@@ -27,19 +27,25 @@ import pytest
 
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.index import schema_for
 from everos.infra.persistence.lancedb import (
     LanceIndexBackend,
     LanceRepoBase,
     LanceTimeouts,
     open_lancedb_connection,
 )
-from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
-from everos.infra.persistence.records import BaseLanceTable, Vector
-from tests.fakes import UnusedPort
+from everos.infra.persistence.lancedb.base import (
+    LanceDailyLogRepoBase,
+    ensure_fts_indexes,
+)
+from everos.infra.persistence.records import DenseVector, IndexRecord
+from tests.fakes import UnusedPort, arrow_schema
 from tests.fakes.storage import Storage
 
+_DIM = 4
 
-class _Note(BaseLanceTable):
+
+class _Note(IndexRecord):
     """Minimal daily-log-shaped table for chassis tests."""
 
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
@@ -56,10 +62,10 @@ class _Note(BaseLanceTable):
     parent_id: str
     md_path: str
     text: str
-    vector: Vector(4)  # type: ignore[valid-type]
+    vector: DenseVector
 
 
-class _SearchNote(BaseLanceTable):
+class _SearchNote(IndexRecord):
     """Schema with BM25_FIELDS declared — exercises FTS index setup."""
 
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
@@ -74,7 +80,7 @@ class _SearchNote(BaseLanceTable):
     tokens: str
     """Space-joined pre-tokenised text (BM25 index target)."""
 
-    vector: Vector(4)  # type: ignore[valid-type]
+    vector: DenseVector
 
 
 class _NoteRepo(LanceDailyLogRepoBase[_Note]):
@@ -122,8 +128,8 @@ async def repo(tmp_path: Path) -> _NoteRepo:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table("_note", schema=_Note)
-    return _NoteRepo(table=table)
+    table = await conn.create_table("_note", schema=arrow_schema(_Note, dim=_DIM))
+    return _NoteRepo(table=table, dim=_DIM)
 
 
 # ── add + get_by_id + count ──────────────────────────────────────────────
@@ -416,7 +422,7 @@ def test_repo_needs_exactly_one_table_source(both: bool) -> None:
 
     kwargs = {"table": object(), "source": object()} if both else {}
     with pytest.raises(TypeError, match="exactly one of table / source"):
-        _BareRepo(**kwargs)  # type: ignore[arg-type]
+        _BareRepo(**kwargs, dim=_DIM)  # type: ignore[arg-type]
 
 
 async def test_table_name_derived_from_schema() -> None:
@@ -426,14 +432,14 @@ async def test_table_name_derived_from_schema() -> None:
         schema = _Note
 
     assert (
-        _R(source=UnusedPort("table source")).table_name == "_note"
+        _R(source=UnusedPort("table source"), dim=_DIM).table_name == "_note"
     )  # equals _Note.TABLE_NAME
 
 
 # ── SQL-quote escape defence ────────────────────────────────────────────
 
 
-# ── BaseLanceTable.ensure_fts_indexes ───────────────────────────────────
+# ── ensure_fts_indexes ───────────────────────────────────────────────────
 
 
 async def test_ensure_fts_indexes_creates_index(tmp_path: Path) -> None:
@@ -441,7 +447,9 @@ async def test_ensure_fts_indexes_creates_index(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table("_search_note", schema=_SearchNote)
+    table = await conn.create_table(
+        "_search_note", schema=arrow_schema(_SearchNote, dim=_DIM)
+    )
     await table.add(
         [
             _SearchNote(
@@ -449,11 +457,11 @@ async def test_ensure_fts_indexes_creates_index(tmp_path: Path) -> None:
                 text="hello world",
                 tokens="hello world",
                 vector=[1, 0, 0, 0],
-            )
+            ).model_dump()
         ]
     )
 
-    await _SearchNote.ensure_fts_indexes(table)
+    await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
 
     indices = await table.list_indices()
     indexed_cols = {col for idx in indices for col in (idx.columns or [])}
@@ -466,12 +474,16 @@ async def test_ensure_fts_indexes_is_idempotent(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table("_search_note", schema=_SearchNote)
-    await table.add([_SearchNote(id="1", text="hi", tokens="hi", vector=[1, 0, 0, 0])])
+    table = await conn.create_table(
+        "_search_note", schema=arrow_schema(_SearchNote, dim=_DIM)
+    )
+    await table.add(
+        [_SearchNote(id="1", text="hi", tokens="hi", vector=[1, 0, 0, 0]).model_dump()]
+    )
 
-    await _SearchNote.ensure_fts_indexes(table)
+    await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
     first = await table.list_indices()
-    await _SearchNote.ensure_fts_indexes(table)
+    await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
     second = await table.list_indices()
 
     assert len(first) == len(second)
@@ -484,7 +496,7 @@ async def test_ensure_fts_indexes_noop_when_no_fields_declared(
     """Schema without ``BM25_FIELDS`` is a no-op (no error)."""
     table = await repo._table()
     # _Note declares no BM25_FIELDS — calling the classmethod is a no-op.
-    await _Note.ensure_fts_indexes(table)
+    await ensure_fts_indexes(table, schema_for(_Note, dim=_DIM))
     indices = await table.list_indices()
     # No FTS index was created; vector/scalar may exist by default but we
     # only assert no error path triggered.
@@ -630,7 +642,7 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
 
-    class _OtherNote(BaseLanceTable):
+    class _OtherNote(IndexRecord):
         PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
         TABLE_NAME: ClassVar[str] = "_other_note"
         id: str
@@ -641,13 +653,15 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
         parent_id: str
         md_path: str
         text: str
-        vector: Vector(4)  # type: ignore[valid-type]
+        vector: DenseVector
 
     class _OtherRepo(LanceDailyLogRepoBase[_OtherNote]):
         schema = _OtherNote
 
-    table_a = await conn.create_table("_note_a", schema=_Note)
-    table_b = await conn.create_table(_OtherNote.TABLE_NAME, schema=_OtherNote)
+    table_a = await conn.create_table("_note_a", schema=arrow_schema(_Note, dim=_DIM))
+    table_b = await conn.create_table(
+        _OtherNote.TABLE_NAME, schema=arrow_schema(_OtherNote, dim=_DIM)
+    )
 
     class _NoteARepo(LanceDailyLogRepoBase[_Note]):
         schema = _Note
@@ -656,8 +670,8 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
         def table_name(self) -> str:
             return "_note_a"
 
-    repo_a = _NoteARepo(table=table_a)
-    repo_b = _OtherRepo(table=table_b)
+    repo_a = _NoteARepo(table=table_a, dim=_DIM)
+    repo_b = _OtherRepo(table=table_b, dim=_DIM)
     assert repo_a._write_lock(repo_a.table_name) is not repo_b._write_lock(
         repo_b.table_name
     )
@@ -675,9 +689,11 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
     White-box surfaces: the ``.fts_index_version`` marker file and
     ``AsyncTable.list_indices`` on the storage's connection table.
     """
-    backend = LanceIndexBackend(storage.lance, schemas=(_SearchNote,))
+    backend = LanceIndexBackend(storage.lance, dim=_DIM, schemas=(_SearchNote,))
     try:
-        table = await storage.lance.table(_SearchNote.TABLE_NAME, _SearchNote)
+        table = await storage.lance.table(
+            _SearchNote.TABLE_NAME, arrow_schema(_SearchNote, dim=_DIM)
+        )
         await table.add(
             [
                 _SearchNote(
@@ -685,10 +701,10 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
                     text="hello world",
                     tokens="hello world",
                     vector=[1, 0, 0, 0],
-                )
+                ).model_dump()
             ]
         )
-        await _SearchNote.ensure_fts_indexes(table)
+        await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
         assert any("tokens" in (i.columns or []) for i in await table.list_indices())
 
         marker = storage.root.lancedb_dir / ".fts_index_version"
@@ -745,7 +761,7 @@ async def test_prune_holds_write_lock_and_is_cross_process_safe(
             # TypeError behind a green test.
             return []
 
-    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_MockTable(), dim=_DIM)  # type: ignore[arg-type]
     await repo.prune(dt.timedelta(seconds=42))
 
     assert state["held"], "prune must hold the write lock while optimizing"
@@ -772,7 +788,11 @@ async def test_prune_times_out_and_releases_the_write_lock(
         async def uri(self) -> str:
             return str(tmp_path)
 
-    repo = _NoteRepo(table=_HangingTable(), timeouts=LanceTimeouts(prune=0.05))  # type: ignore[arg-type]
+    repo = _NoteRepo(
+        table=_HangingTable(),  # type: ignore[arg-type]
+        dim=_DIM,
+        timeouts=LanceTimeouts(prune=0.05),
+    )
     with pytest.raises(VectorStoreBusyError) as excinfo:
         await repo.prune(dt.timedelta(seconds=60))
 
@@ -808,7 +828,11 @@ async def test_waiting_for_a_stuck_holder_also_times_out(
         async def add(self, _records):  # type: ignore[no-untyped-def]
             return None
 
-    repo = _NoteRepo(table=_NoopTable(), timeouts=LanceTimeouts(write=0.05))  # type: ignore[arg-type]
+    repo = _NoteRepo(
+        table=_NoopTable(),  # type: ignore[arg-type]
+        dim=_DIM,
+        timeouts=LanceTimeouts(write=0.05),
+    )
 
     # Simulate a holder that never gives the lock back.
     lock = repo._write_lock(repo.table_name)
@@ -847,6 +871,7 @@ async def test_a_hanging_table_handle_still_hits_the_deadline(
 
     repo = _NoteRepo(
         source=_HangingSource(),
+        dim=_DIM,
         timeouts=LanceTimeouts(prune=0.05, compact=0.05, write=0.05),
     )
 
@@ -924,7 +949,9 @@ async def test_hanging_reads_also_hit_a_deadline(
     """
     from everos.core.errors import VectorStoreBusyError
 
-    repo = _NoteRepo(source=_HangingSource(), timeouts=LanceTimeouts(read=0.05))
+    repo = _NoteRepo(
+        source=_HangingSource(), dim=_DIM, timeouts=LanceTimeouts(read=0.05)
+    )
 
     with pytest.raises(VectorStoreBusyError):
         await repo.count()
@@ -965,7 +992,7 @@ async def test_optimize_is_lock_free_compaction_only() -> None:
             state["held"] = repo._write_lock(repo.table_name).locked()
             captured.update(kwargs)
 
-    repo = _NoteRepo(table=_MockTable())  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_MockTable(), dim=_DIM)  # type: ignore[arg-type]
     await repo.optimize()
 
     assert state["held"] is False, "light optimize must be lock-free"
@@ -993,8 +1020,10 @@ async def test_rebuild_never_leaves_the_column_without_an_fts_index(
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table("_search_note", schema=_SearchNote)
-    repo = _SearchRepo(table=table)
+    table = await conn.create_table(
+        "_search_note", schema=arrow_schema(_SearchNote, dim=_DIM)
+    )
+    repo = _SearchRepo(table=table, dim=_DIM)
     await repo.add(
         [
             _SearchNote(
@@ -1006,7 +1035,7 @@ async def test_rebuild_never_leaves_the_column_without_an_fts_index(
             for i in range(200)
         ]
     )
-    await _SearchNote.ensure_fts_indexes(table)
+    await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
 
     failures: list[str] = []
     successes = 0
@@ -1089,7 +1118,10 @@ async def test_husk_sweep_only_takes_dead_empty_old_dirs(tmp_path: Path) -> None
     for d in (dead, live, populated):
         _aged(d, old)  # only `fresh` keeps its current mtime
 
-    repo = _NoteRepo(table=_SweepTable(str(tmp_path), live=("live-uuid",)))  # type: ignore[arg-type]
+    repo = _NoteRepo(
+        table=_SweepTable(str(tmp_path), live=("live-uuid",)),  # type: ignore[arg-type]
+        dim=_DIM,
+    )
     await repo.prune(dt.timedelta(seconds=1))
 
     assert not dead.exists(), "a dead, empty, aged husk is the whole point"
@@ -1144,6 +1176,7 @@ async def test_husk_sweep_timeout_must_not_fail_the_prune(
 
     repo = _NoteRepo(
         table=_SweepTable(str(tmp_path)),
+        dim=_DIM,
         timeouts=LanceTimeouts(husk_sweep=0.05),
         sweep_husks=_slow_sweep,
     )  # type: ignore[arg-type]
@@ -1168,6 +1201,10 @@ async def test_a_broken_sweep_still_surfaces(
     def _broken_sweep(table_uri, *, live_uuids, min_age_seconds):  # type: ignore[no-untyped-def]
         raise TypeError("sweep signature drifted")
 
-    repo = _NoteRepo(table=_SweepTable(str(tmp_path)), sweep_husks=_broken_sweep)  # type: ignore[arg-type]
+    repo = _NoteRepo(
+        table=_SweepTable(str(tmp_path)),  # type: ignore[arg-type]
+        dim=_DIM,
+        sweep_husks=_broken_sweep,
+    )
     with pytest.raises(TypeError, match="signature drifted"):
         await repo.prune(dt.timedelta(seconds=1))

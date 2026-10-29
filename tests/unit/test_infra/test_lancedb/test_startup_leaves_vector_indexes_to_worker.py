@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.infra.persistence.records import BaseLanceTable
+from everos.infra.persistence.lancedb.base import indexes
 from tests.fakes.storage import Storage
 
 
@@ -30,10 +30,10 @@ async def test_startup_pass_never_trains_a_vector_index(
 ) -> None:
     calls: list[str] = []
 
-    async def spy(cls, table, *, min_rows):  # type: ignore[no-untyped-def]
-        calls.append(cls.__name__)
+    async def spy(table, schema, *, min_rows):  # type: ignore[no-untyped-def]
+        calls.append(schema.__name__)
         return []
 
-    monkeypatch.setattr(BaseLanceTable, "ensure_vector_indexes", classmethod(spy))
+    monkeypatch.setattr(indexes, "ensure_vector_indexes", spy)
     await storage.index.ensure_business_indexes()
     assert calls == [], f"startup pass trained vector indexes on {calls}"

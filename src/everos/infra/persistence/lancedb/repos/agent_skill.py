@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from everos.infra.persistence.lancedb.base.indexes import VECTOR_QUERY_NPROBES
 from everos.infra.persistence.lancedb.base.repository import LanceRepoBase
-from everos.infra.persistence.records.table_chassis import VECTOR_QUERY_NPROBES
 
 from ...records.agent_skill import AgentSkill
 from ._contract import LanceIndexContract

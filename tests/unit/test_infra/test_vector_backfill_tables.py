@@ -21,7 +21,6 @@ from everos.component.tokenizer import build_tokenizer
 from everos.infra.persistence.index import (
     BUSINESS_SCHEMAS,
     ProjectionVectorBackfill,
-    schema_for,
 )
 from tests.fakes.storage import Storage
 
@@ -32,9 +31,7 @@ def test_the_index_and_the_projections_name_the_same_tables(
     tables = storage.repos.with_vectors()
 
     assert set(tables) == {
-        schema.TABLE_NAME
-        for schema in BUSINESS_SCHEMAS
-        if schema_for(schema).vector_fields
+        schema.TABLE_NAME for schema in BUSINESS_SCHEMAS if schema.vector_columns()
     }
     _backfill_over(tables)
 

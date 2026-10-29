@@ -400,12 +400,13 @@ ignore_imports = [
     "everos.infra.persistence.factories -> everos.infra.persistence.milvus",
     # Persistence primitives moved out of ``core`` (stage 2a): each storage
     # subpackage facade re-exports its own ``base`` primitives, and
-    # ``records`` re-exports the table chassis it shares with every backend.
+    # ``records`` re-exports the base table it shares with every backend.
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.base",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.base",
     "everos.infra.persistence.lancedb -> everos.infra.persistence.lancedb.base",
     "everos.infra.persistence.records -> everos.infra.persistence.records.index_record",
-    "everos.infra.persistence.records -> everos.infra.persistence.records.table_chassis",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.base",
+    "everos.infra.persistence.records -> everos.infra.persistence.records.vector",
 ]
 
 [[tool.importlinter.contracts]]
@@ -426,7 +427,24 @@ source_modules = [
 forbidden_modules = [
     "everos.infra.persistence.lancedb",
     "everos.infra.persistence.milvus",
-    "everos.infra.persistence.records.table_chassis",
+]
+
+[[tool.importlinter.contracts]]
+# The record models declare columns, keys and which columns are embeddings;
+# every backend derives its physical schema from them through ``schema_for``.
+# The moment a record imports an engine (or its storage format), the
+# declarations stop being shared and the vector width can creep back into
+# import time (issue #476). Indirect imports are checked, so a helper module
+# cannot smuggle an engine in either.
+name = "records-neutral: record declarations know no index backend"
+type = "forbidden"
+source_modules = ["everos.infra.persistence.records"]
+forbidden_modules = [
+    "everos.infra.persistence.lancedb",
+    "everos.infra.persistence.milvus",
+    "lancedb",
+    "pymilvus",
+    "pyarrow",
 ]
 
 [[tool.importlinter.contracts]]

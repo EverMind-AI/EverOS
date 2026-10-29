@@ -21,8 +21,10 @@ test reads back through a second set over the same root.
 from __future__ import annotations
 
 __all__ = [
+    "TEST_DIM",
     "Storage",
     "StorageView",
+    "arrow_schema",
     "handler_deps",
     "index_repositories",
     "make_storage",
@@ -33,15 +35,31 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
+
 from everos.config import Settings, load_settings
 from everos.infra.cascade.projections import HandlerDeps
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_derived_index
-from everos.infra.persistence.index import DerivedIndex, IndexRepositories
+from everos.infra.persistence.index import (
+    DerivedIndex,
+    IndexRepositories,
+    schema_for,
+)
 from everos.infra.persistence.lancedb import LanceDbConnection, LanceIndexBackend
+from everos.infra.persistence.lancedb.base import arrow_schema_for
 from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
 
 from .stores import UnusedPort
+
+TEST_DIM = 1024
+"""Vector width of the business tables in tests that create them by hand
+(the ``[embedding] dim`` default)."""
+
+
+def arrow_schema(model: type[Any], *, dim: int = TEST_DIM) -> pa.Schema:
+    """The Arrow schema the LanceDB backend creates ``model``'s table with."""
+    return arrow_schema_for(schema_for(model, dim=dim))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,7 +96,7 @@ def make_storage(
     settings = settings or load_settings()
     database = SqliteDatabase(root, settings.sqlite)
     lance = LanceDbConnection(root, settings.lancedb)
-    backend = LanceIndexBackend(lance)
+    backend = LanceIndexBackend(lance, dim=settings.embedding.dim)
     return Storage(
         root=root,
         database=database,

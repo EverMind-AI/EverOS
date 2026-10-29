@@ -12,8 +12,8 @@ import pytest
 from everos.core.errors import VectorStoreBusyError
 from everos.infra.persistence.lancedb import LanceRepoBase
 from everos.infra.persistence.lancedb.base import repository as repo_mod
-from everos.infra.persistence.records import BaseLanceTable
-from tests.fakes import UnusedPort
+from everos.infra.persistence.records import IndexRecord
+from tests.fakes import TEST_DIM, UnusedPort
 
 _SPILL = (
     "lance error: LanceError(IO): Execution error: Spill has sent an error, "
@@ -21,7 +21,7 @@ _SPILL = (
 )
 
 
-class _Note(BaseLanceTable):
+class _Note(IndexRecord):
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
     TABLE_NAME: ClassVar[str] = "_note"
     id: str
@@ -33,7 +33,7 @@ class _Repo(LanceRepoBase[_Note]):
 
 def _repo() -> _Repo:
     """A repo whose table is never resolved: these tests stay in the guards."""
-    return _Repo(source=UnusedPort("table source"))
+    return _Repo(source=UnusedPort("table source"), dim=TEST_DIM)
 
 
 def test_only_the_spill_phrase_counts_as_transient() -> None:

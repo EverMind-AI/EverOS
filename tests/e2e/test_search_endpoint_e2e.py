@@ -1857,7 +1857,7 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     """Same anti-drift contract, but for the LanceDB-backed episode path.
 
     LanceDB's Arrow schema declares timestamp columns with ``tz=UTC``
-    (see :attr:`BaseLanceTable.UTC_DATETIME_FIELDS`) so PyArrow returns
+    (see ``lancedb.base.arrow_schema_for``) so PyArrow returns
     aware UTC datetimes directly — no caller-side ``ensure_utc`` needed.
     The shaper only runs ``to_display_tz`` to convert UTC to the
     configured display zone. This test pins that path against a tz switch.

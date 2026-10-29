@@ -1,6 +1,6 @@
-"""LanceDB ``agent_case`` table schema.
+"""Derived-index ``agent_case`` record.
 
-Field set for the agent-case LanceDB row. Each row records one
+Field set for the agent-case index row. Each row records one
 task an agent worked on: intent, approach, optional pivotal insight,
 and a quality score. A MemCell extracted on the agent's own execution
 log yields at most one AgentCase.
@@ -11,18 +11,14 @@ from __future__ import annotations
 import datetime as _dt
 from typing import ClassVar
 
-from lancedb.pydantic import Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from everos.infra.persistence.records.table_chassis import BaseLanceTable
-
-from ._dim import configured_dim
 from ._parent_type import ParentType
+from .vector import DenseVector
 
-_DIM = configured_dim()
 
-
-class AgentCase(BaseLanceTable):
-    """One agent case indexed in LanceDB."""
+class AgentCase(IndexRecord):
+    """One agent case in the derived index."""
 
     TABLE_NAME: ClassVar[str] = "agent_case"
     BM25_FIELDS: ClassVar[list[str]] = ["task_intent_tokens", "approach_tokens"]
@@ -86,4 +82,4 @@ class AgentCase(BaseLanceTable):
     session_id / timestamp / parent_id) is NOT in the hash. See
     :attr:`AgentCaseHandler.content_change_keys`."""
 
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]
+    vector: DenseVector | None = None

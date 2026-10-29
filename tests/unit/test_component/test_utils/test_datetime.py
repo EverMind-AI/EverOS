@@ -22,6 +22,7 @@ from everos.core.utils.datetime import (
     to_timestamp_ms,
     today_with_timezone,
 )
+from tests.fakes import TEST_DIM, arrow_schema
 from tests.fakes.storage import Storage
 
 
@@ -466,61 +467,14 @@ def test_sqlite_round_trip_under_shanghai_display_tz(
     asyncio.run(_run())
 
 
-def test_lancedb_schema_overrides_subclass_declared_non_utc_tz() -> None:
-    """A subclass that tries to declare ``tz=America/New_York`` is forced to UTC.
-
-    Project convention: storage is always UTC. The
-    :meth:`BaseLanceTable.to_arrow_schema` rewrite ignores whatever tz a
-    subclass attempts to set and replaces it with ``tz=UTC``. This pins
-    that no future schema can quietly opt out of the discipline.
-    """
-    from typing import ClassVar as _ClassVar
-
-    import pyarrow as pa
-
-    from everos.infra.persistence.records import BaseLanceTable
-
-    class _MisbehavingSchema(BaseLanceTable):
-        TABLE_NAME: _ClassVar[str] = "_misbehaving"
-        id: str
-        ts: dt.datetime
-
-        @classmethod
-        def to_arrow_schema(cls):  # type: ignore[no-untyped-def]
-            # Subclass tries to sneak a non-UTC tz onto the column …
-            base = pa.schema(
-                [
-                    pa.field("id", pa.string(), nullable=False),
-                    pa.field(
-                        "ts", pa.timestamp("us", tz="America/New_York"), nullable=False
-                    ),
-                ]
-            )
-            # … and pipes it through BaseLanceTable's coercion. We expect
-            # the coercion to override NY → UTC.
-            return pa.schema(
-                [
-                    pa.field(f.name, pa.timestamp("us", tz="UTC"), nullable=f.nullable)
-                    if pa.types.is_timestamp(f.type)
-                    else f
-                    for f in base
-                ]
-            )
-
-    schema = _MisbehavingSchema.to_arrow_schema()
-    ts_field = schema.field("ts")
-    assert getattr(ts_field.type, "tz", None) == "UTC", (
-        f"non-UTC subclass tz must be coerced to UTC; got {ts_field.type}"
-    )
-
-
 def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
-    """Every datetime column on a BaseLanceTable subclass gets tz=UTC auto-applied.
+    """Every datetime column on an IndexRecord subclass is stored tz=UTC.
 
-    Pins the **zero-configuration** contract: subclasses just declare
-    ``ts: datetime`` and ``BaseLanceTable.to_arrow_schema`` rewrites
-    every naive ``timestamp[us]`` to ``timestamp[us, tz=UTC]``. No
-    per-table opt-in declaration is required.
+    Pins the **zero-configuration** contract: records just declare
+    ``ts: datetime`` and the LanceDB mapping of the neutral ``datetime``
+    kind (``arrow_schema_for``) is always ``timestamp[us, tz=UTC]``. A
+    record has no way to declare another zone: the neutral schema carries
+    none, so no future table can quietly opt out of the discipline.
     """
     import pyarrow as pa
 
@@ -531,7 +485,7 @@ def test_lancedb_schema_auto_tags_every_datetime_field_with_tz_utc() -> None:
     from everos.infra.persistence.records.user_profile import UserProfile
 
     for cls in (Episode, AtomicFact, AgentCase, Foresight, UserProfile):
-        schema = cls.to_arrow_schema()
+        schema = arrow_schema(cls)
         ts_fields = [f for f in schema if pa.types.is_timestamp(f.type)]
         assert ts_fields, f"{cls.__name__} has no timestamp fields (unexpected)"
         for field in ts_fields:
@@ -1380,7 +1334,7 @@ def test_typedec_raw_sql_bypasses_typedecorator_documented_limit(
 # LanceDB has fewer write APIs: ``table.add`` (the main one),
 # ``table.merge_insert``, and ``table.update``. All of them ultimately go
 # through PyArrow which uses the Arrow schema to coerce input. The
-# ``BaseLanceTable.to_arrow_schema`` rewrite that stamps ``tz=UTC`` is
+# ``arrow_schema_for`` mapping that stamps ``tz=UTC`` is
 # therefore active on every write path. Pin this explicitly.
 
 
@@ -1398,7 +1352,9 @@ def test_lance_table_add_normalises_aware_non_utc() -> None:
 
     async def _run() -> None:
         conn = await lancedb.connect_async(tempfile.mkdtemp())
-        table = await conn.create_table("ep", schema=Episode)
+        table = await conn.create_table(
+            "ep", schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
         row = Episode(
             id="alice_ep_1",
             entry_id="ep_1",
@@ -1414,7 +1370,7 @@ def test_lance_table_add_normalises_aware_non_utc() -> None:
             content_sha256="abc",
             vector=[0.0] * 1024,
         )
-        await table.add([row])
+        await table.add([row.model_dump()])
         rows = await table.query().to_list()
         assert rows[0]["timestamp"].tzinfo is not None
         # 14:00 +08:00 = 06:00 UTC
@@ -1437,7 +1393,9 @@ def test_lance_table_naive_input_is_assumed_utc() -> None:
 
     async def _run() -> None:
         conn = await lancedb.connect_async(tempfile.mkdtemp())
-        table = await conn.create_table("ep", schema=Episode)
+        table = await conn.create_table(
+            "ep", schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
         row = Episode(
             id="x_1",
             entry_id="ep_1",
@@ -1453,7 +1411,7 @@ def test_lance_table_naive_input_is_assumed_utc() -> None:
             content_sha256="x",
             vector=[0.0] * 1024,
         )
-        await table.add([row])
+        await table.add([row.model_dump()])
         rows = await table.query().to_list()
         # naive 14:00 → assumed UTC 14:00 on disk → read back aware UTC 14:00
         assert rows[0]["timestamp"].hour == 14

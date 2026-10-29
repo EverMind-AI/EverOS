@@ -1,6 +1,6 @@
 """FTS-layer normalisation contract tests.
 
-``BaseLanceTable.ensure_fts_indexes`` builds the LanceDB FTS index with
+``ensure_fts_indexes`` builds the LanceDB FTS index with
 the following configuration::
 
     base_tokenizer="whitespace"
@@ -39,10 +39,13 @@ import lancedb
 import pytest
 from lancedb import AsyncTable
 
-from everos.infra.persistence.records import BaseLanceTable
+from everos.infra.persistence.index import schema_for
+from everos.infra.persistence.lancedb.base import ensure_fts_indexes
+from everos.infra.persistence.records import IndexRecord
+from tests.fakes import TEST_DIM, arrow_schema
 
 
-class _FtsSpec(BaseLanceTable):
+class _FtsSpec(IndexRecord):
     """Minimal schema with one BM25-indexed column for FTS-layer probes."""
 
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
@@ -61,14 +64,16 @@ async def fts_table(tmp_path: Path) -> AsyncIterator[AsyncTable]:
     requires data first to materialise sensibly).
     """
     conn = await lancedb.connect_async(str(tmp_path / "lancedb"))
-    table = await conn.create_table(_FtsSpec.TABLE_NAME, schema=_FtsSpec)
+    table = await conn.create_table(
+        _FtsSpec.TABLE_NAME, schema=arrow_schema(_FtsSpec, dim=TEST_DIM)
+    )
     yield table
 
 
 async def _seed_and_index(table: AsyncTable, rows: list[dict]) -> None:
     """Insert rows, then (re)build the FTS index over the full table."""
-    await table.add([_FtsSpec(**r) for r in rows])
-    await _FtsSpec.ensure_fts_indexes(table)
+    await table.add([_FtsSpec(**r).model_dump() for r in rows])
+    await ensure_fts_indexes(table, schema_for(_FtsSpec, dim=TEST_DIM))
 
 
 async def _query_ids(table: AsyncTable, text: str) -> set[str]:

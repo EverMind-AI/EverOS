@@ -20,12 +20,16 @@ import datetime as dt
 from collections.abc import Sequence
 from typing import ClassVar
 
+import pyarrow as pa
+from lancedb import AsyncTable
+
 from everos.core.errors import IndexSchemaMismatchError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index.repositories import (
     BUSINESS_SCHEMAS,
     IndexRepositories,
 )
+from everos.infra.persistence.index.schema import IndexSchema, schema_for
 from everos.infra.persistence.locking import memory_root_lock
 
 from ..records import (
@@ -33,11 +37,13 @@ from ..records import (
     AgentCase,
     AgentSkill,
     AtomicFact,
-    BaseLanceTable,
     Episode,
     Foresight,
+    IndexRecord,
     KnowledgeTopic,
 )
+from .base import indexes
+from .base.arrow import arrow_schema_for
 from .lancedb_manager import LanceDbConnection
 from .repos.agent_case import _AgentCaseRepo
 from .repos.agent_skill import _AgentSkillRepo
@@ -71,7 +77,7 @@ class LanceDBMigrationError(RuntimeError):
 _FTS_INDEX_SCHEMA_VERSION = 2
 """Bump when the FTS index build config changes so existing on-disk
 indexes get rebuilt at startup. v2 = ``with_position=False`` (see
-:meth:`BaseLanceTable.ensure_fts_indexes` + lance-format/lance#7653)."""
+:func:`.base.indexes.ensure_fts_indexes` + lance-format/lance#7653)."""
 
 
 _PROVENANCE_COLUMN = "vector"
@@ -86,7 +92,7 @@ and is not recorded separately.
 
 _TABLE_SCHEMA_VERSION = 2
 """Bump when column nullability or presence changes on business tables.
-v2 = ``vector: Vector(_DIM) | None`` on the 6 business tables that carry
+v2 = ``vector: DenseVector | None`` on the 6 business tables that carry
 a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
 
 .. note::
@@ -110,7 +116,7 @@ a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
 """
 
 
-BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[BaseLanceTable], ...] = (
+BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[IndexRecord], ...] = (
     Episode,
     AtomicFact,
     Foresight,
@@ -121,7 +127,11 @@ BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[BaseLanceTable], ...] = (
 """Business schemas whose ``vector`` column needs the v2 nullability
 migration. ``Episode.subject_vector`` was already nullable in v1.1.1 and
 is intentionally left out of this migration. ``UserProfile`` has no
-vector column; ``knowledge_document`` has no LanceDB table."""
+vector column; ``knowledge_document`` has no LanceDB table.
+
+An explicit tuple rather than "every table with a vector column": it names the
+tables that existed when v2 shipped, so a vector table added later -- created
+nullable from the start -- does not silently join a historical migration."""
 
 
 class LanceIndexBackend:
@@ -132,6 +142,7 @@ class LanceIndexBackend:
 
     Args:
         connection: The application's LanceDB connection.
+        dim: ``[embedding] dim`` -- the width every vector column is built at.
         schemas: The business tables the per-table sweeps (migrations,
             verification, drop) walk; every one of them in production.
     """
@@ -142,18 +153,20 @@ class LanceIndexBackend:
         self,
         connection: LanceDbConnection,
         *,
-        schemas: Sequence[type[BaseLanceTable]] = BUSINESS_SCHEMAS,
+        dim: int,
+        schemas: Sequence[type[IndexRecord]] = BUSINESS_SCHEMAS,
     ) -> None:
         self._connection = connection
+        self._vector_dim = dim
         self._schemas = tuple(schemas)
         self.repositories = IndexRepositories(
-            episode=_EpisodeRepo(source=connection),
-            atomic_fact=_AtomicFactRepo(source=connection),
-            foresight=_ForesightRepo(source=connection),
-            agent_case=_AgentCaseRepo(source=connection),
-            agent_skill=_AgentSkillRepo(source=connection),
-            user_profile=_UserProfileRepo(source=connection),
-            knowledge_topic=_KnowledgeTopicRepo(source=connection),
+            episode=_EpisodeRepo(source=connection, dim=dim),
+            atomic_fact=_AtomicFactRepo(source=connection, dim=dim),
+            foresight=_ForesightRepo(source=connection, dim=dim),
+            agent_case=_AgentCaseRepo(source=connection, dim=dim),
+            agent_skill=_AgentSkillRepo(source=connection, dim=dim),
+            user_profile=_UserProfileRepo(source=connection, dim=dim),
+            knowledge_topic=_KnowledgeTopicRepo(source=connection, dim=dim),
         )
 
     async def connect(self) -> object:
@@ -161,6 +174,17 @@ class LanceIndexBackend:
 
     async def shutdown(self) -> None:
         await self._connection.close()
+
+    def _index_schema(self, record: type[IndexRecord]) -> IndexSchema:
+        return schema_for(record, dim=self._vector_dim)
+
+    def _arrow_schema(self, record: type[IndexRecord]) -> pa.Schema:
+        return arrow_schema_for(self._index_schema(record))
+
+    async def _open(self, record: type[IndexRecord]) -> AsyncTable:
+        return await self._connection.table(
+            record.TABLE_NAME, self._arrow_schema(record)
+        )
 
     async def migrate_fts_indexes(self) -> None:
         """One-time rebuild of FTS indexes that predate the current config.
@@ -172,7 +196,7 @@ class LanceIndexBackend:
         index dir grows unbounded until the disk fills.
 
         Rebuilds every business table's FTS index with the current
-        :meth:`BaseLanceTable.ensure_fts_indexes` config (``with_position``
+        :func:`.base.indexes.ensure_fts_indexes` config (``with_position``
         now off) and reclaims the orphaned index files / data fragments the
         crashed-optimize churn left behind. Guarded by a version marker in
         the LanceDB dir so it runs at most once per bump; the rebuild is
@@ -206,12 +230,12 @@ class LanceIndexBackend:
             for schema in self._schemas:
                 if not schema.BM25_FIELDS:
                     continue
-                table = await self._connection.table(schema.TABLE_NAME, schema)
+                table = await self._open(schema)
                 # Drop existing indexes (everos only builds FTS here; mirrors
                 # LanceRepoBase.rebuild_indexes) then rebuild with the new config.
                 for idx in await table.list_indices():
                     await table.drop_index(idx.name)
-                await schema.ensure_fts_indexes(table)
+                await indexes.ensure_fts_indexes(table, self._index_schema(schema))
                 # Reclaim the orphaned index dirs + data fragments the crashed
                 # optimize loop piled up. Safe now: the crashing index is gone,
                 # so compaction no longer decodes a position List.
@@ -268,7 +292,7 @@ class LanceIndexBackend:
             logger.info("table_schema_migration_started", target=_TABLE_SCHEMA_VERSION)
             failed_schemas: list[str] = []
             for schema in BUSINESS_SCHEMAS_WITH_VECTOR:
-                table = await self._connection.table(schema.TABLE_NAME, schema)
+                table = await self._open(schema)
                 arrow_schema = await table.schema()
                 if arrow_schema.field("vector").nullable:
                     continue
@@ -326,7 +350,7 @@ class LanceIndexBackend:
         to rebuild any pre-fix ``with_position=True`` indexes, then walks
         the business schemas (each owns its ``TABLE_NAME`` + ``BM25_FIELDS``),
         opens each table via :meth:`LanceDbConnection.table`, and delegates to
-        ``schema.ensure_fts_indexes(table)``. Already-indexed columns are
+        ``ensure_fts_indexes(table, schema)``. Already-indexed columns are
         skipped, so re-runs are no-ops.
 
         Adding a new business table = adding it to ``BUSINESS_SCHEMAS``;
@@ -340,15 +364,15 @@ class LanceIndexBackend:
         ``Retryable commit conflict`` the moment a table crossed the row
         threshold). Vector indexes belong to the cascade worker alone: its
         first rebuild sweep at server start builds a missing one and the heavy
-        beat maintains it (:meth:`BaseLanceTable.ensure_vector_indexes`). FTS
+        beat maintains it (:func:`.base.indexes.ensure_vector_indexes`). FTS
         stays here because a search on a column without its inverted index
         raises instead of degrading.
         """
         await self.migrate_table_schemas()
         await self.migrate_fts_indexes()
         for schema in self._schemas:
-            table = await self._connection.table(schema.TABLE_NAME, schema)
-            await schema.ensure_fts_indexes(table)
+            table = await self._open(schema)
+            await indexes.ensure_fts_indexes(table, self._index_schema(schema))
 
     async def verify_business_schemas(self) -> None:
         """Fail loud at startup if an existing LanceDB table's columns don't
@@ -363,9 +387,10 @@ class LanceIndexBackend:
         *not* the recovery — it leaves the cascade queue marked ``done`` so
         nothing re-indexes and the index comes back empty.
 
-        Both dimensions are checked against ``schema.to_arrow_schema()`` —
-        the exact schema ``LanceDbConnection.table`` builds the table from, so a healthy
-        table never false-positives:
+        Both dimensions are checked against the Arrow schema derived from the
+        record at the configured width (:func:`.base.arrow.arrow_schema_for`) —
+        the exact schema ``LanceDbConnection.table`` builds the table from, so
+        a healthy table never false-positives:
 
         * **Column set** — a missing / extra column (e.g. a pre-``content_sha256``
           table) is caught by name.
@@ -376,18 +401,19 @@ class LanceIndexBackend:
           ``fixed_size_list``. The name matches, so a name-only check waves it
           through and it detonates deep inside ``merge_insert`` as an opaque
           ``LanceError(IO): Spill has sent an error``. Comparing types surfaces
-          it here instead.
+          it here instead. A vector column built at another width than
+          ``[embedding] dim`` is the same kind of drift and is caught here too.
         """
         for schema in self._schemas:
-            table = await self._connection.table(schema.TABLE_NAME, schema)
+            table = await self._open(schema)
             on_disk = await table.schema()
-            expected = schema.to_arrow_schema()
+            expected = self._arrow_schema(schema)
             on_disk_names = set(on_disk.names)
             expected_names = set(expected.names)
             missing = expected_names - on_disk_names
             extra = on_disk_names - expected_names
             # Type drift on columns present in both, compared against the
-            # authoritative to_arrow_schema() Arrow types.
+            # authoritative derived Arrow types.
             type_drift = [
                 f"{name}: on-disk {on_disk.field(name).type} "
                 f"!= expected {expected.field(name).type}"
@@ -427,7 +453,7 @@ class LanceIndexBackend:
         attested yet. The caller writes the current configuration in that
         case; see :meth:`write_embedding_model`.
         """
-        table = await self._connection.table(Episode.TABLE_NAME, Episode)
+        table = await self._open(Episode)
         metadata = (await table.schema()).field(_PROVENANCE_COLUMN).metadata or {}
         raw = metadata.get(EMBEDDING_MODEL_KEY.encode())
         return raw.decode() if raw else None
@@ -437,10 +463,10 @@ class LanceIndexBackend:
 
         Arrow field metadata is updated without rewriting data: the table
         gains a version, its row count and column types are untouched. The
-        create path cannot carry this (``pydantic_to_schema`` builds fields
+        create path does not carry this (``arrow_schema_for`` builds fields
         with no metadata), so every attestation goes through here.
         """
-        table = await self._connection.table(Episode.TABLE_NAME, Episode)
+        table = await self._open(Episode)
         await table.update_field_metadata(
             {
                 "path": _PROVENANCE_COLUMN,

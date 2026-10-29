@@ -61,7 +61,7 @@ from everos.infra.persistence.sqlite import create_session_factory, create_syste
 from everos.infra.persistence.sqlite.repos.md_change_state import MdChangeStateRepo
 from everos.infra.persistence.sqlite.tables import MdChangeState
 from everos.memory.ports.query import eq
-from tests.fakes import handler_deps, index_repositories
+from tests.fakes import TEST_DIM, arrow_schema, handler_deps, index_repositories
 
 settings.register_profile(
     "ci",
@@ -171,8 +171,10 @@ class CascadeProjectionMachine(RuleBasedStateMachine):
 
     async def _open_index(self) -> _EpisodeRepo:
         conn = await open_lancedb_connection(self.root.lancedb_dir, LanceDBSettings())
-        table = await conn.create_table(Episode.TABLE_NAME, schema=Episode)
-        return _EpisodeRepo(table=table)
+        table = await conn.create_table(
+            Episode.TABLE_NAME, schema=arrow_schema(Episode, dim=TEST_DIM)
+        )
+        return _EpisodeRepo(table=table, dim=TEST_DIM)
 
     def run(self, coro: Any) -> Any:
         return self.loop.run_until_complete(coro)

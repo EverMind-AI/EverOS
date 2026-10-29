@@ -2,11 +2,11 @@
 
 End-to-end story for how to author + use a LanceDB-backed table in everos:
 
-    1. Define a table schema by subclassing :class:`BaseLanceTable` and
-       declaring a ``Vector(N)`` column for the embedding.
+    1. Define a table schema by subclassing :class:`IndexRecord` and
+       declaring a ``DenseVector`` column for the embedding.
     2. ``open_lancedb_connection`` to get an :class:`AsyncConnection`.
-    3. ``conn.create_table(name, schema=Cls)`` to create the table from
-       the Pydantic schema.
+    3. ``conn.create_table(name, schema=...)`` with the Arrow schema derived
+       from the record at a chosen vector width (``arrow_schema_for``).
     4. ``table.add(rows)`` to insert.
     5. ``table.query().nearest_to(vec).limit(k).to_list()`` for vector
        search (BM25 + scalar filter can chain in the same query).
@@ -24,16 +24,19 @@ from typing import ClassVar
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import open_lancedb_connection
-from everos.infra.persistence.records import BaseLanceTable, Vector
+from everos.infra.persistence.records import DenseVector, IndexRecord
+from tests.fakes import arrow_schema
+
+_DIM = 4
 
 
-class _DemoNote(BaseLanceTable):
+class _DemoNote(IndexRecord):
     """Demo table — used only by this test module."""
 
-    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("text",)
 
     text: str
-    vector: Vector(4)  # 4-dim for the test fixture
+    vector: DenseVector  # 4-dim for the test fixture
 
 
 async def test_lancedb_typical_workflow(tmp_path: Path) -> None:
@@ -44,17 +47,19 @@ async def test_lancedb_typical_workflow(tmp_path: Path) -> None:
     # 1. Open async connection rooted at <memory_root>/.index/lancedb/
     conn = await open_lancedb_connection(mr.lancedb_dir, settings)
 
-    # 2. Create the table from the BaseLanceTable schema
-    table = await conn.create_table("_demo_notes", schema=_DemoNote)
+    # 2. Create the table from the record's Arrow schema at width _DIM
+    table = await conn.create_table(
+        "_demo_notes", schema=arrow_schema(_DemoNote, dim=_DIM)
+    )
 
     # 3. Insert rows (Pydantic instances; created_at / updated_at filled in
-    #    by BaseLanceTable's default_factory).
+    #    by IndexRecord's default_factory).
     rows = [
         _DemoNote(text="hello world", vector=[1.0, 0.0, 0.0, 0.0]),
         _DemoNote(text="goodbye cruel world", vector=[0.0, 1.0, 0.0, 0.0]),
         _DemoNote(text="welcome aboard", vector=[1.0, 0.5, 0.0, 0.0]),
     ]
-    await table.add(rows)
+    await table.add([row.model_dump() for row in rows])
 
     # 4. Count
     assert await table.count_rows() == 3

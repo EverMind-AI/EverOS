@@ -21,6 +21,7 @@ from everos.infra.persistence.lancedb import (
     LanceDBSchemaMismatchError,
 )
 from everos.infra.persistence.records.episode import Episode
+from tests.fakes import arrow_schema
 from tests.fakes.storage import Storage
 
 
@@ -42,7 +43,7 @@ def _episode_schema_with_subject_vector_as(dtype: pa.DataType) -> pa.Schema:
             pa.field("subject_vector", dtype, nullable=True)
             if f.name == "subject_vector"
             else f
-            for f in Episode.to_arrow_schema()
+            for f in arrow_schema(Episode)
         ]
     )
 
@@ -83,10 +84,20 @@ async def test_verify_raises_on_subject_vector_null_drift(storage: Storage) -> N
     assert "subject_vector" in str(exc.value)
 
 
+async def test_verify_raises_on_vector_width_drift(storage: Storage) -> None:
+    """A table built at another ``[embedding] dim`` is type drift on its
+    vector columns -- the width comes from configuration, so changing it
+    without ``cascade rebuild`` must be refused, not written through."""
+    await _create_episode_table_on_disk(storage.root, arrow_schema(Episode, dim=768))
+    with pytest.raises(LanceDBSchemaMismatchError) as exc:
+        await storage.backend.verify_business_schemas()
+    assert "fixed_size_list<item: float>[768]" in str(exc.value)
+
+
 async def test_verify_raises_on_missing_column(storage: Storage) -> None:
     """A table missing a current column is caught by name (unchanged)."""
     reduced = pa.schema(
-        [f for f in Episode.to_arrow_schema() if f.name != "subject_vector"]
+        [f for f in arrow_schema(Episode) if f.name != "subject_vector"]
     )
     await _create_episode_table_on_disk(storage.root, reduced)
     with pytest.raises(LanceDBSchemaMismatchError) as exc:
@@ -114,9 +125,9 @@ async def test_drop_business_tables_removes_then_recreatable(storage: Storage) -
     assert "episode" not in set((await conn.list_tables()).tables)
     # Recreated fresh from the current schema → correct vector type, not string.
     # A stale cached handle would still carry the drifted string column.
-    tbl = await storage.lance.table("episode", Episode)
+    tbl = await storage.lance.table("episode", arrow_schema(Episode))
     assert (
         (await tbl.schema())
         .field("subject_vector")
-        .type.equals(Episode.to_arrow_schema().field("subject_vector").type)
+        .type.equals(arrow_schema(Episode).field("subject_vector").type)
     )

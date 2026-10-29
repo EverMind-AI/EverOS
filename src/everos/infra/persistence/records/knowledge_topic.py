@@ -1,20 +1,16 @@
-"""LanceDB table schema for L2 knowledge topic nodes."""
+"""Derived-index ``knowledge_topic`` record: L2 knowledge topic nodes."""
 
 from __future__ import annotations
 
 import datetime as dt
 from typing import ClassVar
 
-from lancedb.pydantic import Vector
+from everos.infra.persistence.records.base import IndexRecord
 
-from everos.infra.persistence.records.table_chassis import BaseLanceTable
-
-from ._dim import configured_dim
-
-_DIM = configured_dim()
+from .vector import DenseVector
 
 
-class KnowledgeTopic(BaseLanceTable):
+class KnowledgeTopic(IndexRecord):
     """L2 topic node — dense + dual-column BM25 retrieval."""
 
     TABLE_NAME: ClassVar[str] = "knowledge_topic"
@@ -36,6 +32,6 @@ class KnowledgeTopic(BaseLanceTable):
     content_labels: list[str] = []
     md_path: str
     content_sha256: str
-    vector: Vector(_DIM) | None = None  # type: ignore[valid-type]  -- Vector() is runtime-constructed; static analyzers cannot verify
+    vector: DenseVector | None = None
     created_at: dt.datetime
     updated_at: dt.datetime

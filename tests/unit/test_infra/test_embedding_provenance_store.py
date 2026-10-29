@@ -20,6 +20,7 @@ import pytest
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import lancedb as lance
 from everos.infra.persistence.records.episode import Episode
+from tests.fakes import TEST_DIM, arrow_schema
 from tests.fakes.storage import Storage
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ def _episode_row(entry_id: str) -> dict[str, object]:
     the product actually writes, and the first version of this helper was
     missing four required fields.
     """
-    width = Episode.to_arrow_schema().field("vector").type.list_size
+    width = TEST_DIM
     episode = Episode.model_validate(
         {
             "id": f"u1_{entry_id}",
@@ -66,7 +67,7 @@ async def test_roundtrip_survives_a_new_connection(storage: Storage) -> None:
 
 async def test_attesting_does_not_rewrite_data(storage: Storage) -> None:
     """Row count and column type must not move — this is the upgrade path."""
-    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     await table.add([_episode_row("e0")])
     rows_before = await table.count_rows()
     type_before = (await table.schema()).field("vector").type
@@ -80,7 +81,7 @@ async def test_attesting_does_not_rewrite_data(storage: Storage) -> None:
 async def test_record_survives_writes_and_optimize(storage: Storage) -> None:
     """Routine maintenance must not drop the attestation (A13)."""
     await storage.backend.write_embedding_model("fake-768")
-    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     for index in range(3):
         await table.add([_episode_row(f"e{index}")])
     await table.optimize()
@@ -97,7 +98,7 @@ async def test_record_hangs_on_the_episode_vector_column(storage: Storage) -> No
     invisible to a deployment that never wrote one.
     """
     await storage.backend.write_embedding_model("fake-768")
-    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
+    table = await storage.lance.table(Episode.TABLE_NAME, arrow_schema(Episode))
     schema = await table.schema()
 
     on_vector = schema.field("vector").metadata or {}

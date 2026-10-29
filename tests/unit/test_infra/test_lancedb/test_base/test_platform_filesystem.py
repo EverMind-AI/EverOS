@@ -30,10 +30,13 @@ from everos.infra.persistence.lancedb.base.repository import (
     _HUSK_MIN_AGE_SECONDS,
     remove_empty_index_dirs,
 )
-from everos.infra.persistence.records import BaseLanceTable, Vector
+from everos.infra.persistence.records import DenseVector, IndexRecord
+from tests.fakes import arrow_schema
+
+_DIM = 4
 
 
-class _Probe(BaseLanceTable):
+class _Probe(IndexRecord):
     PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
     TABLE_NAME: ClassVar[str] = "_probe"
 
@@ -47,7 +50,7 @@ class _Probe(BaseLanceTable):
     parent_id: str = "mc"
     md_path: str = "users/u/notes/x.md"
     text: str = "x"
-    vector: Vector(4)  # type: ignore[valid-type]
+    vector: DenseVector
 
 
 class _ProbeRepo(LanceDailyLogRepoBase[_Probe]):
@@ -128,7 +131,9 @@ async def test_table_files_are_releasable_after_close(tmp_path: Path) -> None:
     mr = MemoryRoot(tmp_path / "root")
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table(_Probe.TABLE_NAME, schema=_Probe)
+    table = await conn.create_table(
+        _Probe.TABLE_NAME, schema=arrow_schema(_Probe, dim=_DIM)
+    )
     await table.add([r.model_dump() for r in _rows(2)])
     assert await table.count_rows() == 2
 
@@ -151,8 +156,10 @@ async def test_prune_completes_while_another_handle_reads_the_table(
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     writer_conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await writer_conn.create_table(_Probe.TABLE_NAME, schema=_Probe)
-    repo = _ProbeRepo(table=table)
+    table = await writer_conn.create_table(
+        _Probe.TABLE_NAME, schema=arrow_schema(_Probe, dim=_DIM)
+    )
+    repo = _ProbeRepo(table=table, dim=_DIM)
     await repo.add(_rows(3, prefix="a"))
     await repo.add(_rows(3, prefix="b"))  # a second version to reclaim
 
@@ -185,7 +192,9 @@ async def test_deep_memory_root_still_stores_and_counts(tmp_path: Path) -> None:
     mr = MemoryRoot(deep)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table(_Probe.TABLE_NAME, schema=_Probe)
+    table = await conn.create_table(
+        _Probe.TABLE_NAME, schema=arrow_schema(_Probe, dim=_DIM)
+    )
     await table.add([r.model_dump() for r in _rows(3)])
     assert await table.count_rows() == 3
     assert len(str(mr.lancedb_dir)) > 200, "probe must actually be deep"

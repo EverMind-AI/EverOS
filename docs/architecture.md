@@ -137,7 +137,7 @@ and passes down; nothing is reached through a module-level instance.
 | `SqliteRepos` (`sqlite/repositories.py`) | one repository per system table, built by `SqliteRepos.over(database)` | — |
 | `LanceDbConnection` / `MilvusConnection` | the engine connection and, for LanceDB, the table-handle cache | on first use |
 | `LanceIndexBackend` / `MilvusIndexBackend` | the engine's `IndexRepositories` and its migrations / schema checks | — |
-| `DerivedIndex` (`index/derived_index.py`) | the selected backend plus the engine-neutral checks: record width, primary keys, configuration verification | — |
+| `DerivedIndex` (`index/derived_index.py`) | the selected backend plus the engine-neutral checks: primary keys, configuration verification | — |
 
 `infra/persistence/factories.py` builds the engine-dependent pieces:
 `build_derived_index(settings, root)` picks the backend once,
@@ -146,6 +146,26 @@ in the domain ports. Why objects rather than module instances: a test or a
 second root gets its own storage by building another set, a repository's
 database is visible at its construction, and closing is the owner's call
 (`Application.aclose`, `OpsService.index_session`), not a process-wide reset.
+
+The table declarations every index backend reads (`TABLE_NAME`,
+`BM25_FIELDS`, `PRIMARY_KEY`, the columns, which columns are embeddings) live
+in `infra/persistence/records/` as plain pydantic models (`IndexRecord`). An
+embedding column is marked `DenseVector` and carries no width. The vector
+width is deployment configuration: `build_derived_index` hands
+`settings.embedding.dim` to the backend, and `index.schema_for(model, dim=...)`
+turns a record into the neutral `IndexSchema` at that width. Each backend
+derives its physical schema from `IndexSchema` alone -- LanceDB its Arrow
+schema (`lancedb/base/arrow.py`), Milvus its collection layout
+(`milvus/_layout.py`) -- and builds its own indexes in its own package
+(LanceDB's FTS and IVF upkeep is `lancedb/base/indexes.py`).
+
+Why: with the width baked into the record classes, they had to read the
+configuration while being imported, a second configuration reader that could
+disagree with `Settings` and needed a startup check to catch it. With the
+records neutral there is one reader and one path for the width
+(`Settings` -> bootstrap -> backend -> repositories), a third backend needs
+only `IndexSchema`, and the `records-neutral` import contract keeps
+`lancedb`, `pymilvus` and `pyarrow` out of `records/`.
 
 ## Storage three-piece set
 

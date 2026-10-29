@@ -68,15 +68,21 @@ def build_derived_index(settings: Settings, root: MemoryRoot) -> DerivedIndex:
     """The derived index of the engine ``settings.index.backend`` selects.
 
     Builds the engine's connection and backend; nothing connects until the
-    index is first used.
+    index is first used. This is the one place the vector width
+    (``[embedding] dim``) reaches the derived index: the backend builds every
+    vector column at it.
     """
     if settings.index.backend == "milvus":
         # Deferred: pymilvus is an optional extra, needed only when selected.
         from .milvus import MilvusConnection, MilvusIndexBackend
 
-        backend = MilvusIndexBackend(MilvusConnection(settings.milvus))
+        backend = MilvusIndexBackend(
+            MilvusConnection(settings.milvus), dim=settings.embedding.dim
+        )
     else:
-        backend = LanceIndexBackend(LanceDbConnection(root, settings.lancedb))
+        backend = LanceIndexBackend(
+            LanceDbConnection(root, settings.lancedb), dim=settings.embedding.dim
+        )
     return DerivedIndex(backend, embedding_dim=settings.embedding.dim)
 
 

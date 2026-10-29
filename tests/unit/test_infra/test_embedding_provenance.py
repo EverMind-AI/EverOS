@@ -21,7 +21,6 @@ import pytest
 from everos.config import load_settings
 from everos.core.errors import EmbeddingProvenanceError
 from everos.infra.persistence.index import EmbeddingProvenance, _provenance
-from tests.fakes import UnusedPort
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -265,39 +264,6 @@ def test_probe_defeats_client_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
     assert asyncio.run(provenance.probe_dimension()) is None
     assert captured["dim"] is not None
     assert captured["dim"] > 100_000
-
-
-async def test_dim_disagreement_between_the_two_readers_aborts() -> None:
-    """The record classes and Settings must not quietly diverge on the width.
-
-    The record classes resolve ``[embedding] dim`` with a narrow reader of
-    their own, because the width has to be known while they are imported.
-    Two readers can disagree -- a different root, a key one of them cannot
-    parse -- and the symptom would otherwise be tables silently built at the
-    wrong width. The width is frozen at import, so the disagreement is
-    constructed from the Settings side: the dim the index is built with.
-    """
-    from everos.infra.persistence.index import DerivedIndex
-    from everos.infra.persistence.records.episode import Episode
-
-    baked = Episode.to_arrow_schema().field("vector").type.list_size
-    index = DerivedIndex(UnusedPort("index backend"), embedding_dim=baked + 256)
-
-    with pytest.raises(EmbeddingProvenanceError) as excinfo:
-        index.assert_record_dim_matches_settings()
-    message = str(excinfo.value)
-    assert str(baked) in message
-    assert str(baked + 256) in message
-
-
-async def test_matching_dim_passes() -> None:
-    """The guard must not fire on the normal case."""
-    from everos.infra.persistence.index import DerivedIndex
-    from everos.infra.persistence.records.episode import Episode
-
-    baked = Episode.to_arrow_schema().field("vector").type.list_size
-    index = DerivedIndex(UnusedPort("index backend"), embedding_dim=baked)
-    index.assert_record_dim_matches_settings()
 
 
 async def test_a_refused_start_does_not_attest(

@@ -43,21 +43,22 @@ class MilvusIndexBackend:
 
     Args:
         connection: The application's Milvus connection.
+        dim: ``[embedding] dim`` -- the width of every dense vector field.
     """
 
     name: ClassVar[str] = "milvus"
 
-    def __init__(self, connection: MilvusConnection) -> None:
+    def __init__(self, connection: MilvusConnection, *, dim: int) -> None:
         self._connection = connection
-        self._episode = _EpisodeRepo(connection)
+        self._episode = _EpisodeRepo(connection, dim=dim)
         self.repositories = IndexRepositories(
             episode=self._episode,
-            atomic_fact=_AtomicFactRepo(connection),
-            foresight=_ForesightRepo(connection),
-            agent_case=_AgentCaseRepo(connection),
-            agent_skill=_AgentSkillRepo(connection),
-            user_profile=_UserProfileRepo(connection),
-            knowledge_topic=_KnowledgeTopicRepo(connection),
+            atomic_fact=_AtomicFactRepo(connection, dim=dim),
+            foresight=_ForesightRepo(connection, dim=dim),
+            agent_case=_AgentCaseRepo(connection, dim=dim),
+            agent_skill=_AgentSkillRepo(connection, dim=dim),
+            user_profile=_UserProfileRepo(connection, dim=dim),
+            knowledge_topic=_KnowledgeTopicRepo(connection, dim=dim),
         )
 
     @property

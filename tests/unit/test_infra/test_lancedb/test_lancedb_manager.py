@@ -10,21 +10,24 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from lancedb.pydantic import Vector
 
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceDbConnection
-from everos.infra.persistence.records import BaseLanceTable
+from everos.infra.persistence.records import DenseVector, IndexRecord
+from tests.fakes import arrow_schema
 
 
-class _DemoVec(BaseLanceTable):
+class _DemoVec(IndexRecord):
     """Demo schema — only used by this test module."""
 
-    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("id",)
+    PRIMARY_KEY: ClassVar[tuple[str, ...]] = ("text",)
 
     text: str
-    vector: Vector(3)  # type: ignore[valid-type]
+    vector: DenseVector
+
+
+_SCHEMA = arrow_schema(_DemoVec, dim=3)
 
 
 @pytest.fixture
@@ -46,8 +49,8 @@ async def test_connect_returns_the_same_connection(
 
 
 async def test_table_creates_then_caches(connection: LanceDbConnection) -> None:
-    t1 = await connection.table("demo", _DemoVec)
-    t2 = await connection.table("demo", _DemoVec)
+    t1 = await connection.table("demo", _SCHEMA)
+    t2 = await connection.table("demo", _SCHEMA)
     assert t1 is t2
 
 
@@ -55,19 +58,19 @@ async def test_table_reopens_existing_after_close(
     connection: LanceDbConnection,
 ) -> None:
     """A second connection cycle must reopen (not recreate) the table."""
-    await connection.table("demo", _DemoVec)
+    await connection.table("demo", _SCHEMA)
     await connection.close()
 
-    t = await connection.table("demo", _DemoVec)
+    t = await connection.table("demo", _SCHEMA)
     # Round-trip a row to prove the schema survived.
-    await t.add([_DemoVec(text="hello", vector=[0.1, 0.2, 0.3])])
+    await t.add([_DemoVec(text="hello", vector=[0.1, 0.2, 0.3]).model_dump()])
     assert await t.count_rows() == 1
 
 
 async def test_close_evicts_the_cache(connection: LanceDbConnection) -> None:
-    t1 = await connection.table("demo", _DemoVec)
+    t1 = await connection.table("demo", _SCHEMA)
     await connection.close()
-    assert await connection.table("demo", _DemoVec) is not t1
+    assert await connection.table("demo", _SCHEMA) is not t1
 
 
 async def test_close_is_idempotent(connection: LanceDbConnection) -> None:

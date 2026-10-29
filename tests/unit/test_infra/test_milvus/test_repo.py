@@ -32,11 +32,14 @@ from everos.infra.persistence.milvus.repository import (
     MilvusRepoBase,
     MilvusValueLimitError,
 )
+from tests.fakes import TEST_DIM
 
 
 def _milvus() -> IndexRepositories:
     """Milvus repositories over the configured settings; nothing connects."""
-    return MilvusIndexBackend(MilvusConnection(load_settings().milvus)).repositories
+    return MilvusIndexBackend(
+        MilvusConnection(load_settings().milvus), dim=TEST_DIM
+    ).repositories
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +152,7 @@ def test_remote_uri_is_required_and_local_paths_are_rejected() -> None:
 
 
 def test_neutral_schema_tracks_every_model_field_and_dense_vector() -> None:
-    schema = schema_for(Episode)
+    schema = schema_for(Episode, dim=TEST_DIM)
     assert {field.name for field in schema.fields} == set(Episode.model_fields)
     assert [field.name for field in schema.vector_fields] == [
         "vector",
@@ -604,7 +607,7 @@ def test_nullable_bm25_input_is_declared_not_null() -> None:
     logical field is optional. Episode and user_profile cannot cover this
     interaction, so it is asserted where it actually occurs.
     """
-    logical = schema_for(_milvus().foresight.schema)
+    logical = _milvus().foresight.index_schema
     assert logical.field("evidence_tokens").nullable is True
     assert "evidence_tokens" in logical.bm25_fields
 

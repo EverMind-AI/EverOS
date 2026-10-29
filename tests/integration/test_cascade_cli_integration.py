@@ -31,7 +31,7 @@ from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
 from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.service import OpsService
-from tests.fakes import make_storage
+from tests.fakes import arrow_schema, make_storage
 
 
 @pytest.fixture
@@ -204,7 +204,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
                 pa.field("subject_vector", pa.string(), nullable=True)
                 if f.name == "subject_vector"
                 else f
-                for f in Episode.to_arrow_schema()
+                for f in arrow_schema(Episode)
             ]
         )
         await conn.create_table("episode", schema=drifted)
@@ -213,7 +213,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
     async def _episode_subject_vector_type():  # type: ignore[no-untyped-def]
         storage = make_storage(root)
         try:
-            tbl = await storage.lance.table("episode", Episode)
+            tbl = await storage.lance.table("episode", arrow_schema(Episode))
             return (await tbl.schema()).field("subject_vector").type
         finally:
             await storage.aclose()
@@ -240,7 +240,7 @@ def test_rebuild_recovers_drifted_index_and_reindexes(
 
     # Table recreated with the correct vector type; md re-indexed.
     assert asyncio.run(_episode_subject_vector_type()).equals(
-        Episode.to_arrow_schema().field("subject_vector").type
+        arrow_schema(Episode).field("subject_vector").type
     )
     assert asyncio.run(_atomic_fact_row_count()) == 2
 

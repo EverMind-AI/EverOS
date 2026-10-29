@@ -58,8 +58,10 @@ from .llm import user_track_script as user_track_script
 from .sources import static_trace_path as static_trace_path
 from .sources import static_tuning as static_tuning
 from .sources import unused_raw_file_builder as unused_raw_file_builder
+from .storage import TEST_DIM as TEST_DIM
 from .storage import Storage as Storage
 from .storage import StorageView as StorageView
+from .storage import arrow_schema as arrow_schema
 from .storage import handler_deps as handler_deps
 from .storage import index_repositories as index_repositories
 from .storage import make_storage as make_storage
@@ -81,6 +83,7 @@ from .trajectories import agent_trajectory_messages as agent_trajectory_messages
 __all__ = [
     "AGENT_TRACK_OPERATORS",
     "KNOWLEDGE_OPERATORS",
+    "TEST_DIM",
     "TRAJECTORY_START_MS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
@@ -113,6 +116,7 @@ __all__ = [
     "agent_track_script",
     "agent_trajectory",
     "agent_trajectory_messages",
+    "arrow_schema",
     "backfill_deps",
     "boundary_reply",
     "boundary_window",

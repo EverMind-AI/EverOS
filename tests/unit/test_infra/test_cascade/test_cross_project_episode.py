@@ -26,7 +26,7 @@ from everos.infra.persistence.lancedb import (
     open_lancedb_connection,
 )
 from everos.infra.persistence.markdown import EpisodeWriter
-from tests.fakes import handler_deps
+from tests.fakes import TEST_DIM, arrow_schema, handler_deps
 
 
 class _Tokenizer(Tokenizer):
@@ -81,8 +81,10 @@ async def test_same_owner_same_day_in_two_projects_keeps_two_rows(
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
-    table = await conn.create_table(Episode.TABLE_NAME, schema=Episode)
-    repo = _EpisodeRepo(table=table)
+    table = await conn.create_table(
+        Episode.TABLE_NAME, schema=arrow_schema(Episode, dim=TEST_DIM)
+    )
+    repo = _EpisodeRepo(table=table, dim=TEST_DIM)
     monkeypatch.setattr(EpisodeHandler, "index_repo", repo)
 
     writer = EpisodeWriter(mr)

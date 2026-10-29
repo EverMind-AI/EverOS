@@ -20,7 +20,6 @@ from everos.infra.persistence.index import (
     DerivedIndex,
     EmbeddingProvenance,
     is_null,
-    schema_for,
 )
 from everos.infra.persistence.sqlite import (
     MdChangeState,
@@ -87,14 +86,7 @@ class CascadeAdmin:
     async def open_index(
         self, *, verify: bool = True, ensure: bool = True, may_attest: bool = True
     ) -> None:
-        """The CLI's open, whose middle steps ``cascade rebuild`` must skip.
-
-        The width assertion runs unconditionally: ``rebuild`` skips the
-        verification because it repairs the index, yet it is also the one
-        command that creates every table from scratch, where a width the two
-        configuration readers disagree on would be baked in.
-        """
-        self._index.assert_record_dim_matches_settings()
+        """The CLI's open, whose middle steps ``cascade rebuild`` must skip."""
         await self._index.connect()
         if verify:
             await self._index.verify_configuration(
@@ -123,8 +115,7 @@ class CascadeAdmin:
         """
         total = 0
         for repo in self._index.repositories.all():
-            logical_schema = schema_for(repo.schema)
-            if not any(f.name == "vector" for f in logical_schema.vector_fields):
+            if "vector" not in repo.schema.vector_columns():
                 continue
             try:
                 total += await repo.count_where(is_null("vector"))

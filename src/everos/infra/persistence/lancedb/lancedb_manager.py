@@ -13,13 +13,13 @@ __all__ = ["LanceDbConnection"]
 import asyncio
 from collections.abc import Sequence
 
+import pyarrow as pa
 from lancedb import AsyncConnection, AsyncTable
 
 from everos.config import LanceDBSettings
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.lancedb.base.connection import open_lancedb_connection
 from everos.infra.persistence.memory_root import MemoryRoot
-from everos.infra.persistence.records.table_chassis import BaseLanceTable
 
 logger = get_logger(__name__)
 
@@ -49,8 +49,12 @@ class LanceDbConnection:
         async with self._lock:
             return await self._ensure_connection_locked()
 
-    async def table(self, name: str, schema: type[BaseLanceTable]) -> AsyncTable:
-        """Open the named table (creating it from ``schema`` if missing). Cached."""
+    async def table(self, name: str, arrow_schema: pa.Schema) -> AsyncTable:
+        """Open the named table (creating it with ``arrow_schema`` if missing).
+
+        Cached by name: ``arrow_schema`` is only read when the table does not
+        exist yet.
+        """
         async with self._lock:
             if name not in self._tables:
                 conn = await self._ensure_connection_locked()
@@ -59,7 +63,9 @@ class LanceDbConnection:
                     self._tables[name] = await conn.open_table(name)
                     logger.info("lancedb_table_opened", name=name)
                 else:
-                    self._tables[name] = await conn.create_table(name, schema=schema)
+                    self._tables[name] = await conn.create_table(
+                        name, schema=arrow_schema
+                    )
                     logger.info("lancedb_table_created", name=name)
             return self._tables[name]
 

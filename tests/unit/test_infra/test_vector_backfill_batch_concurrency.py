@@ -70,7 +70,7 @@ class _NoopRepo:
 
 
 class _FakeSchema:
-    """Minimal stand-in for :class:`BaseLanceTable` — ``_backfill_table``
+    """Minimal stand-in for :class:`IndexRecord` — ``_backfill_table``
     only reads ``schema.TABLE_NAME``."""
 
     TABLE_NAME = "fake_table"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from everos.infra.persistence.lancedb import KnowledgeTopic
+from tests.fakes import arrow_schema
 
 
 class TestKnowledgeTopicSchema:
@@ -35,5 +36,5 @@ class TestKnowledgeTopicSchema:
         assert required.issubset(fields), f"Missing: {required - fields}"
 
     def test_arrow_schema_has_utc_timestamps(self) -> None:
-        schema = KnowledgeTopic.to_arrow_schema()
+        schema = arrow_schema(KnowledgeTopic)
         assert schema is not None

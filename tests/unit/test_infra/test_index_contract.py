@@ -47,6 +47,7 @@ from everos.infra.persistence.milvus import (
     MilvusRepoBase,
 )
 from everos.infra.persistence.milvus.repos import _EpisodeRepo as _MilvusEpisodeRepo
+from tests.fakes import TEST_DIM
 
 _EXTERNAL_PREFIX_PATTERN = re.compile(r"everos_e2e_[0-9a-f]{32}")
 
@@ -152,16 +153,18 @@ def _episode(number: int, *, owner_id: str = "owner") -> Episode:
 
 
 def _lance_backend(root: Path) -> IndexBackend:
-    return LanceIndexBackend(LanceDbConnection(MemoryRoot(root), LanceDBSettings()))
+    return LanceIndexBackend(
+        LanceDbConnection(MemoryRoot(root), LanceDBSettings()), dim=TEST_DIM
+    )
 
 
 def _milvus_backend(_root: Path) -> IndexBackend:
-    return MilvusIndexBackend(MilvusConnection(MilvusSettings()))
+    return MilvusIndexBackend(MilvusConnection(MilvusSettings()), dim=TEST_DIM)
 
 
 def _milvus_episode() -> _MilvusEpisodeRepo:
     """A Milvus episode repository over the configured (unconnected) settings."""
-    return _MilvusEpisodeRepo(MilvusConnection(load_settings().milvus))
+    return _MilvusEpisodeRepo(MilvusConnection(load_settings().milvus), dim=TEST_DIM)
 
 
 @pytest.mark.parametrize(
@@ -198,7 +201,7 @@ def test_the_registered_repository_set_is_the_seven_business_tables() -> None:
 
 def test_all_logical_schemas_are_portable_and_validate_bm25_fields() -> None:
     for schema in BUSINESS_SCHEMAS:
-        logical = schema_for(schema)
+        logical = schema_for(schema, dim=TEST_DIM)
         assert logical.table_name == schema.TABLE_NAME
         declared = {field.name for field in logical.fields}
         assert set(logical.bm25_fields) <= declared
@@ -344,7 +347,7 @@ async def test_find_by_owner_entries_columns_select_before_materializing(
     find_where_spy = AsyncMock(
         side_effect=AssertionError("columns projection must not fetch full rows")
     )
-    lance_episode_repo = _EpisodeRepo(table=_RecordingTable())  # type: ignore[arg-type]
+    lance_episode_repo = _EpisodeRepo(table=_RecordingTable(), dim=TEST_DIM)  # type: ignore[arg-type]
     monkeypatch.setattr(lance_episode_repo, "find_where", find_where_spy)
 
     rows = await lance_episode_repo.find_by_owner_entries(

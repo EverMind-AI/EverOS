@@ -15,16 +15,24 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
 
 import pyarrow as pa
 from lancedb import AsyncTable
 
-from everos.core.errors import VectorStoreBusyError
+from everos.core.errors import IndexSchemaMismatchError, VectorStoreBusyError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now
-from everos.infra.persistence.records.table_chassis import BaseLanceTable
+from everos.infra.persistence.index.schema import (
+    IndexFieldKind,
+    IndexSchema,
+    schema_for,
+)
+from everos.infra.persistence.lancedb.base import indexes
+from everos.infra.persistence.lancedb.base.arrow import arrow_schema_for
+from everos.infra.persistence.records import IndexRecord
 
 logger = get_logger(__name__)
 
@@ -270,32 +278,33 @@ def _is_transient_execution_error(exc: BaseException) -> bool:
 class TableSource(Protocol):
     """Where a repository opens its table (the application's connection)."""
 
-    async def table(self, name: str, schema: type[BaseLanceTable]) -> AsyncTable: ...
+    async def table(self, name: str, arrow_schema: pa.Schema) -> AsyncTable: ...
 
 
-class LanceRepoBase[T: BaseLanceTable]:
+class LanceRepoBase[T: IndexRecord]:
     """Generic CRUD repository for one LanceDB table.
 
     Subclass and bind to a schema. Two ways to provide the table:
 
     1. **A table** — pass an open one to ``__init__``::
 
-           repo = EpisodeRepo(table)
+           repo = EpisodeRepo(table, dim=1024)
 
     2. **A table source** — pass ``source=``, typically the application's
        :class:`~everos.infra.persistence.lancedb.LanceDbConnection`; the
        table is opened (and created if missing) on first use::
 
-           repo = EpisodeRepo(source=connection)
+           repo = EpisodeRepo(source=connection, dim=1024)
            # business tables are written through ``upsert`` (merge on the
            # declared PRIMARY_KEY); ``add`` is the chassis insert primitive
            await repo.upsert([Episode(text=..., vector=[...])])
 
-    The LanceDB table name lives on the schema (``BaseLanceTable.TABLE_NAME``)
-    so every LanceDB-side metadatum — column shape, table name,
-    vector dim, BM25 index spec — sits in one place. ``table_name``
-    here is a thin pass-through; subclasses normally do **not**
-    override it.
+    The table name, columns and BM25 spec live on the record
+    (``IndexRecord.TABLE_NAME`` / ``BM25_FIELDS``); the vector width is the
+    ``dim`` the backend passes in. Together they give :attr:`index_schema`,
+    and the Arrow schema the table is created and written with derives from
+    it (:attr:`arrow_schema`). ``table_name`` here is a thin pass-through;
+    subclasses normally do **not** override it.
 
     Write paths (``add`` / ``upsert`` / ``delete`` / ``delete_by_md_path``)
     are serialised by a per-``table_name`` :class:`asyncio.Lock`. LanceDB's
@@ -465,6 +474,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         table: AsyncTable | None = None,
         *,
         source: TableSource | None = None,
+        dim: int,
         timeouts: LanceTimeouts = LanceTimeouts(),  # noqa: B008 - frozen value
         sweep_husks: HuskSweep | None = None,
     ) -> None:
@@ -474,14 +484,57 @@ class LanceRepoBase[T: BaseLanceTable]:
             )
         self._table_override = table
         self._source = source
+        self._vector_dim = dim
         self._timeouts = timeouts
         self._sweep_husks: HuskSweep = sweep_husks or remove_empty_index_dirs
+
+    @cached_property
+    def index_schema(self) -> IndexSchema:
+        """The record's neutral schema at this repo's vector width.
+
+        Lazy so a record with no ``PRIMARY_KEY`` is refused by the write path
+        (``upsert``) with its own message rather than at construction.
+        """
+        return schema_for(self.schema, dim=self._vector_dim)
+
+    @cached_property
+    def arrow_schema(self) -> pa.Schema:
+        """The Arrow schema the table is created and written with."""
+        return arrow_schema_for(self.index_schema)
 
     async def _table(self) -> AsyncTable:
         if self._table_override is not None:
             return self._table_override
         assert self._source is not None
-        return await self._source.table(self.schema.TABLE_NAME, self.schema)
+        return await self._source.table(self.schema.TABLE_NAME, self.arrow_schema)
+
+    def _to_arrow(self, records: Sequence[T]) -> pa.Table:
+        self._check_vector_widths(records)
+        return pa.Table.from_pylist(
+            [record.model_dump() for record in records], schema=self.arrow_schema
+        )
+
+    def _check_vector_widths(self, records: Sequence[T]) -> None:
+        """Refuse a vector whose length is not the configured width.
+
+        The records carry no width, so this is where a wrong-width embedding
+        is caught. Arrow would refuse it too, but as an anonymous
+        ``ArrowInvalid`` the cascade can only record as a failed write; a
+        width mismatch is configuration, so it is named as such.
+
+        Raises:
+            IndexSchemaMismatchError: A vector's length differs from the
+                column's width.
+        """
+        for field in self.index_schema.vector_fields:
+            for record in records:
+                vector = getattr(record, field.name)
+                if vector is not None and len(vector) != field.dimension:
+                    raise IndexSchemaMismatchError(
+                        f"table {self.table_name!r} column {field.name!r} expects "
+                        f"vectors of width {field.dimension} ([embedding] dim) but "
+                        f"got {len(vector)}; the embedding model and dim disagree"
+                    )
 
     # ── Create ─────────────────────────────────────────────────────────────
 
@@ -489,7 +542,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         """Insert one or more records."""
         async with self._locked(self._timeouts.write, "add"):
             table = await self._table()
-            await table.add(list(records))
+            await table.add(self._to_arrow(records))
 
     # ── Upsert ─────────────────────────────────────────────────────────────
 
@@ -519,7 +572,7 @@ class LanceRepoBase[T: BaseLanceTable]:
                 table.merge_insert(list(key))
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(list(records))
+                .execute(self._to_arrow(records))
             )
 
     # ── Maintenance ────────────────────────────────────────────────────────
@@ -690,7 +743,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         per call.
 
         This method is the workaround: rebuild every indexed column from the
-        schema's ``ensure_fts_indexes`` contract. Measured effect — the live
+        schema's declarations (:mod:`.indexes`). Measured effect — the live
         index goes from 7 files back to 4 after 25 ``optimize()`` beats, i.e.
         the fragment set does collapse. The rebuild is an **O(N) full retrain**
         but cheap in practice (~0.3s for 50k rows × 2 FTS columns on local SSD).
@@ -732,15 +785,15 @@ class LanceRepoBase[T: BaseLanceTable]:
             # ``return_exceptions``, so the whole search request 500s. Only
             # indexes on columns that are no longer indexed at all get dropped;
             # nothing queries those, so their drop opens no window.
-            wanted = set(self.schema.BM25_FIELDS or ()) | set(
-                self.schema.vector_columns()
-            )
+            wanted = set(self.index_schema.bm25_fields) | {
+                field.name for field in self.index_schema.vector_fields
+            }
             for idx in await table.list_indices():
                 if not wanted.intersection(idx.columns or ()):
                     await table.drop_index(idx.name)
-            await self.schema.ensure_fts_indexes(table, replace=True)
-            await self.schema.ensure_vector_indexes(
-                table, min_rows=_vector_index_min_rows()
+            await indexes.ensure_fts_indexes(table, self.index_schema, replace=True)
+            await indexes.ensure_vector_indexes(
+                table, self.index_schema, min_rows=_vector_index_min_rows()
             )
 
     # ── Read ───────────────────────────────────────────────────────────────
@@ -749,11 +802,11 @@ class LanceRepoBase[T: BaseLanceTable]:
         """Build the ANN index on vector columns that crossed the row
         threshold since startup, and retrain one whose delta indices piled
         up — the cascade's heavy beat calls this; the cases are spelled out
-        on :meth:`BaseLanceTable.ensure_vector_indexes`."""
+        on :func:`.indexes.ensure_vector_indexes`."""
         async with self._locked(self._timeouts.rebuild, "ensure_vector_indexes"):
             table = await self._table()
-            return await self.schema.ensure_vector_indexes(
-                table, min_rows=_vector_index_min_rows()
+            return await indexes.ensure_vector_indexes(
+                table, self.index_schema, min_rows=_vector_index_min_rows()
             )
 
     async def count(self) -> int:
@@ -813,8 +866,8 @@ class LanceRepoBase[T: BaseLanceTable]:
                 query = query.select(
                     [
                         f.name
-                        for f in self.schema.to_arrow_schema()
-                        if not pa.types.is_fixed_size_list(f.type)
+                        for f in self.index_schema.fields
+                        if f.kind is not IndexFieldKind.DENSE_VECTOR
                     ]
                 )
             rows = await query.limit(limit).to_list()
@@ -974,7 +1027,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         return int(result.num_deleted_rows)
 
 
-class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
+class LanceDailyLogRepoBase[T: IndexRecord](LanceRepoBase[T]):
     """LanceRepoBase + queries unique to daily-log tables.
 
     Daily-log tables (``episode`` / ``atomic_fact`` / ``foresight`` /

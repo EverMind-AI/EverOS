@@ -1,7 +1,8 @@
 """LanceDB business persistence layer.
 
-Sits on top of :mod:`.base` (connection factory + ``LanceRepoBase``)
-and :mod:`everos.infra.persistence.records` (``BaseLanceTable``) and provides:
+Sits on top of :mod:`.base` (connection factory, ``LanceRepoBase``, the
+Arrow schema derivation and the FTS / vector index upkeep) and the neutral
+record declarations of :mod:`everos.infra.persistence.records`, and provides:
 
     * :class:`LanceDbConnection` -- one memory root's async connection and
       table cache (:mod:`.lancedb_manager`)
@@ -14,7 +15,9 @@ External usage::
 
     from everos.infra.persistence.lancedb import LanceDbConnection, LanceIndexBackend
 
-    backend = LanceIndexBackend(LanceDbConnection(root, settings.lancedb))
+    backend = LanceIndexBackend(
+        LanceDbConnection(root, settings.lancedb), dim=settings.embedding.dim
+    )
     await backend.repositories.episode.upsert([...])
 
 Three index kinds: scalar / BM25 / vector. Tables are created lazily on

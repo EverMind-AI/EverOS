@@ -65,6 +65,7 @@ class MilvusRepoBase[T: BaseModel]:
 
     Args:
         connection: The application's Milvus connection.
+        dim: ``[embedding] dim`` -- the width of the dense vector fields.
     """
 
     schema: type[T]
@@ -74,14 +75,15 @@ class MilvusRepoBase[T: BaseModel]:
 
     @property
     def index_schema(self) -> IndexSchema:
-        return schema_for(self.schema)
+        return self._index_schema
 
     @property
     def table_name(self) -> str:
         return self.index_schema.table_name
 
-    def __init__(self, connection: MilvusConnection) -> None:
+    def __init__(self, connection: MilvusConnection, *, dim: int) -> None:
         self._connection = connection
+        self._index_schema = schema_for(self.schema, dim=dim)
         self._layout = CollectionLayout(self.index_schema)
         self._codec = RowCodec(self.schema, self.index_schema)
 

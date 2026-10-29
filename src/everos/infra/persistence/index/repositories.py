@@ -21,7 +21,6 @@ from .protocols import (
     EpisodeIndexRepository,
     IndexRepository,
 )
-from .schema import schema_for
 
 BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     Episode,
@@ -77,5 +76,5 @@ class IndexRepositories:
         return {
             schema.TABLE_NAME: self.for_schema(schema)
             for schema in BUSINESS_SCHEMAS
-            if schema_for(schema).vector_fields
+            if schema.vector_columns()
         }
