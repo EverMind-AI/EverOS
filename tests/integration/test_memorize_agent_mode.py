@@ -10,36 +10,38 @@ Covers the agent branches that ``test_memorize_integration.py`` skips:
 
 Self-contained: the chat-baseline file keeps its fixture local, so we
 copy the minimum scaffolding rather than refactor it into a shared
-conftest. The model is :func:`tests.fakes.memorize_llm`.
+conftest. The model is :func:`tests.fakes.memorize_llm`, which answers the
+agent-track operators from their canned scripts, so the OME strategies run
+for real.
 """
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
-import importlib
 import json
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from everalgo.testing import FakeLLMClient
 
+from everos.infra.ome.records import RunStatus
 from everos.infra.persistence import MemoryRoot
 from everos.service import (
     MemorizeResult,
-    MemoryService,
     build_application,
     build_providers,
 )
-from tests.fakes import memorize_llm
+from tests.fakes import agent_trajectory_messages, memorize_llm
 from tests.fakes.storage import Storage
 
-_under_test: dict[str, MemoryService] = {}
-"""The memory facade of the application the ``memorize_env`` fixture built."""
+_under_test: dict[str, Any] = {}
+"""The memory facade (``memory``) and OME engine (``engine``) of the
+application the ``memorize_env`` fixture built."""
 
 
 async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
@@ -101,10 +103,6 @@ async def memorize_env(
     (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ome.toml").write_text("# test\n")
 
-    af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    ac_mod = importlib.import_module("everos.memory.strategies.extract_agent_case")
-
     started: dict[str, Any] = {"engine": None}
 
     async def _setup(*, mode: str = "agent", fake_llm: FakeLLMClient) -> None:
@@ -118,20 +116,6 @@ async def memorize_env(
 
         await storage.create_schema()
 
-        # Silence OME strategies so agent_case / atomic / foresight don't
-        # try real extraction logic during these tests.
-        noop = AsyncMock(return_value=[])
-        for mod in (af_mod, fs_mod, ac_mod):
-            extractor_attr = next(
-                (n for n in dir(mod) if n.endswith("Extractor")), None
-            )
-            if extractor_attr:
-                monkeypatch.setattr(
-                    mod,
-                    extractor_attr,
-                    lambda *a, **k: type("M", (), {"aextract": noop})(),
-                )
-
         settings = load_settings()
         application = build_application(
             settings,
@@ -139,6 +123,7 @@ async def memorize_env(
         )
         _under_test["memory"] = application.memory
         engine = application._engine
+        _under_test["engine"] = engine
         await engine.start()
         started["engine"] = engine
 
@@ -243,3 +228,35 @@ async def test_agent_mode_dispatch_no_double_insert(
     assert len(rows) == 1  # boundary stage owns the ledger
     payload = json.loads(rows[0]["payload_json"])
     assert len(payload["items"]) == 4
+
+
+async def test_agent_mode_files_the_trajectory_as_an_agent_case(
+    tmp_path: Path, memorize_env: Callable[..., Any]
+) -> None:
+    """A closed tool trajectory becomes an agent case of its assistant sender."""
+    await memorize_env(mode="agent", fake_llm=memorize_llm([[]]))
+
+    result = await memorize(
+        {"session_id": "test_agent_case", "messages": agent_trajectory_messages()},
+        is_final=True,
+    )
+    assert result.status == "extracted"
+
+    engine = _under_test["engine"]
+    runs: list = []
+    for _ in range(100):
+        runs = await engine.list_runs("extract_agent_case", status=RunStatus.SUCCESS)
+        if runs:
+            break
+        await asyncio.sleep(0.1)
+    assert runs, "expected a SUCCESS run of extract_agent_case"
+
+    (case_md,) = _case_files(tmp_path, "agent_42")
+    assert "Fix the flaky date parsing test" in case_md
+
+
+def _case_files(root: Path, agent_id: str) -> list[str]:
+    return [
+        p.read_text(encoding="utf-8")
+        for p in root.glob(f"**/agents/{agent_id}/.cases/*.md")
+    ]

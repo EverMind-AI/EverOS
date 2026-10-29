@@ -1,0 +1,5 @@
+{
+  "has_exploration": true,
+  "has_user_correction": false,
+  "reason": "The agent tried a failing test run, read the traceback and changed its approach."
+}

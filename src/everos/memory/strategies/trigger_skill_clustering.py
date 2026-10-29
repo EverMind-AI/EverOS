@@ -9,19 +9,20 @@ merges into an existing cluster (id transparently swapped to the existing
 cluster's id by ``_merge``) or returns ``None`` (the brand-new id is used
 as-is when persisting).
 
-Skill-track parity with opensource: uses :func:`cluster_by_llm` (rather
+Skill-track parity with opensource: uses :func:`acluster_by_llm` (rather
 than the geometry-only variant) — opensource routes ``has_case=True``
-memcells through the LLM-refined path. The low-quality short-circuit
-(``quality_score < 0.2``) mirrors :class:`AgentSkillExtractor`'s own
-``skip_quality_threshold`` so we avoid both an embedding call and an LLM
-ranking call for cases that won't drive a skill anyway.
+memcells through the LLM-refined path. Cases algo would not distil into a
+skill (:func:`should_extract_skill`: below the quality floor and not admitted
+by a correctness gate) are dropped first, so they cost neither an embedding
+call nor an LLM ranking call.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from everalgo.agent_memory import should_extract_skill
 from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.clustering import cluster_by_llm
+from everalgo.clustering import acluster_by_llm
 
 from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
@@ -32,10 +33,6 @@ from everos.memory.models import mint_cluster_id
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
-
-_SKIP_QUALITY_THRESHOLD = 0.2
-"""Lower bound mirroring :attr:`AgentSkillExtractor.skip_quality_threshold`;
-cases below this never produce a skill, so we don't bother clustering them."""
 
 
 async def trigger_skill_clustering(
@@ -71,13 +68,12 @@ async def trigger_skill_clustering(
     # Lock per (app, project, agent): clusters are scoped to a space.
     partition = f"{event.app_id}:{event.project_id}:{event.agent_id}"
     async with get_partition_lock("trigger_skill_clustering", partition):
-        # 1. Drop low-quality cases — they won't yield a skill anyway.
-        if event.quality_score < _SKIP_QUALITY_THRESHOLD:
+        # 1. Drop cases algo would not distil into a skill anyway.
+        if not should_extract_skill(event.quality_score, case_gate=event.case_gate):
             logger.info(
                 "skill_clustering_skipped_low_quality",
                 case_entry_id=event.case_entry_id,
                 quality_score=event.quality_score,
-                threshold=_SKIP_QUALITY_THRESHOLD,
             )
             return []
 
@@ -116,7 +112,9 @@ async def trigger_skill_clustering(
             )
 
             # 5. Ask the LLM to merge it into an existing cluster (or keep as-is).
-            merged = await cluster_by_llm(new_cluster, existing, llm=deps.require_llm())
+            merged = await acluster_by_llm(
+                new_cluster, existing, llm=deps.require_llm()
+            )
             to_save = merged if merged is not None else new_cluster
 
             # 6. Persist the (possibly-merged) cluster.
@@ -151,6 +149,7 @@ async def trigger_skill_clustering(
             quality_score=event.quality_score,
             case_timestamp_ms=event.case_timestamp_ms,
             case_vector=vector_list,
+            case_gate=event.case_gate,
         )
     ]
 

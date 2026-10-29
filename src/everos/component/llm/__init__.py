@@ -7,6 +7,8 @@ This package exports only what EverOS itself defines:
 - :class:`OpenAIProvider` -- the one ``LLMClient`` implementation, over any
   OpenAI-compatible Chat Completions endpoint.
 - :class:`LLMCallError` -- what a failed call raises, with a ``reason``.
+- :class:`LLMCaseJudge` -- everalgo's agent-case gate question answered by
+  an ``LLMClient``.
 - :class:`LLMCallObserver` / :class:`TokenUsage` / :class:`NullObserver` --
   the hook that sees each completion's usage and finish reason.
 - :class:`LLMClientConfig` / :func:`build_llm_provider` -- the factory.
@@ -29,6 +31,7 @@ External usage::
     )
 """
 
+from .case_judge import LLMCaseJudge as LLMCaseJudge
 from .errors import LLMCallError as LLMCallError
 from .factory import DeciderClientConfig as DeciderClientConfig
 from .factory import LLMClientConfig as LLMClientConfig
@@ -47,6 +50,7 @@ __all__ = [
     "DeciderClientConfig",
     "LLMCallError",
     "LLMCallObserver",
+    "LLMCaseJudge",
     "LLMClientConfig",
     "LLMNotConfiguredError",
     "NullObserver",

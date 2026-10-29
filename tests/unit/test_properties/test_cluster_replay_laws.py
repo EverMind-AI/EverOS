@@ -62,7 +62,7 @@ _plans = st.lists(
 )
 
 
-async def _fake_cluster_by_llm(
+async def _fake_acluster_by_llm(
     new_cluster: AlgoCluster, existing: list[AlgoCluster], *, llm: Any
 ) -> AlgoCluster | None:
     """Same shape as the LLM merge: fold into the first cluster of the same group."""
@@ -124,8 +124,8 @@ async def _run(plan: list[tuple[int, int]], which: str) -> None:
             }
 
         llm_merge = patch(
-            "everos.memory.strategies.trigger_skill_clustering.cluster_by_llm",
-            _fake_cluster_by_llm,
+            "everos.memory.strategies.trigger_skill_clustering.acluster_by_llm",
+            _fake_acluster_by_llm,
         )
         with llm_merge:
             seen: set[str] = set()

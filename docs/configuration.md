@@ -264,6 +264,12 @@ joins it only behind its session's backlog)
 | `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
 | `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
 
+### `[agent_memory]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `case_gate_enabled` | bool | `false` | Put everalgo's correctness gate in front of agent-case extraction: the extraction LLM judges whether the work in a conversation was completed correctly (one extra call per conversation up to 50k tokens; longer ones are admitted without a call), and only admitted conversations become cases. An admitted case drives skill extraction whatever its quality score. Off: cases are admitted by the complexity and value filters. Requires restart. |
+
 ### `[clustering]`
 
 | Field | Type | Default | Description |

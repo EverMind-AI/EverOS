@@ -1,0 +1,5 @@
+{
+  "reasoning": "The window is one debugging task, from the request to the agent's closing answer; nothing closes before its end.",
+  "boundaries": [],
+  "tail_complete": true
+}

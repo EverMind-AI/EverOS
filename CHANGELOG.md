@@ -13,6 +13,17 @@ engine, the cascade and the domain objects are now assembled once, by
 both use the resulting `Application` through three facades:
 `MemoryService`, `KnowledgeService` and `OpsService`.
 
+### Added
+
+- **An optional correctness gate for agent cases** (`[agent_memory]
+  case_gate_enabled`, default `false`). On, the extraction LLM judges
+  whether the work in an agent conversation was completed correctly (one
+  extra call per conversation up to 50k tokens; longer ones are admitted
+  without a call), and only admitted conversations become cases, instead of
+  the complexity and value filters deciding. An admitted case drives skill
+  extraction whatever its quality score. The judge is
+  `everos.component.llm.LLMCaseJudge`.
+
 ### Changed
 
 - **The service layer's module-level functions are gone.** `everos.service`
@@ -116,6 +127,21 @@ both use the resulting `Application` through three facades:
   profile item with all four keys (`description`, `category` / `trait`,
   `evidence` / `basis`, `observed_at`), the ones a stored item lacks as
   `null` -- an additive change.
+- **Agent memory says why it stayed empty.** A memcell that yields no agent
+  case logs `agent_case_skipped` with everalgo's `reason` (for example
+  `too_few_tool_rounds`, `filter_rejected`) and its `detail`; a skill run
+  logs `agent_skill_skipped` for a case below the quality floor and
+  `agent_skill_op_dropped` for each operation the model proposed that was
+  dropped. The case quality floor before skill clustering is everalgo's
+  `should_extract_skill` instead of a copy of its threshold.
+  `AgentCase.from_algo` moved to `everos.memory.mappers.agent_case`.
+
+### Fixed
+
+- **Agent skill clustering failed on the 2026-10-13 everalgo line.**
+  `trigger_skill_clustering` awaited `cluster_by_llm`, which is now a
+  blocking bridge that refuses to run inside the event loop, so no case was
+  clustered and no skill extracted; it now awaits `acluster_by_llm`.
 
 ### Upgrade
 

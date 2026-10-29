@@ -1,4 +1,10 @@
-"""Agent pipeline e2e: 5 SWE-bench trajectories drive /add + /flush.
+"""Agent pipeline e2e — a hermetic canned run and a real-LLM SWE-bench drive.
+
+``test_add_flush_search_get_on_canned_agent_track`` runs anywhere: every
+model call is answered from the canned scripts and the embedder is
+:class:`tests.fakes.FakeEmbeddingProvider`.
+
+The rest: 5 SWE-bench trajectories drive /add + /flush.
 
 Drives the full HTTP route through to storage, exercising the agent-track
 pipeline (boundary → memcell → extract_agent_case → trigger_skill_clustering
@@ -38,6 +44,7 @@ White-box assertions (audit trail of internal surfaces touched):
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -49,6 +56,12 @@ from everos.infra.ome.records import RunStatus
 from everos.infra.persistence.index import eq
 from everos.infra.persistence.markdown import AgentCaseDailyFrontmatter
 from everos.service import Application
+from tests.fakes import (
+    FakeEmbeddingProvider,
+    agent_track_script,
+    agent_trajectory_messages,
+    memorize_llm,
+)
 from tests.fakes.storage import StorageView
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "agent_trajectories"
@@ -265,3 +278,119 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         storage_view.repos,
         expect_at_least={"agent_case": 1},
     )
+
+
+# ---------------------------------------------------------------------------
+# Hermetic agent track: canned model, fake embedder, no credentials
+# ---------------------------------------------------------------------------
+
+
+async def _poll_until(
+    condition: Callable[[], Awaitable[bool]], *, deadline_seconds: float = 60.0
+) -> None:
+    async with asyncio.timeout(deadline_seconds):
+        while True:
+            if await condition():
+                return
+            await asyncio.sleep(0.2)
+
+
+async def test_add_flush_search_get_on_canned_agent_track(
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/add`` -> ``/flush`` -> ``/get`` -> ``/search`` on the canned agent track.
+
+    Real application in agent mode (boundary, both pipelines, OME strategies,
+    cascade, LanceDB), every model call answered from the canned scripts, a
+    1024-wide fake embedder (the skill chain needs one), no rerank. The flush
+    cuts the trajectory into one cell; the case, its cluster and the skill it
+    drives all become readable through the API for ``agent_id``.
+    """
+    from everos.config import load_settings
+    from everos.entrypoints.api.app import create_app
+    from everos.service import build_application, build_providers
+
+    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "agent")
+    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
+    load_settings.cache_clear()
+    settings = load_settings()
+    calls: list[str] = []
+    providers = dataclasses.replace(
+        build_providers(settings),
+        llm=memorize_llm(calls=calls),
+        embedding=FakeEmbeddingProvider(dim=1024),
+        rerank=None,
+    )
+    app = create_app(application=build_application(settings, providers=providers))
+    case = json.loads(agent_track_script("case_compress"))
+    skill = json.loads(agent_track_script("skill_extract"))["operations"][0]["data"]
+
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        add = await client.post(
+            "/api/v1/memory/add",
+            json={"session_id": "s_billing", "messages": agent_trajectory_messages()},
+        )
+        assert add.status_code == 200, add.text
+        assert add.json()["data"]["status"] == "accumulated"
+
+        flush = await client.post(
+            "/api/v1/memory/flush", json={"session_id": "s_billing"}
+        )
+        assert flush.status_code == 200, flush.text
+        assert flush.json()["data"]["status"] == "extracted"
+
+        async def _get(memory_type: str) -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/get",
+                json={"agent_id": "agent_42", "memory_type": memory_type},
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()["data"][f"{memory_type}s"]
+
+        async def _search() -> dict[str, list[dict]]:
+            resp = await client.post(
+                "/api/v1/memory/search",
+                json={
+                    "agent_id": "agent_42",
+                    "query": "flaky date parsing test",
+                    "method": "keyword",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()["data"]
+
+        async def _indexed() -> bool:
+            return bool(await _get("agent_case")) and bool(await _get("agent_skill"))
+
+        await _poll_until(_indexed)
+        (got_case,) = await _get("agent_case")
+        assert got_case["task_intent"] == case["task_intent"]
+        assert got_case["approach"] == case["approach"]
+        assert got_case["key_insight"] == case["key_insight"]
+        assert got_case["quality_score"] == case["quality_score"]
+        assert got_case["session_id"] == "s_billing"
+
+        (got_skill,) = await _get("agent_skill")
+        assert got_skill["name"] == skill["name"]
+        assert got_skill["content"] == skill["content"]
+        (source_case,) = got_skill["source_case_ids"]
+        assert got_case["id"].endswith(source_case)
+
+        async def _found() -> bool:
+            data = await _search()
+            return bool(data["agent_cases"]) and bool(data["agent_skills"])
+
+        await _poll_until(_found)
+        found = await _search()
+        assert [c["task_intent"] for c in found["agent_cases"]] == [case["task_intent"]]
+        assert [s["name"] for s in found["agent_skills"]] == [skill["name"]]
+
+    assert calls.count("_BatchReply") == 2  # the add and the flush
+    assert calls.count("_CaseFilterReply") == 1
+    assert calls.count("_CaseCompressReply") == 1
+    assert calls.count("_SkillExtractReply") == 1

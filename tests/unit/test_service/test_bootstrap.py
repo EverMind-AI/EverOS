@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.llm import LLMNotConfiguredError
+from everos.component.llm import LLMCaseJudge, LLMNotConfiguredError
 from everos.config import Settings, load_settings
 from everos.infra.ome import OmeEventBus
 from everos.memory.strategies import STRATEGY_SPECS
@@ -31,6 +31,7 @@ from everos.service import (
     build_application,
     build_providers,
 )
+from everos.service.bootstrap import _case_judge
 from tests.fakes import FakeEmbeddingProvider, make_application, unscripted_llm
 from tests.fakes.application import _ALL_CAPABILITIES
 
@@ -111,6 +112,20 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     assert memory._boundary._llm is llm
     assert memory._boundary._session_buffer is memory._stores.session_buffer
     assert memory._boundary._memcells is memory._stores.memcell
+
+
+@pytest.mark.parametrize(
+    ("enabled", "has_llm", "judged"),
+    [(True, True, True), (False, True, False), (True, False, False)],
+)
+def test_the_case_judge_exists_only_with_the_gate_on_and_an_llm(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, has_llm: bool, judged: bool
+) -> None:
+    monkeypatch.setenv("EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED", str(enabled))
+    load_settings.cache_clear()
+    judge = _case_judge(load_settings(), unscripted_llm() if has_llm else None)
+    assert isinstance(judge, LLMCaseJudge) is judged
+    load_settings.cache_clear()
 
 
 @pytest.mark.parametrize(

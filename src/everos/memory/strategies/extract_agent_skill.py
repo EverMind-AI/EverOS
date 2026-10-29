@@ -48,8 +48,9 @@ has assigned the fresh case to its cluster. The strategy:
    directory an update left behind when it renamed a skill (see
    :func:`_reap_renamed_skills`).
 
-**Retire is not implemented.** ``AgentSkillExtractor.aextract`` returns a
-flat ``list[AgentSkill]`` with no op discriminator; its retire branch
+**Retire is not implemented.** ``AgentSkillExtractor.aextract_with_reason``
+reports one outcome per proposed operation, but a produced skill carries no
+op discriminator; its retire branch
 (``skill_ops._apply_update``, taken when ``confidence <
 retire_confidence``, default ``0.1``) is an ordinary skill carrying a
 lowered confidence and nothing else. This strategy writes every emitted
@@ -64,7 +65,9 @@ stated here rather than left implied by a docstring listing three ops.
 
 Per-case granularity (one strategy run per fresh case) — algo
 short-circuits low-quality cases internally via its own
-``skip_quality_threshold``; the strategy trusts that gate.
+``skip_quality_threshold``; the strategy trusts that gate. Why a run wrote
+fewer skills than the model proposed is logged: ``agent_skill_skipped``
+for the short-circuit, ``agent_skill_op_dropped`` per dropped operation.
 ``cluster_id`` is stamped onto each emitted skill before persistence.
 """
 
@@ -72,7 +75,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from everalgo.agent_memory import AgentSkillExtractor
+from everalgo.agent_memory import AgentSkillExtractor, SkillExtractionResult
 from everalgo.types import AgentCase as AlgoAgentCase
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
@@ -80,6 +83,7 @@ from everos.core.observability.logging import get_logger
 from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import SkillClusterUpdated
+from everos.memory.mappers import agent_case as agent_case_mapper
 from everos.memory.mappers import agent_skill as agent_skill_mapper
 from everos.memory.models import AgentCase, AgentSkill
 from everos.memory.ports import (
@@ -111,10 +115,6 @@ too-aggressive cap here, nor overfilled by an unbounded lineage union
 when many top-K skills each carry a distinct ``source_case_ids`` list.
 Ranking is ``(quality_score desc, timestamp desc)`` — same ordering
 opensource ``AgentSkillExtractor._load_case_history`` applies."""
-
-
-class _ClusterMissingError(RuntimeError):
-    """Race with the cluster strategy; OME retry will catch up."""
 
 
 class _ClusterMissingError(RuntimeError):
@@ -189,16 +189,21 @@ async def extract_agent_skill(
         #    back as an ordinary skill with confidence < retire_confidence and
         #    is NOT honoured here — see the module docstring.
         extractor = AgentSkillExtractor(llm=deps.require_llm())
-        emitted_skills = await extractor.aextract(
+        result = await extractor.aextract_with_reason(
             target,
             existing_relevant_skills=[
                 agent_skill_mapper.to_algo(s.item) for s in existing_skills
             ],
-            supporting_cases=[_to_algo_case(c) for c in supporting],
+            supporting_cases=[
+                agent_case_mapper.to_algo(c.item, entry_id=c.ref.entry_id)
+                for c in supporting
+            ],
         )
+        _log_skipped_operations(result, event)
 
         # 6. Write each emitted skill back, then reap the documents that a
         #    rename left behind.
+        emitted_skills = result.skills
         written_names: dict[str, str] = {}
         for skill in emitted_skills:
             written_names[skill.id] = await _persist_skill(
@@ -218,6 +223,29 @@ async def extract_agent_skill(
 
 
 # ── orchestration helpers ────────────────────────────────────────────────
+
+
+def _log_skipped_operations(
+    result: SkillExtractionResult, event: SkillClusterUpdated
+) -> None:
+    """Log why the extractor produced fewer skills than it was asked about."""
+    if result.pre_reason is not None:
+        logger.info(
+            "agent_skill_skipped",
+            case_entry_id=event.case_entry_id,
+            cluster_id=event.cluster_id,
+            reason=result.pre_reason,
+            detail=result.pre_detail,
+        )
+    for outcome in result.dropped:
+        logger.info(
+            "agent_skill_op_dropped",
+            case_entry_id=event.case_entry_id,
+            cluster_id=event.cluster_id,
+            op_index=outcome.op_index,
+            reason=outcome.reason,
+            detail=outcome.detail,
+        )
 
 
 async def _select_existing_skills(
@@ -348,30 +376,16 @@ def _collect_supporting_entry_ids(
 # ── algo projection and persistence ──────────────────────────────────────
 
 
-def _to_algo_case(case: Stored[AgentCase]) -> AlgoAgentCase:
-    """Project an indexed case onto the algo-side AgentCase type.
-
-    Used only for ``supporting_cases`` — that lineage read stays
-    index-backed (see module docstring, point 3).
-    """
-    return AlgoAgentCase(
-        id=case.ref.entry_id,
-        timestamp=case.item.timestamp,
-        task_intent=case.item.task_intent,
-        approach=case.item.approach,
-        quality_score=case.item.quality_score,
-        key_insight=case.item.key_insight or "",
-    )
-
-
 def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
     """Reconstruct the target case from event fields.
 
     Strong-consistency: the case body travels on the event bus, so the
     strategy never races cascade indexing. Pre-1.2.3 events default
     missing fields to empty — those runs won't have useful data but also
-    won't crash.
+    won't crash. ``case_gate`` rides along only when a gate admitted the case;
+    everalgo reads its presence as "admitted".
     """
+    gate = {"case_gate": event.case_gate} if event.case_gate is not None else {}
     return AlgoAgentCase(
         id=event.case_entry_id,
         timestamp=event.case_timestamp_ms,
@@ -379,6 +393,7 @@ def _to_algo_case_from_event(event: SkillClusterUpdated) -> AlgoAgentCase:
         approach=event.approach,
         quality_score=event.quality_score,
         key_insight=event.key_insight or "",
+        **gate,
     )
 
 

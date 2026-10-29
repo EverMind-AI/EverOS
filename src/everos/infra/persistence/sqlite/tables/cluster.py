@@ -65,7 +65,7 @@ class Cluster(BaseTable, table=True):
 
     preview_json: str
     """JSON-encoded ``list[str]`` — short text samples used by
-    :func:`cluster_by_llm` ranking. Repo round-trips JSON ↔ list."""
+    :func:`acluster_by_llm` ranking. Repo round-trips JSON ↔ list."""
 
 
 class ClusterMember(BaseTable, table=True):

@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
-import uuid
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
-from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
+from everalgo.types import AtomicFact, ChatMessage, Foresight, MemCell
 from structlog.testing import capture_logs
 
 from everos.infra.persistence import MemoryRoot
@@ -32,6 +32,9 @@ from tests.fakes import (
     InMemoryEpisodeIndex,
     InMemoryMemcellStore,
     InMemoryProfileStore,
+    agent_track_llm,
+    agent_track_script,
+    agent_trajectory,
     bundled_instructions,
     make_indexes,
     unscripted_llm,
@@ -45,7 +48,7 @@ class _DeterministicHashEmbedder:
     Same input text → same unit vector; distinct inputs → distinct directions
     (sha256-seeded ``numpy.random.default_rng``). The vectors aren't
     semantically meaningful, but they ARE deterministic and well-spread, so
-    ``cluster_by_geometry`` / ``cluster_by_llm``'s nearest-neighbor logic
+    ``cluster_by_geometry`` / ``acluster_by_llm``'s nearest-neighbor logic
     has real signal to work with — unlike a MagicMock returning a constant
     vector, which collapses every cosine similarity to 1.0.
     """
@@ -255,28 +258,6 @@ async def test_emit_dispatches_both_strategies_to_success(
     assert fs_logs[0]["count"] == 2
 
 
-def _agent_memcell() -> MemCell:
-    return MemCell(
-        items=[
-            ChatMessage(
-                id="m1",
-                role="user",
-                content="please summarise",
-                timestamp=1_700_000_000_000,
-                sender_id="u_alice",
-            ),
-            ChatMessage(
-                id="m2",
-                role="assistant",
-                content="here's the summary",
-                timestamp=1_700_000_001_000,
-                sender_id="agent_42",
-            ),
-        ],
-        timestamp=1_700_000_001_000,
-    )
-
-
 @pytest.mark.asyncio
 async def test_emit_dispatches_agent_case_strategy_to_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
@@ -298,23 +279,8 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         classmethod(lambda cls: MemoryRoot(root=tmp_path)),
     )
 
-    fake_case = AgentCase(
-        id=uuid.uuid4().hex,
-        timestamp=1_700_000_001_000,
-        task_intent="summarise the doc",
-        approach="read + condense",
-        quality_score=0.8,
-        key_insight="",
-    )
-
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
-        ) as mock_ac,
-        capture_logs() as logs,
-    ):
-        _install_deps(storage, monkeypatch, tmp_path)
-        mock_ac.return_value.aextract = AsyncMock(return_value=[fake_case])
+    with capture_logs() as logs:
+        _install_deps(storage, monkeypatch, tmp_path, llm=agent_track_llm())
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
         (tmp_path / "ome.toml").write_text("# test\n")
@@ -325,9 +291,7 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         try:
             await engine.emit(
                 AgentPipelineStarted(
-                    memcell_id="mc_a",
-                    session_id="s1",
-                    memcell=_agent_memcell(),
+                    memcell_id="mc_a", session_id="s1", memcell=agent_trajectory()
                 )
             )
 
@@ -360,17 +324,13 @@ async def test_skill_chain_e2e(
     """Chain: AgentCaseExtracted → trigger_skill_clustering (sqlite) →
     SkillClusterUpdated → extract_agent_skill → SUCCESS.
 
-    Real ``cluster_by_llm`` algorithm path: hash-based deterministic
-    embedder feeds the top-K nearest-neighbor stage, a ``FakeLLMClient``
-    returns ``{"idx": "new"}`` so the algo picks the "brand-new cluster"
-    branch — but the recall + skip-threshold + prompt-render + JSON-parse
-    pipeline is all real. Stood in: the index reads (case +
-    skill, in-memory and empty), ``AgentSkillExtractor`` (downstream
-    extractor; out of scope), and the skill store (in-memory).
+    Real ``acluster_by_llm`` and ``AgentSkillExtractor``: a hash-based
+    deterministic embedder feeds the top-K nearest-neighbor stage (no
+    existing cluster, so a new one is kept without asking the model) and
+    the extractor answers from the canned agent-track script. Stood in: the
+    index reads (case + skill, in-memory and empty) and the skill store
+    (in-memory).
     """
-
-    from everalgo.testing.fake_llm import FakeLLMClient
-    from everalgo.types import AgentSkill as AlgoAgentSkill
 
     from everos.infra.ome.records import RunStatus
 
@@ -381,43 +341,19 @@ async def test_skill_chain_e2e(
     )
 
     embedder = _DeterministicHashEmbedder()
-    # FakeLLMClient: cluster_by_llm only invokes it when top-K similarity
-    # falls below llm_skip_threshold (default 0.85). With a single new
-    # cluster in an empty owner set, the recall stage returns no candidates
-    # at all — so the LLM is never asked. Provide a "{idx: new}" response
-    # anyway as belt-and-suspenders for future scenarios with seeded clusters.
-    fake_llm = FakeLLMClient(responses=['{"idx": "new"}'])
-
-    emitted_skill = AlgoAgentSkill(
-        id=uuid.uuid4().hex,
-        cluster_id="",
-        name="summarise_doc",
-        description="how to summarise docs",
-        content="step 1: read; step 2: condense",
-        confidence=0.7,
-        maturity_score=0.5,
-        source_case_ids=["ac_20260517_0001"],
-    )
-
+    # With no existing cluster the clustering operator never asks the model;
+    # the skill extractor answers from the canned agent-track script.
     skill_store = InMemoryAgentSkillStore()
-    with (
-        patch(
-            "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
-        ) as mock_extractor_cls,
-        capture_logs() as logs,
-    ):
+    with capture_logs() as logs:
         # Index reads are in-memory and empty: no prior skills, no lineage.
         _install_deps(
             storage,
             monkeypatch,
             tmp_path,
-            llm=fake_llm,
+            llm=agent_track_llm(),
             embedding=embedder,
             stores={"agent_skill": skill_store},
             indexes={},
-        )
-        mock_extractor_cls.return_value.aextract = AsyncMock(
-            return_value=[emitted_skill]
         )
 
         (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
@@ -467,7 +403,8 @@ async def test_skill_chain_e2e(
     )
     (written,) = skill_store.skills[agent].values()
     assert written.cluster_id == cluster_logs[0]["cluster_id"]
-    assert written.name == "summarise_doc"
+    want = json.loads(agent_track_script("skill_extract"))["operations"][0]["data"]
+    assert written.name == want["name"]
 
 
 @pytest.mark.asyncio

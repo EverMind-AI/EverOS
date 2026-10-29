@@ -116,7 +116,7 @@ index catches up asynchronously.
                       │                             │
                       │              ┌──────────────┴───────────────┐
                       │              ▼                              ▼
-                      │   UserMemoryPipeline (sync)      AgentMemoryPipeline (fire-and-forget)
+                      │   UserMemoryPipeline (sync)      AgentMemoryPipeline (events only)
                       │   writes episode .md NOW          emits AgentPipelineStarted
                       ▼              │                              │
    (response returns once md is on disk)                           │
@@ -218,7 +218,10 @@ and write their markdown when ready:
 - `extract_foresight` — anticipatory notes
 - `extract_user_profile` — the aggregated `user.md`
 - `extract_agent_case` — a reusable agent trajectory (only when the cell is
-  substantive enough; thin trajectories are skipped by design)
+  substantive enough; thin trajectories are skipped by design, and the
+  `agent_case_skipped` log line says which check skipped them). With
+  `[agent_memory] case_gate_enabled`, an LLM judgement of whether the work
+  was completed correctly decides instead
 - `extract_agent_skill` — clusters related cases into a named skill
 - `trigger_profile_clustering` — triggers user profile clustering
 - `trigger_skill_clustering` — triggers agent skill clustering

@@ -37,6 +37,7 @@ from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider, build_embedding_provider
 from everos.component.llm import (
+    LLMCaseJudge,
     LLMClientConfig,
     LLMNotConfiguredError,
     build_llm_provider,
@@ -223,6 +224,7 @@ def build_application(
         stores=stores,
         indexes=indexes,
         instructions=CustomInstructions(_CONFIG_ROOT),
+        case_judge=_case_judge(settings, providers.llm),
     )
     engine = _build_engine(root, deps)
     capabilities = _capabilities(settings, providers)
@@ -275,6 +277,13 @@ def build_application(
 
 
 # ── providers ──────────────────────────────────────────────────────────────
+
+
+def _case_judge(settings: Settings, llm: LLMClient | None) -> LLMCaseJudge | None:
+    """The agent-case gate's judge, when the gate is on and an LLM exists."""
+    if not settings.agent_memory.case_gate_enabled or llm is None:
+        return None
+    return LLMCaseJudge(llm)
 
 
 def _llm_or_none(

@@ -13,6 +13,7 @@ __all__ = [
 from pathlib import Path
 from typing import Any
 
+from everalgo.agent_memory import CaseJudge
 from everalgo.testing import FakeLLMClient
 
 from everos.memory.custom_instructions import CustomInstructions
@@ -95,12 +96,14 @@ def make_deps(
     stores: Stores | None = None,
     indexes: Indexes | None = None,
     instructions: CustomInstructions | None = None,
+    case_judge: CaseJudge | None = None,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
     ``llm`` defaults to an LLM that refuses every call and ``embedding`` to a
     :class:`FakeEmbeddingProvider`; pass ``None`` for either to model an
-    unconfigured provider.
+    unconfigured provider. ``case_judge`` stays ``None`` (no agent-case
+    gate) unless given.
     """
     return MemoryDeps(
         llm=unscripted_llm() if llm is _DEFAULT else llm,
@@ -108,4 +111,5 @@ def make_deps(
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),
         instructions=instructions or bundled_instructions(),
+        case_judge=case_judge,
     )

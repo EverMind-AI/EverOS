@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import anyio
+from everalgo.agent_memory import CaseExtractionResult
 from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCell
 
 from everos.component.embedding import EmbeddingProvider
@@ -258,7 +259,9 @@ async def test_agent_case_strategy_md_feeds_handler_with_content(
             "everos.memory.strategies.extract_agent_case.AgentCaseExtractor"
         ) as mock_ext,
     ):
-        mock_ext.return_value.aextract = AsyncMock(return_value=cases)
+        mock_ext.return_value.aextract_with_reason = AsyncMock(
+            return_value=CaseExtractionResult(cases, None, {})
+        )
         await extract_agent_case(_agent_event(), _markdown_deps(tmp_path))
 
     handler = AgentCaseHandler(

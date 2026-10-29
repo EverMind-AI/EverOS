@@ -216,6 +216,14 @@ max_replays = 3
 # Rows (any status) are deleted this many hours after they were created.
 row_retention_hours = 168.0
 
+[agent_memory]
+# Put everalgo's correctness gate in front of agent-case extraction: the
+# extraction LLM judges whether the work in a conversation was completed
+# correctly (one extra call per conversation), and only admitted ones become
+# cases. Off -> cases are admitted by the complexity and value filters.
+# Needs a restart. Override via EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED.
+case_gate_enabled = false
+
 [knowledge]
 # Max bytes for an uploaded knowledge document (default 50 MiB). Oversized
 # uploads are rejected with HTTP 422 before parsing/extraction. Note: the

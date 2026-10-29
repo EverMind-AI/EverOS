@@ -8,7 +8,7 @@ defaults so payloads persisted by an older release still validate.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from everalgo.types import MemCell
 from pydantic import BaseModel, ConfigDict, Field
@@ -138,8 +138,9 @@ class AgentCaseExtracted(Event):
     consistency data on the event bus, avoiding the cascade lag that made
     ``extract_agent_skill`` retry-then-dead-letter on every run.
 
-    ``quality_score`` lets ``trigger_skill_clustering`` short-circuit before any
-    embedding work when the case is below algo's quality floor.
+    ``quality_score`` and ``case_gate`` let ``trigger_skill_clustering``
+    short-circuit before any embedding work when algo would not distil the
+    case into a skill.
     ``case_timestamp_ms`` drives the algo-side ``Cluster.last_ts`` for the
     time-window filter in :func:`everalgo.clustering.cluster_by_geometry`.
     """
@@ -158,6 +159,9 @@ class AgentCaseExtracted(Event):
     agent_id: str
     app_id: str = "default"
     project_id: str = "default"
+    case_gate: dict[str, Any] | None = None
+    """The case's admission decision when a correctness gate admitted it;
+    ``None`` when no gate ran (see :attr:`AgentCase.case_gate`)."""
 
 
 class ProfileClusterUpdated(Event):
@@ -202,3 +206,5 @@ class SkillClusterUpdated(Event):
     """Case task_intent embedding, produced by trigger_skill_clustering when it
     embeds for cluster matching. Passed through so extract_agent_skill does not
     need a second embedding call for the > MAX_SKILLS_IN_PROMPT top-k branch."""
+    case_gate: dict[str, Any] | None = None
+    """Passed through from :attr:`AgentCaseExtracted.case_gate`."""

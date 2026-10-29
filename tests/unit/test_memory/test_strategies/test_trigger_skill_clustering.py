@@ -1,20 +1,21 @@
 """Tests for :func:`trigger_skill_clustering`.
 
-In-memory cluster store and fake embedder from :mod:`tests.fakes`;
-``cluster_by_llm`` and ``mint_cluster_id`` patched on the strategy module.
+In-memory cluster store and fake embedder from :mod:`tests.fakes`; the real
+``acluster_by_llm`` answers from the canned agent-track scripts. Only the
+lock probes patch it, to hold the critical section open.
 """
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 import structlog.testing
-from everalgo.clustering import Cluster as AlgoCluster
 
 from everos.memory._partition_locks import _reset_for_tests
+from everos.memory.deps import MemoryDeps
 from everos.memory.events import AgentCaseExtracted, SkillClusterUpdated
 from everos.memory.models import Cluster
 from everos.memory.ports import Scope
@@ -22,12 +23,20 @@ from everos.memory.strategies import (
     TRIGGER_SKILL_CLUSTERING_SPEC,
     trigger_skill_clustering,
 )
-from tests.fakes import FakeEmbeddingProvider, make_deps
+from tests.fakes import FakeEmbeddingProvider, agent_track_llm, make_deps
 
 _MODULE = "everos.memory.strategies.trigger_skill_clustering"
 _AGENT = Scope(
     app_id="default", project_id="default", owner_id="agent_42", owner_type="agent"
 )
+_ADMITTED = {
+    "policy": "decision_case_v1",
+    "method": "decision_api",
+    "input_tokens": 1_200,
+    "bypass_token_threshold": 50_000,
+    "success_threshold": 0.7,
+    "success_probability": 0.9,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +53,7 @@ def _event(
     case_timestamp_ms: int = 1_700_000_001_000,
     approach: str = "",
     key_insight: str | None = None,
+    case_gate: dict | None = None,
 ) -> AgentCaseExtracted:
     return AgentCaseExtracted(
         memcell_id="mc_a",
@@ -54,6 +64,7 @@ def _event(
         quality_score=quality_score,
         case_timestamp_ms=case_timestamp_ms,
         agent_id=agent_id,
+        case_gate=case_gate,
     )
 
 
@@ -67,48 +78,43 @@ def test_spec() -> None:
 
 async def test_skips_when_quality_score_below_threshold() -> None:
     """quality_score < 0.2 → log + early return; no embedding, no LLM, no store."""
-    deps = make_deps()
-    with (
-        patch(f"{_MODULE}.cluster_by_llm") as mock_cluster,
-        structlog.testing.capture_logs() as captured,
-    ):
+    deps = make_deps()  # an LLM that fails the test when called
+    with structlog.testing.capture_logs() as captured:
         events = await trigger_skill_clustering(_event(quality_score=0.1), deps)
 
     assert events == []
     assert deps.embedding.calls == []
     assert deps.stores.cluster.upserts == []
-    mock_cluster.assert_not_called()
     assert any(
         e.get("event") == "skill_clustering_skipped_low_quality" for e in captured
     )
 
 
-async def test_creates_new_cluster_when_no_existing() -> None:
-    """Empty existing list → cluster_by_llm returns None → new cluster persisted."""
+async def test_clusters_an_admitted_case_whatever_its_quality() -> None:
+    """A gate-admitted case drives a skill at any quality; the decision rides on."""
     deps = make_deps()
-    with (
-        patch(
-            f"{_MODULE}.cluster_by_llm", new=AsyncMock(return_value=None)
-        ) as mock_cluster,
-        patch(f"{_MODULE}.mint_cluster_id", return_value="cl_newxxxx0001"),
-    ):
+    (announced,) = await trigger_skill_clustering(
+        _event(quality_score=0.1, case_gate=_ADMITTED), deps
+    )
+    assert announced.case_gate == _ADMITTED
+    assert list(deps.stores.cluster.clusters) == [announced.cluster_id]
+
+
+async def test_creates_new_cluster_when_no_existing() -> None:
+    """No existing cluster → the size-1 cluster is persisted under the minted id."""
+    deps = make_deps()  # no existing cluster, so the model is never asked
+    with patch(f"{_MODULE}.mint_cluster_id", return_value="cl_newxxxx0001"):
         events = await trigger_skill_clustering(_event(), deps)
 
-    # cluster_by_llm called with the size-1 new cluster + empty existing,
-    # and the strategy's LLM.
-    (new_cluster, existing), kwargs = mock_cluster.call_args
-    assert kwargs == {"llm": deps.llm}
-    assert isinstance(new_cluster, AlgoCluster)
-    assert new_cluster.id == "cl_newxxxx0001"
-    assert new_cluster.count == 1
-    assert new_cluster.last_ts == 1_700_000_001_000
-    assert new_cluster.members == ["ac_20260517_0001"]
-    assert new_cluster.preview == ["summarise the doc"]
+    persisted = deps.stores.cluster.clusters["cl_newxxxx0001"]
+    assert persisted.count == 1
+    assert persisted.last_ts == 1_700_000_001_000
+    assert persisted.members == ["ac_20260517_0001"]
+    assert persisted.preview == ["summarise the doc"]
     expected_vector = await FakeEmbeddingProvider().embed("summarise the doc")
     np.testing.assert_allclose(
-        np.asarray(new_cluster.centroid), np.asarray(expected_vector, np.float32)
+        np.asarray(persisted.centroid), np.asarray(expected_vector, np.float32)
     )
-    assert existing == []
 
     clusters = deps.stores.cluster
     assert list(clusters.clusters) == ["cl_newxxxx0001"]
@@ -135,8 +141,7 @@ async def test_event_passes_through_case_body_and_vector() -> None:
         agent_id="a1",
         case_entry_id="c1",
     )
-    with patch(f"{_MODULE}.cluster_by_llm", new=AsyncMock(return_value=None)):
-        (ev,) = await trigger_skill_clustering(incoming, make_deps())
+    (ev,) = await trigger_skill_clustering(incoming, make_deps())
 
     assert ev.task_intent == "restore replica"
     assert ev.approach == "stop, resync, verify"
@@ -144,39 +149,50 @@ async def test_event_passes_through_case_body_and_vector() -> None:
     assert ev.quality_score == 0.8
     assert ev.case_timestamp_ms == 1_700_000_000_000
     assert ev.case_vector == await FakeEmbeddingProvider().embed("restore replica")
+    assert ev.case_gate is None
 
 
-async def test_merges_into_existing_cluster_when_algo_matches() -> None:
-    """algo returns a merged Cluster → persisted with the existing id."""
-    deps = make_deps()
+def _seed_dissimilar_cluster(deps: MemoryDeps) -> None:
+    """One existing cluster far enough from any case that the model is asked."""
     deps.stores.cluster.seed(
         _AGENT,
         "agent_case",
         Cluster(
             id="cl_existing0001",
-            centroid=(0.15,) * 8,
+            centroid=(-1.0,) * 8,
             count=2,
             last_ts=1_700_000_000_000,
             preview=["earlier intent"],
             members=["ac_20260517_0000"],
         ),
     )
-    # Simulate everalgo _merge: id passes through from existing, members appended.
-    merged_cluster = AlgoCluster(
-        id="cl_existing0001",
-        centroid=np.array([0.17] * 8, dtype=np.float32),
-        count=3,
-        last_ts=1_700_000_001_000,
-        preview=["earlier intent", "summarise the doc"],
-        members=["ac_20260517_0000", "ac_20260517_0001"],
-    )
-    with patch(f"{_MODULE}.cluster_by_llm", new=AsyncMock(return_value=merged_cluster)):
-        (announced,) = await trigger_skill_clustering(_event(), deps)
 
+
+async def test_merges_into_existing_cluster_when_the_model_picks_it() -> None:
+    """The model picks the existing cluster → persisted under its id."""
+    llm = agent_track_llm()
+    deps = make_deps(llm=llm)
+    _seed_dissimilar_cluster(deps)
+
+    (announced,) = await trigger_skill_clustering(_event(), deps)
+
+    assert [c.response_format.__name__ for c in llm.calls] == [
+        "_ClusterAssignmentReply"
+    ]
     persisted = deps.stores.cluster.clusters["cl_existing0001"]
     assert persisted.members == ["ac_20260517_0000", "ac_20260517_0001"]
     assert persisted.count == 3
     assert announced.cluster_id == "cl_existing0001"
+
+
+async def test_keeps_a_new_cluster_when_the_model_picks_none() -> None:
+    deps = make_deps(llm=agent_track_llm(skill_cluster="skill_cluster_empty"))
+    _seed_dissimilar_cluster(deps)
+    with patch(f"{_MODULE}.mint_cluster_id", return_value="cl_newxxxx0001"):
+        (announced,) = await trigger_skill_clustering(_event(), deps)
+
+    assert announced.cluster_id == "cl_newxxxx0001"
+    assert sorted(deps.stores.cluster.clusters) == ["cl_existing0001", "cl_newxxxx0001"]
 
 
 # ── body-guard (embedding provider) ──────────────────────────────────────
@@ -184,16 +200,8 @@ async def test_merges_into_existing_cluster_when_algo_matches() -> None:
 
 async def test_returns_without_side_effects_when_embedding_unavailable() -> None:
     """No embedding provider → early return; no store access, no LLM, no event."""
-    deps = make_deps(embedding=None)
-    with (
-        patch(
-            f"{_MODULE}.cluster_by_llm",
-            new=AsyncMock(
-                side_effect=AssertionError("cluster_by_llm must not be called")
-            ),
-        ),
-        structlog.testing.capture_logs() as captured,
-    ):
+    deps = make_deps(embedding=None)  # an LLM that fails the test when called
+    with structlog.testing.capture_logs() as captured:
         events = await trigger_skill_clustering(_event(), deps)
 
     assert events == []
@@ -221,14 +229,14 @@ async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
     """
     log: list[str] = []
 
-    async def mock_cluster_by_llm(new_cluster, _existing, **_kwargs):
+    async def mock_acluster_by_llm(new_cluster, _existing, **_kwargs):
         log.append(f"enter:{new_cluster.members[0]}")
         await asyncio.sleep(0.01)
         log.append(f"leave:{new_cluster.members[0]}")
         return None  # no merge → caller persists the size-1 cluster
 
     deps = make_deps()
-    with patch(f"{_MODULE}.cluster_by_llm", new=mock_cluster_by_llm):
+    with patch(f"{_MODULE}.acluster_by_llm", new=mock_acluster_by_llm):
         await asyncio.gather(
             trigger_skill_clustering(
                 _event(agent_id=agent_a, case_entry_id="ac_run_a"), deps

@@ -72,7 +72,7 @@ class ClusterRepo(RepoBase[Cluster]):
         """All clusters for ``(app, project, owner, kind)``, as algo objects.
 
         Hot path for the cluster strategies (``cluster_by_geometry`` /
-        ``cluster_by_llm`` need the full ``existing_clusters`` list). Each
+        ``acluster_by_llm`` need the full ``existing_clusters`` list). Each
         returned cluster carries its full ``members`` view, populated from
         the join with :class:`ClusterMember`. Scoping by (app, project)
         keeps one space's clusters from merging into another's.

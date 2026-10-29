@@ -33,8 +33,11 @@ from .indexes import InMemoryAgentSkillIndex as InMemoryAgentSkillIndex
 from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
+from .llm import AGENT_TRACK_OPERATORS as AGENT_TRACK_OPERATORS
 from .llm import UNUSABLE_REPLY as UNUSABLE_REPLY
 from .llm import USER_TRACK_OPERATORS as USER_TRACK_OPERATORS
+from .llm import agent_track_llm as agent_track_llm
+from .llm import agent_track_script as agent_track_script
 from .llm import boundary_reply as boundary_reply
 from .llm import boundary_window as boundary_window
 from .llm import memorize_llm as memorize_llm
@@ -56,8 +59,13 @@ from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
 from .stores import UnusedPort as UnusedPort
+from .trajectories import TRAJECTORY_START_MS as TRAJECTORY_START_MS
+from .trajectories import agent_trajectory as agent_trajectory
+from .trajectories import agent_trajectory_messages as agent_trajectory_messages
 
 __all__ = [
+    "AGENT_TRACK_OPERATORS",
+    "TRAJECTORY_START_MS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
     "FakeEmbeddingProvider",
@@ -80,6 +88,10 @@ __all__ = [
     "StubMemoryService",
     "StubOpsService",
     "UnusedPort",
+    "agent_track_llm",
+    "agent_track_script",
+    "agent_trajectory",
+    "agent_trajectory_messages",
     "boundary_reply",
     "boundary_window",
     "bundled_instructions",

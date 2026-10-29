@@ -568,6 +568,24 @@ class MemorizeSettings(BaseModel):
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
 
 
+class AgentMemorySettings(BaseModel):
+    """Agent-memory extraction (``[agent_memory]``).
+
+    ``case_gate_enabled`` puts everalgo's correctness gate in front of
+    agent-case extraction: the extraction LLM judges whether the
+    conversation's work was completed correctly, and only admitted
+    conversations become cases (each admitted case then drives skill
+    extraction whatever its quality score). It costs one extra LLM call per
+    conversation up to the gate's length threshold. Off, cases are admitted
+    by everalgo's complexity and value filters, as before. Needs a restart.
+
+    Env binding:
+        EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED
+    """
+
+    case_gate_enabled: bool = False
+
+
 class ClusteringSettings(BaseModel):
     """Geometry-clustering tunables.
 
@@ -844,6 +862,7 @@ class Settings(BaseSettings):
     rerank: RerankSettings = RerankSettings()
     boundary_detection: BoundaryDetectionSettings = BoundaryDetectionSettings()
     memorize: MemorizeSettings = MemorizeSettings()
+    agent_memory: AgentMemorySettings = AgentMemorySettings()
     clustering: ClusteringSettings = ClusteringSettings()
     cascade: CascadeSettings = CascadeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()

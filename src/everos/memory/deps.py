@@ -6,7 +6,8 @@ the LLM contract comes from everalgo and the embedding contract from
 ``component`` — so a strategy can be exercised against in-memory doubles
 and the service layer decides which adapters stand behind it.
 
-``llm`` / ``embedding`` are ``None`` when the provider is not configured.
+``llm`` / ``embedding`` are ``None`` when the provider is not configured;
+``case_judge`` is ``None`` unless the agent-case gate is switched on.
 Embedding is optional by design (Tier 1 runs without it, and the strategies
 that need it return no events); the LLM is not, so :meth:`MemoryDeps.require_llm`
 raises the same configuration error a missing provider raises elsewhere.
@@ -20,6 +21,7 @@ __all__ = ["Indexes", "MemoryDeps", "Stores"]
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from everalgo.agent_memory import CaseJudge
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider
@@ -87,6 +89,8 @@ class MemoryDeps:
         stores: Write-side stores.
         indexes: Read-side indexes.
         instructions: Custom instructions appended to the operators' rules.
+        case_judge: Answers the agent-case gate question; ``None`` runs
+            agent-case extraction without the gate.
     """
 
     llm: LLMClient | None
@@ -94,6 +98,7 @@ class MemoryDeps:
     stores: Stores
     indexes: Indexes
     instructions: CustomInstructions
+    case_judge: CaseJudge | None = None
 
     def require_llm(self) -> LLMClient:
         """Return the LLM, or raise when none is configured.

@@ -271,19 +271,16 @@ class Foresight(BaseModel):
 class AgentCase(BaseModel):
     """Domain AgentCase — algo-emitted business fields + everos context.
 
-    Composed (not inherited) from :class:`everalgo.types.AgentCase`. Mirrors
-    :class:`Episode` / :class:`AtomicFact` / :class:`Foresight`: everos
-    keeps the semantic fields algo emits (``task_intent`` / ``approach`` /
-    ``quality_score`` / ``key_insight`` / ``timestamp``) and adds
-    engineering context (``owner_id`` = agent_id, ``session_id`` /
-    ``parent_id``).
+    Composed (not inherited) from :class:`everalgo.types.AgentCase`; the two
+    convert through :mod:`everos.memory.mappers.agent_case`. everos keeps the
+    semantic fields algo emits (``task_intent`` / ``approach`` /
+    ``quality_score`` / ``key_insight`` / ``timestamp``) and adds engineering
+    context (``owner_id`` = agent_id, ``session_id`` / ``parent_id``).
 
-    ``owner_id`` is supplied by the caller because algo's AgentCase has no
-    ``owner_id`` field — the strategy infers the agent identity from the
-    source MemCell (assistant's ``sender_id``).
-
-    Single output per memcell (algo returns ``[]`` or ``[case]``); no
-    fan-out semantics.
+    ``case_gate`` is the admission decision when the case passed everalgo's
+    correctness gate (``None`` when no gate ran). It travels with the case to
+    skill extraction, which treats an admitted case as worth a skill whatever
+    its quality score; the case markdown does not record it.
     """
 
     owner_id: str
@@ -292,37 +289,13 @@ class AgentCase(BaseModel):
     quality_score: float
     key_insight: str | None = None
     timestamp: int
+    case_gate: dict[str, Any] | None = None
 
     # everos engineering metadata.
     session_id: str
     parent_id: str
 
     model_config = ConfigDict(extra="allow")
-
-    @classmethod
-    def from_algo(
-        cls,
-        algo_case: AlgoAgentCase,
-        *,
-        owner_id: str,
-        session_id: str,
-        parent_id: str,
-    ) -> AgentCase:
-        """Build a domain AgentCase from an algo AgentCase plus context.
-
-        ``owner_id`` is caller-supplied (agent_id derived from the source
-        memcell's assistant sender). Algo's ``id`` (a uuid4 hex) is
-        dropped — md writer mints the authoritative entry_id. ``key_insight``
-        normalises algo's ``""`` to ``None`` so the optional KeyInsight
-        section is omitted in md when there's nothing to record.
-        """
-        data = algo_case.model_dump(exclude={"id", "parent_id", "owner_id"})
-        data["owner_id"] = owner_id
-        data["session_id"] = session_id
-        data["parent_id"] = parent_id
-        if not data.get("key_insight"):
-            data["key_insight"] = None
-        return cls.model_validate(data)
 
 
 class ExplicitInfoItem(BaseModel):

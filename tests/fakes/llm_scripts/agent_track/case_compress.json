@@ -1,0 +1,6 @@
+{
+  "task_intent": "Fix the flaky date parsing test in the billing module",
+  "approach": "1. Ran the failing test to reproduce the error.\n2. Read the traceback and found a naive datetime compared with an aware one.\n3. Made the parser return UTC-aware datetimes and re-ran the suite.",
+  "key_insight": "Compare datetimes only after normalising both to UTC.",
+  "quality_score": 0.8
+}

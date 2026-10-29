@@ -8,13 +8,8 @@ through ``extra='allow'``) is dropped in favour of the caller's value.
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 import structlog
-from everalgo.types import (
-    AgentCase as AlgoAgentCase,
-)
 from everalgo.types import (
     AtomicFact as AlgoAtomicFact,
 )
@@ -27,7 +22,6 @@ from everalgo.types import (
 from pydantic import ValidationError
 
 from everos.memory.models import (
-    AgentCase,
     AtomicFact,
     Episode,
     Foresight,
@@ -135,46 +129,6 @@ def test_foresight_from_algo_preserves_algo_owner_id() -> None:
     )
     fs = Foresight.from_algo(algo, session_id="s1", parent_id="mc_a")
     assert fs.owner_id == "u_bob"
-
-
-def test_agent_case_from_algo_injects_owner_and_drops_algo_id() -> None:
-    """Algo emits a uuid `id` + no owner; everos injects agent_id, drops uuid."""
-    algo = AlgoAgentCase(
-        id=uuid.uuid4().hex,
-        timestamp=1_700_000_000_000,
-        task_intent="summarise doc",
-        approach="read + condense",
-        quality_score=0.75,
-        key_insight="batch-then-summarise",
-    )
-    case = AgentCase.from_algo(
-        algo, owner_id="agent_42", session_id="s1", parent_id="mc_a"
-    )
-    assert case.owner_id == "agent_42"
-    assert case.task_intent == "summarise doc"
-    assert case.approach == "read + condense"
-    assert case.quality_score == 0.75
-    assert case.key_insight == "batch-then-summarise"
-    assert case.session_id == "s1"
-    assert case.parent_id == "mc_a"
-    # algo's uuid `id` is not surfaced on the domain model.
-    assert not hasattr(case, "id") or case.id != algo.id  # type: ignore[attr-defined]
-
-
-def test_agent_case_from_algo_normalises_empty_key_insight_to_none() -> None:
-    """algo emits `""` when there's nothing to insight; domain normalises to None."""
-    algo = AlgoAgentCase(
-        id=uuid.uuid4().hex,
-        timestamp=1_700_000_000_000,
-        task_intent="ti",
-        approach="ap",
-        quality_score=0.5,
-        key_insight="",
-    )
-    case = AgentCase.from_algo(
-        algo, owner_id="agent_42", session_id="s1", parent_id="mc_a"
-    )
-    assert case.key_insight is None
 
 
 def test_episode_from_algo_owner_id_caller_supplied() -> None:

@@ -37,6 +37,7 @@ from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
+from everalgo.agent_memory import OpOutcome, SkillExtractionResult
 from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
@@ -95,7 +96,7 @@ def stub_llm_extraction(
 ) -> Iterator[list[AlgoAgentSkill]]:
     """Mock the one non-deterministic seam: the LLM-backed extractor.
 
-    Everything downstream of ``AgentSkillExtractor.aextract`` (writer,
+    Everything downstream of ``AgentSkillExtractor.aextract_with_reason`` (writer,
     cascade scan, embed, LanceDB upsert) stays real.
     """
     emitted = [
@@ -117,7 +118,11 @@ def stub_llm_extraction(
     # client is what lets the strategy run at all).
     skill_mod = importlib.import_module("everos.memory.strategies.extract_agent_skill")
     with patch.object(skill_mod, "AgentSkillExtractor") as mock_extractor_cls:
-        mock_extractor_cls.return_value.aextract = AsyncMock(return_value=emitted)
+        mock_extractor_cls.return_value.aextract_with_reason = AsyncMock(
+            return_value=SkillExtractionResult(
+                None, {}, [OpOutcome(0, skill, None, {}) for skill in emitted]
+            )
+        )
         yield emitted
 
 

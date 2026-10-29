@@ -3,7 +3,9 @@
 Ports come from :mod:`tests.fakes` (cluster store, skill store and index,
 agent-case index); the markdown skill store is used for real where the
 property under test is on-disk (directory enumeration, rename reaping).
-``AgentSkillExtractor`` is patched on the strategy module.
+``AgentSkillExtractor`` is patched on the strategy module where a test pins
+what the extractor is given; the rest run the real extractor against the
+canned agent-track scripts.
 
 The target case is reconstructed straight from the ``SkillClusterUpdated``
 event payload (:func:`_to_algo_case_from_event`) — the strategy never reads
@@ -18,11 +20,13 @@ orchestration glue.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import structlog.testing
+from everalgo.agent_memory import OpOutcome, SkillExtractionResult
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.infra.persistence import MemoryRoot
@@ -42,7 +46,13 @@ from everos.memory.strategies.extract_agent_skill import (
     _select_existing_skills,
     _select_supporting_cases,
 )
-from tests.fakes import make_deps, make_indexes, make_stores
+from tests.fakes import (
+    agent_track_llm,
+    agent_track_script,
+    make_deps,
+    make_indexes,
+    make_stores,
+)
 
 _EXTRACTOR = "everos.memory.strategies.extract_agent_skill.AgentSkillExtractor"
 _AGENT = Scope(
@@ -70,6 +80,7 @@ def _event(
     quality_score: float = 0.0,
     case_timestamp_ms: int = 0,
     case_vector: list[float] | None = None,
+    case_gate: dict | None = None,
 ) -> SkillClusterUpdated:
     return SkillClusterUpdated(
         case_entry_id=case_entry_id,
@@ -83,6 +94,7 @@ def _event(
         quality_score=quality_score,
         case_timestamp_ms=case_timestamp_ms,
         case_vector=case_vector,
+        case_gate=case_gate,
     )
 
 
@@ -168,6 +180,25 @@ def _algo_skill(name: str = "summarise_doc") -> AlgoAgentSkill:
     )
 
 
+def _produced(*skills: AlgoAgentSkill) -> SkillExtractionResult:
+    """What the extractor returns when every proposed operation produced a skill."""
+    return SkillExtractionResult(
+        None, {}, [OpOutcome(i, skill, None, {}) for i, skill in enumerate(skills)]
+    )
+
+
+_NOTHING = SkillExtractionResult(None, {}, [])
+
+_ADMITTED = {
+    "policy": "decision_case_v1",
+    "method": "decision_api",
+    "input_tokens": 1_200,
+    "bypass_token_threshold": 50_000,
+    "success_threshold": 0.7,
+    "success_probability": 0.9,
+}
+
+
 def _markdown_deps(tmp_path: Path) -> MemoryDeps:
     return make_deps(
         stores=make_stores(agent_skill=MarkdownAgentSkillStore(MemoryRoot(tmp_path)))
@@ -245,18 +276,19 @@ async def test_reads_target_case_from_event_no_index_probe() -> None:
         case_vector=[0.1] * 8,
     )
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(
-            return_value=[_algo_skill(name="revive_replica")]
+        extractor_cls.return_value.aextract_with_reason = AsyncMock(
+            return_value=_produced(_algo_skill(name="revive_replica"))
         )
         await extract_agent_skill(event, deps)
 
-    target_arg = extractor_cls.return_value.aextract.call_args.args[0]
+    target_arg = extractor_cls.return_value.aextract_with_reason.call_args.args[0]
     assert target_arg.id == "c1"
     assert target_arg.task_intent == "restore replica"
     assert target_arg.approach == "stop, resync, verify"
     assert target_arg.key_insight == "watch oplog"
     assert target_arg.quality_score == 0.8
     assert target_arg.timestamp == 1_700_000_000_000
+    assert not hasattr(target_arg, "case_gate")
 
 
 async def _existing_skills_seen_by_llm(deps: MemoryDeps) -> list[AlgoAgentSkill]:
@@ -264,14 +296,14 @@ async def _existing_skills_seen_by_llm(deps: MemoryDeps) -> list[AlgoAgentSkill]
 
     async def spy_aextract(target, *, existing_relevant_skills, supporting_cases):
         captured.extend(existing_relevant_skills)
-        return []
+        return _NOTHING
 
     _seed_cluster(deps, _A1, cluster_id="cl1", members=["c0", "c1"])
     event = _event(
         cluster_id="cl1", agent_id="a1", case_entry_id="c1", case_vector=[0.1] * 8
     )
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = spy_aextract
+        extractor_cls.return_value.aextract_with_reason = spy_aextract
         await extract_agent_skill(event, deps)
     return captured
 
@@ -365,10 +397,12 @@ async def test_extracts_and_persists_with_cluster_id_stamped() -> None:
         case_vector=[0.1] * 8,
     )
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = AsyncMock(return_value=emitted)
+        extractor_cls.return_value.aextract_with_reason = AsyncMock(
+            return_value=_produced(*emitted)
+        )
         await extract_agent_skill(event, deps)
 
-    extractor_call = extractor_cls.return_value.aextract.call_args
+    extractor_call = extractor_cls.return_value.aextract_with_reason.call_args
     assert extractor_call.args[0].id == "ac_20260517_0001"
     assert extractor_call.args[0].task_intent == "intent of ac_20260517_0001"
     assert [s.name for s in extractor_call.kwargs["existing_relevant_skills"]] == [
@@ -385,6 +419,57 @@ async def test_extracts_and_persists_with_cluster_id_stamped() -> None:
         assert skill.cluster_id == "cl_xxxxxxxxxxx1"
         assert skill.confidence == expected.confidence
         assert skill.content == expected.content
+
+
+async def test_writes_the_skill_the_model_adds() -> None:
+    deps = make_deps(llm=agent_track_llm())
+    _seed_cluster(deps)
+
+    await extract_agent_skill(_event(quality_score=0.8), deps)
+
+    want = json.loads(agent_track_script("skill_extract"))["operations"][0]["data"]
+    skill = deps.stores.agent_skill.skills[_AGENT][want["name"]]
+    assert skill.cluster_id == "cl_xxxxxxxxxxx1"
+    assert skill.content == want["content"]
+    assert skill.source_case_ids == ["ac_20260517_0001"]
+
+
+async def test_logs_the_quality_short_circuit() -> None:
+    deps = make_deps()  # an LLM that fails the test when called
+    _seed_cluster(deps)
+    with structlog.testing.capture_logs() as captured:
+        await extract_agent_skill(_event(quality_score=0.1), deps)
+
+    assert not deps.stores.agent_skill.skills.get(_AGENT)
+    (skipped,) = [e for e in captured if e.get("event") == "agent_skill_skipped"]
+    assert skipped["reason"] == "case_quality_below_threshold"
+    assert skipped["detail"] == {"quality": 0.1, "threshold": 0.2}
+
+
+async def test_an_admitted_case_drives_a_skill_whatever_its_quality() -> None:
+    llm = agent_track_llm()
+    deps = make_deps(llm=llm)
+    _seed_cluster(deps)
+
+    await extract_agent_skill(_event(quality_score=0.1, case_gate=_ADMITTED), deps)
+
+    assert [c.response_format.__name__ for c in llm.calls] == ["_SkillExtractReply"]
+    assert deps.stores.agent_skill.skills[_AGENT]
+
+
+async def test_logs_each_dropped_operation() -> None:
+    deps = make_deps(llm=agent_track_llm(skill_extract="skill_extract_out_of_range"))
+    _seed_cluster(deps)
+    with structlog.testing.capture_logs() as captured:
+        await extract_agent_skill(_event(quality_score=0.8), deps)
+
+    assert not deps.stores.agent_skill.skills.get(_AGENT)
+    (dropped,) = [e for e in captured if e.get("event") == "agent_skill_op_dropped"]
+    assert (dropped["op_index"], dropped["reason"]) == (
+        0,
+        "update_index_out_of_range",
+    )
+    assert dropped["detail"] == {"index": 5, "size": 0}
 
 
 # ── _select_existing_skills routing (cluster size × vector availability) ─
@@ -565,7 +650,7 @@ async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
         log.append(f"enter:{case.id}")
         await asyncio.sleep(0.01)
         log.append(f"leave:{case.id}")
-        return []
+        return _NOTHING
 
     deps = make_deps()
     for agent in {agent_a, agent_b}:
@@ -574,7 +659,7 @@ async def _run_serialisation_probe(agent_a: str, agent_b: str) -> list[str]:
         )
         _seed_cluster(deps, scope, members=["ac_run_a", "ac_run_b"])
     with patch(_EXTRACTOR) as extractor_cls:
-        extractor_cls.return_value.aextract = slow_aextract
+        extractor_cls.return_value.aextract_with_reason = slow_aextract
         await asyncio.gather(
             extract_agent_skill(
                 _event(agent_id=agent_a, case_entry_id="ac_run_a"), deps
