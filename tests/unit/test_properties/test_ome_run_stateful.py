@@ -211,7 +211,7 @@ class OmeRunMachine(RuleBasedStateMachine):
                 for opened, origin in _open_connections.values()
             )
             raise TimeoutError(
-                f"{e}; active_runs={self.engine._active_runs}; running={rows}; "
+                f"{e}; active_runs={self.engine._in_flight.active}; running={rows}; "
                 f"threads={threads}; trace={self.trace[-8:]}\n"
                 f"open connections ({len(_open_connections)}):\n{held}"
             ) from e
@@ -297,7 +297,7 @@ class OmeRunMachine(RuleBasedStateMachine):
 
     @invariant()
     def idle_engine_has_nothing_running(self) -> None:
-        assert self.engine._active_runs == 0
+        assert self.engine._in_flight.active == 0
         running = self.run(self.engine._run_record_store.find_running())
         assert not running, [r.run_id for r in running]
 

@@ -84,7 +84,10 @@ from everos.infra.persistence.factories import (
     build_indexes,
     build_stores,
 )
-from everos.infra.persistence.index import EmbeddingProvenance
+from everos.infra.persistence.index import (
+    EmbeddingProvenance,
+    ProjectionVectorBackfill,
+)
 from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownKnowledgeStore,
@@ -308,6 +311,7 @@ def build_application(
     memory = _build_memory_service(
         settings, providers, deps, tokenizer, OmeEventBus(engine)
     )
+    vector_tables = index.repositories.with_vectors()
     return Application(
         memory=memory,
         knowledge=_build_knowledge_service(
@@ -324,11 +328,14 @@ def build_application(
             inbox=stores.memorize_inbox,
             backfill=BackfillDeps(
                 embedding=providers.embedding,
-                tokenizer=tokenizer,
-                vector_tables=index.repositories.with_vectors(),
-                prune_retention=dt.timedelta(
-                    seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+                vectors=ProjectionVectorBackfill(
+                    vector_tables,
+                    tokenizer=tokenizer,
+                    prune_retention=dt.timedelta(
+                        seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+                    ),
                 ),
+                vector_tables=vector_tables,
                 clusters=stores.cluster,
                 skills=indexes.agent_skill,
                 skill_files=MarkdownAgentSkillStore(root),

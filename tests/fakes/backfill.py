@@ -31,6 +31,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from everos.component.tokenizer import build_tokenizer
+from everos.infra.persistence.index import ProjectionVectorBackfill
 from everos.memory.ports import Event, Filter, Scope, StrategySpec
 from everos.service import BackfillDeps
 
@@ -181,10 +182,13 @@ def backfill_deps(
     vector_tables = {name: InMemoryVectorTable(name) for name in base.vector_tables}
     vector_tables.update(tables or {})
     fields: dict[str, Any] = {
+        "vectors": ProjectionVectorBackfill(
+            vector_tables,  # type: ignore[arg-type]  # in-memory tables
+            tokenizer=build_tokenizer(),
+            prune_retention=dt.timedelta(seconds=60),
+        ),
         "vector_tables": vector_tables,
-        "tokenizer": build_tokenizer(),
         "ensure_schema": _no_schema,
         "ome_lock": FakeOmeLock(),
-        "prune_retention": dt.timedelta(seconds=60),
     }
     return dataclasses.replace(base, **{**fields, **overrides})

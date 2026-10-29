@@ -2,8 +2,8 @@
 
 Markdown remains the source of truth and SQLite remains the system-state
 store. This boundary owns only the derived business indexes used by cascade,
-search, and get. LanceDB and Milvus implement the same typed ports, so callers
-do not branch on physical storage: the application builds one
+search, get and vector backfill. LanceDB and Milvus implement the same typed
+ports, so callers do not branch on physical storage: the application builds one
 :class:`DerivedIndex` over the configured engine's backend and hands its
 :class:`IndexRepositories` to whoever reads or writes the index.
 """
@@ -54,6 +54,11 @@ from .schema import IndexField as IndexField
 from .schema import IndexFieldKind as IndexFieldKind
 from .schema import IndexSchema as IndexSchema
 from .schema import schema_for as schema_for
+from .vector_backfill import ProgressCallback as ProgressCallback
+from .vector_backfill import ProjectionVectorBackfill as ProjectionVectorBackfill
+from .vector_backfill import VectorBackfill as VectorBackfill
+from .vector_backfill import VectorBackfillCounts as VectorBackfillCounts
+from .vector_backfill import VectorBacklog as VectorBacklog
 from .vector_projection import VECTOR_PROJECTIONS as VECTOR_PROJECTIONS
 from .vector_projection import VectorProjection as VectorProjection
 
@@ -86,8 +91,13 @@ __all__ = [
     "KnowledgeTopic",
     "ParentType",
     "Predicate",
+    "ProgressCallback",
+    "ProjectionVectorBackfill",
     "Scalar",
     "UserProfile",
+    "VectorBackfill",
+    "VectorBackfillCounts",
+    "VectorBacklog",
     "VectorProjection",
     "all_of",
     "any_of",

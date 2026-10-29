@@ -38,14 +38,14 @@ from everos.infra.cascade.worker import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
 )
 from everos.infra.persistence.index import VectorProjection
-from everos.service import NullBackfillPresenter
-from everos.service.ops._backfill_vectors import (
+from everos.infra.persistence.index.vector_backfill import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
 )
 
 _RETENTION = dt.timedelta(seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS)
+_LOGGER = "everos.infra.persistence.index.vector_backfill"
 
 
 @pytest.fixture(autouse=True)
@@ -55,6 +55,10 @@ def _wire_structlog_to_stdlib() -> None:
     (optimize success) and WARNING (optimize failure) events emitted by
     the optimize path."""
     configure_logging(level="INFO")
+
+
+def _ignore_progress(table: str, done: int, total: int) -> None:
+    return None
 
 
 class _FakeRepo:
@@ -156,12 +160,12 @@ async def test_backfill_table_calls_optimize_when_rows_processed(
     repo = _FakeRepo()
     backlog = _backlog(repo, [_row(f"r{i}", f"text {i}") for i in range(3)])
 
-    with caplog.at_level("WARNING", logger="everos.service.backfill"):
+    with caplog.at_level("WARNING", logger=_LOGGER):
         result = await _backfill_table(  # type: ignore[arg-type]
             backlog,
             _HappyProvider(),
             prune_retention=_RETENTION,
-            presenter=NullBackfillPresenter(),
+            on_progress=_ignore_progress,
         )
 
     assert result.rows_processed == 3
@@ -190,7 +194,7 @@ async def test_backfill_table_skips_optimize_when_no_rows_written() -> None:
         backlog,
         _AlwaysFailProvider(),
         prune_retention=_RETENTION,
-        presenter=NullBackfillPresenter(),
+        on_progress=_ignore_progress,
     )
 
     assert result.rows_processed == 0
@@ -211,7 +215,7 @@ async def test_backfill_table_skips_optimize_when_backlog_is_empty() -> None:
         backlog,
         _HappyProvider(),
         prune_retention=_RETENTION,
-        presenter=NullBackfillPresenter(),
+        on_progress=_ignore_progress,
     )
 
     assert result.rows_processed == 0
@@ -228,12 +232,12 @@ async def test_backfill_table_optimize_failure_does_not_abort(
     repo = _FakeRepo(optimize_fails=True)
     backlog = _backlog(repo, [_row(f"r{i}", f"text {i}") for i in range(3)])
 
-    with caplog.at_level("WARNING", logger="everos.service.backfill"):
+    with caplog.at_level("WARNING", logger=_LOGGER):
         result = await _backfill_table(  # type: ignore[arg-type]
             backlog,
             _HappyProvider(),
             prune_retention=_RETENTION,
-            presenter=NullBackfillPresenter(),
+            on_progress=_ignore_progress,
         )
 
     # Writes stay committed; counters reflect the real work.
@@ -257,12 +261,12 @@ async def test_backfill_table_prune_failure_does_not_abort(
     repo = _FakeRepo(prune_fails=True)
     backlog = _backlog(repo, [_row(f"r{i}", f"text {i}") for i in range(3)])
 
-    with caplog.at_level("WARNING", logger="everos.service.backfill"):
+    with caplog.at_level("WARNING", logger=_LOGGER):
         result = await _backfill_table(  # type: ignore[arg-type]
             backlog,
             _HappyProvider(),
             prune_retention=_RETENTION,
-            presenter=NullBackfillPresenter(),
+            on_progress=_ignore_progress,
         )
 
     assert result.rows_processed == 3

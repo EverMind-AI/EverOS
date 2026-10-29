@@ -19,7 +19,7 @@ Invariants after every step, from the repo and worker docstrings:
 2. a re-enqueue during processing wins: the stale verdict is dropped and
    the row is pending again with a fresh lsn;
 3. retry bookkeeping: transient failures spend the budget, a row stays
-   retryable only below ``_MAX_TOTAL_RETRIES``, re-saves with new content
+   retryable only below ``MAX_TOTAL_RETRIES``, re-saves with new content
    reset it, ``fix`` resets it;
 4. ``queue_summary`` (what ``cascade status`` and ``/health`` show) agrees
    with the table;
@@ -47,10 +47,10 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.core.errors import EmbeddingServiceError
-from everos.infra.cascade import worker as worker_mod
 from everos.infra.cascade.models import HandlerOutcome
 from everos.infra.cascade.projections import Handler
 from everos.infra.cascade.worker import CascadeWorker
+from everos.infra.cascade.worker import _tuning as tuning
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
 from everos.infra.persistence.sqlite.repos.md_change_state import (
@@ -80,7 +80,7 @@ KINDS = ("episode", "orphan")  # "orphan" has no handler registered
 CHANGES = ("added", "modified", "deleted")
 BATCH = 2
 MAX_RETRY = 1  # inline attempts after the first
-MAX_TOTAL = worker_mod._MAX_TOTAL_RETRIES
+MAX_TOTAL = tuning.MAX_TOTAL_RETRIES
 OUTCOMES = ("ok", "transient", "transient_then_ok", "boom", "vanished", "crash")
 
 

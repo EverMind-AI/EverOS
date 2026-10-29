@@ -20,6 +20,8 @@ from everos.infra.persistence.milvus import (
     MilvusIndexBackend,
     repository,
 )
+from everos.infra.persistence.milvus import _codec as codec
+from everos.infra.persistence.milvus import _layout as layout
 from everos.infra.persistence.milvus.milvus_manager import (
     MilvusConfigurationError,
     MilvusSchemaMismatchError,
@@ -58,7 +60,7 @@ def _describe_response(milvus_repo, *, always_params: bool = False):  # type: ig
     while ``to_dict`` omits it when empty — ``always_params`` covers that one
     known difference between the two serializations.
     """
-    schema = milvus_repo._build_collection_schema().to_dict()
+    schema = milvus_repo._layout.build_schema().to_dict()
     fields = [dict(f) for f in schema["fields"]]
     for field in fields:
         params = field.get("params") or {}
@@ -165,13 +167,13 @@ def test_null_vector_predicate_targets_presence_marker() -> None:
 
 def test_record_conversion_stores_every_dense_vector_with_presence() -> None:
     milvus_repo = _milvus().episode
-    record = milvus_repo._to_milvus_record(_episode())
+    record = milvus_repo._codec.to_record(_episode())
     assert len(record["vector"]) == 1024
     assert len(record["subject_vector"]) == 1024
     assert record["vector__present"] is True
     assert record["subject_vector__present"] is True
 
-    missing = milvus_repo._to_milvus_record(_episode(subject_vector=None))
+    missing = milvus_repo._codec.to_record(_episode(subject_vector=None))
     assert missing["subject_vector__present"] is False
     assert missing["subject_vector"] == [0.0] * 1024
 
@@ -191,16 +193,18 @@ def test_datetime_round_trip_is_exact_below_the_ms_heuristic() -> None:
         dt.datetime(2001, 9, 8, tzinfo=dt.UTC),
         dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
     ):
-        stored = milvus_repo._to_milvus_record(_episode(timestamp=moment))
+        stored = milvus_repo._codec.to_record(_episode(timestamp=moment))
         assert "timestamp_ms" in stored
-        restored = milvus_repo._restore_row(stored)
+        restored = milvus_repo._codec.restore_row(stored)
         assert restored["timestamp"] == moment, f"round-trip broke at {moment}"
 
 
 def test_update_fetch_preserves_dummy_vector_for_scalar_only_tables() -> None:
     milvus_repo = _milvus().user_profile
-    assert "_everos_dummy_vector" in milvus_repo._output_fields(include_vectors=True)
-    assert "_everos_dummy_vector" not in milvus_repo._output_fields(
+    assert "_everos_dummy_vector" in milvus_repo._layout.output_fields(
+        include_vectors=True
+    )
+    assert "_everos_dummy_vector" not in milvus_repo._layout.output_fields(
         include_vectors=False
     )
 
@@ -208,19 +212,19 @@ def test_update_fetch_preserves_dummy_vector_for_scalar_only_tables() -> None:
 def test_record_conversion_reports_varchar_array_and_vector_limits() -> None:
     milvus_repo = _milvus().episode
     with pytest.raises(MilvusValueLimitError, match=r"episode is .* UTF-8 bytes"):
-        milvus_repo._to_milvus_record(_episode(episode="x" * 65_536))
+        milvus_repo._codec.to_record(_episode(episode="x" * 65_536))
     with pytest.raises(MilvusValueLimitError, match="sender_ids has 257 items"):
-        milvus_repo._to_milvus_record(_episode(sender_ids=["u"] * 257))
+        milvus_repo._codec.to_record(_episode(sender_ids=["u"] * 257))
     with pytest.raises(MilvusValueLimitError, match="dimension 2"):
-        milvus_repo._validate_vector(
+        milvus_repo._codec.validate_vector(
             milvus_repo.index_schema.field("vector"),
             [1.0, 0.0],
         )
 
 
 def test_server_score_normalization() -> None:
-    assert repository._cosine_distance_from_milvus(0.75) == pytest.approx(0.25)
-    assert repository._bm25_score_from_distance(1.5) == pytest.approx(1.5)
+    assert codec.cosine_distance_from_milvus(0.75) == pytest.approx(0.25)
+    assert codec.bm25_score_from_distance(1.5) == pytest.approx(1.5)
 
 
 async def test_collection_metadata_is_cached_after_startup(
@@ -404,7 +408,7 @@ async def test_verify_treats_limit_drift_as_advisory(
 
     warnings: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        repository.logger,
+        layout.logger,
         "warning",
         lambda event, **kw: warnings.append((event, kw)),
     )
@@ -509,7 +513,7 @@ async def test_verify_allows_scalar_indexes_and_ignores_index_implementation(
 
 
 # Written out by hand on purpose. _describe_response() builds its fake server
-# reply from _build_collection_schema(), which shares _physical_fields() with
+# reply from CollectionLayout.build_schema(), which shares physical_fields() with
 # the verifier — so those tests can only prove that creation and verification
 # agree with *each other*, never that either matches what we intend. This
 # literal is the independent statement of intent: a slip in _physical_for
@@ -558,7 +562,7 @@ def _flag(field) -> str:  # type: ignore[no-untyped-def]
 def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
     """Pin the physical column list against a hand-written expectation."""
     milvus_repo = _milvus().episode
-    actual = milvus_repo._physical_fields()
+    actual = milvus_repo._layout.physical_fields()
 
     assert [f.name for f in actual] == [row[0] for row in _EPISODE_PHYSICAL]
     for field, row in zip(actual, _EPISODE_PHYSICAL, strict=True):
@@ -579,7 +583,7 @@ def test_episode_physical_layout_matches_the_declared_snapshot() -> None:
 def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     """Milvus needs at least one vector column, so scalar-only tables fake one."""
     milvus_repo = _milvus().user_profile
-    actual = {f.name: f for f in milvus_repo._physical_fields()}
+    actual = {f.name: f for f in milvus_repo._layout.physical_fields()}
 
     assert "_everos_dummy_vector" in actual
     assert actual["_everos_dummy_vector"].datatype is DataType.FLOAT_VECTOR
@@ -604,7 +608,7 @@ def test_nullable_bm25_input_is_declared_not_null() -> None:
     assert logical.field("evidence_tokens").nullable is True
     assert "evidence_tokens" in logical.bm25_fields
 
-    physical = {f.name: f for f in _milvus().foresight._physical_fields()}  # type: ignore[attr-defined]
+    physical = {f.name: f for f in _milvus().foresight._layout.physical_fields()}  # type: ignore[attr-defined]
     assert physical["evidence_tokens"].nullable is False
     assert physical["evidence_tokens"].enable_analyzer is True
     # "evidence" is the same optional text without the analyzer attached, so

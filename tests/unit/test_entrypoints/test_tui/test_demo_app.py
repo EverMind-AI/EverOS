@@ -4,28 +4,30 @@ from __future__ import annotations
 
 import pytest
 
-from everos.entrypoints.tui.demo.app import (
+from everos.entrypoints.tui.demo.app import EverOSDemoApp
+from everos.entrypoints.tui.demo.copy_text import (
+    TRACE_STAGES,
+    _capabilities_text,
+    _conversation_text,
+    _field_header_text,
+    _hero_text,
+    _recall_proof_text,
+    _signal_rail_text,
+    _source_tree_text,
+)
+from everos.entrypoints.tui.demo.data import DemoStory
+from everos.entrypoints.tui.demo.widgets.answer_bar import QueryAnswerBar
+from everos.entrypoints.tui.demo.widgets.dot_sphere import (
     SPHERE_FRAME_HEIGHT,
     SPHERE_FRAME_WIDTH,
     SPHERE_STAGE_TICKS,
     SPHERE_SUPERNOVA_CYCLE_TICKS,
     TERMINAL_CELL_HEIGHT_RATIO,
-    TRACE_STAGES,
     DotSphereWidget,
-    EverOSDemoApp,
-    QueryAnswerBar,
-    _capabilities_text,
-    _conversation_text,
-    _field_header_text,
-    _hero_text,
     _idle_sphere_state,
-    _recall_proof_text,
-    _signal_rail_text,
-    _source_tree_text,
     _sphere_state_phase,
     _state_to_stage,
 )
-from everos.entrypoints.tui.demo.data import DemoStory
 from everos.entrypoints.tui.demo.widgets.sphere import SPHERE_STATES
 
 _YELLOW = "#F9B91C"
@@ -333,7 +335,10 @@ def test_ctrl_c_is_a_priority_quit_binding() -> None:
 
 
 def test_commands_and_unknown_command_text() -> None:
-    from everos.entrypoints.tui.demo.app import _commands_text, _unknown_command_text
+    from everos.entrypoints.tui.demo.copy_text import (
+        _commands_text,
+        _unknown_command_text,
+    )
 
     commands_plain = _commands_text().plain
     for command in ("/live", "/replay", "/clear", "/quit"):
@@ -345,7 +350,7 @@ def test_commands_and_unknown_command_text() -> None:
 
 
 def test_live_guidance_points_to_own_key_flow() -> None:
-    from everos.entrypoints.tui.demo.app import _live_guidance_text
+    from everos.entrypoints.tui.demo.copy_text import _live_guidance_text
 
     text = _live_guidance_text().plain
     assert "everos init" in text
@@ -544,7 +549,7 @@ async def test_demo_tui_interactive_shows_quota_guidance(monkeypatch) -> None:
     from textual.widgets import Input
 
     from everos.entrypoints.tui.demo import cloud
-    from everos.entrypoints.tui.demo.app import _quota_guidance_text
+    from everos.entrypoints.tui.demo.copy_text import _quota_guidance_text
 
     def quota(*_: object, **__: object) -> None:
         raise cloud.CloudQuotaError("http://server.test")

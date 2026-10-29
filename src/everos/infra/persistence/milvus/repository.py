@@ -1,24 +1,29 @@
-"""Milvus repository for EverOS rebuildable derived indexes."""
+"""Milvus repository for EverOS rebuildable derived indexes.
+
+:class:`MilvusRepoBase` is the async repository surface one table's index
+repository exposes (CRUD, scans, pagination, dense / BM25 search) over a
+Milvus collection. It owns the IO — the client calls, the per-collection
+write and readiness locks — and delegates the pure halves to two
+collaborators built from the table's index schema: a
+:class:`~._layout.CollectionLayout` that declares and verifies the collection,
+and a :class:`~._codec.RowCodec` that translates records to rows and back.
+"""
 
 from __future__ import annotations
 
+__all__ = ["MilvusRepoBase", "MilvusValueLimitError"]
+
 import asyncio
 import datetime as dt
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any, ClassVar, overload
 
 from pydantic import BaseModel
-from pymilvus import DataType, Function, FunctionType, MilvusClient
+from pymilvus import MilvusClient
 
 from everos.core.observability.logging import get_logger
-from everos.core.utils.datetime import (
-    ensure_utc,
-    from_timestamp_ms,
-    to_timestamp_ms,
-)
+from everos.core.utils.datetime import ensure_utc
 from everos.infra.persistence.index.schema import (
-    IndexField,
     IndexFieldKind,
     IndexSchema,
     schema_for,
@@ -30,191 +35,29 @@ from everos.memory.ports.query import (
     one_of,
 )
 
+from ._codec import (
+    MilvusValueLimitError,
+    RowCodec,
+    bm25_score_from_distance,
+    compose_pk,
+)
+from ._columns import PK_FIELD, present_field, sparse_field
+from ._layout import CollectionLayout
 from .milvus_manager import (
     MilvusConnection,
-    MilvusSchemaMismatchError,
     collection_name,
 )
 from .predicate import render_predicate
 
 logger = get_logger(__name__)
 
-_DUMMY_VECTOR_FIELD = "_everos_dummy_vector"
-_DUMMY_VECTOR_DIMENSION = 2
+_SEARCH_TOPK_MAX = 16_384
 _SEARCH_TOPK_MAX = 16_384
 """Milvus caps ``search`` topK at its result window and rejects anything
 larger outright. LanceDB has no such ceiling, so callers pass generous
 pool sizes -- agentic search deliberately passes a large sentinel and
 expects the engine to clamp. Clamping here keeps that expectation true on
 both backends instead of making every caller learn one engine's limit."""
-_SPARSE_SUFFIX = "__sparse"
-_PRESENT_SUFFIX = "__present"
-_PK_FIELD = "__pk"
-_PK_SEPARATOR = "/"
-_PK_MAX_LENGTH = 65_535
-"""Milvus has one scalar primary key per collection, so the declared
-PRIMARY_KEY columns are joined into the private ``__pk`` column. No key
-column can contain the separator: app_id / project_id / owner_id / skill
-name are directory segments on disk and entry_id is ``<prefix>_<date>_<seq>``;
-``_compose_pk`` rejects a value that does."""
-
-
-class MilvusValueLimitError(ValueError):
-    """A row exceeds a documented Milvus VARCHAR, array, or vector limit."""
-
-
-def _compose_pk(schema: IndexSchema, row: Mapping[str, Any]) -> str:
-    """Join the row's PRIMARY_KEY values into the ``__pk`` scalar.
-
-    Milvus keys a collection on exactly one field, so the declared key
-    columns are concatenated in declaration order. Rejects a component
-    containing the separator (the join would stop being injective) and a
-    result over the VARCHAR limit (``_validate_raw_record`` only covers
-    logical fields, not this physical one).
-    """
-    parts = [str(row[column]) for column in schema.primary_key]
-    for column, part in zip(schema.primary_key, parts, strict=True):
-        if _PK_SEPARATOR in part:
-            raise MilvusValueLimitError(
-                f"{schema.table_name}.{column} contains {_PK_SEPARATOR!r}: {part!r}"
-            )
-    pk = _PK_SEPARATOR.join(parts)
-    size = len(pk.encode("utf-8"))
-    if size > _PK_MAX_LENGTH:
-        raise MilvusValueLimitError(
-            f"{schema.table_name}.{_PK_FIELD} is {size} UTF-8 bytes; "
-            f"Milvus limit is {_PK_MAX_LENGTH}"
-        )
-    return pk
-
-
-@dataclass(frozen=True)
-class _PhysicalField:
-    """One Milvus column exactly as EverOS declares it.
-
-    The same descriptor drives collection creation and startup verification,
-    so a reported mismatch always means the server disagrees with us — never
-    that the builder and the checker have drifted apart from each other.
-    """
-
-    name: str
-    datatype: DataType
-    is_primary: bool = False
-    nullable: bool = False
-    dim: int | None = None
-    element_type: DataType | None = None
-    max_length: int | None = None
-    max_capacity: int | None = None
-    enable_analyzer: bool = False
-
-    def create_kwargs(self) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"field_name": self.name, "datatype": self.datatype}
-        if self.is_primary:
-            kwargs["is_primary"] = True
-        if self.element_type is not None:
-            kwargs["element_type"] = self.element_type
-        if self.max_length is not None:
-            kwargs["max_length"] = self.max_length
-        if self.max_capacity is not None:
-            kwargs["max_capacity"] = self.max_capacity
-        if self.dim is not None:
-            kwargs["dim"] = self.dim
-        if self.enable_analyzer:
-            kwargs["enable_analyzer"] = True
-        if self.nullable:
-            kwargs["nullable"] = True
-        return kwargs
-
-    def mismatches(self, actual: dict[str, Any]) -> list[str]:
-        """Report how a server-reported field differs from this declaration.
-
-        ``describe_collection`` omits ``nullable`` and ``is_primary`` when they
-        are false and omits ``element_type`` for non-array columns, so absence
-        is unambiguous and can be compared strictly. ``max_length`` and
-        ``max_capacity`` are reported only for the types that carry them and
-        the server may normalize them, so they are advisory: a wrong length
-        surfaces as a loud write rejection anyway, whereas a wrong datatype or
-        dimension is the kind that fails opaquely much later.
-        """
-        params = actual.get("params") or {}
-        out: list[str] = []
-        if actual.get("type") != self.datatype:
-            out.append(
-                f"{self.name}: datatype {_name_of(actual.get('type'))} "
-                f"!= expected {_name_of(self.datatype)}"
-            )
-        if bool(actual.get("is_primary", False)) != self.is_primary:
-            out.append(
-                f"{self.name}: is_primary {actual.get('is_primary', False)} "
-                f"!= expected {self.is_primary}"
-            )
-        if bool(actual.get("nullable", False)) != self.nullable:
-            out.append(
-                f"{self.name}: nullable {actual.get('nullable', False)} "
-                f"!= expected {self.nullable}"
-            )
-        if self.dim is not None and params.get("dim") != self.dim:
-            out.append(f"{self.name}: dim {params.get('dim')} != expected {self.dim}")
-        if self.element_type is not None and actual.get("element_type") != (
-            self.element_type
-        ):
-            out.append(
-                f"{self.name}: element_type {_name_of(actual.get('element_type'))} "
-                f"!= expected {_name_of(self.element_type)}"
-            )
-        if self.enable_analyzer and not _is_true(params.get("enable_analyzer")):
-            out.append(
-                f"{self.name}: enable_analyzer "
-                f"{params.get('enable_analyzer', False)} != expected True"
-            )
-        return out
-
-    def soft_mismatches(self, actual: dict[str, Any]) -> list[str]:
-        """Advisory-only limit drift (see :meth:`mismatches`)."""
-        params = actual.get("params") or {}
-        out: list[str] = []
-        for key, want in (
-            ("max_length", self.max_length),
-            ("max_capacity", self.max_capacity),
-        ):
-            got = params.get(key)
-            if want is not None and got is not None and int(got) != want:
-                out.append(f"{self.name}: {key} {got} != declared {want}")
-        return out
-
-
-def _name_of(datatype: Any) -> str:
-    return getattr(datatype, "name", repr(datatype))
-
-
-def _is_true(value: Any) -> bool:
-    return value is True or (isinstance(value, str) and value.casefold() == "true")
-
-
-def _function_key(
-    function: dict[str, Any],
-) -> tuple[Any, tuple[str, ...], tuple[str, ...]]:
-    return (
-        function.get("type"),
-        tuple(function.get("input_field_names") or ()),
-        tuple(function.get("output_field_names") or ()),
-    )
-
-
-def _format_function_key(
-    key: tuple[Any, tuple[str, ...], tuple[str, ...]],
-) -> str:
-    function_type, inputs, outputs = key
-    return (
-        f"type={_name_of(function_type)}, inputs={list(inputs)}, "
-        f"outputs={list(outputs)}"
-    )
-
-
-def _metric_name(metric: Any) -> str | None:
-    if metric is None:
-        return None
-    return str(getattr(metric, "name", metric)).upper()
 
 
 class MilvusRepoBase[T: BaseModel]:
@@ -239,6 +82,8 @@ class MilvusRepoBase[T: BaseModel]:
 
     def __init__(self, connection: MilvusConnection) -> None:
         self._connection = connection
+        self._layout = CollectionLayout(self.index_schema)
+        self._codec = RowCodec(self.schema, self.index_schema)
 
     @property
     def collection_name(self) -> str:
@@ -282,33 +127,13 @@ class MilvusRepoBase[T: BaseModel]:
             self._ready_collections.add(name)
 
     async def _create_collection(self, client: MilvusClient) -> None:
-        schema = self._build_collection_schema()
         index_params = client.prepare_index_params()
-        vector_fields = self.index_schema.vector_fields
-        if vector_fields:
-            for field in vector_fields:
-                index_params.add_index(
-                    field_name=field.name,
-                    index_type="AUTOINDEX",
-                    metric_type="COSINE",
-                )
-        else:
-            index_params.add_index(
-                field_name=_DUMMY_VECTOR_FIELD,
-                index_type="AUTOINDEX",
-                metric_type="COSINE",
-            )
-        for field in self.index_schema.bm25_fields:
-            index_params.add_index(
-                field_name=_sparse_field(field),
-                index_type="AUTOINDEX",
-                metric_type="BM25",
-            )
+        self._layout.add_indexes(index_params)
         settings = self._connection.settings
         await _run(
             client.create_collection,
             collection_name=self.collection_name,
-            schema=schema,
+            schema=self._layout.build_schema(),
             index_params=index_params,
             consistency_level=settings.consistency_level,
         )
@@ -321,139 +146,31 @@ class MilvusRepoBase[T: BaseModel]:
     async def verify_collection(self) -> None:
         """Reject a collection whose physical metadata disagrees with ours.
 
-        A name-only check waves through a collection whose columns happen to
-        share our names but carry the wrong datatype, primary key, nullability
-        or vector dimension — a stale model, or a ``collection_prefix``
-        collision with someone else's data. That collection starts fine and
-        then fails opaquely on the first write or search. Comparing the
-        physical shape, BM25 function mapping, and field-matched vector index
-        metrics turns it back into a startup error with a recovery path.
+        Fetches the server's description of the collection and of each of its
+        indexes and checks both against :class:`~._layout.CollectionLayout`;
+        see :meth:`~._layout.CollectionLayout.verify_fields` for why a
+        name-only check is not enough.
+
+        Raises:
+            MilvusSchemaMismatchError: The collection or one of its indexes
+                differs from the declaration.
         """
         client = await self._connection.client()
-        description = await _run(client.describe_collection, self.collection_name)
-        reported = {
-            field["name"]: field
-            for field in description.get("fields", [])
-            if "name" in field
-        }
-        expected = {physical.name: physical for physical in self._physical_fields()}
-
-        missing = sorted(set(expected) - set(reported))
-        stale = sorted(set(reported) - set(expected))
-        drift: list[str] = []
-        advisory: list[str] = []
-        for name, physical in expected.items():
-            actual = reported.get(name)
-            if actual is None:
-                continue
-            drift.extend(physical.mismatches(actual))
-            advisory.extend(physical.soft_mismatches(actual))
-
-        expected_functions = {
-            (
-                FunctionType.BM25,
-                (field,),
-                (_sparse_field(field),),
-            )
-            for field in self.index_schema.bm25_fields
-        }
-        reported_functions = {
-            _function_key(function)
-            for function in description.get("functions", [])
-            if isinstance(function, dict)
-        }
-        missing_functions = sorted(
-            _format_function_key(key) for key in expected_functions - reported_functions
-        )
-        stale_functions = sorted(
-            _format_function_key(key) for key in reported_functions - expected_functions
-        )
-
-        if advisory:
-            logger.warning(
-                "milvus_collection_limit_drift",
-                collection=self.collection_name,
-                details=advisory,
-            )
-        if missing or stale or drift or missing_functions or stale_functions:
-            raise MilvusSchemaMismatchError(
-                f"Milvus collection {self.collection_name!r} schema drift: "
-                f"missing={missing}, stale={stale}, incompatible={drift}, "
-                f"missing_functions={missing_functions}, "
-                f"stale_functions={stale_functions}. "
-                "The index is rebuildable from markdown; run "
-                "`everos cascade rebuild`."
-            )
-        await self._verify_indexes(client)
-
-    async def _verify_indexes(self, client: MilvusClient) -> None:
-        """Verify only the field and metric contracts of derived indexes."""
-        expected = {field.name: "COSINE" for field in self.index_schema.vector_fields}
-        if not expected:
-            expected[_DUMMY_VECTOR_FIELD] = "COSINE"
-        expected.update(
-            {_sparse_field(field): "BM25" for field in self.index_schema.bm25_fields}
-        )
-
-        index_names = await _run(client.list_indexes, self.collection_name)
-        reported: dict[str, list[tuple[str, str | None]]] = {}
-        incompatible: list[str] = []
-        physical = {field.name: field for field in self._physical_fields()}
-        vector_types = {DataType.FLOAT_VECTOR, DataType.SPARSE_FLOAT_VECTOR}
-        for index_name in index_names:
-            description = await _run(
-                client.describe_index,
-                self.collection_name,
-                index_name,
-            )
-            if not isinstance(description, dict):
-                incompatible.append(f"index {index_name!r}: description unavailable")
-                continue
-            field_name = description.get("field_name")
-            if not isinstance(field_name, str):
-                incompatible.append(f"index {index_name!r}: field_name unavailable")
-                continue
-            declared = physical.get(field_name)
-            if field_name not in expected:
-                if declared is None or declared.datatype in vector_types:
-                    incompatible.append(
-                        f"index {index_name!r}: unexpected vector field {field_name!r}"
-                    )
-                continue
-            metric = description.get("metric_type")
-            if metric is None and isinstance(description.get("params"), dict):
-                metric = description["params"].get("metric_type")
-            reported.setdefault(field_name, []).append(
-                (str(index_name), _metric_name(metric))
-            )
-
-        missing_indexes = sorted(set(expected) - set(reported))
-        for field_name, indexes in reported.items():
-            wanted = expected[field_name]
-            if len(indexes) != 1:
-                incompatible.append(
-                    f"{field_name}: expected exactly one index, found {len(indexes)}"
-                )
-            for index_name, metric in indexes:
-                if metric != wanted:
-                    incompatible.append(
-                        f"{field_name}: metric_type {metric!r} != expected {wanted!r} "
-                        f"(index {index_name!r})"
-                    )
-
-        if missing_indexes or incompatible:
-            raise MilvusSchemaMismatchError(
-                f"Milvus collection {self.collection_name!r} index drift: "
-                f"missing={missing_indexes}, incompatible={incompatible}. "
-                "The index is rebuildable from markdown; run "
-                "`everos cascade rebuild`."
-            )
+        name = self.collection_name
+        description = await _run(client.describe_collection, name)
+        self._layout.verify_fields(description, collection_name=name)
+        index_names = await _run(client.list_indexes, name)
+        index_descriptions = [
+            (index_name, await _run(client.describe_index, name, index_name))
+            for index_name in index_names
+        ]
+        self._layout.verify_indexes(index_descriptions, collection_name=name)
 
     async def upsert(self, records: Sequence[T]) -> None:
         if not records:
             return
         await self.ensure_collection()
-        payload = [self._to_milvus_record(record) for record in records]
+        payload = [self._codec.to_record(record) for record in records]
         client = await self._connection.client()
         async with self._write_lock(self.collection_name):
             await _run(client.upsert, self.collection_name, payload)
@@ -485,9 +202,9 @@ class MilvusRepoBase[T: BaseModel]:
             for row in rows:
                 merged = dict(row)
                 for key, value in updates.items():
-                    self._write_field_value(merged, key, value)
-                merged[_PK_FIELD] = _compose_pk(self.index_schema, merged)
-                self._validate_raw_record(merged)
+                    self._codec.write_field_value(merged, key, value)
+                merged[PK_FIELD] = compose_pk(self.index_schema, merged)
+                self._codec.validate_raw(merged)
                 patched.append(merged)
             await _run(client.upsert, self.collection_name, patched)
 
@@ -526,7 +243,7 @@ class MilvusRepoBase[T: BaseModel]:
         rows = await self._query_raw(
             where, limit=limit, include_vectors=not skip_vectors
         )
-        return [self._model_from_milvus(row) for row in rows]
+        return [self._codec.to_model(row) for row in rows]
 
     async def find_one_where(self, where: Filter) -> T | None:
         rows = await self.find_where(where, limit=1)
@@ -535,7 +252,7 @@ class MilvusRepoBase[T: BaseModel]:
     async def scan(self, where: Filter | None = None) -> list[T]:
         """Stream every matching row without a fixed query-window cap."""
         rows = await self._scan_raw(where, include_vectors=True)
-        return [self._model_from_milvus(row) for row in rows]
+        return [self._codec.to_model(row) for row in rows]
 
     async def _scan_raw(
         self,
@@ -559,7 +276,7 @@ class MilvusRepoBase[T: BaseModel]:
             batch_size=1000,
             limit=-1,
             filter=self._expr(where),
-            output_fields=self._output_fields(include_vectors=include_vectors),
+            output_fields=self._layout.output_fields(include_vectors=include_vectors),
         )
         rows: list[dict[str, Any]] = []
         try:
@@ -595,7 +312,7 @@ class MilvusRepoBase[T: BaseModel]:
                 total=total,
                 max_fetch=max_fetch,
             )
-        rows = [self._model_from_milvus(row) for row in raw]
+        rows = [self._codec.to_model(row) for row in raw]
         rows.sort(
             key=lambda row: _sort_value(getattr(row, sort_by, None)),
             reverse=descending,
@@ -645,15 +362,15 @@ class MilvusRepoBase[T: BaseModel]:
                 client.search,
                 self.collection_name,
                 data=[query],
-                anns_field=_sparse_field(field),
+                anns_field=sparse_field(field),
                 filter=self._expr(where),
                 limit=min(limit, _SEARCH_TOPK_MAX),
-                output_fields=self._output_fields(include_vectors=False),
+                output_fields=self._layout.output_fields(include_vectors=False),
                 search_params={"metric_type": "BM25"},
             )
             for row in _first_result_set(results):
-                shaped = self._candidate_row_from_search(row)
-                score = _bm25_score_from_distance(row.get("distance"))
+                shaped = self._codec.candidate_from_search(row)
+                score = bm25_score_from_distance(row.get("distance"))
                 shaped["_score"] = score
                 rid = shaped.get("id")
                 if not isinstance(rid, str):
@@ -678,10 +395,10 @@ class MilvusRepoBase[T: BaseModel]:
         field = self.index_schema.field(vector_field)
         if field.kind is not IndexFieldKind.DENSE_VECTOR:
             raise ValueError(f"{vector_field!r} is not a dense-vector field")
-        self._validate_vector(field, vector)
+        self._codec.validate_vector(field, vector)
         await self.ensure_collection()
         client = await self._connection.client()
-        present = eq(_present_field(vector_field), True)
+        present = eq(present_field(vector_field), True)
         results = await _run(
             client.search,
             self.collection_name,
@@ -689,11 +406,11 @@ class MilvusRepoBase[T: BaseModel]:
             anns_field=vector_field,
             filter=self._expr(all_of(where, present)),
             limit=min(limit, _SEARCH_TOPK_MAX),
-            output_fields=self._output_fields(include_vectors=False),
+            output_fields=self._layout.output_fields(include_vectors=False),
             search_params={"metric_type": "COSINE"},
         )
         return [
-            self._candidate_row_from_search(row, normalize_cosine=True)
+            self._codec.candidate_from_search(row, normalize_cosine=True)
             for row in _first_result_set(results)
         ]
 
@@ -808,265 +525,6 @@ class MilvusRepoBase[T: BaseModel]:
             limit=limit,
         )
 
-    def _build_collection_schema(self) -> Any:
-        schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
-        for physical in self._physical_fields():
-            schema.add_field(**physical.create_kwargs())
-        for field in self.index_schema.bm25_fields:
-            sparse_name = _sparse_field(field)
-            schema.add_function(
-                Function(
-                    name=f"{field}_bm25",
-                    function_type=FunctionType.BM25,
-                    input_field_names=[field],
-                    output_field_names=[sparse_name],
-                )
-            )
-        return schema
-
-    def _physical_fields(self) -> tuple[_PhysicalField, ...]:
-        """Every Milvus column this table declares, in creation order."""
-        out: list[_PhysicalField] = [
-            _PhysicalField(
-                name=_PK_FIELD,
-                datatype=DataType.VARCHAR,
-                is_primary=True,
-                max_length=_PK_MAX_LENGTH,
-            )
-        ]
-        for field in self.index_schema.fields:
-            out.extend(self._physical_for(field))
-        if not self.index_schema.vector_fields:
-            out.append(
-                _PhysicalField(
-                    name=_DUMMY_VECTOR_FIELD,
-                    datatype=DataType.FLOAT_VECTOR,
-                    dim=_DUMMY_VECTOR_DIMENSION,
-                )
-            )
-        out.extend(
-            _PhysicalField(
-                name=_sparse_field(field),
-                datatype=DataType.SPARSE_FLOAT_VECTOR,
-            )
-            for field in self.index_schema.bm25_fields
-        )
-        return tuple(out)
-
-    def _physical_for(self, field: IndexField) -> list[_PhysicalField]:
-        is_bm25 = field.name in self.index_schema.bm25_fields
-        if field.kind is IndexFieldKind.STRING:
-            return [
-                _PhysicalField(
-                    name=field.name,
-                    datatype=DataType.VARCHAR,
-                    # A BM25 input is written as "" rather than null so the
-                    # analyzer always has something to tokenize.
-                    nullable=field.nullable and not is_bm25,
-                    max_length=field.max_length,
-                    enable_analyzer=is_bm25,
-                )
-            ]
-        if field.kind is IndexFieldKind.STRING_ARRAY:
-            return [
-                _PhysicalField(
-                    name=field.name,
-                    datatype=DataType.ARRAY,
-                    nullable=field.nullable,
-                    element_type=DataType.VARCHAR,
-                    max_length=field.max_length,
-                    max_capacity=field.max_capacity,
-                )
-            ]
-        if field.kind is IndexFieldKind.FLOAT:
-            return [
-                _PhysicalField(
-                    name=field.name,
-                    datatype=DataType.DOUBLE,
-                    nullable=field.nullable,
-                )
-            ]
-        if field.kind is IndexFieldKind.INTEGER:
-            return [
-                _PhysicalField(
-                    name=field.name,
-                    datatype=DataType.INT64,
-                    nullable=field.nullable,
-                )
-            ]
-        if field.kind is IndexFieldKind.DATETIME:
-            return [
-                _PhysicalField(
-                    name=_datetime_storage_field(field.name),
-                    datatype=DataType.INT64,
-                    nullable=field.nullable,
-                )
-            ]
-        if field.kind is IndexFieldKind.DENSE_VECTOR:
-            return [
-                _PhysicalField(
-                    name=field.name,
-                    datatype=DataType.FLOAT_VECTOR,
-                    dim=field.dimension,
-                ),
-                # Milvus cannot store a null dense vector, so a logical null is
-                # a zero vector plus this presence marker.
-                _PhysicalField(
-                    name=_present_field(field.name),
-                    datatype=DataType.BOOL,
-                ),
-            ]
-        # pragma: no cover - enum exhaustiveness guard
-        raise TypeError(f"unsupported index field kind: {field.kind}")
-
-    def _stored_field_names(self) -> list[str]:
-        return [physical.name for physical in self._physical_fields()]
-
-    def _output_fields(self, *, include_vectors: bool) -> list[str]:
-        fields: list[str] = []
-        vector_names = {field.name for field in self.index_schema.vector_fields}
-        present_names = {_present_field(name) for name in vector_names}
-        for name in self._stored_field_names():
-            if name.endswith(_SPARSE_SUFFIX):
-                continue
-            if name == _DUMMY_VECTOR_FIELD:
-                if include_vectors:
-                    fields.append(name)
-                continue
-            if not include_vectors and (name in vector_names or name in present_names):
-                continue
-            fields.append(name)
-        return fields
-
-    def _to_milvus_record(self, record: T) -> dict[str, Any]:
-        raw = record.model_dump(mode="python")
-        out: dict[str, Any] = {}
-        for field in self.index_schema.fields:
-            value = raw.get(field.name)
-            if field.name in self.index_schema.bm25_fields and value is None:
-                value = ""
-            if field.kind is IndexFieldKind.DATETIME:
-                out[_datetime_storage_field(field.name)] = (
-                    _datetime_to_ms(value) if value is not None else None
-                )
-            elif field.kind is IndexFieldKind.DENSE_VECTOR:
-                present = value is not None
-                out[field.name] = (
-                    list(value) if present else [0.0] * int(field.dimension or 0)
-                )
-                out[_present_field(field.name)] = present
-            elif field.kind is IndexFieldKind.STRING_ARRAY:
-                out[field.name] = [str(item) for item in (value or [])]
-            else:
-                out[field.name] = value
-        if not self.index_schema.vector_fields:
-            out[_DUMMY_VECTOR_FIELD] = [0.0] * _DUMMY_VECTOR_DIMENSION
-        out[_PK_FIELD] = _compose_pk(self.index_schema, out)
-        self._validate_raw_record(out)
-        return out
-
-    def _validate_raw_record(self, row: dict[str, Any]) -> None:
-        for field in self.index_schema.fields:
-            storage_name = (
-                _datetime_storage_field(field.name)
-                if field.kind is IndexFieldKind.DATETIME
-                else field.name
-            )
-            value = row.get(storage_name)
-            if value is None:
-                if not field.nullable:
-                    raise MilvusValueLimitError(
-                        f"{self.table_name}.{field.name} cannot be null"
-                    )
-                continue
-            if field.kind is IndexFieldKind.STRING:
-                size = len(str(value).encode("utf-8"))
-                if field.max_length is not None and size > field.max_length:
-                    raise MilvusValueLimitError(
-                        f"{self.table_name}.{field.name} is {size} UTF-8 bytes; "
-                        f"Milvus limit is {field.max_length}"
-                    )
-            elif field.kind is IndexFieldKind.STRING_ARRAY:
-                if field.max_capacity is not None and len(value) > field.max_capacity:
-                    raise MilvusValueLimitError(
-                        f"{self.table_name}.{field.name} has {len(value)} items; "
-                        f"Milvus limit is {field.max_capacity}"
-                    )
-                for position, item in enumerate(value):
-                    size = len(str(item).encode("utf-8"))
-                    if field.max_length is not None and size > field.max_length:
-                        raise MilvusValueLimitError(
-                            f"{self.table_name}.{field.name}[{position}] is {size} "
-                            f"UTF-8 bytes; Milvus limit is {field.max_length}"
-                        )
-            elif field.kind is IndexFieldKind.DENSE_VECTOR:
-                self._validate_vector(field, value)
-
-    def _validate_vector(self, field: IndexField, value: Sequence[float]) -> None:
-        if len(value) != field.dimension:
-            raise MilvusValueLimitError(
-                f"{self.table_name}.{field.name} has dimension {len(value)}; "
-                f"expected {field.dimension}"
-            )
-
-    def _model_from_milvus(self, row: dict[str, Any]) -> T:
-        return self.schema.model_validate(self._restore_row(row))
-
-    def _candidate_row_from_search(
-        self, row: dict[str, Any], *, normalize_cosine: bool = False
-    ) -> dict[str, Any]:
-        shaped = self._restore_row(row.get("entity", {}))
-        raw_distance = row.get("distance")
-        shaped["_distance"] = (
-            _cosine_distance_from_milvus(raw_distance)
-            if normalize_cosine
-            else raw_distance
-        )
-        return shaped
-
-    def _restore_row(self, row: dict[str, Any]) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for field in self.index_schema.fields:
-            if field.kind is IndexFieldKind.DATETIME:
-                value = row.get(_datetime_storage_field(field.name))
-                out[field.name] = (
-                    None if value is None else from_timestamp_ms(int(value))
-                )
-            elif field.kind is IndexFieldKind.DENSE_VECTOR:
-                if field.name in row:
-                    out[field.name] = (
-                        row[field.name]
-                        if row.get(_present_field(field.name), True)
-                        else None
-                    )
-            elif field.name in row:
-                value = row[field.name]
-                if (
-                    field.name in self.index_schema.bm25_fields
-                    and value == ""
-                    and field.nullable
-                ):
-                    value = None
-                out[field.name] = value
-        return out
-
-    def _write_field_value(
-        self, row: dict[str, Any], field_name: str, value: Any
-    ) -> None:
-        field = self.index_schema.field(field_name)
-        if field.kind is IndexFieldKind.DATETIME:
-            row[_datetime_storage_field(field_name)] = (
-                _datetime_to_ms(value) if value is not None else None
-            )
-        elif field.kind is IndexFieldKind.DENSE_VECTOR:
-            present = value is not None
-            row[field_name] = (
-                list(value) if present else [0.0] * int(field.dimension or 0)
-            )
-            row[_present_field(field_name)] = present
-        else:
-            row[field_name] = value
-
     async def _query_raw(
         self,
         where: Filter | None,
@@ -1080,7 +538,7 @@ class MilvusRepoBase[T: BaseModel]:
             client.query,
             self.collection_name,
             filter=self._expr(where),
-            output_fields=self._output_fields(include_vectors=include_vectors),
+            output_fields=self._layout.output_fields(include_vectors=include_vectors),
             limit=limit,
         )
 
@@ -1088,7 +546,7 @@ class MilvusRepoBase[T: BaseModel]:
         self, where: Filter | None, *, limit: int
     ) -> list[dict[str, Any]]:
         rows = await self._query_raw(where, limit=limit, include_vectors=False)
-        return [self._restore_row(row) for row in rows]
+        return [self._codec.restore_row(row) for row in rows]
 
     def _expr(self, where: Filter | None) -> str:
         if where is not None and not isinstance(where, Filter):
@@ -1103,46 +561,12 @@ class MilvusRepoBase[T: BaseModel]:
         )
 
 
-def _datetime_storage_field(name: str) -> str:
-    return f"{name}_ms"
-
-
-def _present_field(name: str) -> str:
-    return f"{name}{_PRESENT_SUFFIX}"
-
-
-def _sparse_field(name: str) -> str:
-    return f"{name}{_SPARSE_SUFFIX}"
-
-
-def _datetime_to_ms(value: Any) -> int:
-    if isinstance(value, dt.datetime):
-        aware = ensure_utc(value)
-        assert aware is not None
-        return to_timestamp_ms(aware)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return int(value)
-    raise TypeError(f"expected datetime or epoch ms, got {type(value).__name__}")
-
-
 def _sort_value(value: Any) -> Any:
     if value is None:
         fallback = ensure_utc(dt.datetime.min)
         assert fallback is not None
         return fallback
     return value
-
-
-def _bm25_score_from_distance(distance: Any) -> float:
-    """Milvus BM25 is higher-is-better; expose a non-negative score."""
-    return 0.0 if distance is None else max(0.0, float(distance))
-
-
-def _cosine_distance_from_milvus(distance: Any) -> float | None:
-    """Convert Milvus Server / Zilliz similarity to Lance-style distance."""
-    if distance is None:
-        return None
-    return min(1.0, max(0.0, 1.0 - float(distance)))
 
 
 def _first_result_set(results: Any) -> list[dict[str, Any]]:
@@ -1153,6 +577,3 @@ def _first_result_set(results: Any) -> list[dict[str, Any]]:
 
 async def _run(func: Any, /, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(func, *args, **kwargs)
-
-
-__all__ = ["MilvusRepoBase", "MilvusValueLimitError"]

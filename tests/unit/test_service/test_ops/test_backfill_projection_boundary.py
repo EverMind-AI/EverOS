@@ -1,4 +1,12 @@
-"""Keep the backfill facade exception limited to pure projection declarations."""
+"""Keep the vectors phase free of runtime infra imports, with no exception.
+
+The row-level backfill lives in
+:mod:`everos.infra.persistence.index.vector_backfill`; the phase receives it
+through :class:`~everos.service.BackfillDeps`. A type import under
+``TYPE_CHECKING`` is not a dependency (architecture rule 4); anything else
+reaching ``everos.infra`` is, and must not come back as an ``ignore_imports``
+line in the ``service-usecases-forbidden`` contract.
+"""
 
 from __future__ import annotations
 
@@ -11,24 +19,23 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[4]
 _MODULE = "everos.service.ops._backfill_vectors"
-_FACADE = "everos.infra.persistence.index"
-_RUNTIME_NAMES = {"VectorProjection", "VECTOR_PROJECTIONS"}
 
 
-def _infra_import_violations(source: str) -> list[str]:
-    """Check static imports, including aliases, relative imports and annotations."""
+def _runtime_infra_imports(source: str) -> list[str]:
+    """Static ``everos.infra`` imports outside ``if TYPE_CHECKING:`` blocks.
+
+    Covers aliases, relative imports and star imports.
+    """
     violations: list[str] = []
 
-    def visit(node: ast.AST, *, annotation_only: bool = False) -> None:
+    def visit(node: ast.AST) -> None:
         if (
             isinstance(node, ast.If)
             and isinstance(node.test, ast.Name)
             and node.test.id == "TYPE_CHECKING"
         ):
-            for child in node.body:
-                visit(child, annotation_only=True)
             for child in node.orelse:
-                visit(child, annotation_only=annotation_only)
+                visit(child)
             return
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
@@ -36,15 +43,11 @@ def _infra_import_violations(source: str) -> list[str]:
                 module = importlib.util.resolve_name(
                     "." * node.level + module, _MODULE.rpartition(".")[0]
                 )
-            allowed = _RUNTIME_NAMES | (
-                {"IndexMaintenance"} if annotation_only else set()
+            violations.extend(
+                f"{module}.{alias.name}"
+                for alias in node.names
+                if module == "everos.infra" or module.startswith("everos.infra.")
             )
-            for alias in node.names:
-                target = f"{module}.{alias.name}"
-                if target.startswith("everos.infra.") and (
-                    module != _FACADE or alias.name not in allowed
-                ):
-                    violations.append(target)
         elif isinstance(node, ast.Import):
             violations.extend(
                 alias.name
@@ -53,64 +56,55 @@ def _infra_import_violations(source: str) -> list[str]:
                 or alias.name.startswith("everos.infra.")
             )
         for child in ast.iter_child_nodes(node):
-            visit(child, annotation_only=annotation_only)
+            visit(child)
 
     visit(ast.parse(source))
     return violations
 
 
-def test_backfill_imports_only_projection_declarations() -> None:
+def test_vectors_phase_has_no_runtime_infra_import() -> None:
     source = _ROOT / "src/everos/service/ops/_backfill_vectors.py"
-    assert _infra_import_violations(source.read_text()) == []
+    assert _runtime_infra_imports(source.read_text()) == []
 
 
-def test_import_linter_exception_is_exact() -> None:
+def test_import_linter_carries_no_backfill_exception() -> None:
     config = tomllib.loads((_ROOT / "pyproject.toml").read_text())
     contract = next(
         item
         for item in config["tool"]["importlinter"]["contracts"]
         if item["name"].startswith("service-usecases-forbidden:")
     )
-    exceptions = [item for item in contract["ignore_imports"] if _MODULE in item]
-    assert exceptions == [f"{_MODULE} -> {_FACADE}"]
     assert "everos.infra" in contract["forbidden_modules"]
-    backend_guard = next(
-        item
-        for item in config["tool"]["importlinter"]["contracts"]
-        if item["name"] == "Derived-index ports know no concrete backend"
-    )
-    assert f"{_FACADE}.vector_projection" in backend_guard["source_modules"]
+    assert [
+        item for item in contract["ignore_imports"] if "_backfill_vectors" in item
+    ] == []
 
 
 @pytest.mark.parametrize(
     "statement",
     [
-        "from everos.infra.persistence.index import DerivedIndex",
-        "from everos.infra.persistence.index import IndexBackend as Factory",
-        "from everos.infra.persistence.index import IndexMaintenance",
+        "from everos.infra.persistence.index import VectorProjection",
+        "from everos.infra.persistence.index import VECTOR_PROJECTIONS as P",
         "from everos.infra.persistence.index import *",
+        "from everos.infra import persistence",
         "import everos.infra.persistence.index as index",
-        "from everos.infra.persistence import index",
-        "from everos.infra.persistence.factories import build_derived_index",
         "from ...infra.persistence.index import DerivedIndex",
-        "from everos.infra.persistence.index.vector_projection import VectorProjection",
-        "if TYPE_CHECKING:\n"
+        "if TYPE_CHECKING:\n    pass\nelse:\n"
         "    from everos.infra.persistence.index import DerivedIndex",
     ],
 )
-def test_exception_rejects_backend_and_module_access(statement: str) -> None:
-    assert _infra_import_violations(statement)
+def test_checker_rejects_runtime_infra_imports(statement: str) -> None:
+    assert _runtime_infra_imports(statement)
 
 
 @pytest.mark.parametrize(
     "statement",
     [
-        "from everos.infra.persistence.index import "
-        "VectorProjection, VECTOR_PROJECTIONS",
-        "from everos.infra.persistence.index import VectorProjection as Projection",
         "if TYPE_CHECKING:\n"
-        "    from everos.infra.persistence.index import IndexMaintenance",
+        "    from everos.infra.persistence.index import VectorBackfill",
+        "from everos.service.ops._backfill import BackfillDeps",
+        "from everos.memory.ports import Filter",
     ],
 )
-def test_exception_accepts_pure_declarations(statement: str) -> None:
-    assert _infra_import_violations(statement) == []
+def test_checker_accepts_type_only_and_non_infra_imports(statement: str) -> None:
+    assert _runtime_infra_imports(statement) == []

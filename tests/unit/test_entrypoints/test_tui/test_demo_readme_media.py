@@ -91,7 +91,7 @@ def test_readme_media_normalizes_rich_terminal_random_ids() -> None:
 async def test_export_frame_freezes_animation_before_rendering_requested_state(
     tmp_path, monkeypatch
 ) -> None:
-    from everos.entrypoints.tui.demo.app import DotSphereWidget
+    from everos.entrypoints.tui.demo.widgets.dot_sphere import DotSphereWidget
 
     def fast_mount(self: DotSphereWidget) -> None:
         self._animation_timer = self.set_interval(0.001, self._advance)

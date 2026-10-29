@@ -309,6 +309,13 @@ both use the resulting `Application` through three facades:
 - **A request that needs a model while `[llm]` (or `[multimodal]`) is not
   configured answers 422 `PROVIDER_NOT_CONFIGURED`** instead of 500
   `INTERNAL_ERROR`.
+- **Vector backfill's row work moved into the index package.** The vectors
+  phase's row-level events (`cascade_backfill_row_*`,
+  `cascade_backfill_batch_*`, `cascade_backfill_table_*`, ...) are now emitted
+  by the `everos.infra.persistence.index.vector_backfill` logger instead of
+  `everos.service.backfill`; update log filters that matched the old name.
+  `BackfillDeps` takes a `vectors` backfill object in place of its
+  `tokenizer` and `prune_retention` fields.
 
 ### Fixed
 

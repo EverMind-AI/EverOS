@@ -65,7 +65,7 @@ class _EpisodeRepo(MilvusRepoBase[Episode]):
         raw = await self._scan_raw(
             predicate, include_vectors=True, max_rows=limit or 20_000
         )
-        rows = [self._model_from_milvus(row) for row in raw]
+        rows = [self._codec.to_model(row) for row in raw]
         rows.sort(key=lambda row: row.timestamp)
         if columns is None:
             return rows

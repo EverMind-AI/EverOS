@@ -101,7 +101,7 @@ class StrategyTestHarness:
         if not await self._engine.wait_idle(timeout=timeout):
             raise TimeoutError(
                 f"drain: engine still has "
-                f"{self._engine._active_runs} in-flight runs after {timeout}s"
+                f"{self._engine._in_flight.active} in-flight runs after {timeout}s"
             )
 
     async def list_runs(

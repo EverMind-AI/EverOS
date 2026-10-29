@@ -294,10 +294,14 @@ where a protocol's Python type is declared.
 
 `infra.persistence.index.VectorProjection` and `VECTOR_PROJECTIONS` provide
 the shared embedding declarations for normal cascade projection and vector
-backfill. The backfill module may import these two declarations through the
-public index facade; it may not import backend factories or implementations.
-Import-linter limits the module exception, and the backfill boundary tests
-check permitted symbols with both accepted and rejected examples.
+backfill. The row-level backfill -- scanning rows with a missing vector side,
+embedding them in batches with row-by-row fallback, writing them back and
+compacting each table -- lives next to those declarations in
+`infra.persistence.index.vector_backfill` (`ProjectionVectorBackfill`). The
+bootstrap builds it and hands it to the vectors phase through `BackfillDeps`;
+the phase keeps preflight, estimate, confirmation and the summary, and is typed
+against the `VectorBackfill` protocol under `TYPE_CHECKING` only. No
+import-linter exception is needed, and a guard test keeps it that way.
 
 Reflection selects ordered retirement references and retains business report
 counts. Markdown stores group those references by file and apply replacement

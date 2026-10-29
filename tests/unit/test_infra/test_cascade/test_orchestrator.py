@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from sqlmodel import SQLModel
 
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
+from everos.infra.cascade.worker import _kind_state as kind_state
+from everos.infra.cascade.worker import _tuning as tuning
 from everos.infra.persistence import MemoryRoot
 from tests.fakes.storage import Storage
 
@@ -204,16 +207,16 @@ async def test_operational_signal_flips_healthy(
 ) -> None:
     """An operational reason (prune stalled) — not a data-quality backlog —
     is what flips ``healthy`` false."""
-    import everos.infra.cascade.worker as wmod
-
     orch = _make_orchestrator(storage, runtime)
     # Freeze the monotonic clock so staleness is deterministic regardless of
     # the runner's boot uptime (see test_worker prune-staleness test).
     now = 10_000.0
-    monkeypatch.setattr(wmod.time, "monotonic", lambda: now)
+    monkeypatch.setattr(time, "monotonic", lambda: now)
     # simulate a running worker whose version cleanup has gone stale
-    orch._worker._started_at = now - (wmod._PRUNE_STALE_SECONDS_ALERT + 100)
-    orch._worker._optimizer_states["episode"] = wmod._KindOptimizerState()
+    orch._worker._started_at = now - (tuning.PRUNE_STALE_SECONDS_ALERT + 100)
+    orch._worker._maintenance._optimizer_states["episode"] = (
+        kind_state.KindOptimizerState()
+    )
 
     health = await orch.health()
     assert health.healthy is False
@@ -259,10 +262,10 @@ async def test_maintenance_cadences_reach_the_worker_from_settings(
             sqlite=storage.sqlite,
         )
         worker = orch._worker
-        assert worker._optimize_heartbeat == 11.0
-        assert worker._optimize_prune_interval == 22.0
-        assert worker._optimize_prune_retention == 33.0
-        assert worker._optimize_rebuild_interval == 44.0
+        assert worker._maintenance._optimize_heartbeat == 11.0
+        assert worker._maintenance._optimize_prune_interval == 22.0
+        assert worker._maintenance._optimize_prune_retention == 33.0
+        assert worker._maintenance._optimize_rebuild_interval == 44.0
         # The scanner is the other consumer; on an event-less mount it is the
         # only one, so it must see the value too, not just CascadeConfig.
         assert orch._scanner._interval == 55.0

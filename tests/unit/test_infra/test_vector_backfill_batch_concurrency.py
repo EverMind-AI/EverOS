@@ -19,14 +19,17 @@ import time
 from typing import Any
 
 from everos.infra.persistence.index import VectorProjection
-from everos.service import NullBackfillPresenter
-from everos.service.ops._backfill_vectors import (
+from everos.infra.persistence.index.vector_backfill import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
 )
 
 _RETENTION = dt.timedelta(seconds=60)
+
+
+def _ignore_progress(table: str, done: int, total: int) -> None:
+    return None
 
 
 class _RecordingProvider:
@@ -106,7 +109,7 @@ async def test_backfill_table_gathers_primary_and_subject_when_both_needed() -> 
     # ``perf_counter`` grain and give a spurious non-overlap.
     provider = _RecordingProvider(latency=0.05)
     result = await _backfill_table(
-        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+        backlog, provider, prune_retention=_RETENTION, on_progress=_ignore_progress
     )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)
@@ -137,7 +140,7 @@ async def test_backfill_table_skips_subject_gather_when_no_subjects() -> None:
 
     provider = _RecordingProvider(latency=0.05)
     result = await _backfill_table(
-        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+        backlog, provider, prune_retention=_RETENTION, on_progress=_ignore_progress
     )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)
@@ -159,7 +162,7 @@ async def test_backfill_table_gathers_only_on_batches_with_subjects() -> None:
 
     provider = _RecordingProvider(latency=0.02)
     result = await _backfill_table(
-        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+        backlog, provider, prune_retention=_RETENTION, on_progress=_ignore_progress
     )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)

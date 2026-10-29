@@ -20,17 +20,20 @@ from everos.infra.cascade.projections import (
 )
 from everos.infra.cascade.projections._daily_log_base import ParsedEntry
 from everos.infra.persistence.index import VECTOR_PROJECTIONS
-from everos.infra.persistence.markdown import StructuredEntry
-from everos.memory.ports import primary_key
-from everos.service import NullBackfillPresenter
-from everos.service.ops._backfill_vectors import (
+from everos.infra.persistence.index.vector_backfill import (
     _backfill_table,
     _extract_row,
     _NullVectorRow,
     _TableBacklog,
 )
+from everos.infra.persistence.markdown import StructuredEntry
+from everos.memory.ports import primary_key
 from tests.fakes import handler_deps
 from tests.fakes.storage import Storage
+
+
+def _ignore_progress(table: str, done: int, total: int) -> None:
+    return None
 
 
 class RecordingEmbedding:
@@ -141,7 +144,7 @@ async def test_normal_projection_and_repair_match(storage: Storage, kind: str) -
         _TableBacklog(projection, repo, [pending]),
         embedding,
         prune_retention=dt.timedelta(days=7),
-        presenter=NullBackfillPresenter(),
+        on_progress=_ignore_progress,
     )
     assert result.rows_processed == 1
     assert result.rows_failed == 0

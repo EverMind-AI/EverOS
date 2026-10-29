@@ -63,10 +63,16 @@ because the public command is still `everos demo`.
 
 The TUI implementation lives under `src/everos/entrypoints/tui/demo/`:
 
-- `app.py` renders the Textual app and drives the interactive rounds.
+- `app.py` is the Textual app shell and drives the interactive rounds.
+- `copy_text.py` builds the Rich text for every panel and the signal rail.
+- `theme.py` is the colour palette; `_styles.py` is the app stylesheet built
+  from it.
 - `cloud.py` runs the demo memory requests (`add -> flush -> search`).
 - `data.py` holds the static showcase story for `--plain` / `--cinematic`.
-- `widgets/sphere.py` builds the memory sphere frames.
+- `widgets/dot_sphere.py` is the animated sphere widget and its clock;
+  `widgets/answer_bar.py` is the Query <-> Answer bar.
+- `widgets/sphere/` builds the memory sphere frames (one module per renderer,
+  plus geometry, styles and the public build / blend / render API).
 - `readme_media.py` renders README media.
 
 To regenerate README media locally:

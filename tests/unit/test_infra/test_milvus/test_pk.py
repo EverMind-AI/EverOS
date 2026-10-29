@@ -8,10 +8,8 @@ from everos.config.settings import MilvusSettings
 from everos.infra.persistence.index import Episode, eq
 from everos.infra.persistence.index.schema import schema_for
 from everos.infra.persistence.milvus import MilvusConnection, MilvusIndexBackend
-from everos.infra.persistence.milvus.repository import (
-    MilvusValueLimitError,
-    _compose_pk,
-)
+from everos.infra.persistence.milvus._codec import compose_pk
+from everos.infra.persistence.milvus.repository import MilvusValueLimitError
 
 
 def test_compose_pk_joins_primary_key_in_declared_order() -> None:
@@ -21,7 +19,7 @@ def test_compose_pk_joins_primary_key_in_declared_order() -> None:
         "id": "u1_ep_20260914_00000001",
     }
     assert (
-        _compose_pk(schema_for(Episode), row)
+        compose_pk(schema_for(Episode), row)
         == "claude-code/alpha/u1_ep_20260914_00000001"
     )
 
@@ -29,13 +27,13 @@ def test_compose_pk_joins_primary_key_in_declared_order() -> None:
 def test_compose_pk_rejects_separator_in_any_component() -> None:
     row = {"app_id": "claude-code", "project_id": "a/b", "id": "x"}
     with pytest.raises(MilvusValueLimitError, match="project_id contains '/'"):
-        _compose_pk(schema_for(Episode), row)
+        compose_pk(schema_for(Episode), row)
 
 
 def test_compose_pk_rejects_overlong_key() -> None:
     row = {"app_id": "a" * 40_000, "project_id": "b" * 30_000, "id": "x"}
     with pytest.raises(MilvusValueLimitError, match="UTF-8 bytes"):
-        _compose_pk(schema_for(Episode), row)
+        compose_pk(schema_for(Episode), row)
 
 
 async def test_update_refuses_to_change_primary_key_columns() -> None:

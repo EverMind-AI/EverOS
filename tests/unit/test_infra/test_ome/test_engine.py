@@ -490,11 +490,12 @@ async def test_start_failure_cleans_up_engines_and_scheduler(
     cfg: OMEConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failure between scheduler start and ``_started = True`` must roll
-    back: pop from the module-level ``_ENGINES`` registry, shut the
+    back: pop from the module-level ``scheduling.ENGINES`` registry, shut the
     scheduler thread down, and release the lock so a fresh ``OfflineEngine``
     can start on the same jobstore.
     """
     from everos.infra.ome import engine as engine_mod
+    from everos.infra.ome._dispatch import scheduling
 
     async def _boom(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("crash recovery exploded")
@@ -505,7 +506,7 @@ async def test_start_failure_cleans_up_engines_and_scheduler(
     with pytest.raises(RuntimeError, match="crash recovery exploded"):
         await engine.start()
 
-    assert engine._engine_id not in engine_mod._ENGINES
+    assert engine._engine_id not in scheduling.ENGINES
     assert engine._scheduler is None
     assert engine._started is False
     assert engine._lock_handle is None
@@ -525,7 +526,7 @@ async def test_wait_idle_returns_true_when_no_runs(cfg: OMEConfig) -> None:
     engine = OfflineEngine(config=cfg)
     await engine.start()
     try:
-        assert engine._active_runs == 0
+        assert engine._in_flight.active == 0
         assert await engine.wait_idle(timeout=0.5) is True
     finally:
         await engine.stop()
@@ -551,12 +552,12 @@ async def test_wait_idle_blocks_until_strategy_finishes(cfg: OMEConfig) -> None:
         await engine.emit(_E())
         await asyncio.wait_for(entered.wait(), timeout=2.0)
         # Strategy is now mid-flight.
-        assert engine._active_runs >= 1
+        assert engine._in_flight.active >= 1
         assert await engine.wait_idle(timeout=0.2) is False
         # Release the strategy and verify wait_idle resolves.
         release.set()
         assert await engine.wait_idle(timeout=2.0) is True
-        assert engine._active_runs == 0
+        assert engine._in_flight.active == 0
     finally:
         release.set()
         await engine.stop()
@@ -619,7 +620,7 @@ async def test_active_runs_decrements_on_strategy_exception(cfg: OMEConfig) -> N
         runs = await engine.list_runs("boom")
         assert len(runs) == 1
         assert runs[0].status == RunStatus.DEAD_LETTER
-        assert engine._active_runs == 0
+        assert engine._in_flight.active == 0
     finally:
         await engine.stop()
 
@@ -647,7 +648,7 @@ async def test_enqueue_run_rolls_back_counter_on_add_job_failure(
         monkeypatch.setattr(engine._scheduler, "add_job", _boom)
         with pytest.raises(RuntimeError, match="add_job exploded"):
             await engine.emit(_E())
-        assert engine._active_runs == 0
+        assert engine._in_flight.active == 0
         assert await engine.wait_idle(timeout=0.5) is True
     finally:
         monkeypatch.undo()
@@ -702,3 +703,19 @@ async def test_engine_emit_links_strategy_to_request_trace(cfg: OMEConfig) -> No
 
     assert seen_tid, "strategy did not run"
     assert seen_tid[0] == req_tid  # same trace as the triggering request
+
+
+@pytest.mark.parametrize("name", ["_runner_entry", "_cron_entry", "_idle_entry"])
+def test_jobs_persisted_under_the_engine_module_path_still_resolve(name: str) -> None:
+    """APScheduler restores a persisted job from ``<module>:<qualname>``.
+
+    Jobs written before the entry callbacks moved to ``_dispatch.scheduling``
+    name ``everos.infra.ome.engine``; if that ref stopped resolving, the
+    scheduler would drop the job on restore and the run would be lost.
+    """
+    from apscheduler.util import ref_to_obj
+
+    from everos.infra.ome._dispatch import scheduling
+
+    resolved = ref_to_obj(f"everos.infra.ome.engine:{name}")
+    assert resolved is getattr(scheduling, name.removeprefix("_"))

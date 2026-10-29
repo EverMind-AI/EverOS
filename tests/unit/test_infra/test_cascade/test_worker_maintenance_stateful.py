@@ -4,7 +4,7 @@ Third instance of the pattern in
 ``tests/unit/test_service/test_memorize_queue_stateful.py``; the sibling
 ``test_worker_stateful.py`` covers the ``md_change_state`` row cycle. The
 subject here is everything downstream of a drained batch: the per-kind
-throttle (:meth:`CascadeWorker._schedule_optimize`), the runner with its
+throttle (:meth:`IndexMaintainer.schedule_optimize`), the runner with its
 trailing edge and cooldown, the light / heavy beat split (``optimize`` vs
 ``prune`` + ``ensure_vector_indexes``), the maintenance-call timeout, the
 failure streak and its fallback rebuild, the rebuild's commit-conflict
@@ -80,10 +80,13 @@ from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
-from everos.infra.cascade import worker as worker_mod
 from everos.infra.cascade.models import HandlerOutcome
 from everos.infra.cascade.projections import Handler
 from everos.infra.cascade.worker import CascadeWorker
+from everos.infra.cascade.worker import _maintenance as maintenance
+from everos.infra.cascade.worker import _supervision as supervision
+from everos.infra.cascade.worker import _tuning as tuning
+from everos.infra.cascade.worker import _worker as worker_impl
 
 settings.register_profile(
     "ci",
@@ -117,15 +120,15 @@ BEAT_OUTCOMES = (
 REBUILD_OUTCOMES = ("ok", "ok", "conflict", "fail", "touch", "slow_touch")
 MIN_INTERVAL = 0.03
 PRUNE_INTERVAL = 100_000.0
-TIMEOUT = 0.3  # patched over _MAINTENANCE_TASK_TIMEOUT_SECONDS
+TIMEOUT = 0.3  # patched over MAINTENANCE_TASK_TIMEOUT_SECONDS
 CALL = 0.01  # a normal maintenance call
 SLOW = 0.6  # a rebuild the optimize runner gives up waiting for
 HANG = 5.0  # a call the timeout cuts short
 CLOCK_STEPS = (1_000.0, 200_000.0)  # below / above the prune cadence
 TOL = 2.0  # seconds of slack between the model's clock reads and the worker's
-THRESHOLD = worker_mod._OPTIMIZE_FAILURE_ALERT_THRESHOLD
-BACKOFFS = worker_mod._REBUILD_CONFLICT_BACKOFFS_SECONDS
-ALERT = worker_mod._PRUNE_STALE_SECONDS_ALERT
+THRESHOLD = tuning.OPTIMIZE_FAILURE_ALERT_THRESHOLD
+BACKOFFS = tuning.REBUILD_CONFLICT_BACKOFFS_SECONDS
+ALERT = tuning.PRUNE_STALE_SECONDS_ALERT
 
 
 def event(label: str) -> None:
@@ -205,10 +208,12 @@ class _ScriptedLanceRepo:
         try:
             for action in play.actions:
                 if action == "touch":
-                    m.worker._schedule_optimize(self.kind)
+                    m.worker._maintenance.schedule_optimize(self.kind)
                 else:
                     m.side.append(
-                        asyncio.create_task(m.worker._run_rebuild_once(self.kind))
+                        asyncio.create_task(
+                            m.worker._maintenance._run_rebuild_once(self.kind)
+                        )
                     )
             if play.served == "hang":
                 await asyncio.sleep(HANG)
@@ -264,8 +269,8 @@ class _KindModel:
 
 
 class MaintenanceMachine(RuleBasedStateMachine):
-    WORKER: type[CascadeWorker] = CascadeWorker
-    """The worker under test; a self-check swaps in a mutant subclass."""
+    MAINTAINER: type[maintenance.IndexMaintainer] = maintenance.IndexMaintainer
+    """The worker's index maintainer; a self-check swaps in a mutant subclass."""
     CONFLICT_MESSAGE = "Retryable commit conflict: preempted by a writer"
     """What the scripted repository raises for a commit conflict."""
 
@@ -274,7 +279,9 @@ class MaintenanceMachine(RuleBasedStateMachine):
         self.loop = asyncio.new_event_loop()
         self.clock = _Clock()
         self._patches = [
-            mock.patch.object(worker_mod, "time", self.clock),
+            mock.patch.object(worker_impl, "time", self.clock),
+            mock.patch.object(maintenance, "time", self.clock),
+            mock.patch.object(supervision, "time", self.clock),
         ]
         for p in self._patches:
             p.start()
@@ -311,17 +318,18 @@ class MaintenanceMachine(RuleBasedStateMachine):
     # ── driving the worker ─────────────────────────────────────────────────
 
     async def _start(self, sweep: str) -> None:
-        self.worker = self.WORKER(
-            self.handlers,
-            _EmptyQueue(),
-            retry_backoff_seconds=0.0,
-            poll_interval_seconds=3600.0,
-            optimize_min_interval_seconds=MIN_INTERVAL,
-            optimize_heartbeat_seconds=3600.0,
-            optimize_prune_interval_seconds=PRUNE_INTERVAL,
-            optimize_rebuild_interval_seconds=3600.0,
-            maintenance_task_timeout_seconds=TIMEOUT,
-        )
+        with mock.patch.object(worker_impl, "IndexMaintainer", self.MAINTAINER):
+            self.worker = CascadeWorker(
+                self.handlers,
+                _EmptyQueue(),
+                retry_backoff_seconds=0.0,
+                poll_interval_seconds=3600.0,
+                optimize_min_interval_seconds=MIN_INTERVAL,
+                optimize_heartbeat_seconds=3600.0,
+                optimize_prune_interval_seconds=PRUNE_INTERVAL,
+                optimize_rebuild_interval_seconds=3600.0,
+                maintenance_task_timeout_seconds=TIMEOUT,
+            )
         self.started_at = self._now()
         for kind in INDEXED:
             self.m[kind].forget()
@@ -332,19 +340,19 @@ class MaintenanceMachine(RuleBasedStateMachine):
 
     async def _schedule(self, *kinds: str) -> None:
         for kind in kinds:  # create_task inside: needs the running loop
-            self.worker._schedule_optimize(kind)
+            self.worker._maintenance.schedule_optimize(kind)
         await self._settle()
 
     async def _settle(self, *, sweep: bool = False) -> None:
         """Wait until nothing the last rule caused is still running."""
         deadline = time.perf_counter() + 20.0
         while time.perf_counter() < deadline:
-            await self.worker._flush_optimizers()
+            await self.worker._maintenance.flush()
             if self.side:
                 side, self.side = self.side, []
                 await asyncio.gather(*side, return_exceptions=True)
                 continue
-            states = self.worker._optimizer_states.values()
+            states = self.worker._maintenance._optimizer_states.values()
             quiet = all(s.task is None and s.rebuild_task is None for s in states)
             quiet = quiet and all(r.active == 0 for r in self.repos.values())
             if sweep:  # the startup sweep runs inside the rebuild loop's task
@@ -365,7 +373,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
     def _touch_model(
         self, kind: str, outcomes: list[str], rebuild_outcome: str
     ) -> None:
-        """What one ``_schedule_optimize`` must cause: the runner's beats."""
+        """What one ``schedule_optimize`` must cause: the runner's beats."""
         km = self.m[kind]
         km.gave_up = False
         queue = list(outcomes)
@@ -490,7 +498,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
         self.trace.append(f"rebuild {kind} {outcome}")
         if kind in self.m:
             self._rebuild(kind, outcome, inside_runner=False)
-        self.run(self.worker._run_rebuild_once(kind))
+        self.run(self.worker._maintenance._run_rebuild_once(kind))
         self.run(self._settle())
 
     @rule(seconds=st.sampled_from(CLOCK_STEPS))
@@ -536,7 +544,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
 
     @invariant()
     def dirty_only_after_a_runner_gave_up(self) -> None:
-        states = self.worker._optimizer_states
+        states = self.worker._maintenance._optimizer_states
         assert set(states) <= set(INDEXED), set(states)
         for kind, s in states.items():
             assert s.task is None and s.rebuild_task is None, kind
@@ -570,7 +578,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
 
     @invariant()
     def rebuild_ladder_bookkeeping(self) -> None:
-        for kind, s in self.worker._optimizer_states.items():
+        for kind, s in self.worker._maintenance._optimizer_states.items():
             km = self.m[kind]
             assert s.rebuild_attempt == km.rebuild_attempt, (kind, s, km)
             if km.retry_at == 0.0:
@@ -615,14 +623,14 @@ def test_machine_catches_the_fallback_rebuild_zeroing_the_streak() -> None:
     """Self-check: the historical bug -- the fallback rebuild reset the
     failure counter, so the alert that fires at the threshold never fired."""
 
-    class _ResettingWorker(CascadeWorker):
+    class _ResettingMaintainer(maintenance.IndexMaintainer):
         async def _run_rebuild_once(self, kind: str) -> None:
             await super()._run_rebuild_once(kind)
             if kind in self._optimizer_states:
                 self._optimizer_states[kind].optimize_failures = 0
 
     class _Machine(MaintenanceMachine):
-        WORKER = _ResettingWorker
+        MAINTAINER = _ResettingMaintainer
 
     machine = _Machine()
     try:
@@ -856,7 +864,7 @@ async def _jittered_maintenance(
                         )
                     )
                 else:
-                    run.worker._schedule_optimize(kind)
+                    run.worker._maintenance.schedule_optimize(kind)
                 if kind in run.repos:
                     run.last_touch_at[kind] = time.perf_counter()
                 run.note(f"write {kind} via {how}")
@@ -925,7 +933,7 @@ async def _jittered_maintenance(
         run.stopped = True
         for kind, repo in run.repos.items():
             assert repo.active == 0, f"{kind} still in flight after stop\n{run.dump()}"
-        states = run.worker._optimizer_states
+        states = run.worker._maintenance._optimizer_states
         assert all(s.task is None and s.rebuild_task is None for s in states.values())
         await asyncio.sleep(0.15)  # nothing may start after stop (the fake checks)
 
@@ -1038,7 +1046,7 @@ def test_jitter_catches_the_wait_that_cancels() -> None:
 
     plan = [("episode", "touch", 0.03)] * 6
     with (
-        mock.patch.object(worker_mod, "asyncio", _CancellingWait()),
+        mock.patch.object(maintenance, "asyncio", _CancellingWait()),
         pytest.raises(AssertionError, match=r"cancelled mid-flight|loop dead"),
     ):
         asyncio.run(_jittered_maintenance(plan, 1, None, (1, 0, 0, 0), (0, 0, 0, 1)))

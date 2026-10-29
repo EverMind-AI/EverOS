@@ -31,17 +31,20 @@ import datetime as dt
 from typing import Any
 
 from everos.infra.persistence.index import VectorProjection
-from everos.memory.ports.query import AnyOf, Filter, IsNull
-from everos.service import NullBackfillPresenter
-from everos.service.ops._backfill_vectors import (
+from everos.infra.persistence.index.vector_backfill import (
     _backfill_table,
     _extract_row,
     _null_filter,
     _NullVectorRow,
     _TableBacklog,
 )
+from everos.memory.ports.query import AnyOf, Filter, IsNull
 
 _RETENTION = dt.timedelta(seconds=60)
+
+
+def _ignore_progress(table: str, done: int, total: int) -> None:
+    return None
 
 
 class _EpisodeLikeSchema:
@@ -127,7 +130,7 @@ async def test_subject_only_failure_leaves_row_in_backlog() -> None:
 
     provider = _SubjectFailingProvider()
     result = await _backfill_table(
-        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+        backlog, provider, prune_retention=_RETENTION, on_progress=_ignore_progress
     )  # type: ignore[arg-type]
 
     # Every row's primary vector landed on disk exactly once, and no
@@ -208,7 +211,7 @@ async def test_orthogonal_partial_states_all_recover() -> None:
 
     provider = _AllSucceedProvider()
     result = await _backfill_table(
-        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+        backlog, provider, prune_retention=_RETENTION, on_progress=_ignore_progress
     )  # type: ignore[arg-type]
 
     assert result.rows_processed == 3
@@ -249,7 +252,7 @@ def test_extract_row_skips_legitimate_null_subject() -> None:
     """A row where ``subject`` is legitimately absent and both
     ``subject_vector`` NULL + ``vector`` populated is NOT a backlog
     item — ``_extract_row`` returns the ``_ROW_SKIPPED`` sentinel."""
-    from everos.service.ops._backfill_vectors import _ROW_SKIPPED
+    from everos.infra.persistence.index.vector_backfill import _ROW_SKIPPED
 
     spec = _episode_spec()
     raw = {
@@ -292,7 +295,7 @@ async def test_update_is_addressed_by_full_key() -> None:
         backlog,
         _DistinctProvider(),
         prune_retention=_RETENTION,
-        presenter=NullBackfillPresenter(),
+        on_progress=_ignore_progress,
     )  # type: ignore[arg-type]
     assert result.rows_failed == 0
     keys = [

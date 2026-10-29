@@ -37,15 +37,13 @@ __all__ = [
 ]
 
 import dataclasses
-import datetime as dt
 import enum
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from everos.component.embedding import EmbeddingProvider
-    from everos.component.tokenizer import Tokenizer
-    from everos.infra.persistence.index import IndexMaintenance
+    from everos.infra.persistence.index import IndexMaintenance, VectorBackfill
     from everos.memory.ports import (
         AgentSkillIndex,
         ClusterStore,
@@ -58,7 +56,12 @@ BACKFILL_PHASES: tuple[str, ...] = ("vectors", "clusters", "skills")
 """The phases, in the order ``all`` runs them."""
 
 BACKFILL_LOGGER = "everos.service.backfill"
-"""The logger every phase logs under, one name for operators to filter on."""
+"""The logger the phases log under, one name for operators to filter on.
+
+The vectors phase's row-level events (``cascade_backfill_row_*``,
+``cascade_backfill_table_*``) come from the index module that does the work,
+:mod:`everos.infra.persistence.index.vector_backfill`.
+"""
 
 
 class ReplayEngine(Protocol):
@@ -105,12 +108,11 @@ class BackfillDeps:
 
     Attributes:
         embedding: Embedding provider; ``None`` blocks every phase.
-        tokenizer: Counts the tokens of the vectors phase's estimate.
+        vectors: Finds and re-embeds the index rows the vectors phase
+            upgrades.
         vector_tables: Every index table that carries a vector column, by
-            table name -- the rows the vectors phase scans and writes, and
-            the episodes / agent cases the clusters phase replays.
-        prune_retention: How old superseded index versions must be before
-            the vectors phase reclaims them (the daemon's window).
+            table name -- the episodes / agent cases the clusters phase
+            replays.
         clusters: The cluster store the replayed strategies write.
         skills: The agent-skill index the skills phase counts.
         skill_files: Whether a ``SKILL.md`` already names a cluster.
@@ -124,9 +126,8 @@ class BackfillDeps:
     """
 
     embedding: EmbeddingProvider | None
-    tokenizer: Tokenizer
+    vectors: VectorBackfill
     vector_tables: Mapping[str, IndexMaintenance]
-    prune_retention: dt.timedelta
     clusters: ClusterStore
     skills: AgentSkillIndex
     skill_files: SkillFiles

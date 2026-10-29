@@ -554,7 +554,7 @@ class LanceRepoBase[T: BaseLanceTable]:
           :meth:`prune`, a separate write-locked call.
 
         Cascade triggers this through a per-kind throttle + trailing
-        edge scheduler (``CascadeWorker._schedule_optimize``): at most
+        edge scheduler (``IndexMaintainer.schedule_optimize``): at most
         one run per throttle window per kind, decoupled from the drain
         loop, with a 60s heartbeat sweep as a safety net. Cost is
         O(N) data-rewrite per optimized fragment; the throttle is how

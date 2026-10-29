@@ -21,9 +21,8 @@ from rich.panel import Panel
 from everos.entrypoints.cli._process import configure_interactive
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
+from everos.entrypoints.tui.demo.theme import EVEROS_GREEN, EVEROS_YELLOW
 from everos.entrypoints.tui.demo.widgets.sphere import (
-    EVEROS_GREEN,
-    EVEROS_YELLOW,
     build_dot_sphere,
     render_dot_sphere_text,
 )

@@ -46,6 +46,7 @@ from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
 from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
+from everos.infra.persistence.index import ProjectionVectorBackfill
 from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownKnowledgeStore,
@@ -437,13 +438,17 @@ def make_backfill_deps(
         instructions=bundled_instructions(),
     )
     tokenizer = build_tokenizer()
+    vector_tables = storage.index.repositories.with_vectors()
     fields: dict[str, Any] = {
         "embedding": embedding,
-        "tokenizer": tokenizer,
-        "vector_tables": storage.index.repositories.with_vectors(),
-        "prune_retention": dt.timedelta(
-            seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+        "vectors": ProjectionVectorBackfill(
+            vector_tables,
+            tokenizer=tokenizer,
+            prune_retention=dt.timedelta(
+                seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+            ),
         ),
+        "vector_tables": vector_tables,
         "clusters": deps.stores.cluster,
         "skills": deps.indexes.agent_skill,
         "skill_files": MarkdownAgentSkillStore(storage.root),
@@ -466,9 +471,8 @@ def unused_backfill_deps() -> BackfillDeps:
     unused = UnusedPort("backfill")
     return BackfillDeps(
         embedding=None,
-        tokenizer=unused,  # type: ignore[arg-type]
+        vectors=unused,  # type: ignore[arg-type]
         vector_tables=dict.fromkeys(_VECTOR_TABLES, unused),
-        prune_retention=dt.timedelta(0),
         clusters=unused,  # type: ignore[arg-type]
         skills=unused,  # type: ignore[arg-type]
         skill_files=unused,  # type: ignore[arg-type]

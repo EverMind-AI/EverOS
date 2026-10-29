@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from everos.infra.ome.engine import _cron_entry
+from everos.infra.ome._dispatch.scheduling import cron_entry
 from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Counter, Cron, CronTick, Event, Immediate
@@ -177,7 +177,7 @@ async def test_cron_strategy_executes_when_cron_entry_fires() -> None:
         h.register(cron_job, make_deps())
         await h.start()
         # Directly invoke what APS would call; bypass scheduler timing.
-        await _cron_entry(h._engine._engine_id, "cron_e2e")
+        await cron_entry(h._engine._engine_id, "cron_e2e")
         await h.drain(timeout=5)
         runs = await h.list_runs("cron_e2e")
 

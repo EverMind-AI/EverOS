@@ -55,7 +55,6 @@ from ._backfill import SkillsPhaseResult as SkillsPhaseResult
 from ._backfill import VectorsPhaseResult as VectorsPhaseResult
 from ._backfill import format_tokens as format_tokens
 from ._backfill_run import run_backfill
-from ._backfill_vectors import check_vector_tables
 from ._health import QueueHealthProbe, health_report, no_queue
 from ._health import compute_disabled_features as compute_disabled_features
 from ._models import Capabilities as Capabilities
@@ -115,7 +114,6 @@ class OpsService:
         capabilities: Capabilities,
         queue_health: QueueHealthProbe = no_queue,
     ) -> None:
-        check_vector_tables(backfill.vector_tables)
         self._settings = settings
         self._root = root
         self._admin = admin

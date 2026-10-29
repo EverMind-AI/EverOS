@@ -386,6 +386,7 @@ ignore_imports = [
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",
     "everos.infra.persistence.index -> everos.infra.persistence.index.maintenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.vector_projection",
+    "everos.infra.persistence.index -> everos.infra.persistence.index.vector_backfill",
     "everos.infra.persistence.index -> everos.infra.persistence.index._provenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
     "everos.infra.persistence.index -> everos.infra.persistence.index.protocols",
@@ -483,9 +484,6 @@ forbidden_modules = [
 allow_indirect_imports = true
 ignore_imports = [
     "everos.service.bootstrap -> everos.infra.**",
-    # Pure projection declarations; symbol-level limits are tested in
-    # test_backfill_projection_boundary.py (no backend construction).
-    "everos.service.ops._backfill_vectors -> everos.infra.persistence.index",
     "everos.service.bootstrap -> everos.component.**",
 ]
 
