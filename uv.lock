@@ -476,15 +476,15 @@ wheels = [
 
 [[package]]
 name = "everalgo-boundary"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "everalgo-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/8a/9972f48ef78b4cbb2f053d7327c8e1d2f33694626671854e9f09009f1e28/everalgo_boundary-0.4.0.tar.gz", hash = "sha256:9025ffd8e613a9a4ab8986b9c17644bc16008c1cc82f5053edacc1bcfa812413", size = 49612, upload-time = "2026-10-20T03:09:54.655Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/ca/45268e061fbb7b0914882c7bb86b17a45539b1e073cc59f6c3c3cb99da6a/everalgo_boundary-0.4.1.tar.gz", hash = "sha256:cf2252dff844f89a1825761a2cd709fb01d0acbf604e7bfc7ab3f107dd62dc41", size = 50904, upload-time = "2026-10-27T08:24:57.435Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/d1/37c08763c8c64605810493a49157e32b373ea794573627e3d369665bf99a/everalgo_boundary-0.4.0-py3-none-any.whl", hash = "sha256:80bed64c9f9f8da4038d44d093e8c762568fb9206f910d9e26bcec67b7bb7564", size = 23106, upload-time = "2026-10-20T03:09:53.789Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/1f/c5d55f1d66ea989385776ef5881a1368572099d67e9f78cb0cc2faea5bd7/everalgo_boundary-0.4.1-py3-none-any.whl", hash = "sha256:d3c7b3441983e7eba5da24e8284b47c1b23ee38eda443ec8b826a95409782413", size = 31011, upload-time = "2026-10-27T08:24:56.579Z" },
 ]
 
 [[package]]
@@ -581,7 +581,7 @@ wheels = [
 
 [[package]]
 name = "everos"
-version = "1.5.1"
+version = "1.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -655,7 +655,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.4,<4.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "everalgo-agent-memory", specifier = "==0.6.0rc3" },
-    { name = "everalgo-boundary", specifier = "==0.4.0" },
+    { name = "everalgo-boundary", specifier = "==0.4.1" },
     { name = "everalgo-clustering", specifier = "==0.3.0rc2" },
     { name = "everalgo-core", specifier = "==0.6.0" },
     { name = "everalgo-knowledge", specifier = "==0.3.0rc2" },

@@ -1,6 +1,6 @@
 [project]
 name = "everos"
-version = "1.5.1"
+version = "1.6.0"
 description = "EverOS — local-first markdown memory framework for AI agents and user chats; lightweight, dev-friendly, small-team"
 license = {text = "Apache-2.0"}
 readme = "README.md"
@@ -100,7 +100,7 @@ dependencies = [
     "everalgo-agent-memory==0.6.0rc3",
     "everalgo-rank==0.5.0rc3",
     "everalgo-knowledge==0.3.0rc2",
-    "everalgo-boundary==0.4.0",
+    "everalgo-boundary==0.4.1",
     "everalgo-core==0.6.0",
     "everalgo-clustering==0.3.0rc2",
 ]
