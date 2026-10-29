@@ -13,7 +13,7 @@ without standing up the FastAPI app:
   worker once so the retry actually runs before the command returns.
 - ``cascade backfill`` — one-shot Tier 1 → Tier 2/3 migration: re-embed
   vectors, build clusters, extract skills. See
-  :func:`everos.entrypoints.cli.commands._backfill_cmd.run_backfill`
+  :func:`everos.entrypoints.cli.commands._backfill.run_backfill`
   for the phase orchestration.
 - ``cascade rebuild`` — drop every business LanceDB table and re-index
   all md from scratch. Recovery for a drifted / corrupt index; safe
@@ -50,7 +50,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_display_tz
 from everos.entrypoints.cli._process import configure_interactive
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.service import OpsService, build_application
 
 logger = get_logger(__name__)

@@ -15,7 +15,7 @@ import pytest
 from everalgo.types import ParsedContent, RawFile
 
 from everos.core.errors import InvalidInputError, UnsupportedModalityError
-from everos.service._upload import looks_like_utf8_text
+from everos.service.knowledge._upload import looks_like_utf8_text
 from tests.fakes import make_knowledge_service
 
 

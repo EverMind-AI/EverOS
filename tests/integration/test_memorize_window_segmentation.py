@@ -63,9 +63,13 @@ _under_test: dict[str, MemoryService] = {}
 """The memory facade of the application the ``memorize_env`` fixture built."""
 
 
-async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
-    """``MemoryService.memorize`` of the application under test."""
-    return await _under_test["memory"].memorize(payload, **kwargs)
+async def memorize(payload: dict[str, Any]) -> MemorizeResult:
+    """One inline ``MemoryService.add`` of the application under test."""
+    result = await _under_test["memory"].add(
+        payload, request_id="test", async_mode=False, defer_extraction=False
+    )
+    assert isinstance(result, MemorizeResult), result
+    return result
 
 
 @pytest_asyncio.fixture
@@ -358,7 +362,7 @@ async def test_flush_after_accumulation_drains_buffer_into_memcell(
     assert len(buffer) == 3
 
     # Flush
-    await memorize({"session_id": session, "messages": []}, is_final=True)
+    await _under_test["memory"].flush(session_id=session, request_id="test")
 
     cells = await _memcell_rows(storage, session)
     buffer = await _buffer_rows(storage, session)

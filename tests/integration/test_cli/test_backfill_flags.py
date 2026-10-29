@@ -52,7 +52,7 @@ from everos.component.embedding import EmbeddingProvider
 from everos.config import Settings, load_settings
 from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands import cascade as cascade_mod
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.lancedb import Episode
 from everos.service import (
     Application,

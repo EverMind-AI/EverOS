@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
 from everos.core.context import get_request_id
-from everos.core.middleware import RequestIdMiddleware
+from everos.entrypoints.api.middleware import RequestIdMiddleware
 
 
 def _build_app() -> FastAPI:

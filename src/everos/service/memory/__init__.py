@@ -1,11 +1,11 @@
 """MemoryService -- the memory read / write use cases behind one facade.
 
-One method per use case: :meth:`MemoryService.memorize` (``/add``),
+One method per use case: :meth:`MemoryService.add` (``/add``),
 :meth:`~MemoryService.flush` (``/flush``), :meth:`~MemoryService.search` and
-:meth:`~MemoryService.get`, plus the ``async_mode`` queue the ``/add`` route
-can hand a request to instead of running it inline.
+:meth:`~MemoryService.get`; ``add`` and ``flush`` run inline or hand the
+request to the ``async_mode`` queue.
 
-The memorize use case lives in ``_memorize`` (lock, cut, extract, publish);
+The add cycle lives in ``_memorize`` (lock, cut, extract, publish);
 ``_extraction`` keeps an extraction alive past a cancelled request,
 ``_session_locks`` holds the per-session locks, and ``_queue`` is the
 ``async_mode`` worker (steps in ``_queue_steps``, data in ``_queue_models``).
@@ -20,6 +20,7 @@ from __future__ import annotations
 __all__ = [
     "TASK_STATUSES",
     "ExtractionSupervisor",
+    "FlushResult",
     "MemorizeResult",
     "MemoryService",
     "QueueHealth",
@@ -35,6 +36,7 @@ from everos.core.observability.logging import get_logger
 
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._memorize import Memorizer, flush_payload
+from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
 from ._models import Queued as Queued
 from ._queue import MemorizeQueueWorker
@@ -113,7 +115,7 @@ class MemoryService:
         self._queue = MemorizeQueueWorker(
             queue_cfg,
             inbox=stores.memorize_inbox,
-            deliver=self.memorize,
+            deliver=self._memorize,
             accept_async=queue_cfg.enabled,
         )
 
@@ -189,7 +191,7 @@ class MemoryService:
 
     # ── write use cases ────────────────────────────────────────────────────
 
-    async def submit_add(
+    async def add(
         self,
         payload: dict[str, Any],
         *,
@@ -215,16 +217,16 @@ class MemoryService:
                 is_final=False,
                 defer_extraction=defer_extraction,
             )
-        return await self.memorize(payload, defer_extraction=defer_extraction)
+        return await self._memorize(payload, defer_extraction=defer_extraction)
 
-    async def submit_flush(
+    async def flush(
         self,
         *,
         session_id: str,
         request_id: str,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> MemorizeResult | Queued:
+    ) -> FlushResult | Queued:
         """Run one ``/flush`` inline, or queue it behind the session's backlog.
 
         A flush has no ``async_mode`` (the Cloud API has none either); it is
@@ -238,7 +240,7 @@ class MemoryService:
             return await self._queue_request(
                 payload, request_id=request_id, is_final=True, defer_extraction=False
             )
-        return await self.flush(
+        return await self._flush_inline(
             session_id=session_id, app_id=app_id, project_id=project_id
         )
 
@@ -265,19 +267,22 @@ class MemoryService:
         )
         return Queued(message_count=len(payload["messages"]), pending=pending)
 
-    async def flush(
+    async def _flush_inline(
         self,
         *,
         session_id: str,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> MemorizeResult:
+    ) -> FlushResult:
         """Force boundary detection over the session's whole buffer."""
-        return await self.memorize(
+        result = await self._memorize(
             flush_payload(session_id, app_id, project_id), is_final=True
         )
+        return FlushResult(
+            status="extracted" if result.status == "extracted" else "no_extraction"
+        )
 
-    async def memorize(
+    async def _memorize(
         self,
         payload: dict[str, Any],
         *,

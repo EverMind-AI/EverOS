@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from everos.core.utils.datetime import get_utc_now
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.index import AtomicFact, eq
 from tests.fakes import FakeOmeLock, make_backfill_deps, make_ops
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.service import BackfillSummary, OpsService, VectorsPhaseResult
 from tests.fakes import (
     FakeEmbeddingProvider,

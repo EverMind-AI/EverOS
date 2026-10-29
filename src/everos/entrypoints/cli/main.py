@@ -53,7 +53,7 @@ def _bootstrap_root_from_argv() -> None:
 
 _bootstrap_root_from_argv()
 
-from .commands import cascade, config_cmd, demo, init_cmd, server  # noqa: E402
+from .commands import cascade, config, demo, init, server  # noqa: E402
 
 app = typer.Typer(
     name="everos",
@@ -64,11 +64,11 @@ app = typer.Typer(
 
 app.add_typer(server.app, name="server")
 app.add_typer(cascade.app, name="cascade")
-app.add_typer(config_cmd.app, name="config")
+app.add_typer(config.app, name="config")
 
 # ``init`` is a top-level leaf command (not a Typer group) — match the
 # idiomatic ``alembic init`` / ``django-admin startproject`` shape.
-init_cmd.register(app)
+init.register(app)
 demo.register(app)
 
 

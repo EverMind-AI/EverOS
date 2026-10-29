@@ -56,6 +56,7 @@ from everos.service import (
     Application,
     BackfillDeps,
     Capabilities,
+    FlushResult,
     HealthReport,
     KnowledgeService,
     MemorizeResult,
@@ -94,7 +95,7 @@ _ALL_CAPABILITIES = Capabilities(
 
 
 class StubMemoryService:
-    """Records memorize / flush calls; the queue is a per-session counter.
+    """Records add / flush calls; the queue is a per-session counter.
 
     ``calls`` holds ``(payload, is_final, defer_extraction)``; ``enqueued``
     holds ``(payload, request_id, is_final, defer_extraction)``.
@@ -118,7 +119,7 @@ class StubMemoryService:
     async def aclose(self) -> None:
         self.lifecycle.append("memory.aclose")
 
-    async def memorize(
+    async def _memorize(
         self,
         payload: dict[str, Any],
         *,
@@ -130,20 +131,23 @@ class StubMemoryService:
             message_count=len(payload["messages"]), status="extracted"
         )
 
-    async def flush(
+    async def _flush_inline(
         self,
         *,
         session_id: str,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> MemorizeResult:
+    ) -> FlushResult:
         payload = {
             "session_id": session_id,
             "app_id": app_id,
             "project_id": project_id,
             "messages": [],
         }
-        return await self.memorize(payload, is_final=True)
+        result = await self._memorize(payload, is_final=True)
+        return FlushResult(
+            status="extracted" if result.status == "extracted" else "no_extraction"
+        )
 
     @property
     def accepts_async(self) -> bool:
@@ -173,7 +177,7 @@ class StubMemoryService:
         self.pending[payload["session_id"]] = n
         return n
 
-    async def submit_add(
+    async def add(
         self,
         payload: dict[str, Any],
         *,
@@ -185,16 +189,16 @@ class StubMemoryService:
             session_id=payload["session_id"]
         ):
             return await self._queue(payload, request_id, False, defer_extraction)
-        return await self.memorize(payload, defer_extraction=defer_extraction)
+        return await self._memorize(payload, defer_extraction=defer_extraction)
 
-    async def submit_flush(
+    async def flush(
         self,
         *,
         session_id: str,
         request_id: str,
         app_id: str = "default",
         project_id: str = "default",
-    ) -> MemorizeResult | Queued:
+    ) -> FlushResult | Queued:
         if await self.has_queued(session_id=session_id):
             payload = {
                 "session_id": session_id,
@@ -203,7 +207,7 @@ class StubMemoryService:
                 "messages": [],
             }
             return await self._queue(payload, request_id, True, False)
-        return await self.flush(
+        return await self._flush_inline(
             session_id=session_id, app_id=app_id, project_id=project_id
         )
 

@@ -24,8 +24,8 @@ services or storage access.
 
 - `component/` — injectable providers (LLM / embedding / rerank / parser /
   tokenizer / config loader).
-- `core/` — runtime base (errors / observability / middleware / context /
-  `utils.datetime`).
+- `core/` — runtime base (errors / observability / context / `utils.datetime`);
+  it knows no web framework.
 - `config/` — configuration data (Settings schema + default.toml +
   custom-instruction YAML).
 
@@ -177,7 +177,7 @@ The following is a responsibility sketch, not a transaction protocol:
 External message
        │
        ▼
-1. MemoryService.memorize     (entrypoint of write path)
+1. MemoryService.add          (entrypoint of write path)
        │
        ▼
 2. memory.extract.pipeline    (calls everalgo)
@@ -303,6 +303,28 @@ Reflection selects ordered retirement references and retains business report
 counts. Markdown stores group those references by file and apply replacement
 markers in file order. This boundary does not add cross-file atomicity or
 change partial-write failure behavior.
+
+### `entrypoints/`
+
+`entrypoints/api/` splits protocol translation into six parts:
+
+- `app.py` — assembles FastAPI: the lifespan builds the `Application` through
+  `bootstrap`, then handlers, middleware and routers are registered (the
+  business routers under both `/api/v1` and `/api/v2`).
+- `routes/` — one module per resource; a route validates the DTO, calls a
+  facade and wraps the envelope. No business judgement.
+- `schemas/` — request / response models (pydantic), the public wire
+  contract; `docs/openapi.json` is generated from them (`make openapi`).
+- `dependencies.py` — `ApplicationDep` / `RequestIdDep` (`Depends` aliases);
+  tests swap the application through `app.dependency_overrides`.
+- `exception_handlers.py` — one table from exception class to status code /
+  `ErrorCode`.
+- `middleware/` — the HTTP middleware (CORS defaults, request id, Prometheus
+  metrics, profiling); it reaches logging and metrics through
+  `core.observability`.
+
+`entrypoints/cli/`: `main.py` registers the command groups, `commands/` holds
+one module per group, and `_process.py` sets the log level a command runs at.
 
 ### `component/`
 

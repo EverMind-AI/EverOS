@@ -17,7 +17,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.middleware import prometheus as prom_mod
+from everos.entrypoints.api.middleware import prometheus as prom_mod
 
 
 def _sample_value(metric: object, **labels: str) -> float:
@@ -127,7 +127,7 @@ def test_normalize_path_uses_full_request_path_not_route_path() -> None:
     """
     from types import SimpleNamespace
 
-    from everos.core.middleware.prometheus import _normalize_path
+    from everos.entrypoints.api.middleware.prometheus import _normalize_path
 
     fake_req = SimpleNamespace(
         scope={"route": SimpleNamespace(path="/memory/{id}")},
@@ -147,7 +147,7 @@ def test_normalize_path_unmatched_even_with_path_params() -> None:
     """
     from types import SimpleNamespace
 
-    from everos.core.middleware.prometheus import _normalize_path
+    from everos.entrypoints.api.middleware.prometheus import _normalize_path
 
     fake_req = SimpleNamespace(
         scope={},
@@ -161,7 +161,7 @@ def test_normalize_path_unmatched_fallback() -> None:
     """No route, no path_params → ``{unmatched}`` sentinel."""
     from types import SimpleNamespace
 
-    from everos.core.middleware.prometheus import _normalize_path
+    from everos.entrypoints.api.middleware.prometheus import _normalize_path
 
     fake_req = SimpleNamespace(
         scope={},
@@ -175,7 +175,7 @@ def test_normalize_path_non_dict_scope_falls_through() -> None:
     """Defensive: a non-dict ``scope`` skips the route lookup entirely."""
     from types import SimpleNamespace
 
-    from everos.core.middleware.prometheus import _normalize_path
+    from everos.entrypoints.api.middleware.prometheus import _normalize_path
 
     fake_req = SimpleNamespace(
         scope="not-a-dict",

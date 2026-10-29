@@ -26,7 +26,7 @@ import pytest
 import typer
 
 from everos.core.errors import MemoryRootLockedError
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.service import (
     BackfillDeps,
     BackfillOutcome,

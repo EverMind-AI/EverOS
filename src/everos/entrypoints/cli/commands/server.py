@@ -14,7 +14,10 @@ import sys
 import typer
 import uvicorn
 
+from everos.config import load_settings
 from everos.config.settings import resolve_root
+from everos.core.observability.logging import get_logger
+from everos.service import configure_process
 
 app = typer.Typer(
     name="server",
@@ -90,10 +93,6 @@ def start(
         # The app factory loads its own settings (in a fresh process under
         # --reload), so the override travels the way --root does: as env.
         os.environ["EVEROS_LOGGING__LEVEL"] = level_override.upper()
-
-    from everos.config import load_settings
-    from everos.core.observability.logging import get_logger
-    from everos.service import configure_process
 
     settings = load_settings()
     configure_process(settings)

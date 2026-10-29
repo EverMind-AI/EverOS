@@ -37,7 +37,7 @@ from typer.testing import CliRunner
 from everos.config import Settings, load_settings
 from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands import cascade as cascade_mod
-from everos.entrypoints.cli.commands._backfill_cmd import (
+from everos.entrypoints.cli.commands._backfill import (
     PHASE_COPY,
     TyperPresenter,
     run_backfill,

@@ -27,19 +27,19 @@ from everos.core.utils.datetime import get_utc_now
 from everos.memory.mappers import knowledge as knowledge_mapper
 from everos.memory.models import KnowledgeMemory
 from everos.memory.ports import KnowledgeCatalog, KnowledgeStore, WrittenDocument
-from everos.service._upload import (
-    KnowledgeUpload,
-    decode_utf8,
-    extension_of,
-    looks_like_utf8_text,
-    require_content,
-)
 
 from ._models import (
     CreateDocumentResult,
     DeleteResult,
     KnowledgeExtractor,
     PatchResult,
+)
+from ._upload import (
+    KnowledgeUpload,
+    decode_utf8,
+    extension_of,
+    looks_like_utf8_text,
+    require_content,
 )
 
 logger = get_logger("everos.service.knowledge")

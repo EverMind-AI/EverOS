@@ -1,6 +1,6 @@
 """End-to-end memorize integration tests.
 
-Drives ``service.memorize.memorize()`` with a ``FakeLLMClient`` so the
+Drives ``MemoryService._memorize()`` with a ``FakeLLMClient`` so the
 full chain (ingest → boundary → user / agent pipeline → md + OME emit)
 runs without real LLM calls. Each test isolates state by:
 
@@ -49,8 +49,8 @@ _under_test: dict[str, MemoryService] = {}
 
 
 async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
-    """``MemoryService.memorize`` of the application under test."""
-    return await _under_test["memory"].memorize(payload, **kwargs)
+    """The inline add step (``MemoryService._memorize``) under test."""
+    return await _under_test["memory"]._memorize(payload, **kwargs)
 
 
 @pytest_asyncio.fixture
@@ -486,10 +486,10 @@ async def test_flush_on_virgin_session_is_noop(
     """Flush a session that never received ``/add`` — should not crash."""
     await memorize_env(mode="chat", fake_llm=memorize_llm())
 
-    result = await memorize(
-        {"session_id": "test_virgin_flush", "messages": []}, is_final=True
+    result = await _under_test["memory"].flush(
+        session_id="test_virgin_flush", request_id="test"
     )
-    assert result.status == "accumulated"
+    assert result.status == "no_extraction"
     assert _memcell_rows(tmp_path) == []
 
 
@@ -548,11 +548,11 @@ async def test_consecutive_flushes_second_is_noop(
         },
         is_final=False,
     )
-    res1 = await memorize({"session_id": sid, "messages": []}, is_final=True)
-    res2 = await memorize({"session_id": sid, "messages": []}, is_final=True)
+    res1 = await _under_test["memory"].flush(session_id=sid, request_id="test")
+    res2 = await _under_test["memory"].flush(session_id=sid, request_id="test")
 
     assert res1.status == "extracted"
-    assert res2.status == "accumulated"  # nothing left
+    assert res2.status == "no_extraction"  # nothing left
     assert len(_memcell_rows(tmp_path)) == 1
 
 

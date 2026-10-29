@@ -1,6 +1,6 @@
 # End-to-end memorize test
 
-In-process driver that pushes a realistic fixture through `service.memorize`,
+In-process driver that pushes a realistic fixture through `MemoryService.add`,
 batching by 6 messages per `/add` call and then `/flush` at the end.
 
 ## What's here
@@ -19,7 +19,7 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
    - `EVEROS_LLM__MODEL=...` (defaults to `gpt-4.1-mini`)
    - Without these, the boundary stage logs `memorize_no_llm_client` and skips the run.
 2. **Memory root**: defaults to `~/.everos`; override with `EVEROS_ROOT=...`.
-3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `memorize()` call.
+3. **Mode** is read from `settings.memorize.mode` (toml/env) before the first `add()` call.
 
 ## Run
 

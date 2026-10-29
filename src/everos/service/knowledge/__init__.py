@@ -57,7 +57,8 @@ if TYPE_CHECKING:
     from everos.component.rerank import RerankProvider
     from everos.config.settings import KnowledgeSearchSettings
     from everos.memory.search.recall import KnowledgeMethod, KnowledgeTopicRecaller
-    from everos.service._upload import KnowledgeUpload
+
+    from ._upload import KnowledgeUpload
 
 
 class KnowledgeService:

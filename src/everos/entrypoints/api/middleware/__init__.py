@@ -1,8 +1,8 @@
-"""Cross-cutting HTTP middleware components.
+"""The HTTP API layer's middleware (CORS defaults, profiling, metrics, request id).
 
 External usage::
 
-    from everos.core.middleware import (
+    from everos.entrypoints.api.middleware import (
         DEFAULT_CORS_ALLOW_CREDENTIALS,
         DEFAULT_CORS_ALLOW_HEADERS,
         DEFAULT_CORS_ALLOW_METHODS,

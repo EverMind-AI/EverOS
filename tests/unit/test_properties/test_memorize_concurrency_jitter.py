@@ -240,7 +240,7 @@ async def _jittered(
             payload = {"session_id": session, "messages": msgs}
             run.note(f"call#{k} {kind} {session} n={len(msgs)}")
             try:
-                result = await memorize_mod.memorize(
+                result = await memorize_mod._memorize(
                     payload,
                     is_final=(kind == "flush"),
                     defer_extraction=(kind == "defer"),

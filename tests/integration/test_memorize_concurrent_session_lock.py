@@ -22,8 +22,8 @@ message_id is **either** in some memcell's ``message_ids_json`` **or**
 in the surviving ``unprocessed_buffer`` rows. Nothing silently vanishes.
 
 This is a white-box integration test (not e2e): it bypasses HTTP, calls
-``memorize()`` directly, but inspects sqlite tables to assert internal
-state. Uses ``FakeLLMClient`` to avoid real LLM latency and to control
+``MemoryService.add()`` directly, but inspects sqlite tables to assert
+internal state. Uses ``FakeLLMClient`` to avoid real LLM latency and to control
 boundary decisions deterministically.
 """
 
@@ -61,9 +61,13 @@ _under_test: dict[str, MemoryService] = {}
 """The memory facade of the application the ``memorize_env`` fixture built."""
 
 
-async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
-    """``MemoryService.memorize`` of the application under test."""
-    return await _under_test["memory"].memorize(payload, **kwargs)
+async def memorize(payload: dict[str, Any]) -> MemorizeResult:
+    """One inline ``MemoryService.add`` of the application under test."""
+    result = await _under_test["memory"].add(
+        payload, request_id="test", async_mode=False, defer_extraction=False
+    )
+    assert isinstance(result, MemorizeResult), result
+    return result
 
 
 def _cut_before_last(window: int) -> list[int]:

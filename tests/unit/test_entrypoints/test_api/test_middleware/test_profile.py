@@ -8,7 +8,10 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from everos.core.middleware.profile import ProfileMiddleware, _profiling_enabled
+from everos.entrypoints.api.middleware.profile import (
+    ProfileMiddleware,
+    _profiling_enabled,
+)
 
 
 def _build_app() -> FastAPI:

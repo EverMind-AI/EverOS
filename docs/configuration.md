@@ -243,7 +243,7 @@ unaffected: nothing is probed, compared, or recorded.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `"agent"` | Conversation mode: `chat` (user-memory only) or `agent` (user + agent memory). Requires restart. |
-| `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per memorize() invocation. |
+| `session_lock_timeout_seconds` | float | `360.0` | Max wall-clock per add() / flush() invocation. |
 
 ### `[memorize.async_queue]`
 

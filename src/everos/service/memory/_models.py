@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__all__ = ["MemorizeResult", "Queued"]
+__all__ = ["FlushResult", "MemorizeResult", "Queued"]
 
 from typing import Literal
 
@@ -14,6 +14,16 @@ class MemorizeResult(BaseModel):
 
     message_count: int
     status: Literal["accumulated", "extracted"]
+
+
+class FlushResult(BaseModel):
+    """What flush returns to the caller.
+
+    ``no_extraction`` means the flush carved no cell out: the session buffer
+    was empty, or nothing in it formed a memcell.
+    """
+
+    status: Literal["extracted", "no_extraction"]
 
 
 class Queued(BaseModel):

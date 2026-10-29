@@ -2,7 +2,7 @@
 
 :func:`build_application` builds an :class:`Application` from settings; an
 entry point holds that one object and calls its facades --
-:class:`MemoryService` (memorize / flush / search / get),
+:class:`MemoryService` (add / flush / search / get),
 :class:`KnowledgeService` (knowledge documents and search) and
 :class:`OpsService` (cascade, OME, health, tasks). One CLI command or API
 endpoint maps to one facade method.
@@ -14,7 +14,9 @@ External usage::
 
     application = build_application(load_settings())
     await application.start()            # a server; a CLI command skips this
-    result = await application.memory.memorize(payload)
+    result = await application.memory.add(
+        payload, request_id="req-1", async_mode=False, defer_extraction=False
+    )
     await application.aclose()
 """
 
@@ -47,6 +49,7 @@ from .knowledge import SearchKnowledgeResult as SearchKnowledgeResult
 from .knowledge import TopicDetail as TopicDetail
 from .knowledge import TopicOverview as TopicOverview
 from .memory import TASK_STATUSES as TASK_STATUSES
+from .memory import FlushResult as FlushResult
 from .memory import MemorizeResult as MemorizeResult
 from .memory import MemoryService as MemoryService
 from .memory import Queued as Queued
@@ -97,6 +100,7 @@ __all__ = [
     "DocumentOverviewItem",
     "DuplicateDocumentError",
     "ExtractionEmptyError",
+    "FlushResult",
     "GetRequest",
     "GetResponse",
     "HealthReport",

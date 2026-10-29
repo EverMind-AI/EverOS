@@ -550,7 +550,7 @@ class MemorizeSettings(BaseModel):
         - ``"agent"`` -> tool rows stay in the cells (the model sees only the
           chat messages) and both user-memory + agent-memory pipelines run.
 
-    ``session_lock_timeout_seconds`` caps how long one ``memorize()``
+    ``session_lock_timeout_seconds`` caps how long one ``add()`` / ``flush()``
     invocation can hold the per-session lock. Covers boundary LLM call +
     memcell DB writes + (synchronous portion of) pipeline dispatch. Stops
     a stuck LLM from deadlocking subsequent concurrent calls on the same

@@ -48,6 +48,11 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **`MemoryService` write use cases are `add` and `flush`.**
+  `MemoryService.submit_add` / `submit_flush` are now `add` / `flush`, the
+  names the HTTP API uses; the inline `memorize()` / `flush()` steps are
+  private. Python callers of the facade update the two names; HTTP clients
+  are unaffected.
 - **Local parser input handling lives in the parser component.** Application
   assembly supplies the raw-file builder to ingestion, and ingestion no longer
   falls back to a built-in one. `everos.memory.extract.parser.mapping` is

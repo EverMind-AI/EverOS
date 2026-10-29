@@ -45,8 +45,8 @@ application the ``memorize_env`` fixture built."""
 
 
 async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
-    """``MemoryService.memorize`` of the application under test."""
-    return await _under_test["memory"].memorize(payload, **kwargs)
+    """The inline add step (``MemoryService._memorize``) under test."""
+    return await _under_test["memory"]._memorize(payload, **kwargs)
 
 
 def _msg(

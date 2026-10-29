@@ -41,7 +41,7 @@ import pytest
 from everos.component.embedding import EmbeddingProvider
 from everos.config import load_settings
 from everos.core.utils.datetime import get_utc_now
-from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
+from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.lancedb import (
     AgentCase,
     Episode,

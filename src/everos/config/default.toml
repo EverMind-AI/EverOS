@@ -188,7 +188,7 @@ hard_msg_limit = 500
 # A single service process serves one mode at a time; switching mode
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
-# Maximum wall-clock for one memorize() invocation while holding the
+# Maximum wall-clock for one add() / flush() invocation while holding the
 # per-session lock. On timeout the outer asyncio.timeout cancels the call
 # and the lock auto-releases so subsequent concurrent /add on the same
 # session aren't deadlocked. Covers boundary LLM + memcell writes +

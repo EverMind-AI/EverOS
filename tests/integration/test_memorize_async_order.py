@@ -52,9 +52,9 @@ async def setup(
 
     fake = _FakeMemorize()
     # Set on the class before the application is built, so both the worker
-    # (which binds ``memorize`` when it is built) and the inline route path
+    # (which binds ``_memorize`` when it is built) and the inline route path
     # reach the fake.
-    monkeypatch.setattr(MemoryService, "memorize", fake)
+    monkeypatch.setattr(MemoryService, "_memorize", fake)
 
     application = build_application(load_settings())
     worker = application.memory._queue

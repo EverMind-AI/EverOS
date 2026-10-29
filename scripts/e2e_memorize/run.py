@@ -1,7 +1,7 @@
 """End-to-end memorize runner — in-process call into ``MemoryService``.
 
 Builds and starts the application, then calls
-``application.memory.memorize()`` directly (not via HTTP) so this works
+``application.memory.add()`` / ``flush()`` directly (not via HTTP) so this works
 without ``everos server start``. Drives a fixture through ``/add`` in
 N-sized batches, then triggers ``/flush`` to drain the tail.
 
@@ -109,12 +109,15 @@ async def _run(args: argparse.Namespace) -> None:
 
     application = build_application(settings)
     await application.start()
-    memorize = application.memory.memorize
+    memory = application.memory
     try:
         batches = _chunks(messages, args.batch_size)
         for i, batch in enumerate(batches, start=1):
-            result = await memorize(
-                {"session_id": session_id, "messages": batch}, is_final=False
+            result = await memory.add(
+                {"session_id": session_id, "messages": batch},
+                request_id=f"e2e-add-{i}",
+                async_mode=False,
+                defer_extraction=False,
             )
             print(
                 f"add batch {i}/{len(batches)} ({len(batch)} msgs)  →  "
@@ -123,13 +126,10 @@ async def _run(args: argparse.Namespace) -> None:
 
         print()
         print("flushing residual tail...")
-        flush_result = await memorize(
-            {"session_id": session_id, "messages": []}, is_final=True
+        flush_result = await memory.flush(
+            session_id=session_id, request_id="e2e-flush"
         )
-        print(
-            f"flush  →  status={flush_result.status:<11s}  "
-            f"message_count={flush_result.message_count}"
-        )
+        print(f"flush  →  status={flush_result.status}")
 
         # OME strategies are fire-and-forget; each cell fires 2 strategies
         # (atomic_facts + foresight), each ~5-10s on a real LLM. Sleep long

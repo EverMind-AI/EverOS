@@ -3,10 +3,10 @@
 The HTTP route inserts an accepted ``/add`` or ``/flush`` body into
 ``memorize_inbox`` (one row, one commit) and answers 202. This worker
 claims rows in ``id`` order, never two of one session at a time and at
-most ``max_concurrency`` overall, and hands each to the memorize use case
-it was built with (:meth:`MemoryService.memorize`): a session's batches and
-its flush run in the order the client sent them, and sessions do not wait
-for each other. The per-session lock inside ``memorize`` still provides
+most ``max_concurrency`` overall, and hands each to the inline add step
+it was built with (the one behind :meth:`MemoryService.add`): a session's
+batches and its flush run in the order the client sent them, and sessions
+do not wait for each other. The per-session lock inside ``memorize`` still provides
 mutual exclusion against synchronous calls; the inbox ``id`` provides the
 order. A row whose delivery fails is marked ``failed`` and skipped -- its
 session, and every other session, keeps moving.

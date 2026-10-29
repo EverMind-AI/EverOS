@@ -19,7 +19,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from everos.config import Settings, load_settings
-from everos.core.middleware import (
+from everos.core.observability.logging import get_logger
+from everos.entrypoints.api.middleware import (
     DEFAULT_CORS_ALLOW_CREDENTIALS,
     DEFAULT_CORS_ALLOW_HEADERS,
     DEFAULT_CORS_ALLOW_METHODS,
@@ -28,7 +29,6 @@ from everos.core.middleware import (
     PrometheusMiddleware,
     RequestIdMiddleware,
 )
-from everos.core.observability.logging import get_logger
 from everos.service import Application, build_application
 
 from .exception_handlers import register_handlers

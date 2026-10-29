@@ -9,7 +9,7 @@ exposes the same endpoint.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Response
 from starlette.status import HTTP_202_ACCEPTED
@@ -65,7 +65,7 @@ async def add_memory(
     request_id: RequestIdDep,
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
-    result = await app.memory.submit_add(
+    result = await app.memory.add(
         req.model_dump(exclude={"async_mode", "defer_extraction"}),
         request_id=request_id,
         async_mode=req.async_mode,
@@ -94,7 +94,7 @@ async def flush_memory(
     Runs inline unless the session still has queued batches, in which case
     the flush joins the queue behind them and answers 202.
     """
-    result = await app.memory.submit_flush(
+    result = await app.memory.flush(
         session_id=req.session_id,
         request_id=request_id,
         app_id=req.app_id,
@@ -102,12 +102,7 @@ async def flush_memory(
     )
     if isinstance(result, Queued):
         return _accepted(response, request_id, result)
-    # service's ``accumulated`` = nothing to flush (buffer was empty);
-    # ``extracted`` = at least one cell carved out.
-    status: Literal["extracted", "no_extraction"] = (
-        "extracted" if result.status == "extracted" else "no_extraction"
-    )
     return SuccessEnvelope(
         request_id=request_id,
-        data=FlushResponseData(status=status),
+        data=FlushResponseData(status=result.status),
     )

@@ -69,7 +69,7 @@ def _patch() -> Iterator[InMemorySpanExporter]:
 async def test_add_emits_memory_add_span(
     mm: MemoryService, _patch: InMemorySpanExporter
 ) -> None:
-    await mm.memorize({"session_id": "s1", "messages": []}, is_final=False)
+    await mm._memorize({"session_id": "s1", "messages": []}, is_final=False)
     force_flush()
     spans = {s.name: s for s in _patch.get_finished_spans()}
     assert "everos.memory.add" in spans
@@ -79,7 +79,7 @@ async def test_add_emits_memory_add_span(
 async def test_flush_emits_memory_flush_span(
     mm: MemoryService, _patch: InMemorySpanExporter
 ) -> None:
-    await mm.memorize({"session_id": "s2", "messages": []}, is_final=True)
+    await mm._memorize({"session_id": "s2", "messages": []}, is_final=True)
     force_flush()
     names = {s.name for s in _patch.get_finished_spans()}
     assert "everos.memory.flush" in names
@@ -88,7 +88,7 @@ async def test_flush_emits_memory_flush_span(
 async def test_deferred_add_emits_memory_buffer_span(
     mm: MemoryService, _patch: InMemorySpanExporter
 ) -> None:
-    await mm.memorize({"session_id": "s3", "messages": []}, defer_extraction=True)
+    await mm._memorize({"session_id": "s3", "messages": []}, defer_extraction=True)
     force_flush()
     names = {s.name for s in _patch.get_finished_spans()}
     assert "everos.memory.buffer" in names

@@ -56,10 +56,10 @@ async def test_same_session_in_different_projects_runs_side_by_side(
     mm: MemoryService, gate: _Gate
 ) -> None:
     a = asyncio.create_task(
-        mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
+        mm._memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )
     b = asyncio.create_task(
-        mm.memorize({"session_id": "s", "project_id": "p2", "messages": []})
+        mm._memorize({"session_id": "s", "project_id": "p2", "messages": []})
     )
     await asyncio.sleep(0.05)
     assert sorted(gate.inside) == ["p1/s", "p2/s"]  # both inside at once
@@ -69,10 +69,10 @@ async def test_same_session_in_different_projects_runs_side_by_side(
 
 async def test_same_scope_still_serialises(mm: MemoryService, gate: _Gate) -> None:
     a = asyncio.create_task(
-        mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
+        mm._memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )
     b = asyncio.create_task(
-        mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
+        mm._memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )
     await asyncio.sleep(0.05)
     assert gate.inside == ["p1/s"]  # the second waits on the lock

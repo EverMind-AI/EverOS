@@ -10,7 +10,8 @@ cross-cutting, usable by every layer: core / component / config
 
 - `entrypoints/` — CLI + HTTP API + TUI: protocol translation only (request →
   facade call → response, exception → status / exit code). No business
-  judgement, no construction.
+  judgement, no construction. The HTTP middleware lives in
+  `entrypoints/api/middleware/`.
 - `service/` — `bootstrap.py` (the composition root: the one place that
   selects and builds adapters, providers and engines and owns their lifecycle)
   and three facades: `MemoryService` (memorize / flush / search / get + the
@@ -27,8 +28,8 @@ cross-cutting, usable by every layer: core / component / config
   + milvus) and the two domain-agnostic engines (cascade, OME).
 - `component/` — injectable providers (llm / embedding / rerank / parser /
   tokenizer / config loader).
-- `core/` — runtime base: errors, observability, middleware, request context,
-  stateless utils (`core.utils.datetime`).
+- `core/` — runtime base: errors, observability, request context, stateless
+  utils (`core.utils.datetime`); no web framework.
 - `config/` — Settings, default TOML, custom-instruction YAML.
 
 ## Hard constraints (enforced by `import-linter`, run in `make lint`)

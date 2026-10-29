@@ -22,12 +22,12 @@ entrypoints  →  service  →  memory  ←  infra
 cross-cutting, usable by every layer: core / component / config
 ```
 
-- `entrypoints/` — cli + api + tui (protocol translation only)
+- `entrypoints/` — cli + api (incl. HTTP middleware) + tui (protocol translation only)
 - `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `KnowledgeService` / `OpsService` facades
 - `memory/` — domain (models + ports + extract + search + strategies + reflection + custom_instructions)
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb + milvus) + the cascade and OME engines
 - `component/` — injectable providers (llm / embedding / rerank / parser / tokenizer)
-- `core/` — runtime base (errors / observability / middleware / context / utils.datetime)
+- `core/` — runtime base (errors / observability / context / utils.datetime)
 - `config/` — configuration data (Settings + default.toml + custom_instructions)
 
 **Dependency rule**: `entrypoints → service → memory ← infra`; entry points import only `service` (plus `core` / `config`). Enforced by `import-linter`.

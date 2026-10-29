@@ -187,7 +187,7 @@ async def test_memory_service_passes_injected_hydration_to_ingest(
     }
     try:
         with pytest.raises(UnsupportedModalityError, match="cap 2") as caught:
-            await service.memorize(payload)
+            await service._memorize(payload)
         assert isinstance(caught.value.__cause__, ValueError)
         assert calls == ["settings"]
         assert item == {"type": "document", "uri": path.as_uri()}

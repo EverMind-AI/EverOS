@@ -6,7 +6,7 @@ Cells / memcell_ids / message_id-mapping / sender lists are produced by
 user-perspective output of one cell: Episode md, plus the
 ``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
 
-``MemoryService.memorize`` runs it cell by cell alongside
+``MemoryService.add`` runs it cell by cell alongside
 :class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``) and
 publishes each cell's events as soon as the cell is done.
 """
