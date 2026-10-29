@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytest import mark, param
 
-from everos.component.capabilities import compute_disabled_features
+from everos.service import compute_disabled_features
 
 
 class TestComputeDisabledFeatures:

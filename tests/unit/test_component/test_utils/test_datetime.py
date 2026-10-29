@@ -7,8 +7,9 @@ import os
 
 import pytest
 
-from everos.component.utils import datetime as dt_module
-from everos.component.utils.datetime import (
+from everos.config import load_settings
+from everos.core.utils import datetime as dt_module
+from everos.core.utils.datetime import (
     UtcDatetime,
     ensure_utc,
     from_iso_format,
@@ -21,7 +22,6 @@ from everos.component.utils.datetime import (
     to_timestamp_ms,
     today_with_timezone,
 )
-from everos.config import load_settings
 from tests.fakes.storage import Storage
 
 

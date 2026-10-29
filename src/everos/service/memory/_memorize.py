@@ -1,9 +1,4 @@
-"""MemoryService -- the memory read / write use cases behind one facade.
-
-One method per use case: :meth:`MemoryService.memorize` (``/add``),
-:meth:`~MemoryService.flush` (``/flush``), :meth:`~MemoryService.search` and
-:meth:`~MemoryService.get`, plus the ``async_mode`` queue the ``/add`` route
-can hand a request to instead of running it inline.
+"""The memorize use case: cut a session's messages into memcells, extract them.
 
 Memorize, end to end::
 
@@ -15,138 +10,56 @@ Memorize, end to end::
         -> merge the pipelines' statuses -> MemorizeResult
 
 Boundary detection owns buffer / merge / boundary / tail, so the same cells
-feed both pipelines in agent mode. Publishing is this service's job:
+feed both pipelines in agent mode. Publishing is this use case's job:
 pipelines and strategies return events, and each cell's are published as
 soon as the cell is done, so a failing cell never takes an earlier cell's
 events with it.
-
-Everything is injected by :func:`everos.service.build_application`; the
-service owns only its two background collaborators -- the extraction
-supervisor and the ``async_mode`` queue worker -- and their lifecycle
-(:meth:`~MemoryService.start` / :meth:`~MemoryService.aclose`).
 """
 
 from __future__ import annotations
 
-__all__ = ["ExtractionSupervisor", "MemorizeResult", "MemoryService"]
+__all__ = ["Memorizer"]
 
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
-
-from pydantic import BaseModel
 
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
-from everos.service._session_lock import get_session_lock
-from everos.service.memorize_queue import MemorizeQueueWorker, QueueHealth
+from everos.service.memory._extraction import ExtractionSupervisor
+from everos.service.memory._models import MemorizeResult
+from everos.service.memory._session_locks import SessionLocks
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
-
     from everalgo.llm import LLMClient
 
     from everos.config import Settings
     from everos.memory import IngestResult
-    from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
-    from everos.memory.get import GetManager, GetRequest, GetResponse
     from everos.memory.ports import EventBus
-    from everos.memory.search import SearchRequest, SearchResponse
-    from everos.memory.search.manager import SearchManager
 
-logger = get_logger(__name__)
-
-_DRAIN_TIMEOUT_SECONDS = 30.0
-"""How long :meth:`MemoryService.aclose` waits for extractions still running."""
+logger = get_logger("everos.service.memory")
 
 Mode = Literal["chat", "agent"]
 TrackStatus = Literal["accumulated", "extracted", "skipped"]
 
 
-class MemorizeResult(BaseModel):
-    """What memorize returns to the caller (route serialises it)."""
-
-    message_count: int
-    status: Literal["accumulated", "extracted"]
-
-
-class ExtractionSupervisor:
-    """Owns the extraction tasks that may outlive their request.
-
-    A request whose client went away is cancelled while its extraction
-    runs; the memcell is already committed, so the extraction must finish.
-    ``supervise`` keeps the task referenced until it ends and retrieves its
-    outcome: a failure is logged with the memcell ids (it is not retried
-    here -- the pipelines write markdown and emit events and are not
-    idempotent, the same reason the async queue does not retry a failed
-    delivery), and ``drain`` lets shutdown wait for what is still running
-    instead of dropping it.
-    """
-
-    def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[MemorizeResult]] = set()
-
-    def supervise(
-        self,
-        coro: Coroutine[Any, Any, MemorizeResult],
-        *,
-        session_id: str,
-        memcell_ids: list[str],
-    ) -> asyncio.Task[MemorizeResult]:
-        task: asyncio.Task[MemorizeResult] = asyncio.ensure_future(coro)
-        self._tasks.add(task)
-
-        def _done(t: asyncio.Task[MemorizeResult]) -> None:
-            self._tasks.discard(t)
-            if t.cancelled():
-                logger.error(
-                    "memorize_extraction_cancelled",
-                    session_id=session_id,
-                    memcell_ids=memcell_ids,
-                )
-                return
-            exc = t.exception()
-            if exc is not None:
-                logger.error(
-                    "memorize_extraction_failed",
-                    session_id=session_id,
-                    memcell_ids=memcell_ids,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-
-        task.add_done_callback(_done)
-        return task
-
-    @property
-    def in_flight(self) -> int:
-        return len(self._tasks)
-
-    async def drain(self, wait_seconds: float) -> int:
-        """Wait up to ``wait_seconds`` for running extractions; return what is left."""
-        pending = {t for t in self._tasks if not t.done()}
-        if pending:
-            await asyncio.wait(pending, timeout=wait_seconds)
-        return sum(1 for t in self._tasks if not t.done())
-
-
-class MemoryService:
-    """Memorize, flush, search and get, over injected domain objects and ports.
+class Memorizer:
+    """Runs memorize calls, one session at a time, over injected domain objects.
 
     Args:
         settings: Application settings (``[memorize]``).
         boundary: Cuts each session's buffered messages into memcells.
         multimodal_llm: Parses non-text content; ``None`` when
             ``[multimodal]`` is not configured.
-        stores: Write-side stores (session buffer, memcells, memorize inbox).
         user_pipeline: The user-memory track, run on every cell.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
         bus: Where each cell's events are published.
-        search_manager: Answers :meth:`search`.
-        get_manager: Answers :meth:`get`.
+        locks: The per-session locks.
+        extractions: Keeps extractions alive past a cancelled request.
     """
 
     def __init__(
@@ -155,130 +68,22 @@ class MemoryService:
         settings: Settings,
         boundary: BoundaryDetection,
         multimodal_llm: LLMClient | None,
-        stores: Stores,
         user_pipeline: Pipeline,
         agent_pipeline: Pipeline,
         bus: EventBus,
-        search_manager: SearchManager,
-        get_manager: GetManager,
+        locks: SessionLocks,
+        extractions: ExtractionSupervisor,
     ) -> None:
         self._settings = settings
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
-        self._stores = stores
         self._user_pipeline = user_pipeline
         self._agent_pipeline = agent_pipeline
         self._bus = bus
-        self._search_manager = search_manager
-        self._get_manager = get_manager
-        self._extractions = ExtractionSupervisor()
-        queue_cfg = settings.memorize.async_queue
-        self._queue = MemorizeQueueWorker(
-            queue_cfg,
-            inbox=stores.memorize_inbox,
-            deliver=self.memorize,
-            accept_async=queue_cfg.enabled,
-        )
+        self._locks = locks
+        self._extractions = extractions
 
-    # ── lifecycle ──────────────────────────────────────────────────────────
-
-    async def start(self) -> None:
-        """Start delivering the ``async_mode`` queue."""
-        if not self._queue.accepting:
-            logger.info("memorize_queue_not_accepting_async")
-        await self._queue.start()
-
-    async def aclose(self) -> None:
-        """Stop the queue, then wait (bounded) for extractions still running."""
-        await self._queue.stop()
-        running = self._extractions.in_flight
-        if not running:
-            return
-        logger.info("memorize_extractions_draining", in_flight=running)
-        left = await self._extractions.drain(_DRAIN_TIMEOUT_SECONDS)
-        if left:
-            logger.error(
-                "memorize_extractions_abandoned",
-                in_flight=left,
-                waited_seconds=_DRAIN_TIMEOUT_SECONDS,
-            )
-
-    # ── read use cases ─────────────────────────────────────────────────────
-
-    async def search(self, req: SearchRequest) -> SearchResponse:
-        """Hybrid retrieval across the configured memory backends."""
-        return await self._search_manager.search(req)
-
-    async def get(self, req: GetRequest) -> GetResponse:
-        """Paginated listing over the requested ``memory_type``."""
-        return await self._get_manager.get(req)
-
-    # ── async_mode queue ───────────────────────────────────────────────────
-
-    @property
-    def accepts_async(self) -> bool:
-        """Whether new ``async_mode`` requests are accepted onto the queue."""
-        return self._queue.accepting
-
-    async def has_queued(
-        self,
-        *,
-        session_id: str,
-        app_id: str = "default",
-        project_id: str = "default",
-    ) -> bool:
-        """True when the session has queued requests not yet delivered."""
-        return await self._queue.has_pending(
-            session_id=session_id, app_id=app_id, project_id=project_id
-        )
-
-    async def enqueue(
-        self,
-        payload: dict[str, Any],
-        *,
-        request_id: str,
-        is_final: bool,
-        defer_extraction: bool,
-    ) -> int:
-        """Persist one request for the queue; return the session's backlog.
-
-        Raises:
-            PayloadTooLargeError: The body is over the configured limit.
-            QueueSaturatedError: The session or the whole queue is at its cap.
-            InvalidInputError: The body is not valid UTF-8.
-        """
-        return await self._queue.enqueue(
-            payload,
-            request_id=request_id,
-            is_final=is_final,
-            defer_extraction=defer_extraction,
-        )
-
-    async def queue_health(self) -> QueueHealth | None:
-        """The queue's health probe; ``None`` while the queue is not started."""
-        if not self._queue.started:
-            return None
-        return await self._queue.health()
-
-    # ── write use cases ────────────────────────────────────────────────────
-
-    async def flush(
-        self,
-        *,
-        session_id: str,
-        app_id: str = "default",
-        project_id: str = "default",
-    ) -> MemorizeResult:
-        """Force boundary detection over the session's whole buffer."""
-        payload: dict[str, Any] = {
-            "session_id": session_id,
-            "app_id": app_id,
-            "project_id": project_id,
-            "messages": [],
-        }
-        return await self.memorize(payload, is_final=True)
-
-    async def memorize(
+    async def run(
         self,
         payload: dict[str, Any],
         *,
@@ -297,7 +102,7 @@ class MemoryService:
                 idle or thresholds.
 
         Concurrency: serialised per ``(app_id, project_id, session_id)`` via
-        :func:`everos.service._session_lock.get_session_lock`. The lock
+        :class:`SessionLocks`. The lock
         spans the read-merge-boundary-write cycle so concurrent /add calls
         on the same session cannot lose-update each other's tail.
 
@@ -341,11 +146,11 @@ class MemoryService:
                 f"{payload.get('project_id', 'default')}\x1f{session_id}"
             )
             timeout_s = self._settings.memorize.session_lock_timeout_seconds
-            lock = get_session_lock(lock_key)
+            lock = self._locks.get(lock_key)
             async with asyncio.timeout(timeout_s):
                 await lock.acquire()
             try:
-                prepared = await self._memorize_locked(
+                prepared = await self._cut(
                     payload,
                     mode=mode,
                     is_final=is_final,
@@ -375,7 +180,7 @@ class MemoryService:
                 )
                 raise
 
-    async def _memorize_locked(
+    async def _cut(
         self,
         payload: dict[str, Any],
         *,

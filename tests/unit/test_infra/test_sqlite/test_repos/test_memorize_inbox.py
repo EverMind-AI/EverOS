@@ -22,8 +22,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import SqliteSettings
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
 from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo

@@ -16,17 +16,18 @@ directories, one doc_id).
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import knowledge_store
 from everos.infra.persistence.sqlite.tables.knowledge import KnowledgeDocumentRow
 from tests.fakes import make_knowledge_service
 
@@ -95,12 +96,16 @@ async def test_replace_leaves_one_directory_for_the_document(
         extractor.aextract.return_value = _memories(new_title, new_category)
         if fail_where == "extract":
             extractor.aextract.side_effect = RuntimeError("llm down")
-        original_file = (
-            AsyncMock(side_effect=OSError("disk full"))
+        # The upload's original is the one file written with ``write_bytes``:
+        # failing it fails the step after the new document directory exists.
+        disk_full = (
+            patch.object(
+                anyio.Path, "write_bytes", AsyncMock(side_effect=OSError("disk full"))
+            )
             if fail_where == "after_write"
-            else knowledge_store._write_original
+            else contextlib.nullcontext()
         )
-        with patch.object(knowledge_store, "_write_original", original_file):
+        with disk_full:
             raised: type[BaseException] | None = None
             try:
                 await service.replace_document(

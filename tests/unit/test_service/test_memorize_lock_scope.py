@@ -8,48 +8,52 @@ two calls on the very same scope still serialise.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
-from everos.service import MemorizeResult, MemoryService, _session_lock
+from everos.memory import IngestResult
+from everos.memory.extract.boundary import BoundaryOutcome
+from everos.service import MemoryService
 from tests.fakes import make_memory_service
 
 
 class _Gate:
-    """``_memorize_locked`` stand-in: enters, waits for release, exits."""
+    """A boundary stage that holds each call (under the lock) until released."""
 
     def __init__(self) -> None:
         self.inside: list[str] = []
         self.release = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def __call__(self, payload: dict[str, Any], **_: Any) -> MemorizeResult:
-        key = f"{payload.get('project_id', 'default')}/{payload['session_id']}"
+    async def detect(self, ingested: IngestResult, **_: Any) -> BoundaryOutcome:
+        key = f"{ingested.project_id}/{ingested.session_id}"
         self.inside.append(key)
         self.entered.set()
         await self.release.wait()
         self.inside.remove(key)
-        return MemorizeResult(message_count=1, status="extracted")
+        return BoundaryOutcome(
+            cells=[],
+            memcell_ids=[],
+            per_cell_message_ids=[],
+            per_cell_all_senders=[],
+            status="accumulated",
+            message_count=0,
+        )
 
 
 @pytest.fixture
-def mm() -> MemoryService:
-    return make_memory_service()
+def gate() -> _Gate:
+    return _Gate()
 
 
-@pytest.fixture(autouse=True)
-def _patch(mm: MemoryService, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Gate]:
-    gate = _Gate()
-    monkeypatch.setattr(mm, "_memorize_locked", gate)
-    _session_lock._reset_for_tests()
-    yield gate
-    _session_lock._reset_for_tests()
+@pytest.fixture
+def mm(gate: _Gate) -> MemoryService:
+    return make_memory_service(boundary=gate)
 
 
 async def test_same_session_in_different_projects_runs_side_by_side(
-    mm: MemoryService, _patch: _Gate
+    mm: MemoryService, gate: _Gate
 ) -> None:
     a = asyncio.create_task(
         mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
@@ -58,12 +62,12 @@ async def test_same_session_in_different_projects_runs_side_by_side(
         mm.memorize({"session_id": "s", "project_id": "p2", "messages": []})
     )
     await asyncio.sleep(0.05)
-    assert sorted(_patch.inside) == ["p1/s", "p2/s"]  # both inside at once
-    _patch.release.set()
+    assert sorted(gate.inside) == ["p1/s", "p2/s"]  # both inside at once
+    gate.release.set()
     await asyncio.gather(a, b)
 
 
-async def test_same_scope_still_serialises(mm: MemoryService, _patch: _Gate) -> None:
+async def test_same_scope_still_serialises(mm: MemoryService, gate: _Gate) -> None:
     a = asyncio.create_task(
         mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )
@@ -71,6 +75,6 @@ async def test_same_scope_still_serialises(mm: MemoryService, _patch: _Gate) -> 
         mm.memorize({"session_id": "s", "project_id": "p1", "messages": []})
     )
     await asyncio.sleep(0.05)
-    assert _patch.inside == ["p1/s"]  # the second waits on the lock
-    _patch.release.set()
+    assert gate.inside == ["p1/s"]  # the second waits on the lock
+    gate.release.set()
     await asyncio.gather(a, b)

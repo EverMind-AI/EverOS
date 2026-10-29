@@ -169,11 +169,12 @@ class CascadeConfig:
     they were constructor-only for long enough that the 12h rebuild sweep could
     not be exercised by any soak run short of half a day.
 
-    Deliberately *not* configurable: the deadlines that bound a hung call
-    (read / write / prune / rebuild). Those are hang-catchers sized from
-    measured durations; too low manufactures failures, too high makes a wedged
-    table invisible for longer. They stay as constants beside the code they
-    guard, each with its measurement in the docstring.
+    Deliberately *not* read from settings: the deadlines that bound a hung
+    call (read / write / prune / rebuild, and :attr:`drain_idle_limit_seconds`
+    here). Those are hang-catchers sized from measured durations; too low
+    manufactures failures, too high makes a wedged table invisible for
+    longer. Their defaults stay as constants beside the code they guard, each
+    with its measurement in the docstring.
     """
 
     scan_interval_seconds: float = 30.0
@@ -186,6 +187,7 @@ class CascadeConfig:
     optimize_prune_interval_seconds: float = DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS
     optimize_prune_retention_seconds: float = DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
     optimize_rebuild_interval_seconds: float = DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS
+    drain_idle_limit_seconds: float = _DRAIN_IDLE_LIMIT_SECONDS
 
     @classmethod
     def from_settings(cls) -> CascadeConfig:
@@ -424,7 +426,7 @@ class CascadeOrchestrator:
         not our own pass, says when the drain is done -- ``pending`` counts
         ``processing`` rows -- and a pass that finds nothing waits one poll
         interval for the other drainer. A ledger that stops moving for
-        :data:`_DRAIN_IDLE_LIMIT_SECONDS` ends the wait; the caller reports
+        :attr:`CascadeConfig.drain_idle_limit_seconds` ends the wait; the caller reports
         the rows left.
         """
         processed = await self.sync_once()
@@ -435,7 +437,7 @@ class CascadeOrchestrator:
             if more:
                 idle_seconds = 0.0
                 continue
-            if idle_seconds >= _DRAIN_IDLE_LIMIT_SECONDS:
+            if idle_seconds >= self._config.drain_idle_limit_seconds:
                 logger.warning(
                     "cascade_drain_fully_gave_up",
                     idle_seconds=idle_seconds,

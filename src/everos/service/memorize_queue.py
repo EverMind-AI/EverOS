@@ -31,7 +31,6 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import AsyncQueueSettings
 from everos.core.context import reset_request_id, set_request_id
 from everos.core.errors import (
@@ -40,6 +39,7 @@ from everos.core.errors import (
     QueueSaturatedError,
 )
 from everos.core.observability.logging import bound_log_context, get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.memory.models import MemorizeTask
 from everos.memory.ports import (
     LOST_STATUS_WRITE,
@@ -153,6 +153,9 @@ class MemorizeQueueWorker:
         inbox: The durable queue the rows live in.
         deliver: The memorize call made for each claimed row.
         accept_async: Whether new ``async_mode`` work is accepted.
+        stop_grace_seconds: How long :meth:`stop` waits for the delivery in
+            flight before cancelling it.
+        mark_retry_seconds: The pause before retrying a failed status write.
     """
 
     def __init__(
@@ -162,8 +165,12 @@ class MemorizeQueueWorker:
         inbox: MemorizeInboxStore,
         deliver: Deliver,
         accept_async: bool = True,
+        stop_grace_seconds: float = _STOP_GRACE_SECONDS,
+        mark_retry_seconds: float = _MARK_RETRY_SECONDS,
     ) -> None:
         self._cfg = settings
+        self._stop_grace = stop_grace_seconds
+        self._mark_retry = mark_retry_seconds
         self._inbox = inbox
         self._deliver = deliver
         self.accepting = accept_async
@@ -300,7 +307,7 @@ class MemorizeQueueWorker:
         self._stopping = True
         self._wake.set()
         try:
-            async with asyncio.timeout(_STOP_GRACE_SECONDS):
+            async with asyncio.timeout(self._stop_grace):
                 await self._task
         except TimeoutError:
             logger.warning("memorize_queue_stop_grace_exceeded")
@@ -583,7 +590,7 @@ class MemorizeQueueWorker:
                         status=values.get("status"),
                     )
                     return
-                await asyncio.sleep(_MARK_RETRY_SECONDS)
+                await asyncio.sleep(self._mark_retry)
 
     async def _reap_lost(self) -> None:
         """Fail every ``processing`` row this scheduler is not running."""

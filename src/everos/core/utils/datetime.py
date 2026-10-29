@@ -167,7 +167,7 @@ neutralised: rows go in as UTC and come out as UTC-aware.
 
 Usage::
 
-    from everos.component.utils.datetime import UtcDatetime, get_utc_now
+    from everos.core.utils.datetime import UtcDatetime, get_utc_now
 
     class MyRow(BaseTable, table=True):
         happened_at: UtcDatetime = Field(default_factory=get_utc_now)

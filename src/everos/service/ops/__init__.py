@@ -4,124 +4,123 @@ Cascade (status / sync / fix / rebuild / quiesce / backfill), OME (manual
 trigger), health signals and the ``async_mode`` task readers. Each method
 reaches the object that does the work through what the application
 bootstrap injected -- the cascade orchestrator and its storage admin, the
-OME engine, the memorize inbox -- so neither the HTTP routes nor the CLI
-construct or look up any of them.
+OME engine and the root's lock, the memorize inbox -- so neither the HTTP
+routes nor the CLI construct or look up any of them.
 
 Presentation stays with the caller: the CLI prints and picks exit codes,
 the routes shape response DTOs. What remains here is "which object, which
-call, in which order".
+call, in which order", plus the rules those surfaces used to carry (which
+task statuses exist, what a failed health probe reads as, when a backfill
+run stops).
 
 Two lifecycles meet here. The server starts the cascade orchestrator through
 :meth:`OpsService.start` (unless ``EVEROS_DISABLE_CASCADE`` is set) and the
 health block reports it only while that is so. A CLI command never starts
 it; it opens the storage itself with :meth:`OpsService.index_session` and
 drives the orchestrator one pass at a time.
+
+Backfill's three phases are private step modules of this package
+(``_backfill_vectors`` / ``_backfill_clusters`` / ``_backfill_skills``);
+:meth:`OpsService.backfill` runs them in order.
 """
 
 from __future__ import annotations
 
 __all__ = [
+    "BACKFILL_PHASES",
+    "BackfillDeps",
+    "BackfillOutcome",
+    "BackfillPresenter",
+    "BackfillSummary",
     "Capabilities",
+    "CascadeHealthReport",
     "CascadeStatus",
+    "ClustersPhaseResult",
+    "HealthReport",
+    "NullBackfillPresenter",
     "OmeRun",
     "OmeTriggerResult",
     "OpsService",
+    "ProviderStatus",
     "QuiesceResult",
     "RebuildResult",
+    "SkillsPhaseResult",
+    "VectorsPhaseResult",
+    "compute_disabled_features",
+    "format_tokens",
 ]
 
 import contextlib
 import dataclasses
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from everos.core.errors import NotFoundError
+from everos.core.errors import InvalidInputError, NotFoundError
 from everos.core.observability.logging import get_logger
 from everos.memory.ports import SessionKey
-from everos.service.backfill import (
-    BackfillContext,
-    BackfillPresenter,
-    PhaseResult,
-    hold_ome_lock,
-    ome_lock_is_free,
-    run_phase,
+from everos.service.memorize_queue import (
+    TASK_STATUSES,
+    QueueHealth,
+    TaskItem,
+    TaskPage,
+    to_task_item,
 )
-from everos.service.memorize_queue import TaskItem, TaskPage, to_task_item
+
+from ._backfill import BACKFILL_LOGGER, PhaseResult
+from ._backfill import BACKFILL_PHASES as BACKFILL_PHASES
+from ._backfill import BackfillDeps as BackfillDeps
+from ._backfill import BackfillOutcome as BackfillOutcome
+from ._backfill import BackfillPresenter as BackfillPresenter
+from ._backfill import BackfillSummary as BackfillSummary
+from ._backfill import ClustersPhaseResult as ClustersPhaseResult
+from ._backfill import NullBackfillPresenter as NullBackfillPresenter
+from ._backfill import SkillsPhaseResult as SkillsPhaseResult
+from ._backfill import VectorsPhaseResult as VectorsPhaseResult
+from ._backfill import format_tokens as format_tokens
+from ._backfill_clusters import run_clusters_phase
+from ._backfill_skills import run_skills_phase
+from ._backfill_vectors import check_vector_tables, run_vectors_phase
+from ._health import (
+    cascade_probe_failed,
+    cascade_report,
+    queue_probe_failed,
+)
+from ._health import compute_disabled_features as compute_disabled_features
+from ._models import Capabilities as Capabilities
+from ._models import CascadeHealthReport as CascadeHealthReport
+from ._models import CascadeStatus as CascadeStatus
+from ._models import HealthReport as HealthReport
+from ._models import OmeRun as OmeRun
+from ._models import OmeTriggerResult as OmeTriggerResult
+from ._models import ProviderStatus as ProviderStatus
+from ._models import QuiesceResult as QuiesceResult
+from ._models import RebuildResult as RebuildResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from everos.config import Settings
-    from everos.infra.cascade import CascadeAdmin, CascadeHealth, CascadeOrchestrator
-    from everos.infra.ome import OfflineEngine
+    from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
+    from everos.infra.ome import OfflineEngine, OmeLock
     from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.sqlite import MdChangeState, QueueSummary
+    from everos.infra.persistence.sqlite import MdChangeState
     from everos.memory.ports import MemorizeInboxStore
 
 logger = get_logger(__name__)
+backfill_logger = get_logger(BACKFILL_LOGGER)
+
+_MAX_TASK_PAGE_SIZE = 100
+
+_PHASE_RUNNERS: dict[str, Callable[..., Awaitable[PhaseResult]]] = {
+    "vectors": run_vectors_phase,
+    "clusters": run_clusters_phase,
+    "skills": run_skills_phase,
+}
 
 
-@dataclasses.dataclass(frozen=True)
-class Capabilities:
-    """Which optional providers the application was assembled with.
-
-    A snapshot taken by :func:`everos.service.build_application`; a provider
-    configured later needs a restart, as before.
-    """
-
-    llm: bool
-    decider: bool
-    embedding: bool
-    rerank: bool
-    multimodal_llm: bool
-    parser: bool
-    index_backend: str
-
-
-@dataclasses.dataclass(frozen=True)
-class CascadeStatus:
-    """``everos cascade status``: the ledger, the index, and the live sources."""
-
-    summary: QueueSummary
-    index_rows: dict[str, int]
-    live_sources: int
-
-
-@dataclasses.dataclass(frozen=True)
-class QuiesceResult:
-    """What the final drain before stopping the cascade accomplished."""
-
-    drained: int
-    pending_before: int
-    pending_after: int
-    failed_permanent: int
-
-
-@dataclasses.dataclass(frozen=True)
-class RebuildResult:
-    """What ``everos cascade rebuild`` reset, dropped and re-indexed."""
-
-    ledger_rows_reset: int
-    dropped_tables: list[str]
-    processed: int
-
-
-@dataclasses.dataclass(frozen=True)
-class OmeRun:
-    """One strategy run attempt within a manual trigger."""
-
-    run_id: str
-    status: str
-    error: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class OmeTriggerResult:
-    """Outcome of a manual OME trigger: ``ok`` / ``timeout`` / ``not_dispatched``."""
-
-    status: str
-    dispatched: int
-    runs: list[OmeRun]
+async def _no_queue() -> QueueHealth | None:
+    return None
 
 
 class OpsService:
@@ -135,9 +134,12 @@ class OpsService:
         cascade: The cascade orchestrator (built whether or not it runs).
         run_cascade: Whether :meth:`start` starts the orchestrator.
         engine: The OME engine manual triggers go to.
+        ome_lock: The root's exclusive lock, which a running server holds.
         inbox: The memorize inbox the task readers read.
-        backfill: What the backfill phase runners run against.
+        backfill: What the backfill phases run against.
         capabilities: The providers the application was assembled with.
+        queue_health: The memorize queue's health probe, reported by
+            :meth:`health`; ``None`` while the queue is not running.
     """
 
     def __init__(
@@ -149,19 +151,24 @@ class OpsService:
         cascade: CascadeOrchestrator,
         run_cascade: bool,
         engine: OfflineEngine,
+        ome_lock: OmeLock,
         inbox: MemorizeInboxStore,
-        backfill: BackfillContext,
+        backfill: BackfillDeps,
         capabilities: Capabilities,
+        queue_health: Callable[[], Awaitable[QueueHealth | None]] = _no_queue,
     ) -> None:
+        check_vector_tables(backfill.vector_tables)
         self._settings = settings
         self._root = root
         self._admin = admin
         self._cascade = cascade
         self._run_cascade = run_cascade
         self._engine = engine
+        self._ome_lock = ome_lock
         self._inbox = inbox
         self._backfill = backfill
         self._capabilities = capabilities
+        self._queue_health = queue_health
         self._cascade_attached = False
 
     @property
@@ -199,19 +206,57 @@ class OpsService:
 
     # ── health ─────────────────────────────────────────────────────────────
 
-    def embedding_probed(self) -> bool:
-        """Whether the embedding service answered the startup dimension probe."""
-        return self._admin.embedding_probed()
+    async def health(self) -> HealthReport:
+        """Provider flags, disabled features, and the cascade / queue blocks.
 
-    async def cascade_health(self) -> CascadeHealth | None:
-        """The cascade verdict; ``None`` while the server is not running it."""
+        A probe that raises (a locked or full SQLite, say) is reported as an
+        unhealthy block with the error as its reason instead of propagating:
+        the health endpoint is a liveness signal, and turning it into a 500
+        would get the process restarted, which fixes neither.
+        """
+        providers = ProviderStatus(
+            llm=True,
+            embed=self._admin.embedding_probed(),
+            rerank=self._capabilities.rerank,
+            multimodal_llm=self._capabilities.multimodal_llm,
+            parser=self._capabilities.parser,
+        )
+        return HealthReport(
+            providers=providers,
+            # ``embed`` reports the startup probe, but ``disabled_features`` is
+            # a contract about what the server will refuse, and every gate
+            # (search, the embedding strategies, backfill) asks whether a
+            # provider was built.
+            disabled_features=compute_disabled_features(
+                {
+                    **dataclasses.asdict(providers),
+                    "embed": self._capabilities.embedding,
+                }
+            ),
+            cascade=await self._probe_cascade(),
+            memorize_queue=await self._probe_queue(),
+        )
+
+    async def _probe_cascade(self) -> CascadeHealthReport | None:
         if not self._cascade_attached:
             return None
-        return await self._cascade.health()
+        try:
+            return cascade_report(await self._cascade.health())
+        except Exception as exc:
+            logger.warning("cascade_health_probe_failed", error=repr(exc))
+            return cascade_probe_failed(exc)
+
+    async def _probe_queue(self) -> QueueHealth | None:
+        try:
+            return await self._queue_health()
+        except Exception as exc:
+            logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
+            return queue_probe_failed(exc)
 
     # ── tasks ──────────────────────────────────────────────────────────────
 
     async def get_task(self, request_id: str) -> TaskItem | None:
+        """One accepted request's outcome; ``None`` once it aged out (or never was)."""
         row = await self._inbox.get_task(request_id)
         return None if row is None else to_task_item(row)
 
@@ -225,6 +270,16 @@ class OpsService:
         app_id: str = "default",
         project_id: str = "default",
     ) -> TaskPage:
+        """Accepted requests, newest first; ``page_size`` is capped at 100.
+
+        Raises:
+            InvalidInputError: ``status`` is not one of :data:`TASK_STATUSES`.
+        """
+        if status is not None and status not in TASK_STATUSES:
+            raise InvalidInputError(
+                f"status must be one of {', '.join(TASK_STATUSES)}; got {status!r}"
+            )
+        page_size = min(page_size, _MAX_TASK_PAGE_SIZE)
         session: SessionKey | None = None
         if session_id is not None:
             session = SessionKey(
@@ -316,8 +371,12 @@ class OpsService:
     # ── cascade, CLI side ──────────────────────────────────────────────────
 
     def ome_lock_is_free(self) -> bool:
-        """Whether no other process (a server) holds this root's OME lock."""
-        return ome_lock_is_free(self._root.ome_db)
+        """Whether no other process (a server) holds this root's OME lock.
+
+        A probe, not a reservation: it guards against the common mistake of
+        running a destructive command next to a server, not against a race.
+        """
+        return self._ome_lock.is_free()
 
     @contextlib.asynccontextmanager
     async def index_session(
@@ -333,14 +392,13 @@ class OpsService:
         migrations, which raise on the damage ``rebuild`` exists to repair.
 
         Raises:
-            EngineLockHeldError: ``exclusive`` and another process holds the lock.
+            MemoryRootLockedError: ``exclusive`` and another process holds
+                the lock.
             IndexSchemaMismatchError: A stored table drifted from the schema.
             EmbeddingProvenanceError: The configured embedding cannot have
                 produced the stored vectors.
         """
-        lock = (
-            hold_ome_lock(self._root.ome_db) if exclusive else contextlib.nullcontext()
-        )
+        lock = self._ome_lock.hold() if exclusive else contextlib.nullcontext()
         with lock:
             await self._admin.create_schema()
             try:
@@ -428,13 +486,47 @@ class OpsService:
             ledger_rows_reset=cleared, dropped_tables=dropped, processed=processed
         )
 
+    # ── backfill ───────────────────────────────────────────────────────────
+
     async def backfill(
-        self, phase: str, *, auto_yes: bool, presenter: BackfillPresenter
-    ) -> PhaseResult:
-        """Run one backfill phase (``vectors`` / ``clusters`` / ``skills``)."""
-        return await run_phase(
-            self._backfill, phase, auto_yes=auto_yes, presenter=presenter
-        )
+        self,
+        phase: str,
+        *,
+        auto_yes: bool,
+        presenter: BackfillPresenter,
+        summary: BackfillSummary,
+    ) -> BackfillOutcome:
+        """Run ``phase`` (or ``"all"``: every phase, in order) and say how it ended.
+
+        A phase blocked by a missing provider or a running server, or one
+        the user declines, stops the run: declining the first phase's
+        estimate is a "no" to the phases whose estimates were never shown.
+        Each phase's result lands in ``summary`` as soon as it finishes, so a
+        caller interrupted mid-run still has every phase that completed.
+
+        Raises:
+            ValueError: ``phase`` is neither ``"all"`` nor a phase name.
+        """
+        if phase != "all" and phase not in BACKFILL_PHASES:
+            raise ValueError(f"unknown backfill phase: {phase!r}")
+        selected = BACKFILL_PHASES if phase == "all" else (phase,)
+        for name in selected:
+            presenter.phase_started(name)
+            result = await _PHASE_RUNNERS[name](
+                self._backfill, auto_yes=auto_yes, presenter=presenter
+            )
+            summary.record(name, result)
+            stop = _stopping_outcome(result)
+            if stop is not None:
+                _log_stop(name, stop, result)
+                return stop
+        if summary.rows_failed:
+            backfill_logger.warning(
+                "cascade_backfill_completed_with_failures",
+                total_failed=summary.rows_failed,
+            )
+            return BackfillOutcome.COMPLETED_WITH_FAILURES
+        return BackfillOutcome.COMPLETED
 
     def _prepare_cascade(self) -> None:
         self._root.ensure()
@@ -445,3 +537,31 @@ class OpsService:
                 "cli_cascade_embed_unavailable",
                 reason="embedding not configured; keyword-only mode",
             )
+
+
+def _stopping_outcome(result: PhaseResult) -> BackfillOutcome | None:
+    """How a phase result ends the run, or ``None`` when the next phase runs.
+
+    A missing provider wins over a running server: the first is a permanent
+    configuration gap, the second goes away when the server stops.
+    """
+    if result.blocked_by_capability:
+        return BackfillOutcome.BLOCKED_BY_CAPABILITY
+    if result.blocked_by_server:
+        return BackfillOutcome.BLOCKED_BY_SERVER
+    if result.aborted:
+        return BackfillOutcome.ABORTED
+    return None
+
+
+def _log_stop(phase: str, outcome: BackfillOutcome, result: PhaseResult) -> None:
+    if outcome is BackfillOutcome.BLOCKED_BY_CAPABILITY:
+        backfill_logger.warning(
+            "cascade_backfill_blocked_by_capability",
+            phase=phase,
+            provider=result.blocked_by_capability,
+        )
+    elif outcome is BackfillOutcome.BLOCKED_BY_SERVER:
+        backfill_logger.warning("cascade_backfill_blocked_by_server", phase=phase)
+    else:
+        backfill_logger.info("cascade_backfill_aborted", phase=phase)

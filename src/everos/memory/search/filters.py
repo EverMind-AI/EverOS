@@ -10,8 +10,8 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from everos.component.utils.datetime import ensure_utc, from_iso_format, from_timestamp
 from everos.core.errors import FilterError as FilterError
+from everos.core.utils.datetime import ensure_utc, from_iso_format, from_timestamp
 from everos.memory.ports import (
     Filter,
     Scalar,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from everalgo.types import Candidate, RankOutput, ScoredItem
 
-from everos.component.utils.datetime import from_timestamp_ms, to_display_tz
+from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
 from everos.memory.search.shaper import (
     reshape_hybrid_output,
     shape_agent_cases,

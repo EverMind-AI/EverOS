@@ -27,7 +27,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.tui.demo.data import DemoStory
 
 # Sentinel default for the --server-url option; a different value means the user
@@ -564,12 +564,22 @@ def _match_features(text: str) -> set[str]:
     return features
 
 
+_NEGATION_MARKERS = (
+    # Chinese "not", "have not", "dislike" -- escaped to keep the source ASCII
+    # (language policy); the demo accepts Chinese input.
+    "\u4e0d",
+    "\u6ca1",
+    "\u8ba8\u538c",
+    "not ",
+    "n't",
+    "dislike",
+    "hate",
+)
+
+
 def _has_negation(text: str) -> bool:
     lowered = text.lower()
-    return any(
-        marker in lowered
-        for marker in ("不", "没", "讨厌", "not ", "n't", "dislike", "hate")
-    )
+    return any(marker in lowered for marker in _NEGATION_MARKERS)
 
 
 def _as_dicts(value: object) -> list[dict[str, Any]]:

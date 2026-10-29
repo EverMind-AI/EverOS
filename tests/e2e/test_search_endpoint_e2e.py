@@ -1497,7 +1497,7 @@ async def _seed_unprocessed_buffer_rows(
     import datetime as _dt2
     import json
 
-    from everos.component.utils.datetime import get_now_with_timezone
+    from everos.core.utils.datetime import get_now_with_timezone
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
     )
@@ -1717,8 +1717,8 @@ async def _switch_display_tz(monkeypatch: pytest.MonkeyPatch, tz: str) -> None:
     failing to clear them means the env-var change has no effect — see
     [docs/datetime.md](../../docs/datetime.md) §testing.
     """
-    from everos.component.utils import datetime as dt_module
     from everos.config import load_settings as _ls
+    from everos.core.utils import datetime as dt_module
 
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", tz)
     _ls.cache_clear()
@@ -1750,7 +1750,7 @@ async def test_timezone_switch_preserves_utc_instant_across_responses(
     import datetime as _real_dt
     import json as _json
 
-    from everos.component.utils.datetime import from_iso_format
+    from everos.core.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
     )
@@ -1864,7 +1864,7 @@ async def test_timezone_switch_preserves_utc_instant_for_episode(
     """
     import datetime as _real_dt
 
-    from everos.component.utils.datetime import from_iso_format
+    from everos.core.utils.datetime import from_iso_format
 
     # Seed one episode at a fixed instant. The seed's ``timestamp`` is
     # passed straight into ``Episode.model_validate`` — LanceDB will
@@ -1930,7 +1930,7 @@ async def test_timezone_reverse_switch_utc_to_shanghai(
     import datetime as _real_dt
     import json as _json
 
-    from everos.component.utils.datetime import from_iso_format
+    from everos.core.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
     )
@@ -2014,7 +2014,7 @@ async def test_timezone_mixed_timeline_two_writes_across_switch(
     import datetime as _real_dt
     import json as _json
 
-    from everos.component.utils.datetime import from_iso_format
+    from everos.core.utils.datetime import from_iso_format
     from everos.infra.persistence.sqlite import (
         UnprocessedBuffer,
     )

@@ -168,7 +168,7 @@ storage. This is the same rule users see when reading rendered output:
 "if you didn't say a zone, we assume your zone."
 
 **For internal architecture.** The storage / display split lives in
-`everos.component.utils.datetime`
+`everos.core.utils.datetime`
 (`get_utc_now` / `ensure_utc` / `UtcDatetime` for storage;
 `get_now_with_timezone` / `to_display_tz` for display). See
 [datetime.md](datetime.md) for the design rationale.

@@ -14,16 +14,19 @@ subject batch is skipped (no wasted zero-length ``embed_batch({})``).
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import time
 from typing import Any
 
-from everos.service.backfill import (
-    NullBackfillPresenter,
+from everos.service import NullBackfillPresenter
+from everos.service.ops._backfill_vectors import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
     _TableSpec,
 )
+
+_RETENTION = dt.timedelta(seconds=60)
 
 
 class _RecordingProvider:
@@ -78,7 +81,7 @@ def _build_spec(*, with_subject: bool) -> _TableSpec:
     call shapes.
     """
     return _TableSpec(
-        schema=_FakeSchema,  # type: ignore[arg-type]
+        table=_FakeSchema.TABLE_NAME,
         text_of=lambda r: r["text"],
         subject_of=(lambda r: r.get("subject")) if with_subject else None,
     )
@@ -102,7 +105,9 @@ async def test_backfill_table_gathers_primary_and_subject_when_both_needed() -> 
     # coroutines' sleeps — a zero-latency provider would race the
     # ``perf_counter`` grain and give a spurious non-overlap.
     provider = _RecordingProvider(latency=0.05)
-    result = await _backfill_table(backlog, provider, presenter=NullBackfillPresenter())  # type: ignore[arg-type]
+    result = await _backfill_table(
+        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)
     assert result.rows_failed == 0
@@ -131,7 +136,9 @@ async def test_backfill_table_skips_subject_gather_when_no_subjects() -> None:
     backlog = _TableBacklog(spec=spec, index=_NoopRepo(), rows=rows)  # type: ignore[arg-type]
 
     provider = _RecordingProvider(latency=0.05)
-    result = await _backfill_table(backlog, provider, presenter=NullBackfillPresenter())  # type: ignore[arg-type]
+    result = await _backfill_table(
+        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)
     assert result.rows_failed == 0
@@ -151,7 +158,9 @@ async def test_backfill_table_gathers_only_on_batches_with_subjects() -> None:
     backlog = _TableBacklog(spec=spec, index=_NoopRepo(), rows=rows)  # type: ignore[arg-type]
 
     provider = _RecordingProvider(latency=0.02)
-    result = await _backfill_table(backlog, provider, presenter=NullBackfillPresenter())  # type: ignore[arg-type]
+    result = await _backfill_table(
+        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
 
     assert result.rows_processed == len(rows)
     assert len(provider.calls) == 1

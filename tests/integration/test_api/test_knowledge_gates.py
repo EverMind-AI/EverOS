@@ -44,7 +44,7 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.entrypoints.api.exception_handlers import register_handlers
 from everos.entrypoints.api.routes import knowledge as knowledge_routes
-from tests.fakes import make_application
+from tests.fakes import make_application, make_knowledge_service
 from tests.fakes.application import _ALL_CAPABILITIES
 
 # Endpoints that MUST return 422 when embed or rerank is missing.
@@ -83,12 +83,14 @@ def _build_app() -> FastAPI:
     # the effective paths become /api/v1/knowledge/... — same shape the
     # _GATED / _UNGATED constants below use.
     app.include_router(knowledge_routes.router, prefix="/api/v1")
-    # Both capabilities unavailable by default; tests opt into availability
-    # per-capability via the fixtures below.
+    # Both providers unconfigured by default; tests opt into availability
+    # per provider via the fixtures below.
+    app.state.providers = {"embedding": None, "reranker": None}
     app.state.application = make_application(
+        knowledge=make_knowledge_service(),
         capabilities=dataclasses.replace(
             _ALL_CAPABILITIES, embedding=False, rerank=False
-        )
+        ),
     )
     return app
 
@@ -98,11 +100,12 @@ def app() -> FastAPI:
     return _build_app()
 
 
-def _make_available(app: FastAPI, **capability: bool) -> None:
-    application = app.state.application
+def _make_available(app: FastAPI, provider: str) -> None:
+    """Configure ``provider`` on a fresh knowledge service (the gate's input)."""
+    app.state.providers[provider] = object()
     app.state.application = dataclasses.replace(
-        application,
-        capabilities=dataclasses.replace(application.capabilities, **capability),
+        app.state.application,
+        knowledge=make_knowledge_service(**app.state.providers),
     )
 
 
@@ -115,12 +118,12 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 @pytest.fixture
 def embed_available(app: FastAPI) -> None:
-    _make_available(app, embedding=True)
+    _make_available(app, "embedding")
 
 
 @pytest.fixture
 def rerank_available(app: FastAPI) -> None:
-    _make_available(app, rerank=True)
+    _make_available(app, "reranker")
 
 
 @pytest.fixture
@@ -144,7 +147,7 @@ def _stub_read_services(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     async def _fake_get_document(*args: Any, **kwargs: Any) -> Any:
-        from everos.component.utils.datetime import get_utc_now
+        from everos.core.utils.datetime import get_utc_now
 
         now = get_utc_now()
         return knowledge_service.DocumentDetail(
@@ -161,7 +164,7 @@ def _stub_read_services(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     async def _fake_get_topic(*args: Any, **kwargs: Any) -> Any:
-        from everos.component.utils.datetime import get_utc_now
+        from everos.core.utils.datetime import get_utc_now
 
         now = get_utc_now()
         return knowledge_service.TopicDetail(
@@ -200,7 +203,7 @@ def _stub_patch_document(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     the response envelope. Keeps the assertion focused on the gate
     (or lack of it) instead of on md / SQLite plumbing.
     """
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
     from everos.service import knowledge as knowledge_service
 
     captured: dict[str, Any] = {}

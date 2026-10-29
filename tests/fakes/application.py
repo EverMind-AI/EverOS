@@ -15,19 +15,24 @@ test drives the HTTP layer without storage, providers or background loops::
 from __future__ import annotations
 
 __all__ = [
+    "FakeOmeLock",
     "StubAdmin",
     "StubEngine",
     "StubKnowledgeService",
     "StubMemoryService",
     "StubOpsService",
     "make_application",
-    "make_backfill_context",
+    "make_backfill_deps",
     "make_knowledge_service",
     "make_memory_service",
     "make_ops",
+    "unused_backfill_deps",
 ]
 
+import datetime as dt
 import functools
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -35,28 +40,46 @@ from unittest.mock import AsyncMock
 from everos.component.parser import aparse_file
 from everos.component.tokenizer import build_tokenizer
 from everos.config import Settings, load_settings
-from everos.core.errors import QueueSaturatedError
+from everos.core.errors import MemoryRootLockedError, QueueSaturatedError
+from everos.infra.cascade import CascadeOrchestrator
+from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
-from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.infra.persistence.markdown import (
+    MarkdownAgentSkillStore,
+    MarkdownKnowledgeStore,
+)
 from everos.infra.persistence.sqlite import SqliteKnowledgeCatalog
 from everos.memory.deps import MemoryDeps
 from everos.service import (
     Application,
+    BackfillDeps,
     Capabilities,
+    HealthReport,
     KnowledgeService,
     MemorizeResult,
     MemoryService,
     OpsService,
+    Queued,
     QueueHealth,
     TaskItem,
     TaskPage,
 )
-from everos.service.backfill import BackfillContext
+from everos.service.bootstrap import build_replay_engine
 
 from .deps import bundled_instructions, make_stores
 from .storage import make_storage
 from .stores import UnusedPort
+
+_VECTOR_TABLES = (
+    "episode",
+    "atomic_fact",
+    "foresight",
+    "agent_case",
+    "agent_skill",
+    "knowledge_topic",
+)
 
 _ALL_CAPABILITIES = Capabilities(
     llm=True,
@@ -149,6 +172,55 @@ class StubMemoryService:
         self.pending[payload["session_id"]] = n
         return n
 
+    async def submit_add(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+        async_mode: bool,
+        defer_extraction: bool,
+    ) -> MemorizeResult | Queued:
+        if (async_mode and self.accepting) or await self.has_queued(
+            session_id=payload["session_id"]
+        ):
+            return await self._queue(payload, request_id, False, defer_extraction)
+        return await self.memorize(payload, defer_extraction=defer_extraction)
+
+    async def submit_flush(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        app_id: str = "default",
+        project_id: str = "default",
+    ) -> MemorizeResult | Queued:
+        if await self.has_queued(session_id=session_id):
+            payload = {
+                "session_id": session_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "messages": [],
+            }
+            return await self._queue(payload, request_id, True, False)
+        return await self.flush(
+            session_id=session_id, app_id=app_id, project_id=project_id
+        )
+
+    async def _queue(
+        self,
+        payload: dict[str, Any],
+        request_id: str,
+        is_final: bool,
+        defer_extraction: bool,
+    ) -> Queued:
+        pending = await self.enqueue(
+            payload,
+            request_id=request_id,
+            is_final=is_final,
+            defer_extraction=defer_extraction,
+        )
+        return Queued(message_count=len(payload["messages"]), pending=pending)
+
     async def queue_health(self) -> QueueHealth | None:
         if not self.queue_running:
             return None
@@ -167,17 +239,24 @@ class StubMemoryService:
 
 
 class StubOpsService:
-    """Ops double: no cascade, no tasks, no embedding probe; records lifecycle."""
+    """Ops double: records lifecycle; health is the real assembly over its fields.
+
+    ``cascade`` (a stub orchestrator, or ``None`` for not running), ``probed``
+    and ``queue_health`` feed :meth:`health` exactly as the bootstrap feeds a
+    real :class:`OpsService`.
+    """
 
     def __init__(
         self,
         capabilities: Capabilities = _ALL_CAPABILITIES,
         lifecycle: list[str] | None = None,
+        queue_health: Callable[[], Awaitable[QueueHealth | None]] | None = None,
     ) -> None:
         self.capabilities = capabilities
         self.lifecycle = lifecycle if lifecycle is not None else []
         self.cascade: Any = None
         self.probed = False
+        self.queue_health = queue_health
         self.ome_trigger = AsyncMock()
         self.cascade_quiesce = AsyncMock(return_value=None)
 
@@ -187,11 +266,14 @@ class StubOpsService:
     async def aclose(self) -> None:
         self.lifecycle.append("ops.aclose")
 
-    def embedding_probed(self) -> bool:
-        return self.probed
-
-    async def cascade_health(self) -> Any:
-        return None if self.cascade is None else await self.cascade.health()
+    async def health(self) -> HealthReport:
+        ops = make_ops(
+            cascade=self.cascade,
+            capabilities=self.capabilities,
+            probed=self.probed,
+            queue_health=self.queue_health,
+        )
+        return await ops.health()
 
     async def get_task(self, request_id: str) -> TaskItem | None:
         return None
@@ -212,8 +294,9 @@ class StubAdmin:
 
     backend = "milvus"  # skips the LanceDB-only unbackfilled hint
 
-    def __init__(self, lifecycle: list[str]) -> None:
+    def __init__(self, lifecycle: list[str], *, probed: bool = False) -> None:
         self.lifecycle = lifecycle
+        self.probed = probed
 
     async def create_schema(self) -> int:
         self.lifecycle.append("sqlite.create")
@@ -229,7 +312,23 @@ class StubAdmin:
         self.lifecycle.append("index.close")
 
     def embedding_probed(self) -> bool:
-        return False
+        return self.probed
+
+
+class FakeOmeLock:
+    """The memory root's lock, free or held by a pretend server."""
+
+    def __init__(self, *, free: bool = True) -> None:
+        self.free = free
+
+    def is_free(self) -> bool:
+        return self.free
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        if not self.free:
+            raise MemoryRootLockedError("a pretend server holds the root")
+        yield
 
 
 class StubEngine:
@@ -277,6 +376,8 @@ def make_knowledge_service(
     parse_file: Any = None,
     documents: Any = None,
     topics: Any = None,
+    parser_available: bool = False,
+    max_upload_bytes: int | None = None,
 ) -> KnowledgeService:
     """A real :class:`KnowledgeService`; unset providers read as unconfigured.
 
@@ -302,35 +403,73 @@ def make_knowledge_service(
         recaller=recaller,
         search_config=search_config or load_settings().knowledge.search,
         parse_file=parse_file or functools.partial(aparse_file, llm=None),
+        parser_available=parser_available,
+        max_upload_bytes=max_upload_bytes or load_settings().knowledge.max_upload_bytes,
     )
 
 
-def make_backfill_context(
+def make_backfill_deps(
     *,
     root: MemoryRoot | Path | None = None,
     embedding: Any = None,
     llm: Any = None,
-) -> BackfillContext:
-    """The production backfill context over ``root`` (default: the configured one).
+    **overrides: Any,
+) -> BackfillDeps:
+    """The production backfill wiring over ``root`` (default: the configured one).
 
-    Real storage, stores and indexes, as the CLI builds them; ``embedding`` /
-    ``llm`` default to unconfigured.
+    Real storage, stores, indexes and replay engines, as the bootstrap builds
+    them; ``embedding`` / ``llm`` default to unconfigured. Keyword overrides
+    replace single fields (``ome_lock``, ``engine_for``, ``vector_tables``,
+    ``cascade``, ...).
     """
     storage = make_storage(root if root is not None else MemoryRoot.resolve())
-    return BackfillContext(
-        root=storage.root,
+    deps = MemoryDeps(
+        llm=llm,
         embedding=embedding,
-        deps=MemoryDeps(
-            llm=llm,
-            embedding=embedding,
-            stores=build_stores(storage.root, storage.sqlite),
-            indexes=build_indexes(storage.index),
-            instructions=bundled_instructions(),
+        stores=build_stores(storage.root, storage.sqlite),
+        indexes=build_indexes(storage.index),
+        instructions=bundled_instructions(),
+    )
+    tokenizer = build_tokenizer()
+    fields: dict[str, Any] = {
+        "embedding": embedding,
+        "tokenizer": tokenizer,
+        "vector_tables": storage.index.repositories.with_vectors(),
+        "prune_retention": dt.timedelta(
+            seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
         ),
-        index=storage.index,
-        database=storage.database,
-        sqlite=storage.sqlite,
-        tokenizer=build_tokenizer(),
+        "clusters": deps.stores.cluster,
+        "skills": deps.indexes.agent_skill,
+        "skill_files": MarkdownAgentSkillStore(storage.root),
+        "engine_for": functools.partial(build_replay_engine, storage.root, deps),
+        "ensure_schema": storage.create_schema,
+        "cascade": CascadeOrchestrator(
+            memory_root=storage.root,
+            tokenizer=tokenizer,
+            embedding=embedding,
+            index=storage.index,
+            sqlite=storage.sqlite,
+        ),
+        "ome_lock": OmeLock(storage.root.ome_db),
+    }
+    return BackfillDeps(**{**fields, **overrides})
+
+
+def unused_backfill_deps() -> BackfillDeps:
+    """Backfill wiring that fails loudly if reached, over a free root lock."""
+    unused = UnusedPort("backfill")
+    return BackfillDeps(
+        embedding=None,
+        tokenizer=unused,  # type: ignore[arg-type]
+        vector_tables=dict.fromkeys(_VECTOR_TABLES, unused),
+        prune_retention=dt.timedelta(0),
+        clusters=unused,  # type: ignore[arg-type]
+        skills=unused,  # type: ignore[arg-type]
+        skill_files=unused,  # type: ignore[arg-type]
+        engine_for=unused,  # type: ignore[arg-type]
+        ensure_schema=unused,  # type: ignore[arg-type]
+        cascade=unused,  # type: ignore[arg-type]
+        ome_lock=FakeOmeLock(),
     )
 
 
@@ -339,24 +478,34 @@ def make_ops(
     cascade: Any = None,
     engine: Any = None,
     inbox: Any = None,
-    backfill: Any = None,
+    backfill: BackfillDeps | None = None,
     capabilities: Capabilities = _ALL_CAPABILITIES,
+    probed: bool = False,
+    queue_health: Callable[[], Awaitable[QueueHealth | None]] | None = None,
+    ome_lock: Any = None,
 ) -> OpsService:
     """A real :class:`OpsService` over only the collaborators a test passes.
 
     A ``cascade`` given here counts as running, as if the server had started
     it -- the health block and quiesce see it; ``None`` reads as not running.
+    ``backfill`` defaults to wiring that fails loudly if reached.
     """
+    backfill = backfill or unused_backfill_deps()
+    extra: dict[str, Any] = {}
+    if queue_health is not None:
+        extra["queue_health"] = queue_health
     ops = OpsService(
         settings=load_settings(),
         root=None,  # type: ignore[arg-type] - unused by the server-side paths
-        admin=StubAdmin([]),  # type: ignore[arg-type] - structural double
+        admin=StubAdmin([], probed=probed),  # type: ignore[arg-type]
         cascade=cascade,
         run_cascade=cascade is not None,
         engine=engine,
+        ome_lock=ome_lock or backfill.ome_lock,
         inbox=inbox,
-        backfill=backfill,  # type: ignore[arg-type]
+        backfill=backfill,
         capabilities=capabilities,
+        **extra,
     )
     ops._cascade_attached = cascade is not None
     return ops
@@ -377,10 +526,15 @@ def make_application(
     the application will be started (start creates the root's directories).
     """
     events = lifecycle if lifecycle is not None else []
+    memory = memory if memory is not None else StubMemoryService(events)
     return Application(
-        memory=memory if memory is not None else StubMemoryService(events),
+        memory=memory,
         knowledge=knowledge if knowledge is not None else StubKnowledgeService(),
-        ops=ops if ops is not None else StubOpsService(capabilities, events),
+        ops=(
+            ops
+            if ops is not None
+            else StubOpsService(capabilities, events, memory.queue_health)
+        ),
         capabilities=capabilities,
         _settings=load_settings(),
         _root=MemoryRoot(root) if root is not None else MemoryRoot.resolve(),

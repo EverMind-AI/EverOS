@@ -33,7 +33,6 @@ def test_demo_configures_requested_log_level(monkeypatch) -> None:
         "configure_cli_logging",
         lambda *, verbose: configured.append(verbose),
     )
-    monkeypatch.setattr(demo_command, "_print_plain_demo", lambda: None)
     app = typer.Typer()
     demo_command.register(app)
 
@@ -88,17 +87,10 @@ def test_plain_demo_prints_custom_story(monkeypatch) -> None:
 
 
 def test_launch_interactive_defaults_to_cloud_with_unique_identity(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        demo_command,
-        "_load_run_demo_tui",
-        lambda: lambda **kwargs: captured.update(kwargs),
-    )
     monkeypatch.delenv(cloud.CLOUD_DEMO_SERVER_URL_ENV, raising=False)
     monkeypatch.setenv(cloud.CLOUD_DEMO_KEY_ENV, "demo-key")
 
-    demo_command._launch_interactive_demo(
+    captured = demo_command._interactive_session(
         live=False, server_url=cloud.LIVE_DEMO_SERVER_URL
     )
 
@@ -110,17 +102,10 @@ def test_launch_interactive_defaults_to_cloud_with_unique_identity(monkeypatch) 
 
 
 def test_launch_interactive_live_uses_own_cloud_key(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        demo_command,
-        "_load_run_demo_tui",
-        lambda: lambda **kwargs: captured.update(kwargs),
-    )
     monkeypatch.delenv(cloud.CLOUD_DEMO_SERVER_URL_ENV, raising=False)
     monkeypatch.setenv(cloud.CLOUD_USER_KEY_ENV, "user-key")
 
-    demo_command._launch_interactive_demo(
+    captured = demo_command._interactive_session(
         live=True, server_url=cloud.LIVE_DEMO_SERVER_URL
     )
 

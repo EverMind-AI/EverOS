@@ -35,7 +35,6 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from everos.infra.cascade import watcher as watcher_mod
 from everos.infra.cascade.registry import match_kind
 from everos.infra.cascade.scanner import CascadeScanner
 from everos.infra.cascade.watcher import CascadeWatcher, _enqueue_async, _Handler
@@ -268,21 +267,24 @@ async def test_path_not_matching_a_kind_is_dropped(
     """Dropped *before* the async hop, not lost inside it.
 
     "No row" alone cannot tell a clean drop from a failure downstream: an
-    exception inside ``_enqueue_async`` -- logged, or left unretrieved in the
-    ``run_coroutine_threadsafe`` future -- also leaves no row. Recording what
-    the guard hands downstream is what separates the two.
+    exception inside the enqueue coroutine -- logged, or left unretrieved in
+    the ``run_coroutine_threadsafe`` future -- also leaves no row. Recording
+    what reaches the ledger is what separates the two: the coroutine's first
+    act is the ledger upsert.
     """
     handed_down: list[tuple[object, ...]] = []
 
-    async def record(*a: object, **k: object) -> None:
-        handed_down.append(a)
+    class _RecordingLedger:
+        async def upsert(self, *a: object, **k: object) -> None:
+            handed_down.append(a)
 
-    monkeypatch.setattr(watcher_mod, "_enqueue_async", record)
     p = runtime.root / "notes" / "random.md"
     p.parent.mkdir(parents=True)
     p.write_text("x", encoding="utf-8")
     _Handler(
-        runtime, asyncio.get_running_loop(), storage.sqlite.md_change_state
+        runtime,
+        asyncio.get_running_loop(),
+        _RecordingLedger(),  # type: ignore[arg-type] - structural double
     ).on_created(FileCreatedEvent(str(p)))
     await _settle()
     assert handed_down == [], "a path with no kind reached the enqueue coroutine"

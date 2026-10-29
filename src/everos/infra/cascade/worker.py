@@ -60,7 +60,7 @@ import datetime as dt
 import functools
 import signal
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -470,6 +470,11 @@ class CascadeWorker:
     :func:`infra.cascade.registry.build_handlers` and the ``md_change_state``
     ledger it claims rows from. Holds no other state — every per-row
     decision goes through the ledger.
+
+    The timing keyword arguments default to the module constants, whose
+    docstrings say how each is sized. ``on_unrecoverable`` is called with a
+    loop's name once its restart budget is spent; by default it asks this
+    process to exit (see :meth:`_request_process_exit`).
     """
 
     def __init__(
@@ -493,6 +498,12 @@ class CascadeWorker:
         optimize_rebuild_interval_seconds: float = (
             DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS
         ),
+        maintenance_task_timeout_seconds: float = _MAINTENANCE_TASK_TIMEOUT_SECONDS,
+        rebuild_conflict_backoffs_seconds: Sequence[float] = (
+            _REBUILD_CONFLICT_BACKOFFS_SECONDS
+        ),
+        loop_restart_backoffs_seconds: Sequence[float] = _LOOP_RESTART_BACKOFF_SECONDS,
+        on_unrecoverable: Callable[[str], None] | None = None,
     ) -> None:
         if handler_concurrency <= 0:
             raise ValueError("handler_concurrency must be positive")
@@ -509,6 +520,10 @@ class CascadeWorker:
         self._optimize_prune_interval = optimize_prune_interval_seconds
         self._optimize_prune_retention = optimize_prune_retention_seconds
         self._optimize_rebuild_interval = optimize_rebuild_interval_seconds
+        self._maintenance_timeout = maintenance_task_timeout_seconds
+        self._rebuild_conflict_backoffs = tuple(rebuild_conflict_backoffs_seconds)
+        self._loop_restart_backoffs = tuple(loop_restart_backoffs_seconds)
+        self._on_unrecoverable = on_unrecoverable or self._request_process_exit
         self._task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._rebuild_task: asyncio.Task[None] | None = None
@@ -574,11 +589,11 @@ class CascadeWorker:
         incident. A deterministic crash-on-entry still exhausts the budget in
         ~65s; independent transients days apart each get the full ladder.
         """
-        budget = len(_LOOP_RESTART_BACKOFF_SECONDS)
+        budget = len(self._loop_restart_backoffs)
         strikes = 0
         while True:
             if strikes and await self._wait_or_stop(
-                _LOOP_RESTART_BACKOFF_SECONDS[strikes - 1]
+                self._loop_restart_backoffs[strikes - 1]
             ):
                 return
             if self._stop.is_set():
@@ -605,7 +620,7 @@ class CascadeWorker:
                 if strikes > budget:
                     break
         logger.error("cascade_loop_unrecoverable", loop=loop_name, restarts=budget)
-        self._request_process_exit(loop_name)
+        self._on_unrecoverable(loop_name)
 
     def _on_loop_task_done(self, loop_name: str, task: asyncio.Task[None]) -> None:
         """Log a supervised loop task that ended without ``stop()`` asking it to."""
@@ -631,8 +646,8 @@ class CascadeWorker:
         better outcome: a live server whose projection pipeline is dead answers
         searches from a silently frozen index.
 
-        Overridable seam for tests — they replace this rather than signal the
-        pytest process.
+        The default ``on_unrecoverable``; tests pass their own rather than
+        signal the pytest process.
         """
         logger.error("cascade_worker_requesting_process_exit", loop=loop_name)
         signal.raise_signal(signal.SIGTERM)
@@ -993,7 +1008,7 @@ class CascadeWorker:
             # already logged and counted by ``_run_rebuild_once``.
             if state.rebuild_task is not None and not state.rebuild_task.done():
                 done, _ = await asyncio.wait(
-                    {state.rebuild_task}, timeout=_MAINTENANCE_TASK_TIMEOUT_SECONDS
+                    {state.rebuild_task}, timeout=self._maintenance_timeout
                 )
                 if not done:
                     # Give up this beat rather than compact under a live
@@ -1003,7 +1018,7 @@ class CascadeWorker:
                     logger.warning(
                         "cascade_lancedb_optimize_skipped_rebuild_unfinished",
                         kind=kind,
-                        waited_seconds=_MAINTENANCE_TASK_TIMEOUT_SECONDS,
+                        waited_seconds=self._maintenance_timeout,
                     )
                     return
             while state.dirty and not self._stop.is_set():
@@ -1079,7 +1094,7 @@ class CascadeWorker:
                 # only after the call returns.
                 if state is not None:
                     state.last_prune_attempt_at = now
-                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                async with asyncio.timeout(self._maintenance_timeout):
                     await repo.prune(
                         dt.timedelta(seconds=self._optimize_prune_retention)
                     )
@@ -1088,12 +1103,12 @@ class CascadeWorker:
                 # Same heavy beat: a table that crossed the ANN threshold since
                 # startup gets its vector index, and one whose light beats piled
                 # up delta indices is retrained; a no-op otherwise.
-                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                async with asyncio.timeout(self._maintenance_timeout):
                     await repo.ensure_vector_indexes()
             else:
                 # Light beat: lock-free compaction. A commit conflict here
                 # is benign — handled below.
-                async with asyncio.timeout(_MAINTENANCE_TASK_TIMEOUT_SECONDS):
+                async with asyncio.timeout(self._maintenance_timeout):
                     await repo.optimize()
             if state is not None:
                 state.optimize_failures = 0
@@ -1290,7 +1305,7 @@ class CascadeWorker:
             # killing the beat it was meant to stay clear of (see the mirror
             # wait in ``_optimize_runner``).
             done, _ = await asyncio.wait(
-                {state.task}, timeout=_MAINTENANCE_TASK_TIMEOUT_SECONDS
+                {state.task}, timeout=self._maintenance_timeout
             )
             if not done:
                 # Skip this sweep rather than rebuild concurrently with an
@@ -1300,7 +1315,7 @@ class CascadeWorker:
                 logger.warning(
                     "cascade_lancedb_rebuild_skipped_optimize_unfinished",
                     kind=kind,
-                    waited_seconds=_MAINTENANCE_TASK_TIMEOUT_SECONDS,
+                    waited_seconds=self._maintenance_timeout,
                 )
                 return
         # Retry a lost commit race in place. Lance labels it "Retryable" and
@@ -1322,12 +1337,12 @@ class CascadeWorker:
         except Exception as exc:
             attempt = state.rebuild_attempt
             if _is_benign_commit_conflict(exc) and attempt < len(
-                _REBUILD_CONFLICT_BACKOFFS_SECONDS
+                self._rebuild_conflict_backoffs
             ):
                 # Lost the manifest race to a concurrent writer; the table is
                 # fine. Record a deadline instead of sleeping so the other
                 # kinds in this sweep are not parked behind the backoff.
-                delay = _REBUILD_CONFLICT_BACKOFFS_SECONDS[attempt]
+                delay = self._rebuild_conflict_backoffs[attempt]
                 state.rebuild_attempt = attempt + 1
                 state.rebuild_retry_at = time.monotonic() + delay
                 logger.info(

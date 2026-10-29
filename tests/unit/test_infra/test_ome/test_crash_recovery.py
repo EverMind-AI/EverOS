@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.utils.datetime import get_now_with_timezone, to_iso_format
+from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 from everos.infra.ome._background.crash_recovery import scan_and_resume
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage

@@ -2,14 +2,14 @@
 
 ``memorize()`` serialises one session's calls on an asyncio lock and wraps
 lock plus work in ``asyncio.timeout(session_lock_timeout_seconds)``; the
-``_session_lock`` module docstring says why: two concurrent ``/add`` calls
-on one session would otherwise lose a tail. Boundary detection promises that every
-cell gets exactly one memcell row, and the memorize docs that the pipelines
-run for every cell. This test does not script what should happen; it lands
-random calls -- adds, deferred adds, flushes, on two sessions, in overlapping
-tasks, with a boundary call that takes a random time and sometimes fails --
-under a random lock timeout, and checks only what the documentation promises
-once everything has settled:
+``everos.service.memory._session_locks`` module docstring says why: two
+concurrent ``/add`` calls on one session would otherwise lose a tail. Boundary
+detection promises that every cell gets exactly one memcell row, and the
+memorize docs that the pipelines run for every cell. This test does not script
+what should happen; it lands random calls -- adds, deferred adds, flushes, on
+two sessions, in overlapping tasks, with a boundary call that takes a random
+time and sometimes fails -- under a random lock timeout, and checks only what
+the documentation promises once everything has settled:
 
 1. a message the service accepted (the call returned) is in the buffer or
    in exactly one memcell, never both, never nowhere; a message of a call
@@ -76,7 +76,6 @@ from everos.infra.persistence.sqlite.tables import Memcell
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.pipeline import CellOutcome
-from everos.service import _session_lock as session_lock_mod
 from tests.fakes import (
     UNUSABLE_REPLY,
     boundary_reply,
@@ -174,9 +173,6 @@ async def _jittered(
 ) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="memorize_jitter_"))
     run = _Run(seed, slow_max, fail_rate, poison)
-    # The per-session locks are process-wide and bound to the loop that
-    # first used them; every example runs on a fresh loop.
-    session_lock_mod._session_locks.clear()
     root = MemoryRoot(tmp)
     root.ensure()
     engine = create_system_engine(root.system_db, SqliteSettings())

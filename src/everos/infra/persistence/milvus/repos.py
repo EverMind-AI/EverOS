@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.component.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp
 from everos.infra.persistence.records import (
     AgentCase,
     AgentSkill,

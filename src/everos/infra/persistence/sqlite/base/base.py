@@ -47,7 +47,7 @@ from sqlalchemy import DateTime
 from sqlalchemy import types as sa_types
 from sqlmodel import Field, SQLModel
 
-from everos.component.utils.datetime import UtcDatetime, ensure_utc, get_utc_now
+from everos.core.utils.datetime import UtcDatetime, ensure_utc, get_utc_now
 
 
 class UtcDateTimeColumn(sa_types.TypeDecorator[_dt.datetime]):

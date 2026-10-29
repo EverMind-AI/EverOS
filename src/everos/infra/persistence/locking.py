@@ -71,6 +71,7 @@ async def memory_root_lock(
     *,
     blocking: bool = True,
     timeout_seconds: float | None = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    poll_interval_seconds: float = _LOCK_POLL_INTERVAL_SECONDS,
 ) -> AsyncIterator[None]:
     """Acquire an exclusive process lock on the memory-root.
 
@@ -82,6 +83,8 @@ async def memory_root_lock(
             :class:`LockError` immediately when another process holds it.
         timeout_seconds: Upper bound on the wait when ``blocking=True``;
             ``None`` waits indefinitely. Ignored when ``blocking=False``.
+        poll_interval_seconds: Gap between acquisition attempts while
+            waiting.
 
     Raises:
         LockError: When the lock is held and either ``blocking=False`` or the
@@ -129,7 +132,7 @@ async def memory_root_lock(
                         "lock automatically) — inspect the process holding "
                         f"{lock_path} rather than retrying this one"
                     ) from exc
-                await anyio.sleep(_LOCK_POLL_INTERVAL_SECONDS)
+                await anyio.sleep(poll_interval_seconds)
     except BaseException:
         await anyio.to_thread.run_sync(os.close, fd)
         raise

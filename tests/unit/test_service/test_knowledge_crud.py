@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import PathTraversalError
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite.repos.knowledge import DocumentListPage
 from everos.infra.persistence.sqlite.tables.knowledge import (
@@ -398,19 +398,15 @@ async def test_patch_document_no_changes_returns_empty_fields() -> None:
     mock_doc_repo.upsert_from_handler.assert_not_awaited()
 
 
-async def test_patch_document_not_found_raises() -> None:
+async def test_patch_document_not_found_raises(tmp_path: Path) -> None:
     """Raises DocumentNotFoundError when doc_id does not exist in SQLite or md."""
     mock_doc_repo = MagicMock()
-    with (
-        patch(f"{_STORE}._locate_index", new_callable=AsyncMock) as mock_locate,
-    ):
-        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
-        mock_locate.return_value = None
+    mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
 
-        with pytest.raises(DocumentNotFoundError):
-            await make_knowledge_service(
-                documents=mock_doc_repo,
-            ).patch_document("d_missing", "app1", "proj1", title="New")
+    with pytest.raises(DocumentNotFoundError):
+        await make_knowledge_service(
+            documents=mock_doc_repo, root=tmp_path
+        ).patch_document("d_missing", "app1", "proj1", title="New")
 
 
 # ── patch_document: category move containment ────────────────────────────────

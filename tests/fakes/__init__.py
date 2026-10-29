@@ -15,13 +15,21 @@ seed and inspect. :func:`make_deps` assembles them into a
 
 from __future__ import annotations
 
+from .application import FakeOmeLock as FakeOmeLock
 from .application import StubMemoryService as StubMemoryService
 from .application import StubOpsService as StubOpsService
 from .application import make_application as make_application
-from .application import make_backfill_context as make_backfill_context
+from .application import make_backfill_deps as make_backfill_deps
 from .application import make_knowledge_service as make_knowledge_service
 from .application import make_memory_service as make_memory_service
 from .application import make_ops as make_ops
+from .application import unused_backfill_deps as unused_backfill_deps
+from .backfill import InMemorySkillFiles as InMemorySkillFiles
+from .backfill import InMemoryVectorTable as InMemoryVectorTable
+from .backfill import RecordingCascade as RecordingCascade
+from .backfill import ScriptedReplayEngine as ScriptedReplayEngine
+from .backfill import backfill_deps as backfill_deps
+from .backfill import episode_row as episode_row
 from .deps import bundled_instructions as bundled_instructions
 from .deps import make_deps as make_deps
 from .deps import make_indexes as make_indexes
@@ -73,6 +81,7 @@ __all__ = [
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
     "FakeEmbeddingProvider",
+    "FakeOmeLock",
     "InMemoryAgentCaseIndex",
     "InMemoryAgentCaseStore",
     "InMemoryAgentSkillIndex",
@@ -87,6 +96,10 @@ __all__ = [
     "InMemoryProfileIndex",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
+    "InMemorySkillFiles",
+    "InMemoryVectorTable",
+    "RecordingCascade",
+    "ScriptedReplayEngine",
     "Storage",
     "StorageView",
     "StubMemoryService",
@@ -96,15 +109,17 @@ __all__ = [
     "agent_track_script",
     "agent_trajectory",
     "agent_trajectory_messages",
+    "backfill_deps",
     "boundary_reply",
     "boundary_window",
     "bundled_instructions",
+    "episode_row",
     "handler_deps",
     "index_repositories",
     "knowledge_llm",
     "knowledge_script",
     "make_application",
-    "make_backfill_context",
+    "make_backfill_deps",
     "make_deps",
     "make_indexes",
     "make_knowledge_service",
@@ -115,6 +130,7 @@ __all__ = [
     "memorize_llm",
     "open_storage_view",
     "unscripted_llm",
+    "unused_backfill_deps",
     "user_track_llm",
     "user_track_script",
 ]

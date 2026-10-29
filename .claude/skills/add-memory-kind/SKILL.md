@@ -313,7 +313,7 @@ Tests by layer:
 | Skipped one of the four files (schema / writer / table / repo) | One side silently absent | Re-export both/all from each `__init__.py` |
 | `Vector(N)` mismatched with embedding dim | LanceDB raises on insert | Make `N` exactly match the model output |
 | Imported `MemoryLayout` from a writer (infra) | `import-linter` fails (`infra → memory` reverse dep) | Use `MemoryRoot` (in `infra.persistence`) and let the schema's ClassVars drive paths |
-| Hand-rolling `datetime.now()` instead of `today_with_timezone()` | Day-boundary drift across timezones | Always go through `everos.component.utils.datetime` |
+| Hand-rolling `datetime.now()` instead of `today_with_timezone()` | Day-boundary drift across timezones | Always go through `everos.core.utils.datetime` |
 
 ## Background
 

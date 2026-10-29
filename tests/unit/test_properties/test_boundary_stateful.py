@@ -491,7 +491,7 @@ def _senders(cell: list[str], accepted: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def _ms(d: Any) -> int:
-    from everos.component.utils.datetime import to_timestamp_ms
+    from everos.core.utils.datetime import to_timestamp_ms
 
     return to_timestamp_ms(d)
 

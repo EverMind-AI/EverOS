@@ -26,7 +26,7 @@ try:
 except ImportError:  # pragma: no cover
     from lancedb._lancedb import Occur  # type: ignore[attr-defined,no-redef]
 
-from everos.component.utils.datetime import ensure_utc, to_iso_format
+from everos.core.utils.datetime import ensure_utc, to_iso_format
 from everos.infra.persistence.records.table_chassis import VECTOR_QUERY_NPROBES
 from everos.memory.ports.query import (
     All,

@@ -28,9 +28,9 @@ from typer.testing import CliRunner
 from everos.config import load_settings
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
+from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.service import OpsService
-from everos.service.backfill import ome_lock_is_free
 from tests.fakes import make_storage
 
 
@@ -359,7 +359,7 @@ def test_sync_holds_the_lock_while_it_drains(
     seen: list[bool] = []
 
     def _lock_is_free() -> bool:
-        return ome_lock_is_free(MemoryRoot.resolve().ome_db)
+        return OmeLock(MemoryRoot.resolve().ome_db).is_free()
 
     async def _drain_fully(self: CascadeOrchestrator) -> int:
         # scan + every drain pass happen inside this one call

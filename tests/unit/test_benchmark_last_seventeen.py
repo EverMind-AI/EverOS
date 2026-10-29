@@ -80,6 +80,13 @@ def test_model_override_is_inert_unset_and_both_forms_work(
 # ---------------------------------------------------------------------------
 
 
+class _NoWaitFleet(run_mod._ServerFleet):
+    """A fleet that does not wait for its (fake) servers to answer."""
+
+    def _await_ready(self, timeout_s: float = 180.0) -> None:
+        return None
+
+
 class _FakeProc:
     """Enough of Popen for the fleet and the index gate."""
 
@@ -140,8 +147,7 @@ def test_the_fleet_starts_one_server_per_root_and_stops_them(
     monkeypatch.setattr(
         run_mod.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0})()
     )
-    fleet = run_mod._ServerFleet(1, root, first_port=0)
-    monkeypatch.setattr(fleet, "_await_ready", lambda *a, **k: None)
+    fleet = _NoWaitFleet(1, root, first_port=0)
     fleet.start()
     assert len(procs) == 1, f"started {len(procs)} servers for one root"
     assert fleet.urls and fleet.roots
@@ -228,13 +234,12 @@ def test_print_servers_and_reap_servers_run_without_a_server(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--reap-servers` must not touch a server this run does not own."""
-    monkeypatch.setattr(run_mod, "_iter_servers", lambda: [])
-    run_mod._print_servers()
+    run_mod._print_servers([])
     assert capsys.readouterr().out != ""
 
     killed: list[int] = []
     monkeypatch.setattr(run_mod.os, "kill", lambda pid, sig: killed.append(pid))
-    run_mod._reap_servers()
+    run_mod._reap_servers([])
     assert killed == [], f"reaped {killed} with no servers listed"
 
 
@@ -243,15 +248,15 @@ def test_print_servers_and_reap_servers_run_without_a_server(
 # ---------------------------------------------------------------------------
 
 
-def test_main_dispatches_the_read_only_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_dispatches_the_read_only_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`main` was rewritten from the reference's and nothing referred to it."""
-    seen: list[str] = []
-    monkeypatch.setattr(run_mod, "_print_servers", lambda: seen.append("list"))
     monkeypatch.setattr(sys, "argv", ["run.py", "--list-servers"])
     with pytest.raises(SystemExit) as e:
         run_mod.main()
     assert e.value.code in (0, None), e.value.code
-    assert seen == ["list"]
+    assert "PID" in capsys.readouterr().out, "the server table was not printed"
 
 
 def test_main_refuses_an_unknown_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,8 +359,6 @@ def test_run_conversation_drives_search_answer_and_judge(
     answer_llm = _LLM("3 May 2023")
     judge_llm = _LLM('{"label": "CORRECT"}')
     monkeypatch.setattr(run_mod, "EverosClient", lambda **_: client)
-    # Two questions is enough to prove ordering and per-question artefacts.
-    monkeypatch.setattr(run_mod, "_stratified_sample", lambda qa, n: qa[:2])
 
     args = type(
         "A",

@@ -13,7 +13,7 @@ help:
 	@echo "  check-deprecated-names Block deprecated product names"
 	@echo "  check-github-docs Block legacy/internal branch-model residue in contributor docs"
 	@echo "  check-cjk     Scan for CJK outside the language-policy allowlist (advisory)"
-	@echo "  check-datetime Scan for code that bypasses component/utils/datetime (HARD gate, run via lint)"
+	@echo "  check-datetime Scan for code that bypasses core/utils/datetime (HARD gate, run via lint)"
 	@echo "  check-singletons Scan src/ for module-level singletons (HARD gate, run via lint)"
 	@echo "  openapi       Regenerate docs/openapi.json from the FastAPI app"
 	@echo "  check-openapi Verify docs/openapi.json matches app.openapi() (HARD gate, run via lint)"
@@ -89,7 +89,7 @@ check-cjk:
 
 # Datetime two-zone discipline scanner (see .claude/rules/datetime-handling.md).
 # Wired into `lint` (and therefore `ci`) as a HARD gate — any code that
-# bypasses ``component/utils/datetime`` (raw ``datetime.now()``,
+# bypasses ``core/utils/datetime`` (raw ``datetime.now()``,
 # ``time.time()``, naked ``datetime(...)`` constructor, etc.) fails the build.
 check-datetime:
 	uv run python scripts/check_datetime_discipline.py

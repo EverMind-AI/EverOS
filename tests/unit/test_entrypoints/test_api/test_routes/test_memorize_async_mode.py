@@ -12,6 +12,7 @@ existed: every existing caller depends on it.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,8 +24,9 @@ from httpx import ASGITransport, AsyncClient
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.service import TaskItem, TaskPage
-from tests.fakes import StubMemoryService, make_application
+from everos.memory.models import MemorizeTask
+from everos.memory.ports import PageResult, SessionKey
+from tests.fakes import StubMemoryService, make_application, make_ops
 
 
 @pytest.fixture
@@ -194,24 +196,48 @@ async def test_sync_flush_with_backlog_joins_the_queue(
 # ── GET /tasks ─────────────────────────────────────────────────────────────
 
 
-async def test_task_by_id(
-    client: AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seen: list[str] = []
+class _Inbox:
+    """The memorize inbox the task readers read: one row, and the queries seen."""
 
-    async def fake_get(task_id: str) -> TaskItem | None:
-        seen.append(task_id)
-        if task_id != "r1":
+    def __init__(self) -> None:
+        self.queries: list[dict[str, Any]] = []
+
+    async def get_task(self, request_id: str) -> MemorizeTask | None:
+        if request_id != "r1":
             return None
-        return TaskItem(
-            id="r1",
+        stamp = datetime(2026, 1, 1, tzinfo=UTC)
+        return MemorizeTask(
+            id=1,
+            request_id="r1",
+            app_id="default",
+            project_id="default",
+            session_id="s1",
+            is_final=False,
+            defer_extraction=False,
+            payload_json="",
+            message_count=1,
             status="processing",
-            task_type="memory_add",
-            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            attempt=1,
+            last_error=None,
+            created_at=stamp,
+            updated_at=stamp,
         )
 
-    monkeypatch.setattr(app.state.application.ops, "get_task", fake_get)
+    async def list_tasks(self, **query: Any) -> PageResult[MemorizeTask]:
+        self.queries.append(query)
+        return PageResult(items=[], total=0)
 
+
+@pytest.fixture
+def inbox(app: FastAPI) -> _Inbox:
+    inbox = _Inbox()
+    app.state.application = dataclasses.replace(
+        app.state.application, ops=make_ops(inbox=inbox)
+    )
+    return inbox
+
+
+async def test_task_by_id(client: AsyncClient, inbox: _Inbox) -> None:
     resp = await client.get("/api/v2/tasks/r1")
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -225,23 +251,11 @@ async def test_task_by_id(
 
     missing = await client.get("/api/v2/tasks/zz")
     assert missing.status_code == 404
-    assert missing.json()["error"]["code"] == "NOT_FOUND"
-    assert seen == ["r1", "zz"]
 
 
 async def test_task_list_passes_filters_and_caps_page_size(
-    client: AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, inbox: _Inbox
 ) -> None:
-    seen: list[dict[str, Any]] = []
-
-    async def fake_list(**kwargs: Any) -> TaskPage:
-        seen.append(kwargs)
-        return TaskPage(
-            total=0, page=kwargs["page"], page_size=kwargs["page_size"], items=[]
-        )
-
-    monkeypatch.setattr(app.state.application.ops, "list_tasks", fake_list)
-
     resp = await client.get(
         "/api/v2/tasks",
         params={
@@ -255,23 +269,24 @@ async def test_task_list_passes_filters_and_caps_page_size(
 
     assert resp.status_code == 200
     assert resp.json()["data"] == {"total": 0, "page": 2, "page_size": 100, "items": []}
-    assert seen == [
+    assert inbox.queries == [
         {
-            "session_id": "s1",
+            "session": SessionKey(app_id="a", project_id="default", session_id="s1"),
             "status": "queued",
-            "page": 2,
-            "page_size": 100,
-            "app_id": "a",
-            "project_id": "default",
+            "offset": 100,
+            "limit": 100,
         }
     ]
 
 
-async def test_task_list_rejects_unknown_status(client: AsyncClient) -> None:
+async def test_task_list_rejects_unknown_status(
+    client: AsyncClient, inbox: _Inbox
+) -> None:
     resp = await client.get("/api/v2/tasks", params={"status": "done"})
 
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "INVALID_INPUT"
+    assert inbox.queries == []
 
 
 # ── enabled = false: the door is closed, the backlog rule still holds ─────

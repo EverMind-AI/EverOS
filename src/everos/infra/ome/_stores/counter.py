@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from everos.component.utils.datetime import (
+from everos.core.utils.datetime import (
     from_iso_format,
     get_utc_now,
     to_iso_format,

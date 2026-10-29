@@ -42,15 +42,15 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from everos.component.embedding import EmbeddingProvider
-from everos.component.utils.datetime import get_utc_now
 from everos.config import Settings, load_settings
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands import cascade as cascade_mod
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.lancedb import Episode
@@ -60,34 +60,44 @@ from everos.service import (
     build_application,
     build_providers,
 )
-from everos.service import backfill as backfill_mod
 from tests.fakes.storage import StorageView
 
 _DIM = 1024
 
 
 class _StubEmbedder(EmbeddingProvider):
+    """Deterministic vectors; ``before_embed`` runs first when a test sets it
+    (to interrupt the vectors phase mid-embedding)."""
+
     dim = _DIM
+
+    def __init__(self) -> None:
+        self.before_embed: Callable[[], Awaitable[None]] | None = None
 
     async def embed(self, text: str) -> list[float]:
         return [float(len(text) % 7)] * self.dim
 
     async def embed_batch(self, texts):  # type: ignore[no-untyped-def]
+        if self.before_embed is not None:
+            await self.before_embed()
         return [[float(len(t) % 7)] * self.dim for t in texts]
 
 
 @pytest.fixture
+def embedder() -> _StubEmbedder:
+    return _StubEmbedder()
+
+
+@pytest.fixture
 async def backfill_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, embedder: _StubEmbedder
 ) -> AsyncIterator[Path]:
     """Tmp memory root + stub embedder (mirrors ``test_backfill_phase1.py``)."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
     def _build_with_stub_embedder(settings: Settings) -> Application:
-        providers = dataclasses.replace(
-            build_providers(settings), embedding=_StubEmbedder()
-        )
+        providers = dataclasses.replace(build_providers(settings), embedding=embedder)
         return build_application(settings, providers=providers)
 
     monkeypatch.setattr(cascade_mod, "build_application", _build_with_stub_embedder)
@@ -115,6 +125,13 @@ def _episode(entry_id: str) -> Episode:
         content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
         vector=None,
     )
+
+
+def _raise(error: type[BaseException]) -> Callable[[], Awaitable[None]]:
+    async def _now() -> None:
+        raise error
+
+    return _now
 
 
 # ── summary block ────────────────────────────────────────────────────────────
@@ -162,24 +179,22 @@ async def test_summary_block_reports_real_counts_for_ran_phase_only(
 
 async def test_synchronous_keyboard_interrupt_mid_phase_returns_130_with_resume_hint(
     backfill_runtime: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    embedder: _StubEmbedder,
+    storage_view: StorageView,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Cheap regression guard for the raw ``except KeyboardInterrupt`` catch.
 
-    This raises synchronously (no ``await`` in between), so the
-    exception lands directly in ``run_backfill``'s own frame — it does
-    *not* exercise ``asyncio.Runner``'s SIGINT-to-``CancelledError``
-    translation that a real terminal Ctrl-C goes through. See
+    The interrupt is raised without suspending first, so it travels up the
+    call stack into ``run_backfill``'s handler — it does *not* exercise
+    ``asyncio.Runner``'s SIGINT-to-``CancelledError`` translation that a
+    real terminal Ctrl-C goes through. See
     ``test_cancelled_error_mid_phase_returns_130_with_resume_hint`` and
     ``test_real_sigint_during_phase_await_returns_130_with_resume_hint``
     below for that path.
     """
-
-    async def _raise_interrupt(*_args: object, **_kwargs: object) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _raise_interrupt)
+    await storage_view.repos.episode.add([_episode("ep1")])
+    embedder.before_embed = _raise(KeyboardInterrupt)
 
     code = await run_backfill(_ops(), phase="all", auto_yes=True)
     out = capsys.readouterr().out
@@ -197,7 +212,8 @@ async def test_synchronous_keyboard_interrupt_mid_phase_returns_130_with_resume_
 
 async def test_cancelled_error_mid_phase_returns_130_with_resume_hint(
     backfill_runtime: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    embedder: _StubEmbedder,
+    storage_view: StorageView,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Simulates what ``asyncio.Runner`` actually does on a real SIGINT.
@@ -212,11 +228,13 @@ async def test_cancelled_error_mid_phase_returns_130_with_resume_hint(
     escape ``run_backfill`` uncaught.
     """
 
-    async def _raise_cancelled(*_args: object, **_kwargs: object) -> None:
+    await storage_view.repos.episode.add([_episode("ep1")])
+
+    async def _cancelled() -> None:
         await asyncio.sleep(0)
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _raise_cancelled)
+    embedder.before_embed = _cancelled
 
     code = await run_backfill(_ops(), phase="all", auto_yes=True)
     out = capsys.readouterr().out
@@ -230,7 +248,7 @@ async def test_cancelled_error_mid_phase_returns_130_with_resume_hint(
 
 
 def test_backfill_cli_synchronous_keyboard_interrupt_exits_130(
-    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch
+    backfill_runtime: Path, embedder: _StubEmbedder, storage_view: StorageView
 ) -> None:
     """CLI-level counterpart of the synchronous-raise regression guard.
 
@@ -240,10 +258,8 @@ def test_backfill_cli_synchronous_keyboard_interrupt_exits_130(
     for the real-signal end-to-end path.
     """
 
-    async def _raise_interrupt(*_args: object, **_kwargs: object) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _raise_interrupt)
+    asyncio.run(storage_view.repos.episode.add([_episode("ep1")]))
+    embedder.before_embed = _raise(KeyboardInterrupt)
 
     result = CliRunner().invoke(
         cascade_mod.app, ["backfill", "--phase", "vectors", "--yes"]
@@ -259,7 +275,7 @@ def test_backfill_cli_synchronous_keyboard_interrupt_exits_130(
     "pytest process itself (exit code 2) instead of delivering a Ctrl-C",
 )
 def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
-    backfill_runtime: Path, monkeypatch: pytest.MonkeyPatch
+    backfill_runtime: Path, embedder: _StubEmbedder, storage_view: StorageView
 ) -> None:
     """End-to-end: a real terminal Ctrl-C, delivered as an actual SIGINT.
 
@@ -287,10 +303,12 @@ def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
     the guard available for local repro without destabilising CI.
     """
 
-    async def _slow_phase(*_args: object, **_kwargs: object) -> None:
+    asyncio.run(storage_view.repos.episode.add([_episode("ep1")]))
+
+    async def _slow_embedding() -> None:
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(backfill_mod, "_run_phase_vectors", _slow_phase)
+    embedder.before_embed = _slow_embedding
 
     def _send_sigint_soon() -> None:
         time.sleep(0.3)

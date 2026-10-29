@@ -14,15 +14,16 @@ import datetime as dt
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
 
 import pyarrow as pa
 from lancedb import AsyncTable
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import VectorStoreBusyError
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.records.table_chassis import BaseLanceTable
 
 logger = get_logger(__name__)
@@ -119,7 +120,7 @@ optimize cooldown, not this threshold — see there.
 not in any release as of lancedb 0.34.0 / lance 8.0.0 — the merge sits ahead of
 v11.0.0-beta.2) makes lance's own cleanup remove the directories it empties,
 under this same 7-day / ``delete_unverified`` policy. Once a release carrying
-it is pinned, delete :func:`_remove_empty_index_dirs` and its call site rather
+it is pinned, delete :func:`remove_empty_index_dirs` and its call site rather
 than keep a second implementation of upstream's rule. That upgrade also halves
 the horizon above: lance drops the directory in the pass that empties it, so
 our age gate stops stacking on top of theirs and the steady state goes from
@@ -156,6 +157,32 @@ expiry the caller gets a retryable :class:`VectorStoreBusyError`, so a drain row
 is retried and a search request fails with a structured error rather than
 hanging the request."""
 
+
+@dataclass(frozen=True)
+class LanceTimeouts:
+    """The deadlines one table's operations run under.
+
+    The defaults are the module constants above, each sized from measured
+    durations (see their docstrings); a test shrinks them to exercise the
+    expiry paths without waiting.
+    """
+
+    write: float = _WRITE_TIMEOUT_SECONDS
+    rebuild: float = _REBUILD_TIMEOUT_SECONDS
+    prune: float = _PRUNE_TIMEOUT_SECONDS
+    compact: float = _COMPACT_TIMEOUT_SECONDS
+    husk_sweep: float = _HUSK_SWEEP_TIMEOUT_SECONDS
+    read: float = _READ_TIMEOUT_SECONDS
+
+
+class HuskSweep(Protocol):
+    """Removes empty ``_indices/<uuid>/`` dirs; see :func:`remove_empty_index_dirs`."""
+
+    def __call__(
+        self, table_uri: str, *, live_uuids: frozenset[str], min_age_seconds: float
+    ) -> int: ...
+
+
 _SLOW_HOLD_LOG_SECONDS = 1.0
 """Log a completed critical section that held the write lock at least this
 long. Normal writes are 2-25ms and a normal prune ~40ms, so anything past a
@@ -177,7 +204,7 @@ def _q(value: str) -> str:
     return value.replace("'", "''")
 
 
-def _remove_empty_index_dirs(
+def remove_empty_index_dirs(
     table_uri: str, *, live_uuids: frozenset[str], min_age_seconds: float
 ) -> int:
     """Remove empty ``_indices/<uuid>/`` husks under a table dir; return count.
@@ -434,7 +461,12 @@ class LanceRepoBase[T: BaseLanceTable]:
         cls._table_locks.clear()
 
     def __init__(
-        self, table: AsyncTable | None = None, *, source: TableSource | None = None
+        self,
+        table: AsyncTable | None = None,
+        *,
+        source: TableSource | None = None,
+        timeouts: LanceTimeouts = LanceTimeouts(),  # noqa: B008 - frozen value
+        sweep_husks: HuskSweep | None = None,
     ) -> None:
         if (table is None) == (source is None):
             raise TypeError(
@@ -442,6 +474,8 @@ class LanceRepoBase[T: BaseLanceTable]:
             )
         self._table_override = table
         self._source = source
+        self._timeouts = timeouts
+        self._sweep_husks: HuskSweep = sweep_husks or remove_empty_index_dirs
 
     async def _table(self) -> AsyncTable:
         if self._table_override is not None:
@@ -453,7 +487,7 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     async def add(self, records: Sequence[T]) -> None:
         """Insert one or more records."""
-        async with self._locked(_WRITE_TIMEOUT_SECONDS, "add"):
+        async with self._locked(self._timeouts.write, "add"):
             table = await self._table()
             await table.add(list(records))
 
@@ -479,7 +513,7 @@ class LanceRepoBase[T: BaseLanceTable]:
             raise ValueError(
                 f"derived-index model {self.schema.__name__} has no PRIMARY_KEY"
             )
-        async with self._locked(_WRITE_TIMEOUT_SECONDS, "upsert"):
+        async with self._locked(self._timeouts.write, "upsert"):
             table = await self._table()
             await (
                 table.merge_insert(list(key))
@@ -533,7 +567,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         writer is benign here (compaction is not urgent — the next scheduled
         beat retries), so it must not stall writers.
         """
-        async with self._deadline(_COMPACT_TIMEOUT_SECONDS, "optimize"):
+        async with self._deadline(self._timeouts.compact, "optimize"):
             table = await self._table()
             await table.optimize()
 
@@ -573,7 +607,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         against an object store where an empty directory does not exist), so
         those husks accumulate on a local filesystem: a soak run reached 13061
         dirs, 98% empty. They are swept here, outside the lock — see
-        :func:`_remove_empty_index_dirs` for why that is safe.
+        :func:`remove_empty_index_dirs` for why that is safe.
 
         This is a *separate* gap from index files not being reclaimed while
         they are young: lance skips an index UUID that no manifest references
@@ -589,7 +623,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         stall is rare. Does *not* shrink **active** index internals (FTS
         ``part_N`` / index UUID count) — that is ``rebuild_indexes``'s job.
         """
-        async with self._locked(_PRUNE_TIMEOUT_SECONDS, "prune"):
+        async with self._locked(self._timeouts.prune, "prune"):
             table = await self._table()
             await table.optimize(cleanup_older_than=older_than, delete_unverified=False)
             table_uri = await table.uri()
@@ -611,9 +645,9 @@ class LanceRepoBase[T: BaseLanceTable]:
         # path corrupting the main signal's ledger. The skipped husks are
         # retried on the next heavy beat.
         try:
-            async with self._deadline(_HUSK_SWEEP_TIMEOUT_SECONDS, "prune_husk_sweep"):
+            async with self._deadline(self._timeouts.husk_sweep, "prune_husk_sweep"):
                 removed = await asyncio.to_thread(
-                    _remove_empty_index_dirs,
+                    self._sweep_husks,
                     table_uri,
                     live_uuids=live_uuids,
                     min_age_seconds=_HUSK_MIN_AGE_SECONDS,
@@ -688,7 +722,7 @@ class LanceRepoBase[T: BaseLanceTable]:
           in lance v7.0.0)
         - https://docs.rs/lancedb/latest/lancedb/table/struct.OptimizeOptions.html
         """
-        async with self._locked(_REBUILD_TIMEOUT_SECONDS, "rebuild_indexes"):
+        async with self._locked(self._timeouts.rebuild, "rebuild_indexes"):
             table = await self._table()
             # Replace in place rather than drop-then-create. The live columns
             # must never be left without an index: FTS does not degrade when
@@ -716,7 +750,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         threshold since startup, and retrain one whose delta indices piled
         up — the cascade's heavy beat calls this; the cases are spelled out
         on :meth:`BaseLanceTable.ensure_vector_indexes`."""
-        async with self._locked(_REBUILD_TIMEOUT_SECONDS, "ensure_vector_indexes"):
+        async with self._locked(self._timeouts.rebuild, "ensure_vector_indexes"):
             table = await self._table()
             return await self.schema.ensure_vector_indexes(
                 table, min_rows=_vector_index_min_rows()
@@ -724,7 +758,7 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     async def count(self) -> int:
         """Total row count."""
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "count"):
+        async with self._deadline(self._timeouts.read, "count"):
             table = await self._table()
             return await table.count_rows()
 
@@ -741,7 +775,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         predicate; everos's PK convention is ``<owner_id>_<entry_id>``
         which never contains quotes, so the escape is defensive.
         """
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "get_by_id"):
+        async with self._deadline(self._timeouts.read, "get_by_id"):
             table = await self._table()
             rows = (
                 await table.query()
@@ -772,7 +806,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         Python floats in ``to_list``, so bulk readers that never use them
         should set this.
         """
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
+        async with self._deadline(self._timeouts.read, "find_where"):
             table = await self._table()
             query = table.query().where(where)
             if skip_vectors:
@@ -830,7 +864,7 @@ class LanceRepoBase[T: BaseLanceTable]:
             ``total`` is ``count_rows(filter=where)`` (the predicate's
             true match count, regardless of ``max_fetch``).
         """
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where_paginated"):
+        async with self._deadline(self._timeouts.read, "find_where_paginated"):
             table = await self._table()
             total = await table.count_rows(filter=where)
             if total > max_fetch:
@@ -887,7 +921,7 @@ class LanceRepoBase[T: BaseLanceTable]:
             List of row dicts (LanceDB native shape — fields depend on
             ``schema``; ``_distance`` added when ``vector`` is given).
         """
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "search"):
+        async with self._deadline(self._timeouts.read, "search"):
             table = await self._table()
             q = table.query()
             if vector is not None:
@@ -915,7 +949,7 @@ class LanceRepoBase[T: BaseLanceTable]:
             updates: Column-name to new-value mapping.
             where: SQL-like predicate scoping the update.
         """
-        async with self._locked(_WRITE_TIMEOUT_SECONDS, "update"):
+        async with self._locked(self._timeouts.write, "update"):
             table = await self._table()
             await table.update(updates, where=where)
 
@@ -923,7 +957,7 @@ class LanceRepoBase[T: BaseLanceTable]:
 
     async def delete(self, predicate: str) -> None:
         """Delete rows matching a SQL-like predicate."""
-        async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete"):
+        async with self._locked(self._timeouts.write, "delete"):
             table = await self._table()
             await table.delete(predicate)
 
@@ -934,7 +968,7 @@ class LanceRepoBase[T: BaseLanceTable]:
         (or when reverse-reconcile discovers an orphaned LanceDB row).
         Single quotes in ``md_path`` are doubled defensively.
         """
-        async with self._locked(_WRITE_TIMEOUT_SECONDS, "delete_by_md_path"):
+        async with self._locked(self._timeouts.write, "delete_by_md_path"):
             table = await self._table()
             result = await table.delete(f"md_path = '{_q(md_path)}'")
         return int(result.num_deleted_rows)
@@ -1019,7 +1053,7 @@ class LanceDailyLogRepoBase[T: BaseLanceTable](LanceRepoBase[T]):
         this class is covered by :data:`_READ_TIMEOUT_SECONDS`; the
         docstring there explains what an uncovered hung read costs.
         """
-        async with self._deadline(_READ_TIMEOUT_SECONDS, "find_where"):
+        async with self._deadline(self._timeouts.read, "find_where"):
             table = await self._table()
             return (
                 await table.query()

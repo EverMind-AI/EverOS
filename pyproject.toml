@@ -261,6 +261,23 @@ layers = [
 ]
 
 [[tool.importlinter.contracts]]
+# Entry points translate a protocol (HTTP, CLI, TUI) into facade calls and
+# back. Request / response DTOs and error types reach them through the
+# ``everos.service`` facade or ``everos.core``; nothing below the service is
+# theirs to import. Direct imports only: an entry point reaching the domain
+# *through* the service is the point.
+name = "entrypoints-forbidden: entry points import the service, not what it wires"
+type = "forbidden"
+source_modules = ["everos.entrypoints"]
+forbidden_modules = [
+    "everos.memory",
+    "everos.infra",
+    "everos.component",
+    "everalgo",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 name = "infra-inverted: infra reaches the domain only through its ports"
 type = "forbidden"
 source_modules = ["everos.infra"]
@@ -465,8 +482,6 @@ allow_indirect_imports = true
 ignore_imports = [
     "everos.service.bootstrap -> everos.infra.**",
     "everos.service.bootstrap -> everos.component.**",
-    # removed in stage 6: backfill's phase runners move behind ops ports.
-    "everos.service.backfill -> everos.infra.**",
 ]
 
 [[tool.importlinter.contracts]]

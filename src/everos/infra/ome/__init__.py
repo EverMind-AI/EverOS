@@ -26,6 +26,7 @@ from everos.infra.ome.exceptions import (
 from everos.infra.ome.exceptions import (
     StrategyContractError as StrategyContractError,
 )
+from everos.infra.ome.lock import OmeLock as OmeLock
 from everos.infra.ome.records import RunRecord as RunRecord
 from everos.infra.ome.records import RunStatus as RunStatus
 from everos.infra.ome.records import StrategyRouteInfo as StrategyRouteInfo
@@ -38,6 +39,7 @@ __all__ = [
     "OMEError",
     "OfflineEngine",
     "OmeEventBus",
+    "OmeLock",
     "RunRecord",
     "RunStatus",
     "StartupValidationError",

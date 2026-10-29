@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from everos.component.utils.datetime import (
+from everos.core.utils.datetime import (
     get_now_with_timezone,
     to_iso_format,
 )

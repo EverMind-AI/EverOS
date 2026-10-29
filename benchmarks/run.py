@@ -4130,15 +4130,15 @@ def _server_version(port: str) -> str:
         return "none"
 
 
-def _print_servers() -> None:
+def _print_servers(servers: list[tuple[int, str, str]] | None = None) -> None:
     """One place to answer 'who serves this store, on what port, at what version'.
 
     A store admits exactly ONE server -- the index-queue lock is exclusive and taken at
     startup whatever stages will run -- so a second run against a store still held by a
-    previous fleet cannot start.
+    previous fleet cannot start. ``servers`` defaults to every running one.
     """
     print(f"  {'PID':<9}{'PORT':<7}{'VERSION':<10}{'OWNER':<9}{'STORE'}")
-    for pid, port, root in _iter_servers():
+    for pid, port, root in _iter_servers() if servers is None else servers:
         owner = _server_owner(pid)
         print(
             f"  {pid:<9}{port or '?':<7}{_server_version(port):<10}"
@@ -4146,9 +4146,12 @@ def _print_servers() -> None:
         )
 
 
-def _reap_servers() -> None:
-    """Stop servers no run.py owns. Anything still owned is left strictly alone."""
-    for pid, port, root in _iter_servers():
+def _reap_servers(servers: list[tuple[int, str, str]] | None = None) -> None:
+    """Stop servers no run.py owns. Anything still owned is left strictly alone.
+
+    ``servers`` defaults to every running one.
+    """
+    for pid, port, root in _iter_servers() if servers is None else servers:
         owner = _server_owner(pid)
         if owner is not None:
             print(f"  keep   :{port}  owned by run.py {owner}")

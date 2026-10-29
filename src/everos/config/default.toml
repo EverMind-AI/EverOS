@@ -12,7 +12,7 @@
 
 [memory]
 # Effective timezone for date buckets and timestamps. Drives
-# component.utils.datetime; this is the SOLE source — OS `TZ` is not
+# core.utils.datetime; this is the SOLE source — OS `TZ` is not
 # read. Override via `EVEROS_MEMORY__TIMEZONE` env var if needed.
 timezone = "UTC"
 
@@ -188,6 +188,13 @@ hard_msg_limit = 500
 # A single service process serves one mode at a time; switching mode
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"
+# Maximum wall-clock for one memorize() invocation while holding the
+# per-session lock. On timeout the outer asyncio.timeout cancels the call
+# and the lock auto-releases so subsequent concurrent /add on the same
+# session aren't deadlocked. Covers boundary LLM + memcell writes +
+# synchronous portion of pipeline dispatch.
+# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
+session_lock_timeout_seconds = 360.0
 
 [memorize.async_queue]
 # Queue behind ``async_mode=true`` on /add (a /flush joins it only behind its
@@ -239,14 +246,6 @@ rerank_n = 50
 lambda = 0.1
 mass_top_m = 50
 top_k_cap = 100
-
-# Maximum wall-clock for one memorize() invocation while holding the
-# per-session lock. On timeout the outer asyncio.timeout cancels the call
-# and the lock auto-releases so subsequent concurrent /add on the same
-# session aren't deadlocked. Covers boundary LLM + memcell writes +
-# synchronous portion of pipeline dispatch.
-# Override via EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS.
-session_lock_timeout_seconds = 360.0
 
 [clustering]
 # Geometry-clustering: cosine similarity threshold and time window.

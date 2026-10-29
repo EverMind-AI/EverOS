@@ -27,11 +27,12 @@ This file pins both invariants:
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 from everos.memory.ports.query import AnyOf, Filter, IsNull
-from everos.service.backfill import (
-    NullBackfillPresenter,
+from everos.service import NullBackfillPresenter
+from everos.service.ops._backfill_vectors import (
     _backfill_table,
     _extract_row,
     _null_filter,
@@ -39,6 +40,8 @@ from everos.service.backfill import (
     _TableBacklog,
     _TableSpec,
 )
+
+_RETENTION = dt.timedelta(seconds=60)
 
 
 class _EpisodeLikeSchema:
@@ -96,7 +99,7 @@ class _DistinctProvider:
 
 def _episode_spec() -> _TableSpec:
     return _TableSpec(
-        schema=_EpisodeLikeSchema,  # type: ignore[arg-type]
+        table=_EpisodeLikeSchema.TABLE_NAME,
         text_of=lambda r: r["episode"],
         subject_of=lambda r: r.get("subject") or None,
     )
@@ -123,7 +126,9 @@ async def test_subject_only_failure_leaves_row_in_backlog() -> None:
     backlog = _TableBacklog(spec=spec, index=repo, rows=rows)  # type: ignore[arg-type]
 
     provider = _SubjectFailingProvider()
-    result = await _backfill_table(backlog, provider, presenter=NullBackfillPresenter())  # type: ignore[arg-type]
+    result = await _backfill_table(
+        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
 
     # Every row's primary vector landed on disk exactly once, and no
     # ``subject_vector`` field was written for any row.
@@ -202,7 +207,9 @@ async def test_orthogonal_partial_states_all_recover() -> None:
     backlog = _TableBacklog(spec=spec, index=repo, rows=rows)  # type: ignore[arg-type]
 
     provider = _AllSucceedProvider()
-    result = await _backfill_table(backlog, provider, presenter=NullBackfillPresenter())  # type: ignore[arg-type]
+    result = await _backfill_table(
+        backlog, provider, prune_retention=_RETENTION, presenter=NullBackfillPresenter()
+    )  # type: ignore[arg-type]
 
     assert result.rows_processed == 3
     assert result.rows_failed == 0
@@ -232,7 +239,7 @@ def test_null_filter_widens_only_for_episode() -> None:
     assert _null_filter(ep_spec) == AnyOf((IsNull("vector"), IsNull("subject_vector")))
 
     fact_spec = _TableSpec(
-        schema=_NonSubjectSchema,  # type: ignore[arg-type]
+        table=_NonSubjectSchema.TABLE_NAME,
         text_of=lambda r: r["fact"],
     )
     assert _null_filter(fact_spec) == IsNull("vector")
@@ -242,7 +249,7 @@ def test_extract_row_skips_legitimate_null_subject() -> None:
     """A row where ``subject`` is legitimately absent and both
     ``subject_vector`` NULL + ``vector`` populated is NOT a backlog
     item — ``_extract_row`` returns the ``_ROW_SKIPPED`` sentinel."""
-    from everos.service.backfill import _ROW_SKIPPED
+    from everos.service.ops._backfill_vectors import _ROW_SKIPPED
 
     spec = _episode_spec()
     raw = {
@@ -282,7 +289,10 @@ async def test_update_is_addressed_by_full_key() -> None:
     ]
     backlog = _TableBacklog(spec=spec, index=repo, rows=rows)  # type: ignore[arg-type]
     result = await _backfill_table(
-        backlog, _DistinctProvider(), presenter=NullBackfillPresenter()
+        backlog,
+        _DistinctProvider(),
+        prune_retention=_RETENTION,
+        presenter=NullBackfillPresenter(),
     )  # type: ignore[arg-type]
     assert result.rows_failed == 0
     keys = [

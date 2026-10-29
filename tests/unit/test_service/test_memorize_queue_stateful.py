@@ -190,11 +190,10 @@ class _Queue:
         self.deliver = memorize
         self.ops = make_ops(inbox=self.inbox)
         self.worker = mq.MemorizeQueueWorker(
-            cfg, inbox=self.inbox, deliver=self.deliver
+            cfg, inbox=self.inbox, deliver=self.deliver, mark_retry_seconds=0.0
         )
         self._patches = [
             mock.patch.object(mq, "get_utc_now", self.now),
-            mock.patch.object(mq, "_MARK_RETRY_SECONDS", 0.0),
         ]
 
     def now(self) -> datetime:
@@ -542,7 +541,10 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
                 m["status"] = "queued"
                 self.requeued[rid] += 1
         self.q.worker = mq.MemorizeQueueWorker(
-            _settings(), inbox=self.q.inbox, deliver=self.q.deliver
+            _settings(),
+            inbox=self.q.inbox,
+            deliver=self.q.deliver,
+            mark_retry_seconds=0.0,
         )
         self.run(self.q.worker._sweep())
         self._model_purge()

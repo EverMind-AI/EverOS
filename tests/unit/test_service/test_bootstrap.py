@@ -104,14 +104,14 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     llm = unscripted_llm()
     application = _build(settings, llm=llm)
     memory = application.memory
+    memorizer = memory._memorizer
 
-    assert isinstance(memory._bus, OmeEventBus)
-    assert memory._bus._engine is application._engine
-    assert memory._user_pipeline._episode_store is memory._stores.episode
+    assert isinstance(memorizer._bus, OmeEventBus)
+    assert memorizer._bus._engine is application._engine
     assert memory._search_manager._llm is llm
-    assert memory._boundary._llm is llm
-    assert memory._boundary._session_buffer is memory._stores.session_buffer
-    assert memory._boundary._memcells is memory._stores.memcell
+    assert memorizer._boundary._llm is llm
+    assert memorizer._boundary._session_buffer is memory._search_manager._session_buffer
+    assert memorizer._extractions is memory._extractions
 
 
 @pytest.mark.parametrize(
@@ -163,13 +163,36 @@ async def test_start_brings_the_queue_up_last_and_aclose_unwinds_in_reverse(
     ]
 
 
-async def test_aclose_without_start_stops_nothing(tmp_path: Path) -> None:
+async def test_aclose_without_start_closes_only_the_storage(tmp_path: Path) -> None:
+    """A CLI command opens storage without starting; closing must still close it."""
     events: list[str] = []
     application = make_application(root=tmp_path, lifecycle=events)
 
     await application.aclose()
 
+    assert events == ["index.close", "sqlite.dispose"]
+
+
+async def test_aclose_is_idempotent(tmp_path: Path) -> None:
+    events: list[str] = []
+    application = make_application(root=tmp_path, lifecycle=events)
+    await application.start()
+    await application.aclose()
+    events.clear()
+
+    await application.aclose()
+
     assert events == []
+
+
+async def test_async_with_closes_on_exit_without_starting(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    async with make_application(root=tmp_path, lifecycle=events) as application:
+        assert events == []
+        assert application.memory is not None
+
+    assert events == ["index.close", "sqlite.dispose"]
 
 
 async def test_a_failing_stop_does_not_skip_the_rest(tmp_path: Path) -> None:

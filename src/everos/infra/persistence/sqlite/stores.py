@@ -24,7 +24,7 @@ from typing import cast
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.component.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,

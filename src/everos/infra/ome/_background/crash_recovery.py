@@ -18,8 +18,8 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from uuid import uuid4
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._stores.run_record import RunRecordStore
 
 logger = get_logger(__name__)

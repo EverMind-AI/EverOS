@@ -280,8 +280,8 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     regression on one would likely affect all three, but pinning each
     rules out per-subclass shadowing of ``_frontmatter_updates``.
     """
-    from everos.component.utils import datetime as _dt_module
     from everos.config import load_settings
+    from everos.core.utils import datetime as _dt_module
 
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", "Asia/Shanghai")
     load_settings.cache_clear()

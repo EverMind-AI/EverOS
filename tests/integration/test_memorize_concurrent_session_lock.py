@@ -1,7 +1,7 @@
 """Concurrent /add on one session must not lose messages (regression).
 
 White-box integration test for the per-session lock added in
-``everos.service._session_lock``.
+``everos.service.memory._session_locks``.
 
 Bug class
 ---------
@@ -84,10 +84,6 @@ async def memorize_env_locked(
 
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    lock_mod = importlib.import_module("everos.service._session_lock")
-
-    # Reset memorize singletons + session lock registry.
-    lock_mod._reset_for_tests()
 
     started: dict[str, Any] = {"engine": None}
 

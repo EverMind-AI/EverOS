@@ -14,7 +14,7 @@ from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Static
 
-from everos.component.utils.datetime import today_with_timezone
+from everos.core.utils.datetime import today_with_timezone
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import (
     DemoStory,

@@ -41,16 +41,16 @@ from typing import Annotated
 
 import typer
 
-from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.errors import (
     EmbeddingProvenanceError,
     IndexSchemaMismatchError,
+    MemoryRootLockedError,
 )
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import to_display_tz
 from everos.entrypoints.cli._log_setup import configure_cli_logging
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
-from everos.infra.ome.exceptions import EngineLockHeldError
 from everos.service import OpsService, build_application
 
 logger = get_logger(__name__)
@@ -143,13 +143,15 @@ async def _runtime(
     repairs exactly what verification rejects and what the index
     migrations raise on (see :meth:`OpsService.index_session`).
     """
-    application = build_application(load_settings())
     try:
-        async with application.ops.index_session(
-            verify=verify, ensure=ensure, exclusive=exclusive
+        async with (
+            build_application(load_settings()) as application,
+            application.ops.index_session(
+                verify=verify, ensure=ensure, exclusive=exclusive
+            ),
         ):
             yield application.ops
-    except EngineLockHeldError:
+    except MemoryRootLockedError:
         typer.echo(
             "error: another process holds this memory root's OME lock — a "
             "running `everos server`\n"
@@ -170,8 +172,6 @@ async def _runtime(
         # so the two would be indistinguishable in a script.
         typer.secho(str(exc), err=True)
         raise typer.Exit(code=3) from None
-    finally:
-        await application.aclose()
 
 
 # ── sync ─────────────────────────────────────────────────────────────────
@@ -386,7 +386,7 @@ def fix(
 
 
 class _BackfillPhaseOption(enum.StrEnum):
-    """CLI-facing ``--phase`` choices — mirrors ``BackfillPhase.slug``."""
+    """``--phase`` choices: ``all`` plus :data:`everos.service.BACKFILL_PHASES`."""
 
     VECTORS = "vectors"
     CLUSTERS = "clusters"
@@ -498,7 +498,7 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
-    if not build_application(load_settings()).ops.ome_lock_is_free():
+    if not asyncio.run(_root_is_free()):
         typer.echo(
             "error: a server (or another exclusive CLI phase) is running on "
             "this memory root.\n"
@@ -545,6 +545,12 @@ def rebuild(
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+
+async def _root_is_free() -> bool:
+    """Whether no server (or exclusive CLI phase) holds this memory root."""
+    async with build_application(load_settings()) as application:
+        return application.ops.ome_lock_is_free()
 
 
 def _resolve_relative(ops: OpsService, p: Path) -> str:

@@ -34,8 +34,8 @@ from __future__ import annotations
 import json
 from typing import Any, ClassVar
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.index import (
     IndexRepository,
     KnowledgeTopic,

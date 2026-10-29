@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from everos import __version__
-from everos.component.capabilities import compute_disabled_features
-from everos.core.observability.logging import get_logger
 from everos.entrypoints.api.utils import application
-
-logger = get_logger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -150,91 +147,20 @@ async def health(request: Request) -> HealthResponse:
     a data-quality backlog reported as an informational count that does
     not flip ``healthy``. Alert on ``cascade.healthy``.
     """
-    # ``llm`` is hardcoded ``True`` — kept for symmetry with the caps
-    # dict rather than probed live. Rationale: LLM is a Tier-1 hard
-    # requirement enforced by ``Application.start``, which raises
-    # ``LLMNotConfiguredError`` if credentials are missing — FastAPI
-    # startup then fails, so ``/health`` is unreachable without a
-    # working LLM. If the LLM capability is ever downgraded to soft
-    # (like embed / rerank), swap this literal for a real probe.
-    app = application(request)
-    snapshot = app.capabilities
-    caps = HealthCapabilities(
-        llm=True,
-        embed=app.ops.embedding_probed(),
-        rerank=snapshot.rerank,
-        multimodal_llm=snapshot.multimodal_llm,
-        parser=snapshot.parser,
-    )
-    cascade: CascadeHealthBlock | None = None
-    try:
-        ch = await app.ops.cascade_health()
-        if ch is not None:
-            cascade = CascadeHealthBlock(
-                healthy=ch.healthy,
-                reasons=ch.reasons,
-                pending=ch.pending,
-                failed_permanent=ch.failed_permanent,
-                failed_retryable=ch.failed_retryable,
-                drain_consecutive_failures=ch.drain_consecutive_failures,
-                unrecoverable_total=ch.unrecoverable_total,
-                optimize_failure_streak=ch.optimize_failure_streak,
-                prune_stale_seconds=round(ch.prune_stale_seconds, 1),
-                index_rows=ch.index_rows,
-                index_emptied=ch.index_emptied,
-            )
-    except Exception as exc:
-        # The probe reads SQLite (queue_summary runs aggregate counts).
-        # A locked / full / mid-migration DB must NOT turn /health into a
-        # 500 — that flips the liveness signal and makes k8s restart the
-        # container, which fixes neither a stuck DB nor disk bloat (see
-        # the handler docstring). Surface it as unhealthy *readiness*
-        # with a reason and keep HTTP 200.
-        logger.warning("cascade_health_probe_failed", error=repr(exc))
-        cascade = CascadeHealthBlock(
-            healthy=False,
-            reasons=[f"cascade health probe failed: {exc!r}"],
-            pending=0,
-            failed_permanent=0,
-            failed_retryable=0,
-            drain_consecutive_failures=0,
-            unrecoverable_total=0,
-            optimize_failure_streak=0,
-            prune_stale_seconds=0.0,
-        )
-    queue_block: MemorizeQueueHealthBlock | None = None
-    try:
-        qh = await app.memory.queue_health()
-        if qh is not None:
-            queue_block = MemorizeQueueHealthBlock(**qh.model_dump())
-    except Exception as exc:
-        # Same rule as the cascade block: a locked DB must not turn the
-        # liveness probe into a 500.
-        logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
-        queue_block = MemorizeQueueHealthBlock(
-            healthy=False,
-            reasons=[f"memorize queue health probe failed: {exc!r}"],
-            loop_alive=False,
-            accepting=False,
-            pending=0,
-            oldest_pending_age_s=None,
-            failed=0,
-            loop_restarts=0,
-            last_loop_error_at=None,
-        )
+    report = await application(request).ops.health()
     return HealthResponse(
         status="ok",
         version=__version__,
-        capabilities=caps,
-        # `embed` reports the startup probe, but `disabled_features` is a
-        # client contract about what the server will actually refuse -- and
-        # every engine-side gate (search, the embed-dependent strategies,
-        # backfill) still asks whether a provider could be built. A service
-        # that was unreachable at startup and came back would otherwise have
-        # the server announcing vector search disabled while serving it.
-        disabled_features=compute_disabled_features(
-            {**caps.model_dump(), "embed": snapshot.embedding}
+        capabilities=HealthCapabilities(**dataclasses.asdict(report.providers)),
+        disabled_features=report.disabled_features,
+        cascade=(
+            None
+            if report.cascade is None
+            else CascadeHealthBlock(**dataclasses.asdict(report.cascade))
         ),
-        cascade=cascade,
-        memorize_queue=queue_block,
+        memorize_queue=(
+            None
+            if report.memorize_queue is None
+            else MemorizeQueueHealthBlock(**report.memorize_queue.model_dump())
+        ),
     )

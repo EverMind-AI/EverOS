@@ -17,9 +17,9 @@ behind the injected ports.
 
 from __future__ import annotations
 
-from everos.component.utils.datetime import from_timestamp_ms, to_display_tz
 from everos.core.context import resolve_request_id
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
 from everos.memory.models import AgentCase, AgentSkill, Episode
 from everos.memory.ports import (
     AgentCaseIndex,

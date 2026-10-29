@@ -12,15 +12,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from everos.core.errors import InvalidInputError, NotFoundError
+from everos.core.errors import NotFoundError
 from everos.entrypoints.api.utils import application, extract_request_id
-from everos.service import TASK_STATUSES, TaskItem, TaskPage
+from everos.service import TaskItem, TaskPage
 
 from .memorize import SuccessEnvelope
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
-
-_MAX_PAGE_SIZE = 100
 
 
 @router.get("")
@@ -39,15 +37,11 @@ async def task_list(
     ``status=processing`` until both ``total`` are 0. ``page_size`` is capped
     at 100.
     """
-    if status is not None and status not in TASK_STATUSES:
-        raise InvalidInputError(
-            f"status must be one of {', '.join(TASK_STATUSES)}; got {status!r}"
-        )
     page_data = await application(request).ops.list_tasks(
         session_id=session_id,
         status=status,
         page=page,
-        page_size=min(page_size, _MAX_PAGE_SIZE),
+        page_size=page_size,
         app_id=app_id,
         project_id=project_id,
     )

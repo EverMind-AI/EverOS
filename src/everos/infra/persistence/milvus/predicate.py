@@ -8,7 +8,7 @@ import re
 from collections.abc import Collection
 from typing import Final
 
-from everos.component.utils.datetime import ensure_utc, to_timestamp_ms
+from everos.core.utils.datetime import ensure_utc, to_timestamp_ms
 from everos.memory.ports.query import (
     All,
     AnyOf,

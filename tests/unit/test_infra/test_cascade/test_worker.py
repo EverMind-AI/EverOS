@@ -1416,13 +1416,13 @@ async def test_a_crashed_loop_is_restarted_instead_of_dying_silently(
     interpreter never prints "Task exception was never retrieved" either (that
     fires on GC). The loop's job just stops happening, with zero output.
     """
-    from everos.infra.cascade import worker as wmod
 
     w = CascadeWorker(
-        {"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=patched_repo
+        {"episode": _OkHandler()},
+        retry_backoff_seconds=0,
+        loop_restart_backoffs_seconds=(0.0, 0.0, 0.0),
+        ledger=patched_repo,
     )
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0, 0.0))
 
     runs = 0
 
@@ -1433,10 +1433,7 @@ async def test_a_crashed_loop_is_restarted_instead_of_dying_silently(
             raise RuntimeError("boom")
         w._stop.set()  # third run exits cleanly
 
-    try:
-        await w._supervise("test-loop", _body)
-    finally:
-        monkeypatched.undo()
+    await w._supervise("test-loop", _body)
 
     assert runs == 3, "the loop must be restarted after each crash"
 
@@ -1451,15 +1448,15 @@ async def test_a_permanently_crashing_loop_asks_the_process_to_exit(
     Continuing to serve with a dead projection pipeline is worse: searches
     answer from a silently frozen index while ``/health`` shows nothing wrong.
     """
-    from everos.infra.cascade import worker as wmod
 
-    w = CascadeWorker(
-        {"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=patched_repo
-    )
     exits: list[str] = []
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0))
-    monkeypatched.setattr(w, "_request_process_exit", exits.append)
+    w = CascadeWorker(
+        {"episode": _OkHandler()},
+        retry_backoff_seconds=0,
+        loop_restart_backoffs_seconds=(0.0, 0.0),
+        on_unrecoverable=exits.append,
+        ledger=patched_repo,
+    )
 
     attempts = 0
 
@@ -1468,10 +1465,7 @@ async def test_a_permanently_crashing_loop_asks_the_process_to_exit(
         attempts += 1
         raise RuntimeError("deterministic failure")
 
-    try:
-        await w._supervise("test-loop", _always_raises)
-    finally:
-        monkeypatched.undo()
+    await w._supervise("test-loop", _always_raises)
 
     assert attempts == 3, "initial run + one per backoff entry"
     assert exits == ["test-loop"], "process exit must be requested exactly once"
@@ -1494,17 +1488,19 @@ async def test_a_stable_run_refills_the_restart_budget(
 
     from everos.infra.cascade import worker as wmod
 
-    w = CascadeWorker(
-        {"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=patched_repo
-    )
     exits: list[str] = []
+    w = CascadeWorker(
+        {"episode": _OkHandler()},
+        retry_backoff_seconds=0,
+        loop_restart_backoffs_seconds=(0.0, 0.0),
+        on_unrecoverable=exits.append,
+        ledger=patched_repo,
+    )
     clock = {"now": 0.0}
     monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_LOOP_RESTART_BACKOFF_SECONDS", (0.0, 0.0))
     # Only the worker module sees the fake clock; the event loop keeps real
     # time, so the zero backoffs above still pass through _wait_or_stop.
     monkeypatched.setattr(wmod, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
-    monkeypatched.setattr(w, "_request_process_exit", exits.append)
 
     runs = 0
 
@@ -1596,14 +1592,12 @@ async def test_optimize_does_not_park_forever_on_a_rebuild(
     """
     from everos.infra.cascade import worker as wmod
 
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
-
     fake = _FakeLanceRepo()
     w = CascadeWorker(
         {"episode": _OkHandlerWithRepo(fake)},
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
+        maintenance_task_timeout_seconds=0.05,
         ledger=patched_repo,
     )
     state = wmod._KindOptimizerState()
@@ -1618,7 +1612,6 @@ async def test_optimize_does_not_park_forever_on_a_rebuild(
             await w._optimize_runner("episode", initial_delay=0)
     finally:
         state.rebuild_task.cancel()
-        monkeypatched.undo()
 
     assert not fake.optimize_calls, (
         "the runner must skip the beat, not compact under a live rebuild — "
@@ -1638,10 +1631,7 @@ async def test_optimize_wait_timeout_leaves_the_rebuild_running(
     cancelled task as ``stop()``. No 12 h rebuild ran again until restart.
     Found by ``test_worker_maintenance_stateful.py``.
     """
-    from everos.infra.cascade import worker as wmod
 
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.05)
     fake = _FakeLanceRepo(rebuild_delay=0.3)
     w = CascadeWorker(
         {"episode": _OkHandlerWithRepo(fake)},
@@ -1650,6 +1640,7 @@ async def test_optimize_wait_timeout_leaves_the_rebuild_running(
         optimize_min_interval_seconds=0.01,
         optimize_heartbeat_seconds=3600.0,
         optimize_rebuild_interval_seconds=3600.0,
+        maintenance_task_timeout_seconds=0.05,
         ledger=patched_repo,
     )
     try:
@@ -1663,7 +1654,6 @@ async def test_optimize_wait_timeout_leaves_the_rebuild_running(
         )
     finally:
         await w.stop()
-        monkeypatched.undo()
 
 
 async def test_rebuild_wait_timeout_leaves_the_optimize_running(
@@ -1671,11 +1661,8 @@ async def test_rebuild_wait_timeout_leaves_the_optimize_running(
 ) -> None:
     """Mirror of the above: the rebuild's bounded wait on the optimize runner
     must skip the sweep, not cancel the beat it was staying clear of."""
-    from everos.infra.cascade import worker as wmod
 
-    monkeypatched = pytest.MonkeyPatch()
-    monkeypatched.setattr(wmod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", 0.2)
-    # The same constant bounds each maintenance call, so one long call cannot
+    # The same timeout bounds each maintenance call, so one long call cannot
     # outlive the wait: two short beats around a cooldown longer than the
     # wait do. Beats are far below the wait and the cooldown far above it, so
     # a coarse clock (Windows, where a 20 ms sleep ran past a 50 ms wait and
@@ -1685,15 +1672,13 @@ async def test_rebuild_wait_timeout_leaves_the_optimize_running(
         {"episode": _OkHandlerWithRepo(fake)},
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.6,
+        maintenance_task_timeout_seconds=0.2,
         ledger=patched_repo,
     )
-    try:
-        w._schedule_optimize("episode")
-        await asyncio.sleep(0.01)
-        w._schedule_optimize("episode")  # mid-beat: a second beat after cooldown
-        await w._run_rebuild_once("episode")  # waits 0.2 s, then skips
-        assert not fake.rebuild_calls, "must not rebuild under a live runner"
-        await w._flush_optimizers()
-        assert len(fake.beats) == 2, "both beats must run to completion"
-    finally:
-        monkeypatched.undo()
+    w._schedule_optimize("episode")
+    await asyncio.sleep(0.01)
+    w._schedule_optimize("episode")  # mid-beat: a second beat after cooldown
+    await w._run_rebuild_once("episode")  # waits 0.2 s, then skips
+    assert not fake.rebuild_calls, "must not rebuild under a live runner"
+    await w._flush_optimizers()
+    assert len(fake.beats) == 2, "both beats must run to completion"

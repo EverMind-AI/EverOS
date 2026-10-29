@@ -18,8 +18,8 @@ import pytest
 
 from everos.component.rerank import RerankResult
 from everos.component.tokenizer import Tokenizer
-from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import ProviderNotConfiguredError
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
     KnowledgeTopicRow,

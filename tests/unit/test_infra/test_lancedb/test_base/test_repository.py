@@ -27,7 +27,12 @@ import pytest
 
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
+from everos.infra.persistence.lancedb import (
+    LanceIndexBackend,
+    LanceRepoBase,
+    LanceTimeouts,
+    open_lancedb_connection,
+)
 from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
 from everos.infra.persistence.records import BaseLanceTable, Vector
 from tests.fakes import UnusedPort
@@ -662,7 +667,7 @@ async def test_write_lock_is_per_table(tmp_path: Path) -> None:
 
 
 async def test_migrate_fts_indexes_runs_once_and_rebuilds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
+    tmp_path: Path, storage: Storage
 ) -> None:
     """migrate_fts_indexes rebuilds existing FTS indexes once, guarded by a
     version marker in the LanceDB dir (fix for lance-format/lance#7653).
@@ -670,9 +675,7 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
     White-box surfaces: the ``.fts_index_version`` marker file and
     ``AsyncTable.list_indices`` on the storage's connection table.
     """
-    import everos.infra.persistence.lancedb.backend as lancedb_backend
-
-    monkeypatch.setattr(lancedb_backend, "_BUSINESS_SCHEMAS", (_SearchNote,))
+    backend = LanceIndexBackend(storage.lance, schemas=(_SearchNote,))
     try:
         table = await storage.lance.table(_SearchNote.TABLE_NAME, _SearchNote)
         await table.add(
@@ -692,7 +695,7 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         assert not marker.exists()
 
         # First run: migrates + writes the marker, index still present.
-        await storage.backend.migrate_fts_indexes()
+        await backend.migrate_fts_indexes()
         assert marker.read_text().strip() == "2"
         assert any("tokens" in (i.columns or []) for i in await table.list_indices())
 
@@ -700,7 +703,7 @@ async def test_migrate_fts_indexes_runs_once_and_rebuilds(
         # and confirm it is NOT rebuilt (migration skipped, not re-executed).
         for i in await table.list_indices():
             await table.drop_index(i.name)
-        await storage.backend.migrate_fts_indexes()
+        await backend.migrate_fts_indexes()
         assert not list(await table.list_indices())
     finally:
         await storage.lance.close()
@@ -761,9 +764,6 @@ async def test_prune_times_out_and_releases_the_write_lock(
     cascade worker retries the row instead of marking it permanently failed.
     """
     from everos.core.errors import ExternalServiceError, VectorStoreBusyError
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
-
-    monkeypatch.setattr(repo_mod, "_PRUNE_TIMEOUT_SECONDS", 0.05)
 
     class _HangingTable:
         async def optimize(self, **_kw):  # type: ignore[no-untyped-def]
@@ -772,7 +772,7 @@ async def test_prune_times_out_and_releases_the_write_lock(
         async def uri(self) -> str:
             return str(tmp_path)
 
-    repo = _NoteRepo(table=_HangingTable())  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_HangingTable(), timeouts=LanceTimeouts(prune=0.05))  # type: ignore[arg-type]
     with pytest.raises(VectorStoreBusyError) as excinfo:
         await repo.prune(dt.timedelta(seconds=60))
 
@@ -803,15 +803,12 @@ async def test_waiting_for_a_stuck_holder_also_times_out(
     returned).
     """
     from everos.core.errors import VectorStoreBusyError
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
-
-    monkeypatch.setattr(repo_mod, "_WRITE_TIMEOUT_SECONDS", 0.05)
 
     class _NoopTable:
         async def add(self, _records):  # type: ignore[no-untyped-def]
             return None
 
-    repo = _NoteRepo(table=_NoopTable())  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_NoopTable(), timeouts=LanceTimeouts(write=0.05))  # type: ignore[arg-type]
 
     # Simulate a holder that never gives the lock back.
     lock = repo._write_lock(repo.table_name)
@@ -847,13 +844,11 @@ async def test_a_hanging_table_handle_still_hits_the_deadline(
     siblings pruned on schedule.
     """
     from everos.core.errors import VectorStoreBusyError
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
 
-    monkeypatch.setattr(repo_mod, "_PRUNE_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(repo_mod, "_COMPACT_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(repo_mod, "_WRITE_TIMEOUT_SECONDS", 0.05)
-
-    repo = _NoteRepo(source=_HangingSource())
+    repo = _NoteRepo(
+        source=_HangingSource(),
+        timeouts=LanceTimeouts(prune=0.05, compact=0.05, write=0.05),
+    )
 
     # Every maintenance/write entry point must give up rather than park.
     with pytest.raises(VectorStoreBusyError):
@@ -928,11 +923,8 @@ async def test_hanging_reads_also_hit_a_deadline(
     exceptions.
     """
     from everos.core.errors import VectorStoreBusyError
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
 
-    monkeypatch.setattr(repo_mod, "_READ_TIMEOUT_SECONDS", 0.05)
-
-    repo = _NoteRepo(source=_HangingSource())
+    repo = _NoteRepo(source=_HangingSource(), timeouts=LanceTimeouts(read=0.05))
 
     with pytest.raises(VectorStoreBusyError):
         await repo.count()
@@ -1145,17 +1137,16 @@ async def test_husk_sweep_timeout_must_not_fail_the_prune(
     (~35us/dir measured), and the ceiling-load steady state sits right at
     the sweep budget.
     """
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
-
-    monkeypatch.setattr(repo_mod, "_HUSK_SWEEP_TIMEOUT_SECONDS", 0.05)
 
     def _slow_sweep(table_uri, *, live_uuids, min_age_seconds):  # type: ignore[no-untyped-def]
         time.sleep(0.5)  # to_thread cancellation cannot interrupt this
         return 0
 
-    monkeypatch.setattr(repo_mod, "_remove_empty_index_dirs", _slow_sweep)
-
-    repo = _NoteRepo(table=_SweepTable(str(tmp_path)))  # type: ignore[arg-type]
+    repo = _NoteRepo(
+        table=_SweepTable(str(tmp_path)),
+        timeouts=LanceTimeouts(husk_sweep=0.05),
+        sweep_husks=_slow_sweep,
+    )  # type: ignore[arg-type]
     await repo.prune(dt.timedelta(seconds=1))  # must not raise
 
 
@@ -1166,20 +1157,17 @@ async def test_a_broken_sweep_still_surfaces(
 
     The sibling test pins that a deadline miss does not bill prune. The risk on
     the other side is the catch drifting wider: swallowing every exception
-    would turn a genuine bug in ``_remove_empty_index_dirs`` (a TypeError after
+    would turn a genuine bug in ``remove_empty_index_dirs`` (a TypeError after
     a signature change, a permission error on the index dir) into a silent
     ``removed = 0``, and nothing anywhere would say the sweep had stopped
     working. That is the exact failure shape this module keeps being audited
     for, so the narrowness of the catch is worth a test of its own — widening
     it to ``except Exception`` passes every other test in this file.
     """
-    from everos.infra.persistence.lancedb.base import repository as repo_mod
 
     def _broken_sweep(table_uri, *, live_uuids, min_age_seconds):  # type: ignore[no-untyped-def]
         raise TypeError("sweep signature drifted")
 
-    monkeypatch.setattr(repo_mod, "_remove_empty_index_dirs", _broken_sweep)
-
-    repo = _NoteRepo(table=_SweepTable(str(tmp_path)))  # type: ignore[arg-type]
+    repo = _NoteRepo(table=_SweepTable(str(tmp_path)), sweep_husks=_broken_sweep)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="signature drifted"):
         await repo.prune(dt.timedelta(seconds=1))

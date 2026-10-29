@@ -1,8 +1,8 @@
 """Integration test for ``everos cascade backfill --phase skills``.
 
 Exercises the real Phase 3 scan + synthetic-event-emission + cascade-sync
-path (see ``service.backfill._run_phase_skills``): Phase 2's
-throwaway engine (``_build_cluster_engine``, Task 22) registers
+path (the ops facade's skills phase): Phase 2's
+throwaway replay engine (Task 22) registers
 ``trigger_skill_clustering`` but never ``extract_agent_skill``, so every
 ``SkillClusterUpdated`` it emits during clustering has no listener and is
 dropped. Phase 3 walks every agent-case cluster
@@ -42,15 +42,14 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.types import AgentSkill as AlgoAgentSkill
 
 from everos.component.embedding import EmbeddingProvider
-from everos.component.utils.datetime import get_utc_now
 from everos.config import load_settings
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.lancedb import (
     AgentCase,
 )
 from everos.memory.models import mint_cluster_id
 from everos.service import OpsService, build_application, build_providers
-from everos.service import backfill as backfill_mod
 from tests.fakes.storage import StorageView
 
 _DIM = 1024
@@ -168,7 +167,7 @@ async def _seed_cluster(
     storage_view: StorageView, *, agent_id: str = "agent1", case_entry_id: str = "ac1"
 ) -> str:
     """Seed the sqlite ``cluster`` + ``cluster_member`` pair Phase 3 scans."""
-    await backfill_mod._ensure_cluster_schema(storage_view.database)
+    await storage_view.create_schema()
     cluster_id = mint_cluster_id()
     algo_cluster = AlgoCluster(
         id=cluster_id,
@@ -193,7 +192,7 @@ async def test_empty_db_reports_nothing_to_backfill(
     capsys: pytest.CaptureFixture[str],
     storage_view: StorageView,
 ) -> None:
-    await backfill_mod._ensure_cluster_schema(storage_view.database)
+    await storage_view.create_schema()
 
     code = await run_backfill(_ops(), phase="skills", auto_yes=True)
     out = capsys.readouterr().out

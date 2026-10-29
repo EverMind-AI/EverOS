@@ -13,11 +13,13 @@ The table chassis (``BaseLanceTable``) lives with the table declarations in
 from .connection import open_lancedb_connection as open_lancedb_connection
 from .repository import LanceDailyLogRepoBase as LanceDailyLogRepoBase
 from .repository import LanceRepoBase as LanceRepoBase
+from .repository import LanceTimeouts as LanceTimeouts
 from .repository import TableSource as TableSource
 
 __all__ = [
     "LanceDailyLogRepoBase",
     "LanceRepoBase",
+    "LanceTimeouts",
     "TableSource",
     "open_lancedb_connection",
 ]

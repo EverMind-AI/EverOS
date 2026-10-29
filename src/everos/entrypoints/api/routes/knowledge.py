@@ -21,18 +21,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from everalgo.types import ParsedContent
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, UploadFile
 from fastapi.params import Form
 from pydantic import BaseModel, Field
 
-from everos.component.utils.datetime import to_display_tz
-from everos.config import load_settings
-from everos.core.errors import (
-    InvalidInputError,
-    ProviderNotConfiguredError,
-    UnsupportedModalityError,
-)
+from everos.core.utils.datetime import to_display_tz
 from everos.entrypoints.api.utils import application, extract_request_id
 from everos.service import (
     CreateDocumentResult,
@@ -46,57 +39,17 @@ from everos.service import (
 # a shared module would be cleaner but is out of scope for this PR.
 from .memorize import AppScopeId, ProjectScopeId, SuccessEnvelope
 
-_KNOWLEDGE_FEATURE = "knowledge"
-
 
 def _require_knowledge_capabilities(request: Request) -> None:
-    """Per-endpoint gate: knowledge writes/search require embed + rerank.
+    """Per-endpoint gate: uploads and search need embedding + rerank.
 
-    **Why the gate lives at the HTTP layer, not at cascade registry**:
-    cascade handlers register **unconditionally** now (see
-    ``infra/cascade/registry.py:177-194`` — the earlier atomic-pair
-    gate that lived there was removed because it broke the delete
-    path: a Tier-3 → Tier-2/1 downgrade would strand existing knowledge
-    documents with no handler to process their deletion). Handlers
-    body-guard the embed/rerank branches internally instead, so the
-    delete path stays reachable across tier changes.
-
-    Because the cascade layer no longer refuses the write, the HTTP
-    layer is now the *only* place that enforces "knowledge features
-    require Tier 3". Without this gate a Tier-1/2 upload would:
-
-    - accept the multipart request → md write succeeds
-    - enqueue for cascade → cascade handler body-guards on the
-      embedding capability and no-ops the index write
-    - client sees 201 but the doc is permanently keyword-only /
-      unsearchable
-
-    Returning 422 up front is the honest answer.
-
-    **Attached per-endpoint (not router-wide)** so read / list /
-    delete / metadata-patch routes stay reachable after a Tier-3 →
-    Tier-2/1 downgrade: users can still inspect and clean up their
-    existing docs (rename, recategorize, delete) even when the
-    providers that would embed or rerank new content are no longer
-    configured. Title / category patches only rewrite md frontmatter
-    (and move the doc directory when category changes) — no embed or
-    rerank code runs on that path.
-
-    Checks both capabilities (not just embedding) up front so a client
-    missing only rerank gets a rerank-specific message rather than
-    passing this gate and failing later inside search.
+    The rule is :meth:`KnowledgeService.require_search_providers`; it runs as
+    a dependency so FastAPI resolves it before validating the body, and a
+    deployment without the providers gets the provider-specific 422 for any
+    request. Attached per endpoint, not router-wide, so reads, deletes and
+    metadata patches stay reachable after a provider is removed.
     """
-    capabilities = application(request).capabilities
-    if not capabilities.embedding:
-        raise ProviderNotConfiguredError(
-            provider="embedding",
-            feature=_KNOWLEDGE_FEATURE,
-        )
-    if not capabilities.rerank:
-        raise ProviderNotConfiguredError(
-            provider="rerank",
-            feature=_KNOWLEDGE_FEATURE,
-        )
+    application(request).knowledge.require_search_providers()
 
 
 # Router prefix is /knowledge; app.py mounts it under both /api/v1 and
@@ -290,119 +243,7 @@ class DocumentPatchRequest(BaseModel):
     project_id: ProjectScopeId = "default"
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _reject_oversized_upload(file: UploadFile) -> None:
-    """Reject an upload whose declared size exceeds the configured limit.
-
-    Raises:
-        InvalidInputError: When ``file.size`` exceeds ``knowledge.max_upload_bytes``.
-    """
-    max_bytes = load_settings().knowledge.max_upload_bytes
-    if file.size is not None and file.size > max_bytes:
-        limit_mib = max_bytes / (1024 * 1024)
-        raise InvalidInputError(f"Uploaded file exceeds the {limit_mib:.1f} MiB limit.")
-
-
-_PLAIN_TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {"md", "txt", "rst", "markdown", "text"}
-)
-# Explicit mime allowlist. ``text/*`` prefix matching would let
-# ``text/html`` (and any future ``text/xml`` etc.) bypass the parser and
-# feed raw markup — script tags, HTML comments, style blocks — straight
-# into the knowledge-extraction LLM. everalgo's HTML parser runs
-# ``clean_html_for_llm`` (strips ``<script>/<style>/<nav>/<iframe>`` +
-# comments) and caps output at 1 MiB — semantics we must NOT skip.
-_PLAIN_TEXT_MIMES: frozenset[str] = frozenset(
-    {"text/plain", "text/markdown", "text/x-rst", "text/x-markdown"}
-)
-
-
-def _looks_like_utf8_text(file: UploadFile) -> bool:
-    """Decide whether to skip the parser and go straight to UTF-8 decode.
-
-    A file is treated as plain UTF-8 text when its ``content_type`` is on
-    ``_PLAIN_TEXT_MIMES`` (browsers set ``text/markdown`` / ``text/plain``
-    for ``.md`` / ``.txt`` uploads), or when the mime is missing /
-    ``application/octet-stream`` (typical for ``curl -F file=@x.md``
-    without an explicit ``type=`` hint) AND the filename extension is on
-    the extension allowlist.
-
-    ``text/html`` is deliberately EXCLUDED — HTML uploads must go through
-    the parser so ``clean_html_for_llm`` can strip active markup and cap
-    the payload; the ``text/*`` prefix match this file used to carry
-    would have let raw HTML (including ``<script>`` bodies and
-    ``<!-- prompt injection -->`` comments) reach the LLM as-is.
-    """
-    mime = (file.content_type or "").lower()
-    if mime in _PLAIN_TEXT_MIMES:
-        return True
-    if mime and mime != "application/octet-stream":
-        return False
-    if file.filename and "." in file.filename:
-        return file.filename.rsplit(".", 1)[-1].lower() in _PLAIN_TEXT_EXTENSIONS
-    return False
-
-
-def _decode_as_utf8(raw_bytes: bytes) -> ParsedContent:
-    """Decode ``raw_bytes`` as UTF-8 or raise a caller-friendly error."""
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise UnsupportedModalityError(
-            "File is not UTF-8 text. "
-            "Install everos[multimodal] for PDF/HTML/DOCX support."
-        ) from exc
-    parsed = ParsedContent(text=text)
-    if not parsed.text or not parsed.text.strip():
-        raise InvalidInputError("Uploaded file has no valid content.")
-    return parsed
-
-
-async def _parse_upload(
-    request: Request, file: UploadFile, *, raw_bytes: bytes | None = None
-) -> ParsedContent:
-    """Parse an uploaded file via component.parser, or fall back to UTF-8.
-
-    Args:
-        request: The request, for the application's knowledge facade.
-        file: FastAPI upload file handle.
-        raw_bytes: Pre-read bytes; when provided, skips ``file.read()``.
-
-    Raises:
-        UnsupportedModalityError: When the file cannot be parsed.
-        InvalidInputError: When the parsed content is empty.
-    """
-    from everos.component.parser import parser_available  # Deferred: optional dep
-
-    if raw_bytes is None:
-        raw_bytes = await file.read()
-
-    # Short-circuit plain-text uploads even when everalgo.parser is
-    # installed — the parser path depends on [multimodal] being
-    # configured, which markdown/plaintext ingestion doesn't need.
-    if _looks_like_utf8_text(file):
-        return _decode_as_utf8(raw_bytes)
-
-    if parser_available():
-        from everalgo.types import RawFile  # Deferred: optional dep
-
-        extension = ""
-        if file.filename and "." in file.filename:
-            extension = file.filename.rsplit(".", 1)[-1].lower()
-        parsed = await application(request).knowledge.parse_file(
-            RawFile(
-                content=raw_bytes,
-                mime=file.content_type or "",
-                extension=extension,
-            )
-        )
-        if not parsed.text or not parsed.text.strip():
-            raise InvalidInputError("Uploaded file has no valid content.")
-        return parsed
-
-    return _decode_as_utf8(raw_bytes)
+# ── Mapping ──────────────────────────────────────────────────────────────────
 
 
 def _map_create_result(result: CreateDocumentResult) -> DocumentCreateResponse:
@@ -528,20 +369,13 @@ async def create_document_route(
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Upload a new knowledge document."""
     rid = extract_request_id(request)
-    _reject_oversized_upload(file)
-    file_content = await file.read()
-    parsed = await _parse_upload(request, file, raw_bytes=file_content)
-    source_name = file.filename
-
-    result = await application(request).knowledge.create_document(
-        parsed=parsed,
+    result = await application(request).knowledge.create_from_upload(
+        file,
         title=title,
         app_id=app_id,
         project_id=project_id,
-        source_name=source_name,
         source_type=source_type,
         category_id=category_id,
-        file_content=file_content,
     )
     return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
 
@@ -564,20 +398,14 @@ async def replace_document_route(
 ) -> SuccessEnvelope[DocumentCreateResponse]:
     """Replace an existing knowledge document (atomic backup/restore on failure)."""
     rid = extract_request_id(request)
-    _reject_oversized_upload(file)
-    file_content = await file.read()
-    parsed = await _parse_upload(request, file, raw_bytes=file_content)
-
-    result = await application(request).knowledge.replace_document(
-        doc_id=doc_id,
-        parsed=parsed,
+    result = await application(request).knowledge.replace_from_upload(
+        doc_id,
+        file,
         title=title,
         app_id=app_id,
         project_id=project_id,
-        source_name=file.filename,
         source_type=source_type,
         category_id=category_id,
-        file_content=file_content,
     )
     return SuccessEnvelope(request_id=rid, data=_map_create_result(result))
 

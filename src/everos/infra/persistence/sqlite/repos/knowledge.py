@@ -11,7 +11,7 @@ import dataclasses
 from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite.base.repository import RepoBase
 from everos.infra.persistence.sqlite.base.session import session_scope
 

@@ -15,7 +15,7 @@ import datetime as _dt
 import hashlib
 from pathlib import PurePosixPath
 
-from everos.component.utils.datetime import from_iso_format
+from everos.core.utils.datetime import from_iso_format
 from everos.infra.persistence import app_id_from_dir, project_id_from_dir
 
 

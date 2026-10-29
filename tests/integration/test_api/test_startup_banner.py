@@ -11,9 +11,9 @@ import hashlib
 
 import structlog.testing
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import load_settings
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.cascade import CascadeAdmin
 from everos.infra.persistence.index import EmbeddingProvenance
 from everos.infra.persistence.lancedb import Episode

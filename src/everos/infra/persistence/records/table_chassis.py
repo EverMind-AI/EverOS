@@ -37,7 +37,7 @@ from lancedb.index import FTS, IvfFlat
 from lancedb.pydantic import LanceModel
 from pydantic import Field
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.records.index_record import IndexRecordMeta
 
 VECTOR_INDEX_ROWS_PER_PARTITION = 4096

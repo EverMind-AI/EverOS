@@ -1,7 +1,7 @@
 """Pure helpers over the session's canonical messages and the cells cut from them.
 
 :func:`to_conversation_item` lives here rather than in ``memory.mappers``: it
-reads the clock through ``component.utils.datetime``, which the mappers may
+reads the clock through ``core.utils.datetime``, which the mappers may
 not import.
 """
 
@@ -30,7 +30,7 @@ from everalgo.types import (
     ToolCallResult,
 )
 
-from everos.component.utils.datetime import to_timestamp_ms
+from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import CanonicalMessage
 
 type Mode = Literal["chat", "agent"]

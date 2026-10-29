@@ -87,13 +87,20 @@ def register(parent: typer.Typer) -> None:
 def _launch_interactive_demo(
     *, live: bool, server_url: str, user_label: str = "you"
 ) -> None:
-    """Launch the cloud-platform interactive TUI.
+    """Launch the cloud-platform interactive TUI."""
+    _load_run_demo_tui()(
+        **_interactive_session(live=live, server_url=server_url, user_label=user_label)
+    )
+
+
+def _interactive_session(
+    *, live: bool, server_url: str, user_label: str = "you"
+) -> dict[str, object]:
+    """The interactive TUI's arguments: endpoint, a fresh identity, the key.
 
     The default mode talks to the credential-injecting public relay. ``--live``
     bypasses the relay and uses the user's own platform key directly.
     """
-
-    run_demo_tui = _load_run_demo_tui()
     base_url = (
         cloud.resolve_live_base_url(server_url)
         if live
@@ -101,15 +108,14 @@ def _launch_interactive_demo(
     )
     session_id, user_id = cloud.new_demo_identity()
     api_key = cloud.resolve_user_key() if live else cloud.resolve_demo_key()
-
-    run_demo_tui(
-        interactive=True,
-        base_url=base_url,
-        session_id=session_id,
-        user_id=user_id,
-        api_key=api_key,
-        user_label=user_label,
-    )
+    return {
+        "interactive": True,
+        "base_url": base_url,
+        "session_id": session_id,
+        "user_id": user_id,
+        "api_key": api_key,
+        "user_label": user_label,
+    }
 
 
 def _resolve_local_user() -> str:

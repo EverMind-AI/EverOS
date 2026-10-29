@@ -31,9 +31,9 @@ from collections.abc import Awaitable, Callable
 import httpx
 import pytest
 
-from everos.component.utils import datetime as dt_module
-from everos.component.utils.datetime import from_iso_format
 from everos.config import load_settings
+from everos.core.utils import datetime as dt_module
+from everos.core.utils.datetime import from_iso_format
 
 
 async def _switch_display_tz(monkeypatch: pytest.MonkeyPatch, tz: str) -> None:

@@ -2,7 +2,7 @@
 
 Thin adapter: validate the request DTO, dispatch to the service layer,
 return the envelope verbatim. ``request_id`` is generated inside the
-:class:`GetManager`; we trust the value on the way out.
+service layer; we trust the value on the way out.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from everos.entrypoints.api.utils import application
-from everos.memory.get import GetRequest, GetResponse
+from everos.service import GetRequest, GetResponse
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 

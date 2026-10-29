@@ -27,7 +27,6 @@ from everos.service.knowledge import (
     CategoryOverview,
     DocumentDetail,
     DocumentOverviewItem,
-    KnowledgeService,
 )
 from tests.fakes import make_knowledge_service
 
@@ -80,10 +79,10 @@ def _root_of(knowledge_dir: Path) -> Path:
 async def test_create_document_writes_original_file(
     knowledge_dir: Path,
 ) -> None:
-    """Full chain: create_document → KnowledgeWriter.write → _write_original_file.
+    """Full chain: create_document → KnowledgeWriter.write → the original upload.
 
     Only the extractor is mocked. KnowledgeWriter and filesystem are real.
-    This catches path wiring bugs between _write_document and _write_original_file.
+    This catches path wiring bugs between the document write and the original's.
     """
     mock_repo = MagicMock()
     doc_id = "d_test00000001"
@@ -92,22 +91,19 @@ async def test_create_document_writes_original_file(
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = memories
 
-    with (
-        patch.object(KnowledgeService, "_mint_doc_id", return_value=doc_id),
-    ):
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await make_knowledge_service(
-            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
-        ).create_document(
-            parsed=ParsedContent(text="some content"),
-            title="Test Doc",
-            source_name="report.pdf",
-            source_type="file",
-            doc_id=doc_id,
-            category_id="Sports",
-            file_content=file_content,
-        )
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="some content"),
+        title="Test Doc",
+        source_name="report.pdf",
+        source_type="file",
+        doc_id=doc_id,
+        category_id="Sports",
+        file_content=file_content,
+    )
 
     # _original/ must be inside the document directory, not the category directory
     doc_dir = Path(result.md_path)
@@ -135,21 +131,18 @@ async def test_create_document_without_file_content_no_original(
     mock_ext = AsyncMock()
     mock_ext.aextract.return_value = memories
 
-    with (
-        patch.object(KnowledgeService, "_mint_doc_id", return_value=doc_id),
-    ):
-        mock_repo.doc_id_exists = AsyncMock(return_value=False)
+    mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
-        result = await make_knowledge_service(
-            documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
-        ).create_document(
-            parsed=ParsedContent(text="some content"),
-            title="No Original",
-            source_name="test.txt",
-            source_type="file",
-            doc_id=doc_id,
-            category_id="Sports",
-        )
+    result = await make_knowledge_service(
+        documents=mock_repo, root=_root_of(knowledge_dir), extractor=mock_ext
+    ).create_document(
+        parsed=ParsedContent(text="some content"),
+        title="No Original",
+        source_name="test.txt",
+        source_type="file",
+        doc_id=doc_id,
+        category_id="Sports",
+    )
 
     doc_dir = Path(result.md_path)
     assert not (doc_dir / _ORIGINAL_DIR).exists()
@@ -166,8 +159,8 @@ async def test_get_document_returns_original_file_path(
     """get_document derives original_file_path from md_path + source_name."""
     mock_doc_repo = MagicMock()
     mock_topic_repo = MagicMock()
-    from everos.component.utils.datetime import get_utc_now
     from everos.config import load_settings
+    from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
@@ -227,8 +220,8 @@ async def test_get_document_returns_none_for_legacy_doc(
     """Legacy documents without _original/ get original_file_path=None."""
     mock_doc_repo = MagicMock()
     mock_topic_repo = MagicMock()
-    from everos.component.utils.datetime import get_utc_now
     from everos.config import load_settings
+    from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence import MemoryRoot
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
@@ -279,7 +272,7 @@ async def test_replace_document_writes_new_original(
 ) -> None:
     """replace_document writes new original file after atomic replacement."""
     mock_repo = MagicMock()
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence.sqlite.tables.knowledge import (
         KnowledgeDocumentRow,
     )
@@ -551,7 +544,7 @@ async def test_resolve_original_file_path_rejects_traversal(
 
 def test_document_overview_item_slim_fields() -> None:
     """DocumentOverviewItem has exactly 5 fields, no summary/source/updated_at."""
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
 
     item = DocumentOverviewItem(
         doc_id="d_abc",

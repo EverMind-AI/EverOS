@@ -1,6 +1,6 @@
 """Phase 2 idempotency across reruns (round-2 finding M2).
 
-``_emit_synthetic_events`` used to fan every episode / agent-case row
+The clusters phase used to fan every episode / agent-case row
 into the ephemeral engine unconditionally, so re-running Phase 2 (or
 triggering it through ``--phase all`` after a Ctrl-C) re-fired
 ``EpisodeExtracted`` / ``AgentCaseExtracted`` for rows that a prior
@@ -24,28 +24,12 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.sqlite import SqliteClusterStore
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
-from everos.service import backfill as _backfill
-from everos.service.backfill import BackfillContext, NullBackfillPresenter
-from tests.fakes import make_backfill_context
-
-_STATE: dict[str, Any] = {}
-"""Per-test choices the backfill context is built from (``embedding``)."""
-
-
-@pytest.fixture(autouse=True)
-def _fresh_state() -> None:
-    _STATE.clear()
-
-
-def _ctx() -> BackfillContext:
-    """The context the phase runners run against: the configured memory root,
-    with the embedding provider the test chose (none by default)."""
-    return make_backfill_context(embedding=_STATE.get("embedding"))
+from everos.service import NullBackfillPresenter
+from everos.service.ops._backfill_clusters import _emit_synthetic_events
+from tests.fakes import backfill_deps
 
 
 class _RecordingEngine:
@@ -84,9 +68,7 @@ def _case_row(entry_id: str) -> dict[str, Any]:
     }
 
 
-async def test_emit_synthetic_events_skips_already_clustered_rows(
-    monkeypatch,
-) -> None:
+async def test_emit_synthetic_events_skips_already_clustered_rows() -> None:
     """A row whose ``(member_type, entry_id)`` already resolves to a
     cluster is NOT re-emitted — but still counted toward the progress
     tally so the readout matches the pre-scan estimate."""
@@ -109,16 +91,14 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
             lookups.append((member_type, member_id))
             return clustered.get((member_type, member_id))
 
-    monkeypatch.setattr(
-        _backfill, "_cluster_store", lambda _ctx: SqliteClusterStore(_StubClusterRepo())
-    )
+    deps = backfill_deps(clusters=SqliteClusterStore(_StubClusterRepo()))
 
     engine = _RecordingEngine()
     episodes = [_episode_row("ep_fresh"), _episode_row("ep_dup")]
     cases = [_case_row("ac_fresh"), _case_row("ac_dup")]
 
-    processed = await _backfill._emit_synthetic_events(
-        _ctx(), engine, episodes, cases, presenter=NullBackfillPresenter()
+    processed = await _emit_synthetic_events(
+        deps, engine, episodes, cases, presenter=NullBackfillPresenter()
     )
 
     # Every row was looked up — dedup must not depend on ordering.
@@ -146,9 +126,7 @@ async def test_emit_synthetic_events_skips_already_clustered_rows(
     assert processed == 4
 
 
-async def test_emit_synthetic_events_uses_write_path_member_type_strings(
-    monkeypatch,
-) -> None:
+async def test_emit_synthetic_events_uses_write_path_member_type_strings() -> None:
     """Regression guard: the ``member_type`` strings on the lookup path
     (``"episode"`` / ``"case"``) must match what the clustering
     strategies persist on the write path. A drift here would silently
@@ -168,13 +146,11 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings(
             seen_member_types.add(member_type)
             return None
 
-    monkeypatch.setattr(
-        _backfill, "_cluster_store", lambda _ctx: SqliteClusterStore(_StubClusterRepo())
-    )
+    deps = backfill_deps(clusters=SqliteClusterStore(_StubClusterRepo()))
 
     engine = _RecordingEngine()
-    await _backfill._emit_synthetic_events(
-        _ctx(),
+    await _emit_synthetic_events(
+        deps,
         engine,
         [_episode_row("ep1")],
         [_case_row("ac1")],
@@ -187,9 +163,7 @@ async def test_emit_synthetic_events_uses_write_path_member_type_strings(
     assert seen_member_types == {"episode", "case"}
 
 
-async def test_emit_synthetic_events_no_skip_when_no_prior_clusters(
-    monkeypatch,
-) -> None:
+async def test_emit_synthetic_events_no_skip_when_no_prior_clusters() -> None:
     """Fresh run baseline: every row emits when the reverse index has
     nothing — the fix must not perturb the first-run happy path."""
 
@@ -205,13 +179,11 @@ async def test_emit_synthetic_events_no_skip_when_no_prior_clusters(
         ) -> str | None:
             return None
 
-    monkeypatch.setattr(
-        _backfill, "_cluster_store", lambda _ctx: SqliteClusterStore(_StubClusterRepo())
-    )
+    deps = backfill_deps(clusters=SqliteClusterStore(_StubClusterRepo()))
 
     engine = _RecordingEngine()
-    processed = await _backfill._emit_synthetic_events(
-        _ctx(),
+    processed = await _emit_synthetic_events(
+        deps,
         engine,
         [_episode_row("ep1"), _episode_row("ep2")],
         [_case_row("ac1")],

@@ -1,6 +1,6 @@
-"""Kind-scoped sync in Phase 3 (finding #6 round-1 + #3 round-2).
+"""Kind-scoped cascade sync (finding #6 round-1 + #3 round-2).
 
-``_sync_new_skill_files`` used to call ``orchestrator.sync_once()``
+Backfill's skills phase used to call ``orchestrator.sync_once()``
 unscoped, which walked every registered kind including knowledge_topic
 / knowledge_document. If the current process had embedding but not
 rerank, cascade's knowledge handlers were gated off — the worker
@@ -12,62 +12,15 @@ Round-1 wired ``kinds={"agent_skill"}`` through the scanner but left
 ``worker.drain_until_empty`` kind-agnostic — the drain would still
 claim any queued knowledge row and flip it to permanently failed.
 Round-2 (finding #3) closes the drain end so the scoping intent
-holds end-to-end.
+holds end-to-end. That the skills phase asks for ``{"agent_skill"}`` is
+pinned in ``tests/unit/test_service/test_ops``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import pytest
-
-from everos.service import backfill as _backfill
-from everos.service.backfill import BackfillContext
-from tests.fakes import make_backfill_context
 from tests.fakes.storage import Storage
-
-_STATE: dict[str, Any] = {}
-"""Per-test choices the backfill context is built from (``embedding``)."""
-
-
-@pytest.fixture(autouse=True)
-def _fresh_state() -> None:
-    _STATE.clear()
-
-
-def _ctx() -> BackfillContext:
-    """The context the phase runners run against: the configured memory root,
-    with the embedding provider the test chose (none by default)."""
-    return make_backfill_context(embedding=_STATE.get("embedding"))
-
-
-async def test_sync_new_skill_files_only_syncs_agent_skill_kind(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """``_sync_new_skill_files`` forwards ``kinds={"agent_skill"}`` to
-    the orchestrator so an unscoped sweep never fires.
-
-    We spy on :meth:`CascadeOrchestrator.sync_once` at the class level:
-    the helper builds its own orchestrator instance, so a per-instance
-    patch would miss it. The spy records the ``kinds`` kwarg and
-    short-circuits (returns 0) so no real cascade machinery runs.
-    """
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-
-    from everos.infra.cascade.orchestrator import CascadeOrchestrator
-
-    captured: dict[str, object] = {}
-
-    async def _spy_sync_once(self, *, kinds=None) -> int:  # type: ignore[no-untyped-def]
-        captured["kinds"] = kinds
-        return 0
-
-    monkeypatch.setattr(CascadeOrchestrator, "sync_once", _spy_sync_once)
-
-    await _backfill._sync_new_skill_files(_ctx())
-
-    assert captured["kinds"] == {"agent_skill"}
 
 
 async def test_orchestrator_sync_once_default_scans_all(

@@ -20,7 +20,10 @@ __all__ = [
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from everos.component.utils.datetime import from_timestamp, to_iso_format
+import anyio
+
+from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import from_timestamp, to_iso_format
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.memory.models import (
     AgentCase,
@@ -32,7 +35,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports import MemoryRef, Scope, Stored
 
-from .base import EntryId
+from .base import EntryId, MarkdownReader
 from .mds import AgentSkillFrontmatter, UserProfileFrontmatter
 from .readers import AgentSkillReader, ProfileReader
 from .writers import (
@@ -44,6 +47,8 @@ from .writers import (
     ForesightWriter,
     ProfileWriter,
 )
+
+logger = get_logger(__name__)
 
 type EntryBody = tuple[dict[str, object], dict[str, str]]
 """``(inline, sections)`` of one rendered daily-log entry."""
@@ -259,6 +264,44 @@ class MarkdownAgentSkillStore:
             )
             for frontmatter, body in found
         ]
+
+    async def names_cluster(self, scope: Scope, cluster_id: str) -> bool:
+        """Whether any of the agent's ``SKILL.md`` files names ``cluster_id``.
+
+        Reads the raw frontmatter rather than the validated schema
+        :meth:`list_by_cluster` returns: a file that names the cluster counts
+        even when a later schema revision would reject it, so an operational
+        replay never extracts a second skill next to it. A file that does not
+        parse at all is logged and does not count.
+        """
+        skills_dir = (
+            self._root.agents_dir(scope.app_id, scope.project_id)
+            / scope.owner_id
+            / AgentSkillFrontmatter.SKILLS_CONTAINER_NAME
+        )
+        apath = anyio.Path(skills_dir)
+        if not await apath.is_dir():
+            return False
+        async for skill_dir in apath.iterdir():
+            if not await skill_dir.is_dir():
+                continue
+            if not skill_dir.name.startswith(AgentSkillFrontmatter.SKILL_DIR_PREFIX):
+                continue
+            md_path = skill_dir / AgentSkillFrontmatter.SKILL_MAIN_FILENAME
+            if not await md_path.is_file():
+                continue
+            try:
+                parsed = await MarkdownReader.read(Path(str(md_path)))
+            except Exception as exc:
+                logger.warning(
+                    "cascade_backfill_skill_md_parse_failed",
+                    md_path=str(md_path),
+                    error=repr(exc),
+                )
+                continue
+            if parsed.frontmatter.get("cluster_id") == cluster_id:
+                return True
+        return False
 
     async def write(self, scope: Scope, skill: AgentSkill) -> MemoryRef:
         name = AgentSkillFrontmatter.sanitize_skill_name(skill.name)

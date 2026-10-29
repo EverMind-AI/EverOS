@@ -31,8 +31,8 @@ from typing import Any, ClassVar
 
 import anyio
 
-from everos.component.utils.datetime import today_with_timezone
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence.markdown.base.entries import (
     EntryId,
     render_structured_entry,

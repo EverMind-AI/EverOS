@@ -36,6 +36,7 @@ from .backend import LanceDBMigrationError as LanceDBMigrationError
 from .backend import LanceDBSchemaMismatchError as LanceDBSchemaMismatchError
 from .backend import LanceIndexBackend as LanceIndexBackend
 from .base import LanceRepoBase as LanceRepoBase
+from .base import LanceTimeouts as LanceTimeouts
 from .base import TableSource as TableSource
 from .base import open_lancedb_connection as open_lancedb_connection
 from .lancedb_manager import LanceDbConnection as LanceDbConnection
@@ -58,6 +59,7 @@ __all__ = [
     "LanceIndexBackend",
     "LanceIndexContract",
     "LanceRepoBase",
+    "LanceTimeouts",
     "ParentType",
     "TableSource",
     "UserProfile",

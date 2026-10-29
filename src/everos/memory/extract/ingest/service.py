@@ -26,8 +26,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from everos.component.utils.datetime import from_timestamp
 from everos.config import load_settings
+from everos.core.utils.datetime import from_timestamp
 from everos.memory import CanonicalMessage, IngestResult, ToolCall
 from everos.memory.extract.parser import (
     enrich_content_items,

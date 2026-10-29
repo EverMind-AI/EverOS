@@ -13,7 +13,7 @@
 | [uv](https://docs.astral.sh/uv/) | sole package manager (`uv sync`; do not use `pip install`) |
 | [hatchling](https://hatch.pypa.io/) | wheel build backend (src layout under `src/everos`) |
 | [ruff](https://docs.astral.sh/ruff/) | lint + format (replaces black / isort / flake8) |
-| [import-linter](https://import-linter.readthedocs.io/) | enforces the DDD layer dependency direction |
+| [import-linter](https://import-linter.readthedocs.io/) | enforces the DDD layer dependency direction (entry points import only the service; only the bootstrap builds adapters) |
 | [pytest](https://docs.pytest.org/) | unit + integration tests |
 | [pre-commit](https://pre-commit.com/) | local gate run before each commit |
 | `Makefile` | single entry point for every command — CI invokes the same targets |
@@ -104,12 +104,24 @@ locally, and `--hypothesis-show-statistics` shows which branches (crash,
 lost status write, restart, …) the run reached -- a branch at 0% was not
 exercised. Copy that file's structure when writing the next one. Two more
 follow it for the cascade worker:
-[`test_worker_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_stateful.py)
+[`test_worker_stateful.py`](../tests/unit/test_infra/test_cascade/test_worker_stateful.py)
 (the `md_change_state` row cycle) and
-[`test_worker_maintenance_stateful.py`](../tests/unit/test_memory/test_cascade/test_worker_maintenance_stateful.py)
+[`test_worker_maintenance_stateful.py`](../tests/unit/test_infra/test_cascade/test_worker_maintenance_stateful.py)
 (the optimize / prune / rebuild cycle); the latter found a bounded wait that
 cancelled the task it waited on, which the example-based tests around those
 waits had not reached.
+
+**Test doubles enter through the front door.** A test never replaces a
+private name (`monkeypatch.setattr(module, "_helper", ...)`): it hands its
+double in through a constructor or call argument (a fake port, a scripted
+engine, `LanceTimeouts(write=0.05)`, `maintenance_task_timeout_seconds=`),
+or subclasses the object under test. That keeps a private helper free to be
+renamed or inlined, and makes every seam a test needs a visible part of the
+API. A self-check that must break production code to prove an invariant
+trips does so through a mutant subclass or a mutated input, never a patch.
+The shared doubles live in [`tests/fakes/`](../tests/fakes/) (in-memory
+stores and indexes, `make_ops` / `make_memory_service` /
+`make_knowledge_service`, `backfill_deps`).
 
 ## Continuous integration
 

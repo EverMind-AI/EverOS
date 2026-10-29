@@ -22,10 +22,11 @@ from everos.core.errors import DocumentNotFoundError as DocumentNotFoundError
 from everos.core.errors import DuplicateDocumentError as DuplicateDocumentError
 from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
 from everos.core.errors import TopicNotFoundError as TopicNotFoundError
+from everos.memory.get import GetRequest as GetRequest
+from everos.memory.get import GetResponse as GetResponse
+from everos.memory.search import SearchRequest as SearchRequest
+from everos.memory.search import SearchResponse as SearchResponse
 
-from .backfill import BackfillPhase as BackfillPhase
-from .backfill import BackfillPresenter as BackfillPresenter
-from .backfill import NullBackfillPresenter as NullBackfillPresenter
 from .bootstrap import Application as Application
 from .bootstrap import Providers as Providers
 from .bootstrap import build_application as build_application
@@ -50,22 +51,42 @@ from .memorize_queue import TaskItem as TaskItem
 from .memorize_queue import TaskPage as TaskPage
 from .memory import MemorizeResult as MemorizeResult
 from .memory import MemoryService as MemoryService
+from .memory import Queued as Queued
+from .ops import BACKFILL_PHASES as BACKFILL_PHASES
+from .ops import BackfillDeps as BackfillDeps
+from .ops import BackfillOutcome as BackfillOutcome
+from .ops import BackfillPresenter as BackfillPresenter
+from .ops import BackfillSummary as BackfillSummary
 from .ops import Capabilities as Capabilities
+from .ops import CascadeHealthReport as CascadeHealthReport
 from .ops import CascadeStatus as CascadeStatus
+from .ops import ClustersPhaseResult as ClustersPhaseResult
+from .ops import HealthReport as HealthReport
+from .ops import NullBackfillPresenter as NullBackfillPresenter
 from .ops import OmeRun as OmeRun
 from .ops import OmeTriggerResult as OmeTriggerResult
 from .ops import OpsService as OpsService
+from .ops import ProviderStatus as ProviderStatus
 from .ops import QuiesceResult as QuiesceResult
 from .ops import RebuildResult as RebuildResult
+from .ops import SkillsPhaseResult as SkillsPhaseResult
+from .ops import VectorsPhaseResult as VectorsPhaseResult
+from .ops import compute_disabled_features as compute_disabled_features
+from .ops import format_tokens as format_tokens
 
 __all__ = [
+    "BACKFILL_PHASES",
     "TASK_STATUSES",
     "Application",
-    "BackfillPhase",
+    "BackfillDeps",
+    "BackfillOutcome",
     "BackfillPresenter",
+    "BackfillSummary",
     "Capabilities",
+    "CascadeHealthReport",
     "CascadeStatus",
     "CategoryOverview",
+    "ClustersPhaseResult",
     "CreateDocumentResult",
     "DeleteResult",
     "DocumentContext",
@@ -75,6 +96,9 @@ __all__ = [
     "DocumentOverviewItem",
     "DuplicateDocumentError",
     "ExtractionEmptyError",
+    "GetRequest",
+    "GetResponse",
+    "HealthReport",
     "KnowledgeExtractor",
     "KnowledgeService",
     "MemorizeResult",
@@ -84,17 +108,25 @@ __all__ = [
     "OmeTriggerResult",
     "OpsService",
     "PatchResult",
+    "ProviderStatus",
     "Providers",
     "QueueHealth",
+    "Queued",
     "QuiesceResult",
     "RebuildResult",
     "SearchHit",
     "SearchKnowledgeResult",
+    "SearchRequest",
+    "SearchResponse",
+    "SkillsPhaseResult",
     "TaskItem",
     "TaskPage",
     "TopicDetail",
     "TopicNotFoundError",
     "TopicOverview",
+    "VectorsPhaseResult",
     "build_application",
     "build_providers",
+    "compute_disabled_features",
+    "format_tokens",
 ]

@@ -25,9 +25,9 @@ import traceback
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import bound_log_context, get_logger
 from everos.core.observability.tracing import memory_span, use_traceparent
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._dispatch._state import _CURRENT_STRATEGY
 from everos.infra.ome._dispatch.strategy import RunContext, StrategyMeta
 from everos.infra.ome._stores.run_record import RunRecordStore

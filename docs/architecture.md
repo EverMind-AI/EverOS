@@ -4,27 +4,23 @@
 
 ## DDD layered architecture
 
-```
-┌──────────────────────────────────────────────────────┐
-│  entrypoints/  (Presentation)                         │
-│    cli + api                                          │
-├──────────────────────────────────────────────────────┤
-│  service/      (Application — assembly + use cases)   │
-│    bootstrap + MemoryService / KnowledgeService / Ops │
-├──────────────────────────────────────────────────────┤
-│  memory/       (Domain — Business core)               │
-│    models + extract + search + custom_instructions    │
-│    + reflection + strategies + get + events            │
-├──────────────────────────────────────────────────────┤
-│  infra/persistence  (Storage adapters; infra/ may host other adapter types)    │
-│    markdown + sqlite + derived index                  │
-└──────────────────────────────────────────────────────┘
+- `entrypoints/` (Presentation) — cli + api + tui; translates protocols to
+  service calls and results / errors back, nothing else.
+- `service/` (Application) — `bootstrap` (assembly) + the `MemoryService` /
+  `KnowledgeService` / `OpsService` facades.
+- `memory/` (Domain) — models + ports + extract + search + custom_instructions
+  + reflection + strategies + get + events.
+- `infra/` (Adapters) — `persistence/` (markdown + sqlite + derived index)
+  implementing `memory.ports`, and the cascade and OME engines.
 
 Cross-cutting (used by all layers, depends on none):
-  component/  ← Injectable providers (LLM / Embedding / parser / config / utils)
-  core/       ← Runtime base (observability / context / errors / middleware)
-  config/     ← Configuration data (Settings schema + default.toml)
-```
+
+- `component/` — injectable providers (LLM / embedding / rerank / parser /
+  tokenizer / config loader).
+- `core/` — runtime base (errors / observability / middleware / context /
+  `utils.datetime`).
+- `config/` — configuration data (Settings schema + default.toml +
+  custom-instruction YAML).
 
 ## Dependency direction (single-direction, enforced)
 
@@ -40,7 +36,7 @@ domain, never the other way round (dependency inversion).
 | from → to | Allowed? |
 |---|---|
 | entrypoints → service | ✅ |
-| entrypoints → memory / infra | ❌ (must go through service) |
+| entrypoints → memory / infra / component / everalgo | ❌ (must go through service; DTOs and errors come from `everos.service` / `everos.core`) |
 | service → memory | ✅ |
 | memory → infra | ❌ (go through `memory/ports`) |
 | memory → service | ❌ |
@@ -48,10 +44,10 @@ domain, never the other way round (dependency inversion).
 | infra → any other memory module, service, entrypoints | ❌ |
 | infra.ome → memory.ports | ✅ (`infra.ome` imports only `everos.memory.ports` — the types the domain declares for it); any other memory module ❌ |
 | service.bootstrap → infra / component implementations | ✅ — the one module that builds adapters and providers and injects them (`service-usecases-forbidden`) |
-| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only. One registered exception: `service.backfill` (removed in stage 6) |
+| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only (backfill included: its collaborators arrive as `BackfillDeps`) |
 | infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
 | any → component / core / config | ✅ (cross-cutting) |
-| `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` uses `component` only for `utils.datetime`. |
+| `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` imports only `component` protocols (`EmbeddingProvider`, `Tokenizer`) for the collaborators it is handed. |
 
 Enforced via `import-linter` in CI:
 
@@ -68,9 +64,10 @@ layers = [
     "everos.memory",
 ]
 
-# plus forbidden contracts: infra-inverted, memory-forbidden,
-# core-forbidden, component-forbidden, mappers-pure, ome-ports-only,
-# service-usecases-forbidden, no-bypass-facade (see pyproject.toml)
+# plus forbidden contracts: entrypoints-forbidden, infra-inverted,
+# memory-forbidden, core-forbidden, component-forbidden, mappers-pure,
+# ome-ports-only, service-usecases-forbidden, no-bypass-facade
+# (see pyproject.toml)
 ```
 
 `make lint` also runs `scripts/check_singletons.py`: no module-level lazy
@@ -209,18 +206,26 @@ The application layer has two jobs, kept in separate modules:
   opens nothing; `Application.start()` brings up the system DB, the index, the
   cascade, OME and the `async_mode` queue in that order (the queue publishes
   into OME, so it starts last and stops first), and `aclose()` unwinds what was
-  started. Tracing and metrics are configured once here (`configure_tracing` /
-  `configure_metrics`).
+  started, then closes the storage connections whether or not `start()` ran.
+  `aclose()` is idempotent and `async with build_application(settings) as
+  app:` closes on exit. Tracing and metrics are configured once here
+  (`configure_tracing` / `configure_metrics`).
 - **Use cases** — one facade per kind of caller, one method per use case:
   `MemoryService` (memorize / flush / search / get, plus the `async_mode`
   queue), `KnowledgeService` (document CRUD and knowledge search) and
   `OpsService` (cascade status / sync / fix / rebuild / quiesce / backfill, OME
   trigger, health signals, task readers). They receive their collaborators;
-  none builds or looks one up.
+  none builds or looks one up. The rules an entry point would otherwise carry
+  live here too: which task statuses exist, when an `/add` is queued instead
+  of run inline, how an upload is size-checked and parsed, what a failed
+  health probe reads as, when a backfill run stops. A facade that outgrows
+  one module becomes a package with the facade class in `__init__` and the
+  use-case steps in private modules (`service/memory/`, `service/ops/` —
+  backfill's three phases are `service/ops/_backfill_*`).
 
 Entry points hold the one `Application`: the HTTP lifespan builds and starts it
 (`app.state.application`), routes call its facades, and a CLI command builds it
-without starting it and opens storage per command through
+without starting it (`async with`) and opens storage per command through
 `OpsService.index_session`. Why one assembly point: every object's
 construction is visible in one file, a test swaps any provider by passing
 `Providers`, and no module can reach a half-configured singleton.

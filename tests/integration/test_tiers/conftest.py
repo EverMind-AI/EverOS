@@ -396,7 +396,7 @@ async def seed_atomic_fact_for_episode(
     """
     import hashlib
 
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
     from everos.infra.persistence.index import AtomicFact
 
     entry_id = f"af_seed_{episode_row['entry_id']}"

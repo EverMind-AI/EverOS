@@ -215,7 +215,7 @@ class _ScriptedLanceRepo:
             else:
                 await asyncio.sleep(SLOW if play.slow else CALL)
             if play.served == "conflict":
-                raise RuntimeError("Retryable commit conflict: preempted by a writer")
+                raise RuntimeError(m.CONFLICT_MESSAGE)
             if play.served == "fail":
                 raise RuntimeError("index maintenance boom")
         finally:
@@ -264,13 +264,17 @@ class _KindModel:
 
 
 class MaintenanceMachine(RuleBasedStateMachine):
+    WORKER: type[CascadeWorker] = CascadeWorker
+    """The worker under test; a self-check swaps in a mutant subclass."""
+    CONFLICT_MESSAGE = "Retryable commit conflict: preempted by a writer"
+    """What the scripted repository raises for a commit conflict."""
+
     def __init__(self) -> None:
         super().__init__()
         self.loop = asyncio.new_event_loop()
         self.clock = _Clock()
         self._patches = [
             mock.patch.object(worker_mod, "time", self.clock),
-            mock.patch.object(worker_mod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", TIMEOUT),
         ]
         for p in self._patches:
             p.start()
@@ -307,7 +311,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
     # ── driving the worker ─────────────────────────────────────────────────
 
     async def _start(self, sweep: str) -> None:
-        self.worker = CascadeWorker(
+        self.worker = self.WORKER(
             self.handlers,
             _EmptyQueue(),
             retry_backoff_seconds=0.0,
@@ -316,6 +320,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
             optimize_heartbeat_seconds=3600.0,
             optimize_prune_interval_seconds=PRUNE_INTERVAL,
             optimize_rebuild_interval_seconds=3600.0,
+            maintenance_task_timeout_seconds=TIMEOUT,
         )
         self.started_at = self._now()
         for kind in INDEXED:
@@ -588,38 +593,45 @@ class MaintenanceMachine(RuleBasedStateMachine):
 TestMaintenanceMachine = MaintenanceMachine.TestCase
 
 
+class _UnrecognisedConflict(MaintenanceMachine):
+    """The worker fails to recognise the conflict it is handed."""
+
+    CONFLICT_MESSAGE = "preempted by a writer"
+
+
 def test_machine_catches_a_conflict_counted_as_a_failure() -> None:
-    """Self-check: treat a commit conflict as a real failure and the health
-    invariant must trip (the streak would pin high on a busy table)."""
-    with mock.patch.object(worker_mod, "_is_benign_commit_conflict", lambda exc: False):
-        machine = MaintenanceMachine()
-        try:
-            machine.touch("episode", ["conflict"], "ok")
-            with pytest.raises(AssertionError):
-                machine.health_matches_model()
-        finally:
-            machine.teardown()
+    """Self-check: a conflict the worker counts as a real failure must trip
+    the health invariant (the streak would pin high on a busy table)."""
+    machine = _UnrecognisedConflict()
+    try:
+        machine.touch("episode", ["conflict"], "ok")
+        with pytest.raises(AssertionError):
+            machine.health_matches_model()
+    finally:
+        machine.teardown()
 
 
 def test_machine_catches_the_fallback_rebuild_zeroing_the_streak() -> None:
     """Self-check: the historical bug -- the fallback rebuild reset the
     failure counter, so the alert that fires at the threshold never fired."""
-    real = CascadeWorker._run_rebuild_once
 
-    async def resetting(self: CascadeWorker, kind: str) -> None:
-        await real(self, kind)
-        if kind in self._optimizer_states:
-            self._optimizer_states[kind].optimize_failures = 0
+    class _ResettingWorker(CascadeWorker):
+        async def _run_rebuild_once(self, kind: str) -> None:
+            await super()._run_rebuild_once(kind)
+            if kind in self._optimizer_states:
+                self._optimizer_states[kind].optimize_failures = 0
 
-    with mock.patch.object(CascadeWorker, "_run_rebuild_once", resetting):
-        machine = MaintenanceMachine()
-        try:
-            for _ in range(THRESHOLD):
-                machine.touch("episode", ["fail"], "ok")
-            with pytest.raises(AssertionError):
-                machine.health_matches_model()
-        finally:
-            machine.teardown()
+    class _Machine(MaintenanceMachine):
+        WORKER = _ResettingWorker
+
+    machine = _Machine()
+    try:
+        for _ in range(THRESHOLD):
+            machine.touch("episode", ["fail"], "ok")
+        with pytest.raises(AssertionError):
+            machine.health_matches_model()
+    finally:
+        machine.teardown()
 
 
 # ── mode 2: the real loops on their own timers, raced by real writers ───────
@@ -652,7 +664,7 @@ _DEEP = os.environ.get("HYPOTHESIS_PROFILE") == "deep"
 _J_PLAN_MAX = 40 if _DEEP else 16
 _J_TIMEOUT = 0.1  # maintenance-call timeout (patched)
 _J_SLOW = 0.25  # a rebuild longer than the wait, cut by nothing
-_J_BACKOFFS = (0.05, 0.1, 0.2)  # rebuild conflict retry ladder (patched)
+_J_BACKOFFS = (0.05, 0.1, 0.2)  # rebuild conflict retry ladder
 _J_MIN_INTERVAL = 0.05
 
 
@@ -787,6 +799,8 @@ class _JitterRun:
             optimize_heartbeat_seconds=0.05,
             optimize_prune_interval_seconds=0.08,
             optimize_rebuild_interval_seconds=0.15,
+            maintenance_task_timeout_seconds=_J_TIMEOUT,
+            rebuild_conflict_backoffs_seconds=_J_BACKOFFS,
         )
         return self.worker
 
@@ -817,14 +831,6 @@ async def _jittered_maintenance(
     restarts the worker that far through the plan, or never. ``quiet_tail``
     is how long the loops run on alone after the last write."""
     run = _JitterRun(seed, beat_weights, rebuild_weights)
-    patches = [
-        mock.patch.object(worker_mod, "_MAINTENANCE_TASK_TIMEOUT_SECONDS", _J_TIMEOUT),
-        mock.patch.object(
-            worker_mod, "_REBUILD_CONFLICT_BACKOFFS_SECONDS", _J_BACKOFFS
-        ),
-    ]
-    for p in patches:
-        p.start()
     w = run.new_worker()
     await w.start()
     run.note("started")
@@ -974,8 +980,6 @@ async def _jittered_maintenance(
         if run.worker is not None and run.worker._task is not None:
             run.stopping = True
             await run.worker.stop()
-        for p in patches:
-            p.stop()
 
 
 @given(

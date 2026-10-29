@@ -11,7 +11,7 @@ singleton away, and each is a hit:
 
 Allowlist (facade functions, not singletons):
 
-* ``component/utils/datetime.py`` ``get_utc_now`` / ``get_now_with_timezone``
+* ``core/utils/datetime.py`` ``get_utc_now`` / ``get_now_with_timezone``
   -- read the clock; there is no instance behind them.
 * ``core/context/request.py`` ``get_request_id`` -- reads a ``ContextVar``,
   which is per task, not per process.
@@ -51,10 +51,11 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _FACADES: dict[str, set[str]] = {
-    "component/utils/datetime.py": {"get_utc_now", "get_now_with_timezone"},
+    "core/utils/datetime.py": {"get_utc_now", "get_now_with_timezone"},
     "core/context/request.py": {"get_request_id"},
     "core/observability/metrics/registry.py": {"get_metrics_registry"},
 }
+
 
 def _allowed(rel: str, name: str) -> bool:
     return name in _FACADES.get(rel, set())

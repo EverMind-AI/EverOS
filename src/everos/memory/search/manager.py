@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Any
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
 
-from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
 from everos.core.context import resolve_request_id
 from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
@@ -46,6 +45,7 @@ from everos.core.observability.tracing import (
     emit_recall_scores,
     memory_span,
 )
+from everos.core.utils.datetime import to_display_tz
 from everos.memory.models import CanonicalMessage
 from everos.memory.ports import ClusterStore, Filter, SessionBufferStore, SessionKey
 
@@ -823,7 +823,7 @@ def _feature_name(method: SearchMethod, owner_type: str) -> str:
 
     Note: this vocabulary (``"vector"``, ``"user_hybrid"``, ``"agent_hybrid"``,
     ``"agentic_search"``) is separate from the capability-level vocabulary
-    in :mod:`everos.component.capabilities`. See that module's docstring
+    of :func:`everos.service.compute_disabled_features`. See its module docstring
     for the rationale and contract.
     """
     if method == SearchMethod.VECTOR:

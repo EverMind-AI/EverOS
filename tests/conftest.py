@@ -84,8 +84,8 @@ def _reset_table_write_locks() -> None:
 def _reset_settings_cache() -> Iterator[None]:
     import structlog
 
-    from everos.component.utils import datetime as dt_module
     from everos.config import load_settings
+    from everos.core.utils import datetime as dt_module
     from everos.memory import _partition_locks
 
     # ``configure_logging`` (called by some e2e fixtures / the CLI entry)

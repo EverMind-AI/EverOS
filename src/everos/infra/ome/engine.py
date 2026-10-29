@@ -22,9 +22,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import current_traceparent
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._background.config_reloader import ConfigReloader
 from everos.infra.ome._background.crash_recovery import scan_and_resume
 from everos.infra.ome._background.idle_scanner import IdleScanner

@@ -34,7 +34,6 @@ from starlette.status import (
     HTTP_503_SERVICE_UNAVAILABLE,
 )
 
-from everos.component.utils.datetime import get_now_with_timezone, to_iso_format
 from everos.core.errors import (
     CapabilityError,
     ConfigurationError,
@@ -51,6 +50,7 @@ from everos.core.errors import (
     UnsupportedModalityError,
 )
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 
 from .utils import extract_request_id
 

@@ -21,6 +21,7 @@ from .protocols import (
     EpisodeIndexRepository,
     IndexRepository,
 )
+from .schema import schema_for
 
 BUSINESS_SCHEMAS: tuple[type[Any], ...] = (
     Episode,
@@ -66,3 +67,15 @@ class IndexRepositories:
             if repo.schema is schema:
                 return repo
         raise KeyError(f"no derived-index repository for {schema!r}")
+
+    def with_vectors(self) -> dict[str, IndexRepository[Any]]:
+        """Every repository whose table carries a vector column, by table name.
+
+        The tables a row can sit in without its embedding (written while no
+        embedding provider was configured) -- what backfill re-embeds.
+        """
+        return {
+            schema.TABLE_NAME: self.for_schema(schema)
+            for schema in BUSINESS_SCHEMAS
+            if schema_for(schema).vector_fields
+        }

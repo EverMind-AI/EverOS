@@ -1,15 +1,15 @@
 """Round-2 finding #6: Phase-3 idempotency across Ctrl-C.
 
 ``extract_agent_skill`` writes ``SKILL.md`` first and only reaches
-LanceDB via ``_sync_new_skill_files`` afterwards. If Phase 3 is
+the index via the phase's cascade sync afterwards. If Phase 3 is
 interrupted between the md write and the sync (Ctrl-C during
 ``engine.wait_idle`` or between ``engine.stop`` and the sync call),
-markdown-only skills are left behind. Round-1's ``_scan_skill_source``
+markdown-only skills are left behind. Round-1's scan
 gated cluster replay only on ``storage.repos.agent_skill.count_in_cluster > 0``
 — on the next Phase-3 run those md-only clusters looked "unextracted"
 and got re-emitted, causing duplicate skill extraction.
 
-Round-2 adds a disk check via :func:`_skill_md_exists_for_cluster`:
+Round-2 adds a disk check (:meth:`MarkdownAgentSkillStore.names_cluster`):
 if any ``SKILL.md`` under the agent's ``skills/`` directory carries
 this ``cluster_id`` in its frontmatter, the cluster is skipped even
 when LanceDB has no row yet.
@@ -18,29 +18,27 @@ when LanceDB has no row yet.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import pytest
-
+from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import AgentSkillIndexAdapter
+from everos.infra.persistence.markdown import MarkdownAgentSkillStore
 from everos.infra.persistence.sqlite import SqliteClusterStore
-from everos.service import backfill as _backfill
-from everos.service.backfill import BackfillContext
-from tests.fakes import make_backfill_context
-
-_STATE: dict[str, Any] = {}
-"""Per-test choices the backfill context is built from (``embedding``)."""
+from everos.memory.ports import Scope
+from everos.service import BackfillDeps
+from everos.service.ops._backfill_skills import _scan_skill_source
+from tests.fakes import backfill_deps
 
 
-@pytest.fixture(autouse=True)
-def _fresh_state() -> None:
-    _STATE.clear()
-
-
-def _ctx() -> BackfillContext:
-    """The context the phase runners run against: the configured memory root,
-    with the embedding provider the test chose (none by default)."""
-    return make_backfill_context(embedding=_STATE.get("embedding"))
+def _deps(root: Path, cluster_id: str) -> BackfillDeps:
+    """The skills phase over one agent cluster of two cases that LanceDB has
+    no skill for, with the real ``SKILL.md`` probe over ``root``."""
+    return backfill_deps(
+        clusters=SqliteClusterStore(
+            _StubClusterRepo(cluster_id=cluster_id, members=["case_1", "case_2"])
+        ),
+        skills=AgentSkillIndexAdapter(_StubAgentSkillRepo()),
+        skill_files=MarkdownAgentSkillStore(MemoryRoot(root)),
+    )
 
 
 class _StubAgentSkillRepo:
@@ -120,7 +118,7 @@ def _write_skill_md(
 
 
 async def test_scan_skill_source_skips_when_md_exists_but_lancedb_empty(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """SKILL.md on disk for cluster ``c_stuck`` → scan skips it even
     though LanceDB reports zero skills for that cluster.
@@ -130,26 +128,11 @@ async def test_scan_skill_source_skips_when_md_exists_but_lancedb_empty(
     closes that window by consulting the filesystem before deciding
     the cluster needs a replay event.
     """
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-
     _write_skill_md(
         tmp_path, agent_id="agent_a", skill_name="doubled", cluster_id="c_stuck"
     )
 
-    monkeypatch.setattr(
-        _backfill,
-        "_skill_index",
-        lambda _ctx: AgentSkillIndexAdapter(_StubAgentSkillRepo()),
-    )
-    monkeypatch.setattr(
-        _backfill,
-        "_cluster_store",
-        lambda _ctx: SqliteClusterStore(
-            _StubClusterRepo(cluster_id="c_stuck", members=["case_1", "case_2"])
-        ),
-    )
-
-    rows = await _backfill._scan_skill_source(_ctx())
+    rows = await _scan_skill_source(_deps(tmp_path, "c_stuck"))
 
     # Empty output despite the LanceDB probe returning 0 is the
     # invariant: it means the disk check ran and matched. Without
@@ -159,72 +142,35 @@ async def test_scan_skill_source_skips_when_md_exists_but_lancedb_empty(
 
 
 async def test_scan_skill_source_emits_when_no_md_or_lancedb_row(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """Neither disk nor LanceDB has the cluster's skill → Phase 3
     correctly emits one row per member so replay can extract it."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-
-    monkeypatch.setattr(
-        _backfill,
-        "_skill_index",
-        lambda _ctx: AgentSkillIndexAdapter(_StubAgentSkillRepo()),
-    )
-    monkeypatch.setattr(
-        _backfill,
-        "_cluster_store",
-        lambda _ctx: SqliteClusterStore(
-            _StubClusterRepo(cluster_id="c_fresh", members=["case_1", "case_2"])
-        ),
-    )
-
-    rows = await _backfill._scan_skill_source(_ctx())
+    rows = await _scan_skill_source(_deps(tmp_path, "c_fresh"))
 
     assert len(rows) == 2
     assert {r.case_entry_id for r in rows} == {"case_1", "case_2"}
     assert {r.cluster_id for r in rows} == {"c_fresh"}
 
 
-async def test_skill_md_exists_for_cluster_matches_frontmatter_cluster_id(
-    tmp_path: Path, monkeypatch
+async def test_the_skill_store_finds_a_cluster_named_in_frontmatter(
+    tmp_path: Path,
 ) -> None:
-    """Direct helper contract: a SKILL.md whose frontmatter carries
-    the queried cluster_id is a hit; a mismatch is a miss."""
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-
-    from everos.infra.persistence import MemoryRoot
-
+    """The probe's contract: a ``SKILL.md`` whose frontmatter carries the
+    cluster id is a hit, a mismatch is a miss, a fresh agent is a miss."""
     _write_skill_md(tmp_path, agent_id="agent_a", skill_name="alpha", cluster_id="c_A")
     _write_skill_md(tmp_path, agent_id="agent_a", skill_name="beta", cluster_id="c_B")
+    store = MarkdownAgentSkillStore(MemoryRoot(tmp_path))
 
-    root = MemoryRoot.resolve()
+    def agent(owner_id: str) -> Scope:
+        return Scope(
+            app_id="default",
+            project_id="default",
+            owner_id=owner_id,
+            owner_type="agent",
+        )
 
-    assert await _backfill._skill_md_exists_for_cluster(
-        cluster_id="c_A",
-        agent_id="agent_a",
-        app_id="default",
-        project_id="default",
-        memory_root=root,
-    )
-    assert await _backfill._skill_md_exists_for_cluster(
-        cluster_id="c_B",
-        agent_id="agent_a",
-        app_id="default",
-        project_id="default",
-        memory_root=root,
-    )
-    assert not await _backfill._skill_md_exists_for_cluster(
-        cluster_id="c_ghost",
-        agent_id="agent_a",
-        app_id="default",
-        project_id="default",
-        memory_root=root,
-    )
-    # Missing skills dir for a fresh agent → False, no exception.
-    assert not await _backfill._skill_md_exists_for_cluster(
-        cluster_id="c_A",
-        agent_id="agent_b",
-        app_id="default",
-        project_id="default",
-        memory_root=root,
-    )
+    assert await store.names_cluster(agent("agent_a"), "c_A")
+    assert await store.names_cluster(agent("agent_a"), "c_B")
+    assert not await store.names_cluster(agent("agent_a"), "c_ghost")
+    assert not await store.names_cluster(agent("agent_b"), "c_A")

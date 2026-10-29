@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlmodel import Field
 
-from everos.component.utils.datetime import UtcDatetime, get_utc_now
+from everos.core.utils.datetime import UtcDatetime, get_utc_now
 from everos.infra.persistence.sqlite.base.base import BaseTable
 
 

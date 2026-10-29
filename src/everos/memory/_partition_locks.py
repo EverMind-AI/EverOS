@@ -9,7 +9,7 @@ body is a read →
 modify → write on shared state (cluster rows, user.md, SKILL.md)
 serialise on a business key (``owner_id`` / ``agent_id``) here.
 
-Mirrors :mod:`everos.service._session_lock` (and the markdown writer's
+Mirrors :mod:`everos.service.memory._session_locks` (and the markdown writer's
 per-path lock pool): one ``asyncio.Lock`` per
 ``(strategy_name, partition_key)`` pair, **never evicted** — a lock
 with pending waiters must outlive any dict entry that points to it,

@@ -59,7 +59,7 @@ at the boundary.
 
 ## Helper reference
 
-All helpers live in [`everos.component.utils.datetime`](../src/everos/component/utils/datetime.py).
+All helpers live in [`everos.core.utils.datetime`](../src/everos/core/utils/datetime.py).
 
 ### Storage rail
 
@@ -91,7 +91,7 @@ All helpers live in [`everos.component.utils.datetime`](../src/everos/component/
 ### SQLite tables
 
 ```python
-from everos.component.utils.datetime import UtcDatetime, get_utc_now
+from everos.core.utils.datetime import UtcDatetime, get_utc_now
 from everos.infra.persistence.sqlite import BaseTable, Field
 
 class MyRow(BaseTable, table=True):
@@ -157,7 +157,7 @@ event payload.
 |---|---|---|
 | **SQLite** | `UtcDateTimeColumn` (`TypeDecorator`) re-attaches `tzinfo=UTC` on read (`process_result_value`) and normalises to UTC on write (`process_bind_param`) | [infra/persistence/sqlite/base/base.py](../src/everos/infra/persistence/sqlite/base/base.py) |
 | **LanceDB** | `BaseLanceTable.to_arrow_schema()` rewrites **every** `timestamp[us]` column to `timestamp[us, tz=UTC]`; PyArrow handles UTC end-to-end | [infra/persistence/records/table_chassis.py](../src/everos/infra/persistence/records/table_chassis.py) |
-| **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `component/utils/datetime` | wired into `make lint` |
+| **CI gate** | `scripts/check_datetime_discipline.py` fails the build on any code that bypasses `core/utils/datetime` | wired into `make lint` |
 
 These defenses replace what used to be an "every consumer must call
 `ensure_utc()`" shotgun discipline. With both in place, callers never
@@ -235,7 +235,7 @@ clear:
 
 ```python
 import pytest
-from everos.component.utils import datetime as dt_module
+from everos.core.utils import datetime as dt_module
 from everos.config import load_settings
 
 @pytest.fixture(autouse=True)

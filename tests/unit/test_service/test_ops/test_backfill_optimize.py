@@ -37,13 +37,15 @@ from everos.core.observability.logging import configure_logging
 from everos.infra.cascade.worker import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
 )
-from everos.service.backfill import (
-    NullBackfillPresenter,
+from everos.service import NullBackfillPresenter
+from everos.service.ops._backfill_vectors import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
     _TableSpec,
 )
+
+_RETENTION = dt.timedelta(seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS)
 
 
 @pytest.fixture(autouse=True)
@@ -53,12 +55,6 @@ def _wire_structlog_to_stdlib() -> None:
     (optimize success) and WARNING (optimize failure) events emitted by
     the optimize path."""
     configure_logging(level="INFO")
-
-
-class _FakeSchema:
-    """Stand-in for ``BaseLanceTable`` — only ``TABLE_NAME`` is read."""
-
-    TABLE_NAME = "fake_table"
 
 
 class _FakeRepo:
@@ -138,7 +134,7 @@ def _row(row_id: str, text: str) -> _NullVectorRow:
 
 def _backlog(repo: _FakeRepo, rows: list[_NullVectorRow]) -> _TableBacklog:
     spec = _TableSpec(
-        schema=_FakeSchema,  # type: ignore[arg-type]
+        table="fake_table",
         text_of=lambda r: r["text"],
         subject_of=None,
     )
@@ -162,7 +158,10 @@ async def test_backfill_table_calls_optimize_when_rows_processed(
 
     with caplog.at_level("WARNING", logger="everos.service.backfill"):
         result = await _backfill_table(  # type: ignore[arg-type]
-            backlog, _HappyProvider(), presenter=NullBackfillPresenter()
+            backlog,
+            _HappyProvider(),
+            prune_retention=_RETENTION,
+            presenter=NullBackfillPresenter(),
         )
 
     assert result.rows_processed == 3
@@ -176,9 +175,7 @@ async def test_backfill_table_calls_optimize_when_rows_processed(
     # separate process, so the in-process write lock cannot fence a daemon
     # /search that still holds a reference to a just-superseded version.
     # Reclaiming at zero age can delete files out from under that read.
-    assert repo.last_prune_older_than == dt.timedelta(
-        seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
-    )
+    assert repo.last_prune_older_than == _RETENTION
     # Happy path must not fire the failure log.
     assert "cascade_backfill_table_optimize_failed" not in caplog.text
 
@@ -190,7 +187,10 @@ async def test_backfill_table_skips_optimize_when_no_rows_written() -> None:
     backlog = _backlog(repo, [_row(f"r{i}", f"text {i}") for i in range(2)])
 
     result = await _backfill_table(  # type: ignore[arg-type]
-        backlog, _AlwaysFailProvider(), presenter=NullBackfillPresenter()
+        backlog,
+        _AlwaysFailProvider(),
+        prune_retention=_RETENTION,
+        presenter=NullBackfillPresenter(),
     )
 
     assert result.rows_processed == 0
@@ -208,7 +208,10 @@ async def test_backfill_table_skips_optimize_when_backlog_is_empty() -> None:
     backlog = _backlog(repo, [])
 
     result = await _backfill_table(  # type: ignore[arg-type]
-        backlog, _HappyProvider(), presenter=NullBackfillPresenter()
+        backlog,
+        _HappyProvider(),
+        prune_retention=_RETENTION,
+        presenter=NullBackfillPresenter(),
     )
 
     assert result.rows_processed == 0
@@ -227,7 +230,10 @@ async def test_backfill_table_optimize_failure_does_not_abort(
 
     with caplog.at_level("WARNING", logger="everos.service.backfill"):
         result = await _backfill_table(  # type: ignore[arg-type]
-            backlog, _HappyProvider(), presenter=NullBackfillPresenter()
+            backlog,
+            _HappyProvider(),
+            prune_retention=_RETENTION,
+            presenter=NullBackfillPresenter(),
         )
 
     # Writes stay committed; counters reflect the real work.
@@ -253,7 +259,10 @@ async def test_backfill_table_prune_failure_does_not_abort(
 
     with caplog.at_level("WARNING", logger="everos.service.backfill"):
         result = await _backfill_table(  # type: ignore[arg-type]
-            backlog, _HappyProvider(), presenter=NullBackfillPresenter()
+            backlog,
+            _HappyProvider(),
+            prune_retention=_RETENTION,
+            presenter=NullBackfillPresenter(),
         )
 
     assert result.rows_processed == 3

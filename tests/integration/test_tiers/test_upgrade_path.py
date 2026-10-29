@@ -22,13 +22,13 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.infra.persistence.index import AtomicFact, eq
-from everos.service import backfill as _backfill_mod
+from tests.fakes import FakeOmeLock, make_backfill_deps, make_ops
 
 from .conftest import (
-    _RUNNING,
+    StubEmbedder,
     _tier_client,
     add_payload,
     cascade_progress,
@@ -166,16 +166,16 @@ async def test_tier1_to_tier2_upgrade_via_backfill(
         # ``run_backfill`` refuses to run against a live OME lock (Phase
         # 1 / 2 / 3 all preflight it — round-4 review J10 aligned Phase
         # 1 with the other two). In-process this test still holds the
-        # server lifespan open around the call, so bypass the probe
-        # locally to simulate the intended "server stopped, then
-        # backfill runs" sequence. A real user's flow does stop the
-        # server; the probe is the mechanism that enforces it.
-        monkeypatch.setattr(
-            _backfill_mod, "_probe_ome_lock_available", lambda _ome_db: True
+        # server lifespan open around the call, so backfill runs over
+        # the production wiring with a lock that reads free, simulating
+        # the intended "server stopped, then backfill runs" sequence. A
+        # real user's flow does stop the server; the probe enforces it.
+        ops = make_ops(
+            backfill=make_backfill_deps(
+                root=tmp_path, embedding=StubEmbedder(), ome_lock=FakeOmeLock()
+            )
         )
-        exit_code = await run_backfill(
-            _RUNNING["application"].ops, phase="vectors", auto_yes=True
-        )
+        exit_code = await run_backfill(ops, phase="vectors", auto_yes=True)
         assert exit_code == 0
 
         post_episode_rows = await episode_rows("u_alice")

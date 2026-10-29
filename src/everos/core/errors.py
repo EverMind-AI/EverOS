@@ -191,6 +191,14 @@ class VectorStoreBusyError(ExternalServiceError):
     """
 
 
+class MemoryRootLockedError(InfrastructureError):
+    """Another process holds this memory root's exclusive lock.
+
+    A running ``everos server`` (or an exclusive CLI command) holds it; the
+    caller stops that process first or tries again later.
+    """
+
+
 class LLMServiceError(ExternalServiceError):
     """The configured LLM provider returned an error or timed out."""
 

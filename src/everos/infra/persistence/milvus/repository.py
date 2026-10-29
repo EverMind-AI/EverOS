@@ -11,12 +11,12 @@ from typing import Any, ClassVar, overload
 from pydantic import BaseModel
 from pymilvus import DataType, Function, FunctionType, MilvusClient
 
-from everos.component.utils.datetime import (
+from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import (
     ensure_utc,
     from_timestamp_ms,
     to_timestamp_ms,
 )
-from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index.schema import (
     IndexField,
     IndexFieldKind,

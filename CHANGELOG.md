@@ -26,6 +26,60 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **Entry points import only the service.** A new import-linter contract
+  (`entrypoints-forbidden`) keeps `everos.entrypoints` off `everos.memory`,
+  `everos.infra`, `everos.component` and `everalgo`; request / response
+  DTOs (`GetRequest`, `SearchRequest`, ...) are re-exported by
+  `everos.service`.
+- **`session_lock_timeout_seconds` sits under `[memorize]` in the shipped
+  `default.toml`** (it had landed under `[knowledge.search]`, where it was
+  ignored). The value, and so the behaviour, is unchanged.
+- **Timings are constructor arguments instead of module constants to patch.**
+  `LanceRepoBase` takes `timeouts=LanceTimeouts(...)` (and `sweep_husks=`),
+  `LanceIndexBackend` takes `schemas=`, `CascadeWorker` takes
+  `maintenance_task_timeout_seconds` / `rebuild_conflict_backoffs_seconds` /
+  `loop_restart_backoffs_seconds` / `on_unrecoverable`, `CascadeConfig` gains
+  `drain_idle_limit_seconds`, `memory_root_lock` takes `poll_interval_seconds`,
+  and `MemorizeQueueWorker` takes `stop_grace_seconds` / `mark_retry_seconds`.
+  Every default is the previous constant. The lance husk sweep is public as
+  `remove_empty_index_dirs`.
+- **`everos.service.memory` is a package** (the facade stays importable from
+  the same path). The process-wide session-lock registry
+  (`everos.service._session_lock`) is gone: each `MemoryService` owns its
+  per-session locks.
+- **The operator, upload and queueing rules moved from the HTTP routes and
+  the CLI into the service facades.** `OpsService.health()` assembles the
+  `/health` payload (a failed probe still reads as an unhealthy block, never
+  a 500); `OpsService.list_tasks` validates `status` and caps `page_size` at
+  100; `MemoryService.submit_add` / `submit_flush` decide between running
+  inline and queueing (`Queued` when queued); `KnowledgeService.create_from_upload`
+  / `replace_from_upload` check the size, pick UTF-8 or the parser and
+  extract, and `KnowledgeService.require_search_providers` is the
+  embedding + rerank gate. HTTP status codes and bodies are unchanged.
+  `everos.component.capabilities` is removed; `compute_disabled_features` is
+  exported from `everos.service`.
+- **Backfill is part of `OpsService`.** `everos.service.backfill` is removed.
+  `OpsService.backfill(phase, auto_yes=, presenter=, summary=)` runs one
+  phase or `"all"`, stops on a missing provider, a running server or a
+  declined prompt, and returns a `BackfillOutcome`; each phase's result
+  lands in the caller's `BackfillSummary`. Its collaborators are injected as
+  one `BackfillDeps`, so the service layer no longer imports `infra`.
+  `BackfillPresenter` gains `phase_started(phase)`; `BackfillPhase` is gone
+  (the CLI keeps its own phase copy). The public result types are
+  `VectorsPhaseResult`, `ClustersPhaseResult` and `SkillsPhaseResult`.
+- **`Application` closes its storage whether or not it was started**, and
+  `aclose()` is idempotent; `async with build_application(settings) as app:`
+  closes on exit. The CLI uses it for every command.
+- **`MemoryRootLockedError` (`everos.core.errors`) is what callers catch
+  when another process holds the memory root.** The OME engine's
+  `EngineLockHeldError` is a subclass; `everos.infra.ome.OmeLock` takes the
+  same lock from outside a running engine.
+- **The datetime helpers moved to `everos.core.utils.datetime`.**
+  `everos.component.utils` is removed; import `get_utc_now`,
+  `to_display_tz`, `UtcDatetime` and the other two-zone helpers from
+  `everos.core.utils.datetime` instead. They are stateless tools every layer
+  uses, the HTTP and CLI entry points included, so they live with the other
+  cross-cutting runtime code.
 - **The service layer's module-level functions are gone.** `everos.service`
   no longer exports `memorize`, `search`, `get`, `get_task`, `list_tasks` or
   the knowledge functions (`create_document`, `search_knowledge`, ...); build
@@ -144,7 +198,7 @@ both use the resulting `Application` through three facades:
   trace field `decider.tokens` is `null` for the prompted decider (token
   usage is reported by the LLM call observer).
 - **Index searches return domain records.** `memory.ports.IndexHit` (a row
-  read by column name) is replaced by `SearchHit[T](stored, score)`, and
+  read by column name) is replaced by `SearchHit[T]` (its `stored` record and `score`), and
   knowledge-topic searches return `ScoredKnowledgeTopic`. Recall hands the
   rank algorithms everalgo `Candidate`s whose `metadata` holds only the
   fields an algorithm reads, with the stored records alongside

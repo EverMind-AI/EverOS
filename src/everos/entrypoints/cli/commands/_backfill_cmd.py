@@ -1,17 +1,9 @@
-"""CLI-side orchestration for ``everos cascade backfill``.
+"""The terminal half of ``everos cascade backfill``.
 
-Presentation half of PR #361 review finding M11. The memory-layer phase
-runners (``service/backfill.py``) are pure — every user-facing
-string, colour, and confirmation prompt lives here, behind the
-:class:`~everos.service.backfill.BackfillPresenter` Protocol.
-:class:`TyperPresenter` is the typer-backed implementation; tests can
-substitute any structurally-compatible stub.
-
-:func:`run_backfill` is the top-level entry point the ``cascade``
-subcommand imports. It builds a :class:`TyperPresenter`, dispatches to
-the three phase runners in order, catches Ctrl-C /
-:class:`click.exceptions.Abort` / :class:`asyncio.CancelledError`, and
-maps every terminal state to a CLI exit code:
+:meth:`OpsService.backfill <everos.service.OpsService.backfill>` runs the
+phases and decides when a run stops; everything the user sees lives here:
+:class:`TyperPresenter` (the copy, colours and the confirmation prompt) and
+:func:`run_backfill`, which maps how the run ended to an exit code:
 
 - ``0`` — clean success.
 - ``1`` — user declined a confirmation prompt.
@@ -29,6 +21,7 @@ maps every terminal state to a CLI exit code:
 from __future__ import annotations
 
 import asyncio
+from typing import NamedTuple
 
 import anyio.to_thread
 import click
@@ -36,20 +29,25 @@ import typer
 
 from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
-from everos.service import BackfillPhase, OpsService
-from everos.service.backfill import (
-    _BackfillSummary,
-    _count_failed_rows,
-    _format_tokens,
+from everos.service import (
+    BackfillOutcome,
+    BackfillSummary,
+    OpsService,
+    format_tokens,
 )
 
 logger = get_logger(__name__)
 
 
-PHASES: tuple[BackfillPhase, ...] = (
-    BackfillPhase(
-        number=1,
-        slug="vectors",
+class PhaseCopy(NamedTuple):
+    """The header shown before one phase runs."""
+
+    title: str
+    detail: str
+
+
+PHASE_COPY: dict[str, PhaseCopy] = {
+    "vectors": PhaseCopy(
         title="Phase 1 — make older memories searchable by meaning",
         detail=(
             "Memories created before you configured embedding can only be "
@@ -57,25 +55,29 @@ PHASES: tuple[BackfillPhase, ...] = (
             "meaning too."
         ),
     ),
-    BackfillPhase(
-        number=2,
-        slug="clusters",
+    "clusters": PhaseCopy(
         title="Phase 2 — group related memories into topics",
         detail=(
             "Related memories get clustered together so reflection and "
             "advanced retrieval can operate on them."
         ),
     ),
-    BackfillPhase(
-        number=3,
-        slug="skills",
+    "skills": PhaseCopy(
         title="Phase 3 — build the agent skill library",
         detail=(
             "Distill reusable skills from past agent conversations. Uses "
             "your LLM — the most expensive step."
         ),
     ),
-)
+}
+
+_EXIT_CODES: dict[BackfillOutcome, int] = {
+    BackfillOutcome.COMPLETED: 0,
+    BackfillOutcome.ABORTED: 1,
+    BackfillOutcome.BLOCKED_BY_CAPABILITY: 2,
+    BackfillOutcome.BLOCKED_BY_SERVER: 3,
+    BackfillOutcome.COMPLETED_WITH_FAILURES: 4,
+}
 
 
 _EXIT_LABELS: dict[int, str] = {
@@ -94,25 +96,6 @@ least one row failed embedding even after the per-row fallback —
 operators consult the ``cascade_backfill_row_embed_failed`` /
 ``..._row_subject_embed_failed`` log events for the failed row ids.
 ``130`` is the SIGINT convention (128 + signal number 2)."""
-
-
-def _confirm(detail: str, *, auto_yes: bool) -> bool:
-    """Ask the user to confirm one phase; ``--yes`` skips the prompt.
-
-    Kept as a module-level helper (rather than a bound method of
-    :class:`TyperPresenter`) so tests can monkeypatch it on this module
-    the same way the pre-M11 code was patched on ``_backfill``. The
-    presenter's :meth:`~TyperPresenter.confirm` delegates here.
-    """
-    if auto_yes:
-        return True
-    return typer.confirm(f"Proceed with: {detail}", default=False)
-
-
-def _print_phase_header(phase: BackfillPhase) -> None:
-    typer.secho(phase.title, bold=True)
-    typer.echo(f"  {phase.detail}")
-    typer.echo("")
 
 
 def _print_aborted() -> None:
@@ -170,7 +153,7 @@ def _print_server_running_hint() -> None:
 
 def _print_vectors_estimate(total_rows: int, total_tokens: int) -> None:
     typer.echo(f"  memories to process:  {total_rows:,}")
-    typer.echo(f"  input tokens:         {_format_tokens(total_tokens)}\n")
+    typer.echo(f"  input tokens:         {format_tokens(total_tokens)}\n")
     typer.echo(
         "  Uses your embedding provider — cost depends on its per-token pricing.\n"
     )
@@ -191,14 +174,14 @@ def _print_skills_estimate(cases: int, clusters: int) -> None:
     typer.echo("  Uses your LLM — cost depends on its per-token pricing.\n")
 
 
-def _print_summary(summary: _BackfillSummary, *, exit_code: int) -> None:
+def _print_summary(summary: BackfillSummary, *, exit_code: int) -> None:
     """Print the consolidated post-run summary block.
 
     Field labels are chosen from what each phase's result dataclass
     actually tracks — e.g. Phase 3 reports "agent cases processed"
     (``events_emitted``) rather than "clusters processed", since the
     distinct cluster count isn't retained on
-    :class:`~everos.service.backfill._SkillPhaseResult`.
+    :class:`~everos.service.SkillsPhaseResult`.
 
     On ``exit_code == 4`` (COMPLETED_WITH_FAILURES) also emits a hint
     pointing operators at the per-row failure log events so they can
@@ -211,7 +194,7 @@ def _print_summary(summary: _BackfillSummary, *, exit_code: int) -> None:
         r = summary.vectors
         typer.echo(
             f"  Phase 1 (vectors)   — {r.rows_processed:,} rows / "
-            f"{r.rows_failed:,} failed / {_format_tokens(r.tokens_embedded)}"
+            f"{r.rows_failed:,} failed / {format_tokens(r.tokens_embedded)}"
         )
     if summary.clusters is not None:
         c = summary.clusters
@@ -231,22 +214,28 @@ def _print_summary(summary: _BackfillSummary, *, exit_code: int) -> None:
     label = _EXIT_LABELS.get(exit_code, "UNKNOWN")
     typer.echo(f"  Exit: {label}  ({exit_code})")
     if exit_code == 4:
-        total_failed = _count_failed_rows(summary)
         typer.secho(
-            f"  {total_failed:,} rows failed embedding — see log events "
+            f"  {summary.rows_failed:,} rows failed embedding — see log events "
             "`cascade_backfill_row_embed_failed` for row_ids and text prefixes.",
             fg=typer.colors.YELLOW,
         )
 
 
 class TyperPresenter:
-    """typer-backed :class:`BackfillPresenter` — the CLI's user-I/O seam.
+    """The typer-backed :class:`~everos.service.BackfillPresenter`.
 
-    Every method delegates to a module-level ``_print_*`` helper or to
-    :func:`_confirm`. Kept as a small class (rather than a module of
-    free functions) so alternative front-ends (e.g. a JSON-emitting
-    CI-mode presenter) can slot in without touching the memory layer.
+    Remembers the phase in progress so an interrupt can be logged against it.
     """
+
+    def __init__(self) -> None:
+        self.current_phase: str | None = None
+
+    def phase_started(self, phase: str) -> None:
+        self.current_phase = phase
+        copy = PHASE_COPY[phase]
+        typer.secho(copy.title, bold=True)
+        typer.echo(f"  {copy.detail}")
+        typer.echo("")
 
     def nothing_to_backfill(self, message: str, *, scan_failed: bool = False) -> None:
         colour = typer.colors.YELLOW if scan_failed else typer.colors.GREEN
@@ -268,13 +257,15 @@ class TyperPresenter:
         _print_skills_estimate(cases, clusters)
 
     async def confirm(self, prompt: str, *, auto_yes: bool) -> bool:
-        # ``typer.confirm`` is blocking (reads from stdin); offload so a
-        # slow / interactive user doesn't hold the event loop. Any
-        # ``click.exceptions.Abort`` raised on Ctrl-C at the prompt
-        # propagates to :func:`run_backfill` which catches it and maps
-        # to exit 130.
+        """Ask before a phase spends tokens; ``--yes`` skips the prompt.
+
+        ``typer.confirm`` blocks on stdin, so it runs in a thread; Ctrl-C at
+        the prompt surfaces as an abort that :func:`run_backfill` maps to 130.
+        """
+        if auto_yes:
+            return True
         return await anyio.to_thread.run_sync(
-            lambda: _confirm(prompt, auto_yes=auto_yes)
+            lambda: typer.confirm(f"Proceed with: {prompt}", default=False)
         )
 
     def emit_progress(self, done: int, total: int) -> None:
@@ -309,132 +300,27 @@ class TyperPresenter:
 
 
 async def run_backfill(ops: OpsService, *, phase: str, auto_yes: bool) -> int:
-    """Run backfill phases through ``ops`` interactively; return an exit code.
+    """Run backfill through ``ops`` interactively; return the exit code.
 
-    ``phase`` is ``"all"`` or one of :data:`PHASES`'s ``slug`` values.
-    Exit codes: see :data:`_EXIT_LABELS`.
+    ``phase`` is ``"all"`` or a phase name. Every exit path ends with the
+    summary of the phases that ran.
 
-    Every exit path — success, abort, error, or interrupt — ends with a
-    consolidated summary block (:func:`_print_summary`) covering every
-    phase that actually ran. The interrupt is only ever caught here, at
-    the outer loop: a phase body mid-batch must let it propagate rather
-    than swallow it, so a Ctrl-C during Phase 1 doesn't get silently
-    absorbed as "phase 1 failed, try phase 2 anyway".
-
-    Both ``KeyboardInterrupt`` and ``asyncio.CancelledError`` are caught:
-    on Python 3.11+, ``asyncio.Runner`` (which backs ``asyncio.run``)
-    translates a real SIGINT into ``main_task.cancel()``, which raises
-    ``CancelledError`` — not ``KeyboardInterrupt`` — at the currently
-    suspended ``await``. Handling it here lets the task complete
-    normally with exit code 130 instead of leaking the cancellation out
-    to ``asyncio.run`` (which would re-synthesize a bare
-    ``KeyboardInterrupt`` that typer/click turns into ``Abort``, exit 1,
-    with no resume hint printed). Catching ``CancelledError``
-    unconditionally is safe here: nothing in this call tree cancels the
-    task for reasons other than an interrupt.
+    Both ``KeyboardInterrupt`` and ``asyncio.CancelledError`` are an
+    interrupt: on Python 3.11+ ``asyncio.run`` turns SIGINT into a
+    cancellation of the main task, which raises ``CancelledError`` at the
+    current ``await``. Catching it here lets the run end with 130 and the
+    resume hint instead of leaking out as a bare ``Abort`` (exit 1). Nothing
+    else in this call tree cancels the task. Ctrl-C (or EOF) at the y/N
+    prompt arrives as typer's ``Abort`` -- since typer vendors click,
+    ``typer.Abort`` and ``click.exceptions.Abort`` are distinct classes, and
+    both are listed.
     """
     presenter = TyperPresenter()
-    selected = [p for p in PHASES if phase == "all" or p.slug == phase]
-    summary = _BackfillSummary()
-    current_phase: BackfillPhase | None = None
+    summary = BackfillSummary()
     try:
-        for p in selected:
-            current_phase = p
-            _print_phase_header(p)
-            if p.slug == "vectors":
-                result = await ops.backfill(
-                    p.slug, auto_yes=auto_yes, presenter=presenter
-                )
-                summary.vectors = result
-                if result.blocked_by_capability:
-                    logger.warning(
-                        "cascade_backfill_blocked_by_capability",
-                        phase=p.slug,
-                        provider=result.blocked_by_capability,
-                    )
-                    _print_summary(summary, exit_code=2)
-                    return 2
-                if result.blocked_by_server:
-                    # Fail fast BEFORE any embed API call — Phase 2 / 3
-                    # already do this preflight; without it here,
-                    # ``--phase all`` against a running server burns
-                    # through Phase 1's real token budget and only
-                    # halts at Phase 2 (see PR #361 review J10).
-                    logger.warning("cascade_backfill_blocked_by_server", phase=p.slug)
-                    _print_summary(summary, exit_code=3)
-                    return 3
-                if result.aborted:
-                    # Policy (PR #361 round-3 review #11, accepted):
-                    # typing ``n`` at Phase 1's confirmation aborts the
-                    # ENTIRE ``--phase all`` run — not just Phase 1.
-                    # Rationale: ``--phase all`` is opt-in-to-run-
-                    # everything. Explicitly declining Phase 1's cost
-                    # estimate is a decisive "no"; interpreting it as
-                    # "skip Phase 1 but still run Phase 2/3" would spend
-                    # LLM/embed budget on phases the user did not see
-                    # estimates for. Users who want only Phase 2 or 3
-                    # invoke ``--phase clusters`` or ``--phase skills``
-                    # explicitly (and see that phase's own estimate).
-                    logger.info("cascade_backfill_aborted", phase=p.slug)
-                    _print_aborted()
-                    _print_summary(summary, exit_code=1)
-                    return 1
-                continue
-            if p.slug == "clusters":
-                cluster_result = await ops.backfill(
-                    p.slug, auto_yes=auto_yes, presenter=presenter
-                )
-                summary.clusters = cluster_result
-                if cluster_result.blocked_by_capability:
-                    logger.warning(
-                        "cascade_backfill_blocked_by_capability",
-                        phase=p.slug,
-                        provider=cluster_result.blocked_by_capability,
-                    )
-                    _print_summary(summary, exit_code=2)
-                    return 2
-                if cluster_result.blocked_by_server:
-                    logger.warning("cascade_backfill_blocked_by_server", phase=p.slug)
-                    _print_summary(summary, exit_code=3)
-                    return 3
-                if cluster_result.aborted:
-                    logger.info("cascade_backfill_aborted", phase=p.slug)
-                    _print_aborted()
-                    _print_summary(summary, exit_code=1)
-                    return 1
-                continue
-            if p.slug == "skills":
-                skill_result = await ops.backfill(
-                    p.slug, auto_yes=auto_yes, presenter=presenter
-                )
-                summary.skills = skill_result
-                if skill_result.blocked_by_capability:
-                    logger.warning(
-                        "cascade_backfill_blocked_by_capability",
-                        phase=p.slug,
-                        provider=skill_result.blocked_by_capability,
-                    )
-                    _print_summary(summary, exit_code=2)
-                    return 2
-                if skill_result.blocked_by_server:
-                    logger.warning("cascade_backfill_blocked_by_server", phase=p.slug)
-                    _print_summary(summary, exit_code=3)
-                    return 3
-                if skill_result.aborted:
-                    logger.info("cascade_backfill_aborted", phase=p.slug)
-                    _print_aborted()
-                    _print_summary(summary, exit_code=1)
-                    return 1
-                continue
-    # ``typer.Abort`` fires when ``typer.confirm`` catches KeyboardInterrupt
-    # or EOF at the y/N prompt and re-raises it as an ``Abort`` (a
-    # ``RuntimeError`` subclass, NOT a ``KeyboardInterrupt``). Typer 0.15+
-    # vendored click under ``typer._click`` — ``typer.Abort`` and the
-    # standalone ``click.exceptions.Abort`` are DISTINCT classes. Catching
-    # only ``click.exceptions.Abort`` would let the real typer-raised
-    # abort fall through to the generic ``except Exception`` branch (exit
-    # 2, rich traceback). Both are listed so the Ctrl-C-at-prompt path
-    # (exit 130 with resume hint) fires regardless of which one arrives.
+        outcome = await ops.backfill(
+            phase, auto_yes=auto_yes, presenter=presenter, summary=summary
+        )
     except (
         KeyboardInterrupt,
         asyncio.CancelledError,
@@ -442,21 +328,18 @@ async def run_backfill(ops: OpsService, *, phase: str, auto_yes: bool) -> int:
         click.exceptions.Abort,
     ):
         logger.warning(
-            "cascade_backfill_interrupted",
-            phase=current_phase.slug if current_phase else phase,
+            "cascade_backfill_interrupted", phase=presenter.current_phase or phase
         )
         _print_interrupted()
         _print_summary(summary, exit_code=130)
         return 130
     except ProviderNotConfiguredError as exc:
-        # Defensive backstop: phase runners preflight capability and
-        # return ``blocked_by_capability`` on their own. Reaching this
-        # branch means a code path bypassed the preflight — surface the
-        # remediation message instead of letting the broad ``except
-        # Exception`` below swallow it into "see logs for details".
+        # The phases preflight their providers and report a block; reaching
+        # this means a path bypassed the preflight, and the remediation
+        # message beats the generic "see logs" below.
         logger.error(
             "cascade_backfill_provider_error_escaped_preflight",
-            phase=current_phase.slug if current_phase else phase,
+            phase=presenter.current_phase or phase,
             provider=exc.provider,
         )
         typer.secho(f"  {exc}", fg=typer.colors.RED)
@@ -467,13 +350,8 @@ async def run_backfill(ops: OpsService, *, phase: str, auto_yes: bool) -> int:
         typer.secho("Backfill failed — see logs for details.", fg=typer.colors.RED)
         _print_summary(summary, exit_code=2)
         return 2
-    total_failed = _count_failed_rows(summary)
-    if total_failed > 0:
-        logger.warning(
-            "cascade_backfill_completed_with_failures",
-            total_failed=total_failed,
-        )
-        _print_summary(summary, exit_code=4)
-        return 4
-    _print_summary(summary, exit_code=0)
-    return 0
+    code = _EXIT_CODES[outcome]
+    if outcome is BackfillOutcome.ABORTED:
+        _print_aborted()
+    _print_summary(summary, exit_code=code)
+    return code

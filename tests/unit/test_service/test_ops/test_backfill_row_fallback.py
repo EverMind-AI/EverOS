@@ -28,7 +28,7 @@ from __future__ import annotations
 import pytest
 
 from everos.core.observability.logging import configure_logging
-from everos.service.backfill import (
+from everos.service.ops._backfill_vectors import (
     _embed_primary_batch,
     _embed_subject_batch,
     _NullVectorRow,

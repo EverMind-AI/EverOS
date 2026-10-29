@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from everos.core.errors import MemoryRootLockedError
 from everos.memory.ports import Event
 
 
@@ -13,8 +14,12 @@ class StartupValidationError(OMEError):
     """Raised by engine.start() for any startup-time validation failure."""
 
 
-class EngineLockHeldError(OMEError):
-    """Raised when another OfflineEngine instance holds the jobstore lock."""
+class EngineLockHeldError(OMEError, MemoryRootLockedError):
+    """Raised when another OfflineEngine instance holds the jobstore lock.
+
+    Also a :class:`~everos.core.errors.MemoryRootLockedError`, which is what
+    callers outside the engine catch.
+    """
 
 
 class StrategyContractError(OMEError):

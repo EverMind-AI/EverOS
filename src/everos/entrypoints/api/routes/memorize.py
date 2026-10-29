@@ -19,7 +19,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from starlette.status import HTTP_202_ACCEPTED
 
 from everos.entrypoints.api.utils import application, extract_request_id
-from everos.service import MemoryService
+from everos.service import Queued
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -229,45 +229,14 @@ class SuccessEnvelope[T](BaseModel):
 # Route ──────────────────────────────────────────────────────────────────────
 
 
-async def _queues(
-    memory: MemoryService,
-    req: MemorizeAddRequest | MemorizeFlushRequest,
-    *,
-    async_mode: bool,
-) -> bool:
-    """Whether the call is queued rather than run inline.
-
-    Queued when the caller asked for ``async_mode`` (and the queue accepts
-    new async work) **or** the session already has unfinished queued rows --
-    running inline then would overtake batches the client was already told
-    are accepted. ``/flush`` has no ``async_mode`` (the Cloud API has none
-    either): it only ever queues behind its session's backlog.
-    """
-    return (async_mode and memory.accepts_async) or await memory.has_queued(
-        session_id=req.session_id, app_id=req.app_id, project_id=req.project_id
-    )
-
-
-async def _accept(
-    memory: MemoryService,
-    response: Response,
-    payload: dict[str, Any],
-    *,
-    request_id: str,
-    is_final: bool,
-    defer_extraction: bool,
+def _accepted(
+    response: Response, request_id: str, queued: Queued
 ) -> SuccessEnvelope[AcceptedResponseData]:
-    pending = await memory.enqueue(
-        payload,
-        request_id=request_id,
-        is_final=is_final,
-        defer_extraction=defer_extraction,
-    )
     response.status_code = HTTP_202_ACCEPTED
     return SuccessEnvelope(
         request_id=request_id,
         data=AcceptedResponseData(
-            message_count=len(payload["messages"]), pending=pending
+            message_count=queued.message_count, pending=queued.pending
         ),
     )
 
@@ -297,18 +266,14 @@ async def add_memory(
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
     request_id = extract_request_id(request)
-    payload = req.model_dump(exclude={"async_mode", "defer_extraction"})
-    memory = application(request).memory
-    if await _queues(memory, req, async_mode=req.async_mode):
-        return await _accept(
-            memory,
-            response,
-            payload,
-            request_id=request_id,
-            is_final=False,
-            defer_extraction=req.defer_extraction,
-        )
-    result = await memory.memorize(payload, defer_extraction=req.defer_extraction)
+    result = await application(request).memory.submit_add(
+        req.model_dump(exclude={"async_mode", "defer_extraction"}),
+        request_id=request_id,
+        async_mode=req.async_mode,
+        defer_extraction=req.defer_extraction,
+    )
+    if isinstance(result, Queued):
+        return _accepted(response, request_id, result)
     return SuccessEnvelope(
         request_id=request_id,
         data=AddResponseData(
@@ -330,25 +295,14 @@ async def flush_memory(
     the flush joins the queue behind them and answers 202.
     """
     request_id = extract_request_id(request)
-    payload: dict[str, Any] = {
-        "session_id": req.session_id,
-        "app_id": req.app_id,
-        "project_id": req.project_id,
-        "messages": [],
-    }
-    memory = application(request).memory
-    if await _queues(memory, req, async_mode=False):
-        return await _accept(
-            memory,
-            response,
-            payload,
-            request_id=request_id,
-            is_final=True,
-            defer_extraction=False,
-        )
-    result = await memory.flush(
-        session_id=req.session_id, app_id=req.app_id, project_id=req.project_id
+    result = await application(request).memory.submit_flush(
+        session_id=req.session_id,
+        request_id=request_id,
+        app_id=req.app_id,
+        project_id=req.project_id,
     )
+    if isinstance(result, Queued):
+        return _accepted(response, request_id, result)
     # service's ``accumulated`` = nothing to flush (buffer was empty);
     # ``extracted`` = at least one cell carved out.
     status: Literal["extracted", "no_extraction"] = (

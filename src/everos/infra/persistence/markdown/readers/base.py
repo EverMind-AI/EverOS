@@ -33,7 +33,7 @@ from typing import ClassVar
 
 import anyio
 
-from everos.component.utils.datetime import today_with_timezone
+from everos.core.utils.datetime import today_with_timezone
 from everos.infra.persistence.markdown.base.entries import (
     Entry,
     EntryId,

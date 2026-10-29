@@ -17,6 +17,7 @@ __all__ = [
 
 import contextlib
 import datetime as dt
+from collections.abc import Sequence
 from typing import ClassVar
 
 from everos.core.errors import IndexSchemaMismatchError
@@ -47,8 +48,6 @@ from .repos.knowledge_topic import _KnowledgeTopicRepo
 from .repos.user_profile import _UserProfileRepo
 
 logger = get_logger(__name__)
-
-_BUSINESS_SCHEMAS = BUSINESS_SCHEMAS
 
 
 class LanceDBSchemaMismatchError(IndexSchemaMismatchError):
@@ -133,12 +132,20 @@ class LanceIndexBackend:
 
     Args:
         connection: The application's LanceDB connection.
+        schemas: The business tables the per-table sweeps (migrations,
+            verification, drop) walk; every one of them in production.
     """
 
     name: ClassVar[str] = "lancedb"
 
-    def __init__(self, connection: LanceDbConnection) -> None:
+    def __init__(
+        self,
+        connection: LanceDbConnection,
+        *,
+        schemas: Sequence[type[BaseLanceTable]] = BUSINESS_SCHEMAS,
+    ) -> None:
         self._connection = connection
+        self._schemas = tuple(schemas)
         self.repositories = IndexRepositories(
             episode=_EpisodeRepo(source=connection),
             atomic_fact=_AtomicFactRepo(source=connection),
@@ -196,7 +203,7 @@ class LanceIndexBackend:
                 # for the lock. Nothing to do.
                 return
             logger.info("fts_index_migration_started", target=_FTS_INDEX_SCHEMA_VERSION)
-            for schema in _BUSINESS_SCHEMAS:
+            for schema in self._schemas:
                 if not schema.BM25_FIELDS:
                     continue
                 table = await self._connection.table(schema.TABLE_NAME, schema)
@@ -322,7 +329,7 @@ class LanceIndexBackend:
         ``schema.ensure_fts_indexes(table)``. Already-indexed columns are
         skipped, so re-runs are no-ops.
 
-        Adding a new business table = adding it to ``_BUSINESS_SCHEMAS``;
+        Adding a new business table = adding it to ``BUSINESS_SCHEMAS``;
         everything else (table name, columns to index) reads off the
         schema's ClassVars.
 
@@ -339,7 +346,7 @@ class LanceIndexBackend:
         """
         await self.migrate_table_schemas()
         await self.migrate_fts_indexes()
-        for schema in _BUSINESS_SCHEMAS:
+        for schema in self._schemas:
             table = await self._connection.table(schema.TABLE_NAME, schema)
             await schema.ensure_fts_indexes(table)
 
@@ -371,7 +378,7 @@ class LanceIndexBackend:
           ``LanceError(IO): Spill has sent an error``. Comparing types surfaces
           it here instead.
         """
-        for schema in _BUSINESS_SCHEMAS:
+        for schema in self._schemas:
             table = await self._connection.table(schema.TABLE_NAME, schema)
             on_disk = await table.schema()
             expected = schema.to_arrow_schema()
@@ -409,7 +416,7 @@ class LanceIndexBackend:
         cache so a later :meth:`LanceDbConnection.table` reopens the fresh table.
         """
         return await self._connection.drop_tables(
-            [schema.TABLE_NAME for schema in _BUSINESS_SCHEMAS]
+            [schema.TABLE_NAME for schema in self._schemas]
         )
 
     async def read_embedding_model(self) -> str | None:

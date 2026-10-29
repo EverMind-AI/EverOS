@@ -24,14 +24,22 @@ what that means (search degrades, knowledge uploads refuse, the server's
 
 from __future__ import annotations
 
-__all__ = ["Application", "Providers", "build_application", "build_providers"]
+__all__ = [
+    "Application",
+    "Providers",
+    "build_application",
+    "build_providers",
+    "build_replay_engine",
+]
 
 import contextlib
 import dataclasses
+import datetime as dt
 import functools
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from types import TracebackType
 
 from everalgo.llm import LLMClient
 
@@ -59,7 +67,14 @@ from everos.core.observability.tracing import (
     shutdown_tracing,
 )
 from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
-from everos.infra.ome import OfflineEngine, OMEConfig, OmeEventBus, to_ome_strategy
+from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+from everos.infra.ome import (
+    OfflineEngine,
+    OMEConfig,
+    OmeEventBus,
+    OmeLock,
+    to_ome_strategy,
+)
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import (
     build_derived_index,
@@ -67,7 +82,10 @@ from everos.infra.persistence.factories import (
     build_stores,
 )
 from everos.infra.persistence.index import EmbeddingProvenance
-from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.infra.persistence.markdown import (
+    MarkdownAgentSkillStore,
+    MarkdownKnowledgeStore,
+)
 from everos.infra.persistence.sqlite import (
     SqliteDatabase,
     SqliteKnowledgeCatalog,
@@ -78,7 +96,7 @@ from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
-from everos.memory.ports import EventBus
+from everos.memory.ports import EventBus, StrategySpec
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
@@ -90,10 +108,9 @@ from everos.memory.search.recall import (
     RecallerDeps,
 )
 from everos.memory.strategies import STRATEGY_SPECS
-from everos.service.backfill import BackfillContext
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
-from everos.service.ops import Capabilities, OpsService
+from everos.service.ops import BackfillDeps, Capabilities, OpsService
 
 logger = get_logger(__name__)
 
@@ -118,14 +135,21 @@ class Providers:
     rerank: RerankProvider | None
 
 
+@dataclasses.dataclass
+class _Lifecycle:
+    closed: bool = False
+
+
 @dataclasses.dataclass(frozen=True)
 class Application:
     """What an entry point holds: three facades plus the provider snapshot.
 
     ``start`` brings up what a long-running server needs -- system DB,
-    index, cascade, OME, the ``async_mode`` queue -- in that order;
-    ``aclose`` stops whatever was started in reverse, then shuts tracing
-    down. ``aclose`` is safe after a failed or absent ``start``.
+    index, cascade, OME, the ``async_mode`` queue -- in that order.
+    ``aclose`` stops whatever was started in reverse, closes the storage
+    connections whether or not ``start`` ran (a CLI command opens them
+    without starting), and shuts tracing down; it is idempotent and safe
+    after a failed ``start``. ``async with application:`` closes on exit.
     """
 
     memory: MemoryService
@@ -139,6 +163,18 @@ class Application:
     _stack: contextlib.AsyncExitStack = dataclasses.field(
         default_factory=contextlib.AsyncExitStack, repr=False
     )
+    _lifecycle: _Lifecycle = dataclasses.field(default_factory=_Lifecycle, repr=False)
+
+    async def __aenter__(self) -> Application:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.aclose()
 
     async def start(self) -> None:
         """Bring the application up for serving.
@@ -162,11 +198,9 @@ class Application:
 
         self._root.ensure()
         tables = await self._admin.create_schema()
-        self._stack.push_async_callback(_shielded("sqlite", self._admin.dispose))
         logger.info("sqlite_schema_ready", tables=tables)
 
         await self._admin.start_index()
-        self._stack.push_async_callback(_shielded("index", self._admin.close_index))
         if self._admin.backend == "lancedb":
             await _log_unbackfilled_hint(self._admin)
         logger.info("derived_index_ready", backend=self._admin.backend)
@@ -184,8 +218,16 @@ class Application:
         logger.info("application_started")
 
     async def aclose(self) -> None:
-        """Stop what :meth:`start` started, in reverse; then shut tracing down."""
+        """Stop what :meth:`start` started, close the storage, shut tracing down.
+
+        Idempotent: a second call does nothing.
+        """
+        if self._lifecycle.closed:
+            return
+        self._lifecycle.closed = True
         await self._stack.aclose()
+        await _shielded("index", self._admin.close_index)()
+        await _shielded("sqlite", self._admin.dispose)()
         shutdown_tracing()
         logger.info("application_closed")
 
@@ -232,6 +274,7 @@ def build_application(
         case_judge=_case_judge(settings, providers.llm),
     )
     engine = _build_engine(root, deps)
+    ome_lock = OmeLock(root.ome_db)
     capabilities = _capabilities(settings, providers)
     admin = CascadeAdmin(
         database=database,
@@ -241,37 +284,47 @@ def build_application(
             settings.embedding, configured=providers.embedding is not None
         ),
     )
+    cascade = CascadeOrchestrator(
+        memory_root=root,
+        tokenizer=tokenizer,
+        embedding=providers.embedding,
+        index=index,
+        sqlite=sqlite,
+    )
+    memory = _build_memory_service(
+        settings, providers, deps, tokenizer, OmeEventBus(engine)
+    )
     return Application(
-        memory=_build_memory_service(
-            settings, providers, deps, tokenizer, OmeEventBus(engine)
-        ),
+        memory=memory,
         knowledge=_build_knowledge_service(
-            settings, root, providers, indexes, sqlite, tokenizer
+            settings, root, providers, indexes, sqlite, tokenizer, capabilities
         ),
         ops=OpsService(
             settings=settings,
             root=root,
             admin=admin,
-            cascade=CascadeOrchestrator(
-                memory_root=root,
-                tokenizer=tokenizer,
-                embedding=providers.embedding,
-                index=index,
-                sqlite=sqlite,
-            ),
+            cascade=cascade,
             run_cascade=not _env_flag("EVEROS_DISABLE_CASCADE"),
             engine=engine,
+            ome_lock=ome_lock,
             inbox=stores.memorize_inbox,
-            backfill=BackfillContext(
-                root=root,
+            backfill=BackfillDeps(
                 embedding=providers.embedding,
-                deps=deps,
-                index=index,
-                database=database,
-                sqlite=sqlite,
                 tokenizer=tokenizer,
+                vector_tables=index.repositories.with_vectors(),
+                prune_retention=dt.timedelta(
+                    seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+                ),
+                clusters=stores.cluster,
+                skills=indexes.agent_skill,
+                skill_files=MarkdownAgentSkillStore(root),
+                engine_for=functools.partial(build_replay_engine, root, deps),
+                ensure_schema=admin.create_schema,
+                cascade=cascade,
+                ome_lock=ome_lock,
             ),
             capabilities=capabilities,
+            queue_health=memory.queue_health,
         ),
         capabilities=capabilities,
         _settings=settings,
@@ -352,6 +405,28 @@ def _build_engine(root: MemoryRoot, deps: MemoryDeps) -> OfflineEngine:
     return engine
 
 
+def build_replay_engine(
+    root: MemoryRoot, deps: MemoryDeps, specs: Sequence[StrategySpec]
+) -> OfflineEngine:
+    """An unstarted, throw-away engine running only ``specs`` (backfill's replay).
+
+    It shares the server's jobstore, so while a server runs on the same root
+    its start fails on the file lock instead of racing it. Without
+    ``config_path`` it never depends on ``ome.toml``. Crash recovery is off:
+    this engine knows only ``specs``, so re-enqueueing a server's stale
+    RUNNING row for any other strategy would fail on dispatch and lose the
+    event for good; the next server start, which knows every strategy,
+    resumes those rows.
+    """
+    root.ome_db.parent.mkdir(parents=True, exist_ok=True)
+    engine = OfflineEngine(
+        config=OMEConfig(jobstore_path=root.ome_db, crash_recovery_enabled=False)
+    )
+    for spec in specs:
+        engine.register(to_ome_strategy(spec, deps))
+    return engine
+
+
 def _build_memory_service(
     settings: Settings,
     providers: Providers,
@@ -409,6 +484,7 @@ def _build_knowledge_service(
     indexes: Indexes,
     sqlite: SqliteRepos,
     tokenizer: Tokenizer,
+    capabilities: Capabilities,
 ) -> KnowledgeService:
     return KnowledgeService(
         store=MarkdownKnowledgeStore(root),
@@ -423,6 +499,8 @@ def _build_knowledge_service(
         ),
         search_config=settings.knowledge.search,
         parse_file=functools.partial(aparse_file, llm=providers.multimodal_llm),
+        parser_available=capabilities.parser,
+        max_upload_bytes=settings.knowledge.max_upload_bytes,
     )
 
 

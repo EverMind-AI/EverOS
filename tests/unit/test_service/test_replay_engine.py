@@ -1,7 +1,8 @@
-"""Backfill OME engines opt out of crash recovery.
+"""Backfill's replay engines opt out of crash recovery.
 
-Pins PR #361 review finding M10: ``_build_cluster_engine`` and
-``_build_skill_engine`` share the server's ``ome.db`` jobstore path.
+Pins PR #361 review finding M10: the throw-away engines
+:func:`~everos.service.bootstrap.build_replay_engine` builds for backfill's
+clusters and skills phases share the server's ``ome.db`` jobstore path.
 If ``engine.start()`` ran ``_run_crash_recovery`` on them, a stale
 RUNNING row for a strategy the backfill engine does NOT register
 (e.g. ``extract_atomic_facts`` left over from a crashed server) would
@@ -9,7 +10,7 @@ be re-enqueued into the backfill engine's own APS scheduler, hit
 ``StrategyRegistry.get`` with an unknown name at dispatch, and be
 permanently lost.
 
-Fix: both builders set ``OMEConfig.crash_recovery_enabled=False``.
+Fix: the builder sets ``OMEConfig.crash_recovery_enabled=False``.
 The stale row stays untouched and is resumed on the next server
 restart, by an engine that actually knows those strategy names.
 """
@@ -22,54 +23,35 @@ from typing import Any
 
 import pytest
 
-from everos.component.utils.datetime import get_now_with_timezone, to_iso_format
+from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence.memory_root import MemoryRoot
-from everos.service import backfill as _backfill
-from everos.service.backfill import BackfillContext
-from tests.fakes import make_backfill_context
+from everos.memory.strategies import (
+    EXTRACT_AGENT_SKILL_SPEC,
+    TRIGGER_PROFILE_CLUSTERING_SPEC,
+    TRIGGER_SKILL_CLUSTERING_SPEC,
+)
+from everos.service.bootstrap import build_replay_engine
+from tests.fakes import make_deps
 
-_STATE: dict[str, Any] = {}
-"""Per-test choices the backfill context is built from (``embedding``)."""
-
-
-@pytest.fixture(autouse=True)
-def _fresh_state() -> None:
-    _STATE.clear()
+_CLUSTER_SPECS = (TRIGGER_PROFILE_CLUSTERING_SPEC, TRIGGER_SKILL_CLUSTERING_SPEC)
 
 
-def _ctx() -> BackfillContext:
-    """The context the phase runners run against: the configured memory root,
-    with the embedding provider the test chose (none by default)."""
-    return make_backfill_context(embedding=_STATE.get("embedding"))
-
-
-@pytest.fixture
-def _isolated_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point ``MemoryRoot.resolve()`` at a per-test temp directory so the
-    builders don't touch ``~/.everos`` and don't collide across tests.
-    """
-    monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
-    return tmp_path
-
-
-def test_cluster_engine_has_crash_recovery_disabled(_isolated_root: Path) -> None:
-    """Phase-2 engine builder wires ``crash_recovery_enabled=False``."""
-    engine = _backfill._build_cluster_engine(_ctx())
-    assert engine._config.crash_recovery_enabled is False
-
-
-def test_skill_engine_has_crash_recovery_disabled(_isolated_root: Path) -> None:
-    """Phase-3 engine builder wires ``crash_recovery_enabled=False``."""
-    engine = _backfill._build_skill_engine(_ctx())
+@pytest.mark.parametrize(
+    "specs", [_CLUSTER_SPECS, (EXTRACT_AGENT_SKILL_SPEC,)], ids=["clusters", "skills"]
+)
+def test_replay_engines_have_crash_recovery_disabled(
+    tmp_path: Path, specs: tuple[Any, ...]
+) -> None:
+    engine = build_replay_engine(MemoryRoot(tmp_path), make_deps(), specs)
     assert engine._config.crash_recovery_enabled is False
 
 
 @pytest.mark.asyncio
 async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
-    _isolated_root: Path,
+    tmp_path: Path,
 ) -> None:
     """End-to-end M10 pin: seed a stale RUNNING row for a strategy the
     backfill engine does NOT register, then start the backfill engine.
@@ -81,7 +63,7 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
     # Seed a stale RUNNING row directly on the shared ome.db, mimicking
     # a prior server session that crashed mid-flight on a strategy the
     # backfill engine does not know.
-    root = MemoryRoot.resolve()
+    root = MemoryRoot(tmp_path)
     root.ome_db.parent.mkdir(parents=True, exist_ok=True)
     storage = OMEStorage(db_path=root.ome_db)
     await storage.init()
@@ -106,7 +88,7 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
         )
         await conn.commit()
 
-    engine = _backfill._build_cluster_engine(_ctx())
+    engine = build_replay_engine(root, make_deps(), _CLUSTER_SPECS)
     await engine.start()
     try:
         rec = await rec_store.get("r_server_stale")

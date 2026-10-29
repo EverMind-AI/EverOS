@@ -106,6 +106,11 @@ class StorageView:
         """The derived-index repositories."""
         return self.index.repositories
 
+    async def create_schema(self) -> None:
+        """Create every SQLite table, as ``Application.start`` does."""
+        async with self.database.engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
     async def aclose(self) -> None:
         """Close the index connection and dispose the database."""
         await self.index.shutdown()

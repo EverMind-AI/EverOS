@@ -2,7 +2,7 @@
 
 Thin adapter: validate the request DTO, dispatch to the service layer,
 return the envelope verbatim. ``request_id`` is generated inside the
-:class:`SearchManager` (uniform for OSS + cloud); we trust that value
+service layer (uniform for OSS + cloud); we trust that value
 on the way out.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from everos.entrypoints.api.utils import application
-from everos.memory.search import SearchRequest, SearchResponse
+from everos.service import SearchRequest, SearchResponse
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 

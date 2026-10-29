@@ -12,8 +12,8 @@ from everalgo.types import ChatMessage, MemCell
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import SqliteSettings
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,

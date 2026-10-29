@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -38,19 +38,20 @@ async def runtime(
 
 
 def _make_orchestrator(
-    storage: Storage, memory_root: MemoryRoot
+    storage: Storage, memory_root: MemoryRoot, **config: Any
 ) -> CascadeOrchestrator:
+    knobs: dict[str, Any] = {
+        "scan_interval_seconds": 60.0,
+        "worker_batch_size": 10,
+        "worker_max_retry": 1,
+        "worker_poll_interval_seconds": 0.05,
+        "worker_retry_backoff_seconds": 0.0,
+    }
     return CascadeOrchestrator(
         memory_root=memory_root,
         tokenizer=build_tokenizer(),
         embedding=None,
-        config=CascadeConfig(
-            scan_interval_seconds=60.0,
-            worker_batch_size=10,
-            worker_max_retry=1,
-            worker_poll_interval_seconds=0.05,
-            worker_retry_backoff_seconds=0.0,
-        ),
+        config=CascadeConfig(**{**knobs, **config}),
         index=storage.index,
         sqlite=storage.sqlite,
     )
@@ -150,7 +151,7 @@ async def test_permanent_failures_are_informational_not_unhealthy(
     surfaced as an informational count while ``healthy`` stays true so
     long as the pipeline itself (drain / optimize / prune) is fine.
     """
-    from everos.component.utils.datetime import get_utc_now
+    from everos.core.utils.datetime import get_utc_now
 
     orch = _make_orchestrator(storage, runtime)
     await storage.sqlite.md_change_state.upsert(
@@ -373,7 +374,7 @@ async def test_drain_fully_waits_for_a_batch_another_drainer_holds(
     (real host, 12000-row ledger: 50 rows left behind). So the ledger, not
     our own pass, says when the drain is done.
     """
-    orch = _make_orchestrator(storage, runtime)
+    orch = _make_orchestrator(storage, runtime, worker_poll_interval_seconds=0.01)
     q = _SharedQueue(rows=5050)
     a, b, c = _patched(orch, q)
     with a, b, c:
@@ -392,9 +393,6 @@ async def test_drain_fully_waits_for_a_batch_another_drainer_holds(
 
         orch.sync_once.side_effect = first_pass
         orch.drain_once.side_effect = worker_finishes_later
-        orch._config = dataclasses.replace(
-            orch._config, worker_poll_interval_seconds=0.01
-        )
         processed = await orch.drain_fully()
 
     assert q.summaries and q.summaries[-1] == 0, (
@@ -409,18 +407,15 @@ async def test_drain_fully_gives_up_when_the_ledger_stops_moving(
     """A row stuck in ``processing`` (a hung handler) must not hang the caller
     forever; after the idle limit the drain returns and the caller reports
     what is left."""
-    orch = _make_orchestrator(storage, runtime)
+    orch = _make_orchestrator(
+        storage,
+        runtime,
+        worker_poll_interval_seconds=0.01,
+        drain_idle_limit_seconds=0.05,
+    )
     q = _SharedQueue(rows=0)
     q.held = 1
     a, b, c = _patched(orch, q)
-    with (
-        a,
-        b,
-        c,
-        patch("everos.infra.cascade.orchestrator._DRAIN_IDLE_LIMIT_SECONDS", 0.05),
-    ):
-        orch._config = dataclasses.replace(
-            orch._config, worker_poll_interval_seconds=0.01
-        )
+    with a, b, c:
         assert await orch.drain_fully() == 0
     assert q.summaries[-1] == 1  # gave up with the row still held, and said so

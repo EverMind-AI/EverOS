@@ -15,7 +15,7 @@ from __future__ import annotations
 from sqlalchemy import Index, LargeBinary
 from sqlmodel import Field
 
-from everos.component.utils.datetime import UtcDatetime
+from everos.core.utils.datetime import UtcDatetime
 from everos.infra.persistence.sqlite.base.base import BaseTable, UtcDateTimeColumn
 
 

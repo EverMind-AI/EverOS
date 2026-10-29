@@ -15,7 +15,7 @@ The settings tree mirrors the TOML structure: ``settings.sqlite.busy_timeout_ms`
 maps to ``[sqlite].busy_timeout_ms`` and to ``EVEROS_SQLITE__BUSY_TIMEOUT_MS``.
 
 ``load_settings`` is ``functools.cache``-d so callers in hot paths (e.g.
-:mod:`everos.component.utils.datetime`) don't re-parse the TOML on every
+:mod:`everos.core.utils.datetime`) don't re-parse the TOML on every
 call. Tests that mutate environment variables must call
 ``load_settings.cache_clear()`` after the mutation to invalidate.
 """

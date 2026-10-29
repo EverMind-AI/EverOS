@@ -81,9 +81,6 @@ async def memorize_env_scripted(
 
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
     fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
-    lock_mod = importlib.import_module("everos.service._session_lock")
-
-    lock_mod._reset_for_tests()
 
     started: dict[str, Any] = {"engine": None}
 
@@ -147,7 +144,7 @@ def _msg(idx: int, sender: str = "alice") -> dict[str, Any]:
 
 async def _buffer_rows(storage: Storage, session_id: str) -> list[tuple[str, int]]:
     """Return ``[(message_id, timestamp_ms)]`` for buffer rows, time-ordered."""
-    from everos.component.utils.datetime import from_iso_format, to_timestamp_ms
+    from everos.core.utils.datetime import from_iso_format, to_timestamp_ms
 
     eng = storage.database.engine
     async with eng.connect() as conn:

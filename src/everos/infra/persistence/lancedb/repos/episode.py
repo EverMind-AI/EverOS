@@ -124,7 +124,7 @@ class _EpisodeRepo(LanceIndexContract[Episode], LanceDailyLogRepoBase[Episode]):
             When ``columns`` is a projection: list of raw dicts holding
             only the requested columns, ordered ascending by timestamp.
         """
-        from everos.component.utils.datetime import to_iso_format
+        from everos.core.utils.datetime import to_iso_format
 
         # Convert milliseconds to UTC datetime, then to ISO string for DataFusion
         # (stored timestamps are always UTC)

@@ -12,8 +12,8 @@ from typing import ClassVar
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import LanceDBSettings
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import KnowledgeTopic, primary_key
 from everos.infra.persistence.lancedb import (

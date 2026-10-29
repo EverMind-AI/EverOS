@@ -45,7 +45,7 @@ from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.ome._dispatch.dispatcher import EventDispatcher
 from everos.infra.ome._dispatch.registry import StrategyRegistry
 from everos.infra.ome._stores import counter as counter_mod

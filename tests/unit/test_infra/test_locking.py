@@ -125,7 +125,6 @@ async def test_blocking_wait_is_bounded_and_logged(
             return rec
 
     monkeypatch.setattr(locking, "logger", _SpyLogger())
-    monkeypatch.setattr(locking, "_LOCK_POLL_INTERVAL_SECONDS", 0.01)
 
     mr = MemoryRoot(tmp_path)
     ctx = multiprocessing.get_context("spawn")
@@ -137,7 +136,9 @@ async def test_blocking_wait_is_bounded_and_logged(
         assert ready.wait(timeout=_SPAWN_TIMEOUT_S)
         started = time.monotonic()
         with pytest.raises(LockError, match="timed out"):
-            async with memory_root_lock(mr, timeout_seconds=0.2):
+            async with memory_root_lock(
+                mr, timeout_seconds=0.2, poll_interval_seconds=0.01
+            ):
                 pass
         elapsed = time.monotonic() - started
         assert 0.2 <= elapsed < 5.0, f"must give up near the budget, took {elapsed}s"
@@ -177,7 +178,6 @@ async def test_successful_wait_logs_how_long_it_waited(
             return rec
 
     monkeypatch.setattr(locking, "logger", _SpyLogger())
-    monkeypatch.setattr(locking, "_LOCK_POLL_INTERVAL_SECONDS", 0.01)
 
     mr = MemoryRoot(tmp_path)
     ctx = multiprocessing.get_context("spawn")
@@ -188,7 +188,9 @@ async def test_successful_wait_logs_how_long_it_waited(
     try:
         assert ready.wait(timeout=_SPAWN_TIMEOUT_S)
         threading.Timer(0.2, release.set).start()
-        async with memory_root_lock(mr, timeout_seconds=5.0):
+        async with memory_root_lock(
+            mr, timeout_seconds=5.0, poll_interval_seconds=0.01
+        ):
             pass
         assert events == [
             "memory_root_lock_waiting",

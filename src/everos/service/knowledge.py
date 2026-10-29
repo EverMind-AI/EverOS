@@ -37,16 +37,17 @@ from everalgo.types import (
     RawFile,
 )
 
-from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import (
     DocumentNotFoundError,
     DuplicateDocumentError,
     ExtractionEmptyError,
+    InvalidInputError,
     LLMNotConfiguredError,
     ProviderNotConfiguredError,
     TopicNotFoundError,
 )
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import get_utc_now
 from everos.memory.mappers import knowledge as knowledge_mapper
 from everos.memory.models import KnowledgeDocument, KnowledgeTopic
 from everos.memory.models import KnowledgeMemory as DomainKnowledgeMemory
@@ -60,6 +61,13 @@ from everos.memory.ports import (
     eq,
 )
 from everos.memory.search.callbacks import build_fetched_rerank_fn
+from everos.service._upload import (
+    KnowledgeUpload,
+    decode_utf8,
+    extension_of,
+    looks_like_utf8_text,
+    require_content,
+)
 
 if TYPE_CHECKING:
     from everos.component.embedding import EmbeddingProvider
@@ -277,6 +285,10 @@ class KnowledgeService:
         search_config: The ``[knowledge.search]`` section.
         parse_file: Parses an uploaded non-text file with the multimodal
             LLM the application was built with.
+        parser_available: Whether the optional parser is installed; without
+            it every upload is decoded as UTF-8 text.
+        max_upload_bytes: The largest upload accepted (``[knowledge]
+            max_upload_bytes``).
     """
 
     def __init__(
@@ -290,6 +302,8 @@ class KnowledgeService:
         recaller: KnowledgeTopicRecaller,
         search_config: KnowledgeSearchSettings,
         parse_file: Callable[[RawFile], Awaitable[ParsedContent]],
+        parser_available: bool = False,
+        max_upload_bytes: int = 52_428_800,
     ) -> None:
         self._store = store
         self._catalog = catalog
@@ -299,6 +313,25 @@ class KnowledgeService:
         self._recaller = recaller
         self._search_config = search_config
         self._parse_file = parse_file
+        self._parser_available = parser_available
+        self._max_upload_bytes = max_upload_bytes
+
+    def require_search_providers(self) -> None:
+        """Refuse what cannot work end to end without embedding and rerank.
+
+        Uploads and search need both. The cascade's knowledge handlers
+        register unconditionally (a tier downgrade must still be able to
+        delete documents) and skip the index write without the providers, so
+        an upload accepted here would be written but never become
+        searchable; refusing up front is the honest answer. Reads, deletes
+        and metadata patches need neither, so a deployment that lost a
+        provider can still inspect and clean up what it has.
+
+        Raises:
+            ProviderNotConfiguredError: Embedding (checked first) or rerank
+                is not configured.
+        """
+        self._require_search_providers()
 
     async def parse_file(self, raw_file: RawFile) -> ParsedContent:
         """Parse an uploaded file with the application's multimodal parser.
@@ -310,6 +343,97 @@ class KnowledgeService:
         return await self._parse_file(raw_file)
 
     # ── Upload ───────────────────────────────────────────────────────────
+
+    async def create_from_upload(
+        self,
+        upload: KnowledgeUpload,
+        *,
+        title: str,
+        app_id: str = "default",
+        project_id: str = "default",
+        source_type: str | None = None,
+        category_id: str | None = None,
+    ) -> CreateDocumentResult:
+        """Create a document from an uploaded file (size check, parse, extract).
+
+        Raises:
+            InvalidInputError: The upload is too large or has no content.
+            UnsupportedModalityError: The file cannot be parsed.
+            LLMNotConfiguredError: No LLM is configured to extract topics.
+            ExtractionEmptyError: When the extractor produces no memories.
+        """
+        parsed, raw = await self._read_upload(upload)
+        return await self.create_document(
+            parsed=parsed,
+            title=title,
+            app_id=app_id,
+            project_id=project_id,
+            source_name=upload.filename,
+            source_type=source_type,
+            category_id=category_id,
+            file_content=raw,
+        )
+
+    async def replace_from_upload(
+        self,
+        doc_id: str,
+        upload: KnowledgeUpload,
+        *,
+        title: str,
+        app_id: str = "default",
+        project_id: str = "default",
+        source_type: str | None = None,
+        category_id: str | None = None,
+    ) -> CreateDocumentResult:
+        """Replace a document with an uploaded file; see :meth:`replace_document`.
+
+        Raises:
+            InvalidInputError: The upload is too large or has no content.
+            UnsupportedModalityError: The file cannot be parsed.
+            LLMNotConfiguredError: No LLM is configured to extract topics.
+            DocumentNotFoundError: When ``doc_id`` does not exist.
+            ExtractionEmptyError: When extraction produces no memories.
+        """
+        parsed, raw = await self._read_upload(upload)
+        return await self.replace_document(
+            doc_id=doc_id,
+            parsed=parsed,
+            title=title,
+            app_id=app_id,
+            project_id=project_id,
+            source_name=upload.filename,
+            source_type=source_type,
+            category_id=category_id,
+            file_content=raw,
+        )
+
+    async def _read_upload(
+        self, upload: KnowledgeUpload
+    ) -> tuple[ParsedContent, bytes]:
+        """Refuse an oversized upload before reading it, then parse it.
+
+        Plain text skips the parser even when it is installed.
+        """
+        self._reject_oversized(upload.size)
+        raw = await upload.read()
+        if looks_like_utf8_text(upload) or not self._parser_available:
+            return decode_utf8(raw), raw
+        parsed = await self.parse_file(
+            RawFile(
+                content=raw,
+                mime=upload.content_type or "",
+                extension=extension_of(upload.filename),
+            )
+        )
+        require_content(parsed)
+        return parsed, raw
+
+    def _reject_oversized(self, size: int | None) -> None:
+        if size is not None and size > self._max_upload_bytes:
+            limit_mib = self._max_upload_bytes / (1024 * 1024)
+            raise InvalidInputError(
+                f"Uploaded file exceeds the {limit_mib:.1f} MiB limit."
+            )
 
     async def create_document(
         self,
@@ -708,9 +832,6 @@ class KnowledgeService:
 
     def _require_search_providers(self) -> tuple[EmbeddingProvider, RerankProvider]:
         """The embedding + rerank providers, which search cannot run without.
-
-        The HTTP router already gates both capabilities; this guards any
-        caller that bypasses it.
 
         Raises:
             ProviderNotConfiguredError: When either provider is missing.

@@ -24,10 +24,10 @@ from everalgo.boundary import DetectionResult, adetect_boundaries
 from everalgo.llm import LLMClient, LLMOutputError
 from everalgo.types import MemCell
 
-from everos.component.utils.datetime import from_timestamp
 from everos.config import BoundaryDetectionSettings
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
+from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.models import CanonicalMessage, IngestResult, MemcellRecord

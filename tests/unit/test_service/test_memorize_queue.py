@@ -29,10 +29,10 @@ from typing import Any
 import pytest
 from sqlmodel import SQLModel
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import SqliteSettings
 from everos.config.settings import AsyncQueueSettings
 from everos.core.errors import PayloadTooLargeError, QueueSaturatedError
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     SqliteMemorizeInboxStore,
@@ -58,13 +58,17 @@ def _fresh_wiring() -> None:
 
 
 def _worker(
-    settings: AsyncQueueSettings, *, accept_async: bool = True
+    settings: AsyncQueueSettings, *, accept_async: bool = True, **timing: float
 ) -> mq.MemorizeQueueWorker:
     async def deliver(payload: dict[str, Any], **kwargs: Any) -> object:
         return await _wiring["deliver"](payload, **kwargs)
 
     return mq.MemorizeQueueWorker(
-        settings, inbox=_wiring["inbox"], deliver=deliver, accept_async=accept_async
+        settings,
+        inbox=_wiring["inbox"],
+        deliver=deliver,
+        accept_async=accept_async,
+        **timing,
     )
 
 
@@ -674,8 +678,7 @@ async def test_stop_cancels_after_the_grace_period(
 ) -> None:
     fake = _BlockingMemorize()  # never released
     _wiring["deliver"] = fake
-    monkeypatch.setattr(mq, "_STOP_GRACE_SECONDS", 0.05)
-    w = _worker(_settings())
+    w = _worker(_settings(), stop_grace_seconds=0.05)
     await w.start()
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
@@ -730,7 +733,6 @@ async def test_sweep_fails_processing_rows_nobody_is_working_on(
 async def test_status_write_is_retried_before_giving_up(
     repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(mq, "_MARK_RETRY_SECONDS", 0.0)
     real_mark = repo.mark
     failures = {"left": 2}
 
@@ -741,7 +743,7 @@ async def test_status_write_is_retried_before_giving_up(
         await real_mark(row_id, **values)
 
     monkeypatch.setattr(repo, "mark", flaky_mark)
-    w = _worker(_settings())
+    w = _worker(_settings(), mark_retry_seconds=0.0)
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -828,7 +830,6 @@ async def test_lost_status_write_is_reaped_before_the_next_row(
     repo: MemorizeInboxRepo, fake: _FakeMemorize, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stuck row must not wait for the backlog to drain before it is failed."""
-    monkeypatch.setattr(mq, "_MARK_RETRY_SECONDS", 0.0)
     real_mark = repo.mark
 
     async def mark_that_loses_r1(row_id: int, **values: Any) -> None:
@@ -838,7 +839,7 @@ async def test_lost_status_write_is_reaped_before_the_next_row(
         await real_mark(row_id, **values)
 
     monkeypatch.setattr(repo, "mark", mark_that_loses_r1)
-    w = _worker(_settings())
+    w = _worker(_settings(), mark_retry_seconds=0.0)
     await w.enqueue(
         _payload("s1"), request_id="r1", is_final=False, defer_extraction=False
     )
@@ -885,18 +886,23 @@ class _LoopKiller(BaseException):
 async def _kill_loop(
     w: mq.MemorizeQueueWorker, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Make the next sweep raise past the loop's handler; wait for the loop to die."""
-    real_sweep = w._sweep
+    """Make the next sweep raise past the loop's handler; wait for the loop to die.
+
+    The sweep's first act is purging expired rows, so the inbox raising there
+    once is a sweep that raises.
+    """
+    inbox = _wiring["inbox"]
+    real_purge = inbox.purge_expired
     armed = True
 
-    async def sweep_then_die() -> None:
+    async def purge_then_die(**kwargs: Any) -> tuple[int, int]:
         nonlocal armed
         if armed:
             armed = False
             raise _LoopKiller
-        await real_sweep()
+        return await real_purge(**kwargs)
 
-    monkeypatch.setattr(w, "_sweep", sweep_then_die)
+    monkeypatch.setattr(inbox, "purge_expired", purge_then_die)
     assert w._task is not None
     w._wake.set()
     done, _ = await asyncio.wait([w._task], timeout=2)
@@ -910,7 +916,6 @@ async def test_dead_loop_restarts_on_next_enqueue(
     await w.start()
     try:
         await _kill_loop(w, monkeypatch)
-        monkeypatch.setattr(mq, "_restart_later", None, raising=False)  # not relied on
 
         await w.enqueue(
             _payload("s1"), request_id="r1", is_final=False, defer_extraction=False

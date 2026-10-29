@@ -34,15 +34,18 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from everos.component.utils.datetime import get_utc_now
 from everos.config import Settings, load_settings
-from everos.entrypoints.cli.commands import _backfill_cmd as backfill_cmd
+from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands import cascade as cascade_mod
-from everos.entrypoints.cli.commands._backfill_cmd import PHASES, run_backfill
+from everos.entrypoints.cli.commands._backfill_cmd import (
+    PHASE_COPY,
+    TyperPresenter,
+    run_backfill,
+)
 from everos.infra.persistence.lancedb import Episode
 from everos.service import (
+    BACKFILL_PHASES,
     Application,
-    BackfillPhase,
     OpsService,
     build_application,
     build_providers,
@@ -144,8 +147,8 @@ def test_backfill_invalid_phase_rejected() -> None:
     assert result.exit_code != 0
 
 
-def test_phases_slugs_match_cli_choices() -> None:
-    assert [p.slug for p in PHASES] == ["vectors", "clusters", "skills"]
+def test_every_phase_has_its_header_copy() -> None:
+    assert list(PHASE_COPY) == list(BACKFILL_PHASES)
 
 
 async def test_run_backfill_single_phase_runs_only_that_phase(
@@ -203,31 +206,44 @@ async def test_run_backfill_abort_returns_one(
     assert code == 1
 
 
-async def test_run_backfill_unexpected_error_returns_two(
-    ops: OpsService,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _raise(*_args: object, **_kwargs: object) -> None:
+class _BrokenOps:
+    """An ops facade whose backfill fails with an unexpected error."""
+
+    async def backfill(self, *_args: object, **_kwargs: object) -> None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(backfill_cmd, "_print_phase_header", _raise)
-    code = await run_backfill(ops, phase="vectors", auto_yes=True)
+
+async def test_run_backfill_unexpected_error_returns_two(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = await run_backfill(_BrokenOps(), phase="vectors", auto_yes=True)  # type: ignore[arg-type]
+
     assert code == 2
+    assert "Backfill failed — see logs for details." in capsys.readouterr().out
 
 
-def test_confirm_auto_yes_short_circuits(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_confirm_auto_yes_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _boom(*_args: object, **_kwargs: object) -> bool:
         raise AssertionError("must not prompt when auto_yes=True")
 
     monkeypatch.setattr(typer, "confirm", _boom)
-    assert backfill_cmd._confirm("anything", auto_yes=True) is True
+    assert await TyperPresenter().confirm("anything", auto_yes=True) is True
 
 
-def test_confirm_delegates_to_typer_when_not_auto_yes(
+async def test_confirm_delegates_to_typer_when_not_auto_yes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(typer, "confirm", lambda *a, **k: True)
-    assert backfill_cmd._confirm("anything", auto_yes=False) is True
+    prompts: list[str] = []
+
+    def _answer(prompt: str, **_kwargs: object) -> bool:
+        prompts.append(prompt)
+        return True
+
+    monkeypatch.setattr(typer, "confirm", _answer)
+    assert await TyperPresenter().confirm("anything", auto_yes=False) is True
+    assert prompts == ["Proceed with: anything"]
 
 
 def test_backfill_cli_abort_via_n_returns_exit_code_one(
@@ -252,10 +268,3 @@ def test_backfill_cli_yes_flag_auto_confirms() -> None:
     )
     assert result.exit_code == 0
     assert "Phase 2" in result.stdout
-
-
-def test_backfill_phase_dataclass_is_frozen() -> None:
-    phase = PHASES[0]
-    assert isinstance(phase, BackfillPhase)
-    with pytest.raises(Exception):  # noqa: B017 — dataclasses.FrozenInstanceError
-        phase.number = 99  # type: ignore[misc]

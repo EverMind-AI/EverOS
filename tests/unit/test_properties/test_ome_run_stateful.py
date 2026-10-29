@@ -34,6 +34,7 @@ The ring-buffer trim of the run-record table is left to its own unit test:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import threading
 import time
@@ -42,7 +43,6 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
-from unittest import mock
 
 import pytest
 from hypothesis import HealthCheck, currently_in_test_context, settings
@@ -50,13 +50,12 @@ from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
-from everos.component.utils.datetime import get_utc_now, to_iso_format
+from everos.core.utils.datetime import get_utc_now, to_iso_format
 from everos.infra.ome import RunStatus
-from everos.infra.ome._dispatch import runner as runner_mod
 from everos.infra.ome._stores import storage as storage_mod
 from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
-from everos.memory.ports import Event, Immediate
+from everos.memory.ports import Event, Immediate, StrategySpec
 from tests.fakes import make_deps
 from tests.helpers.ome import strategy_spec
 
@@ -151,6 +150,9 @@ async def _scripted(event: Event, deps: MemoryDeps) -> list[Event]:
 
 
 class OmeRunMachine(RuleBasedStateMachine):
+    SPEC: StrategySpec = _scripted
+    """What the engine runs; the model always expects ``_scripted``'s budget."""
+
     def __init__(self) -> None:
         super().__init__()
         self.loop = asyncio.new_event_loop()
@@ -161,7 +163,7 @@ class OmeRunMachine(RuleBasedStateMachine):
         # it out of reach of anything one sequence can write (a deep
         # sequence writes a few hundred rows, the default cap is 100).
         self.h._engine._config.max_records_per_strategy = 100_000
-        self.h.register(_scripted, make_deps())
+        self.h.register(self.SPEC, make_deps())
         self.run(self.h.start())
         self.expected: dict[str, list[tuple[RunStatus, int]]] = {}
         self.plan_of: dict[str, str] = {}
@@ -341,20 +343,19 @@ class OmeRunMachine(RuleBasedStateMachine):
 TestOmeRunMachine = OmeRunMachine.TestCase
 
 
+class _NoRetryMachine(OmeRunMachine):
+    """The engine makes every failed attempt terminal."""
+
+    SPEC = dataclasses.replace(_scripted, max_retries=0)
+
+
 def test_machine_catches_a_dropped_retry() -> None:
-    """Self-check: make every failed attempt terminal and the attempt-chain
-    invariant must trip on a flaky job."""
-    real = runner_mod.Runner._run_one_attempt
-
-    async def no_retry(self: Any, **kw: Any) -> bool:
-        await real(self, **kw)
-        return True
-
-    with mock.patch.object(runner_mod.Runner, "_run_one_attempt", no_retry):
-        machine = OmeRunMachine()
-        try:
-            machine.emit_and_drain(["flaky"])
-            with pytest.raises(AssertionError):
-                machine.every_job_has_exactly_its_attempt_chain()
-        finally:
-            machine.teardown()
+    """Self-check: an engine that drops the retry of a failed attempt must
+    trip the attempt-chain invariant on a flaky job."""
+    machine = _NoRetryMachine()
+    try:
+        machine.emit_and_drain(["flaky"])
+        with pytest.raises(AssertionError):
+            machine.every_job_has_exactly_its_attempt_chain()
+    finally:
+        machine.teardown()

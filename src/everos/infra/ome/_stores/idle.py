@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from everos.component.utils.datetime import ensure_utc, from_iso_format, to_iso_format
+from everos.core.utils.datetime import ensure_utc, from_iso_format, to_iso_format
 from everos.infra.ome._stores.storage import OMEStorage
 
 

@@ -1,14 +1,14 @@
 """``memorize`` opens an add, deferred-buffer, or flush span.
 
-The inner critical section is mocked out — this asserts only the span
-wrapping + name selection (add vs flush) driven by ``is_final``.
+The boundary stage cuts nothing — this asserts only the span wrapping +
+name selection (add vs buffer vs flush) driven by ``is_final`` /
+``defer_extraction``.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
-from unittest.mock import AsyncMock
+from typing import Any
 
 import pytest
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -22,31 +22,40 @@ from everos.core.observability.tracing import (
     init_tracing,
     shutdown_tracing,
 )
-from everos.service import MemorizeResult, MemoryService
+from everos.memory import IngestResult
+from everos.memory.extract.boundary import BoundaryOutcome
+from everos.service import MemoryService
 from tests.fakes import make_memory_service
+
+
+class _EmptyBoundary:
+    """A boundary stage that buffers everything and cuts nothing."""
+
+    async def buffer(self, ingested: IngestResult, **_: Any) -> BoundaryOutcome:
+        return _nothing_cut()
+
+    async def detect(self, ingested: IngestResult, **_: Any) -> BoundaryOutcome:
+        return _nothing_cut()
+
+
+def _nothing_cut() -> BoundaryOutcome:
+    return BoundaryOutcome(
+        cells=[],
+        memcell_ids=[],
+        per_cell_message_ids=[],
+        per_cell_all_senders=[],
+        status="accumulated",
+        message_count=0,
+    )
 
 
 @pytest.fixture
 def mm() -> MemoryService:
-    return make_memory_service()
+    return make_memory_service(boundary=_EmptyBoundary())
 
 
 @pytest.fixture(autouse=True)
-def _patch(
-    mm: MemoryService, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[InMemorySpanExporter]:
-    monkeypatch.setattr(
-        mm,
-        "_memorize_locked",
-        AsyncMock(return_value=MemorizeResult(message_count=0, status="extracted")),
-    )
-
-    # memorize() acquires and releases the lock explicitly (the timeout
-    # bounds the wait only), so the stand-in is a real, uncontended Lock.
-    monkeypatch.setattr(
-        "everos.service.memory.get_session_lock", lambda session_id: asyncio.Lock()
-    )
-
+def _patch() -> Iterator[InMemorySpanExporter]:
     exporter = InMemorySpanExporter()
     shutdown_tracing()
     init_tracing(

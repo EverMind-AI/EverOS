@@ -25,8 +25,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from everos.component.utils.datetime import to_timestamp_ms
 from everos.core.observability.logging import get_logger
+from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
     AgentCase,
     AgentSkill,

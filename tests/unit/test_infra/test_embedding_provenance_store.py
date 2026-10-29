@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from everos.component.utils.datetime import get_utc_now
+from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import lancedb as lance
 from everos.infra.persistence.records.episode import Episode
 from tests.fakes.storage import Storage

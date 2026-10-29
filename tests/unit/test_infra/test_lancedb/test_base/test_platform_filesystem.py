@@ -28,7 +28,7 @@ from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connect
 from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
 from everos.infra.persistence.lancedb.base.repository import (
     _HUSK_MIN_AGE_SECONDS,
-    _remove_empty_index_dirs,
+    remove_empty_index_dirs,
 )
 from everos.infra.persistence.records import BaseLanceTable, Vector
 
@@ -104,7 +104,7 @@ def test_husk_sweep_skips_a_refused_rmdir_and_keeps_going(
 
     monkeypatch.setattr(Path, "rmdir", refusing_rmdir)
 
-    removed = _remove_empty_index_dirs(
+    removed = remove_empty_index_dirs(
         str(tmp_path), live_uuids=frozenset(), min_age_seconds=1.0
     )
 

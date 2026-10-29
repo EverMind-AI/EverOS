@@ -1,6 +1,6 @@
 """Laws of the datetime helpers, checked on generated instants.
 
-``everos.component.utils.datetime`` is the one place the two-zone discipline
+``everos.core.utils.datetime`` is the one place the two-zone discipline
 (UTC in storage, display zone at the edges) is implemented, and every
 timestamp in SQLite, LanceDB and the markdown files passes through it. The
 functions promise algebraic facts in their docstrings; this module states
@@ -37,7 +37,7 @@ import datetime as dt
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from everos.component.utils import datetime as dtu
+from everos.core.utils import datetime as dtu
 
 # 1970-01-01 .. 2100-01-01, in epoch milliseconds.
 _MS_MAX = 4_102_444_800_000

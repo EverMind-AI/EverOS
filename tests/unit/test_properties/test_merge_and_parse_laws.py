@@ -36,7 +36,7 @@ from everos.memory.extract.boundary.messages import merge_dedupe_sort
 from everos.memory.models import CanonicalMessage
 from everos.memory.search.llm_multiround import _coerce_core_indices
 from everos.memory.search.recall import RecallResult, merge_by_id_max
-from everos.service.memory import _merge_status
+from everos.service.memory._memorize import _merge_status
 
 _UTC = dt.UTC
 
