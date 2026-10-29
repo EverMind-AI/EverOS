@@ -8,11 +8,14 @@ tree::
     knowledge/<category>/<title>_<doc_id>/_original/<f>   uploaded file
 
 A document is found by the ``_<doc_id>`` suffix of its directory name
-(compared literally: a caller-supplied id never acts as a glob or a path)
-unless the caller already knows its ``md_path``; ``read_document`` matches
-``doc_id`` in the ``index.md`` frontmatter instead. Hidden directories
-are never touched: a replacement in progress keeps its backup under a
-``.<name>.backup`` sibling.
+(compared literally: a caller-supplied id never acts as a glob or a path);
+``read_document`` matches ``doc_id`` in the ``index.md`` frontmatter
+instead. The search also covers the project directory itself, where a
+category move of ``..`` used to land a document before category ids were
+sanitised -- so such a document is still found, moved back, or deleted.
+Hidden directories are never touched: a replacement in progress keeps its
+backup under a ``.<name>.backup`` sibling. Callers never pass a path in:
+every write reports where the document is as a ``WrittenDocument``.
 
 Untrusted names -- the multipart upload filename, a category id -- are
 reduced to one safe path component and the resolved target is asserted to
@@ -99,7 +102,7 @@ class MarkdownKnowledgeStore:
         original_path: str | None = None
         if original_name is not None and original is not None:
             original_path = str(await _write_original(doc_dir, original_name, original))
-        return WrittenDocument(location=str(doc_dir), original_file_path=original_path)
+        return self._written(doc_dir, original_path)
 
     async def replace_document(
         self,
@@ -111,7 +114,9 @@ class MarkdownKnowledgeStore:
         original: bytes | None,
     ) -> WrittenDocument:
         knowledge_dir = self._knowledge_dir(previous.app_id, previous.project_id)
-        backup = await _back_up(await self._dirs_of(previous))
+        backup = await _back_up(
+            await self._dirs_of(previous.app_id, previous.project_id, previous.doc_id)
+        )
         try:
             written = await self.write_document(
                 previous.app_id,
@@ -135,17 +140,10 @@ class MarkdownKnowledgeStore:
         await _drop(backup)
         return written
 
-    async def delete_document(
-        self, app_id: str, project_id: str, doc_id: str, *, md_path: str | None
-    ) -> int:
-        if md_path is None:
-            return await anyio.to_thread.run_sync(
-                _remove_doc_dirs, self._knowledge_dir(app_id, project_id), doc_id
-            )
-        doc_dir = self._root.root / Path(md_path).parent
-        if not await anyio.Path(doc_dir).is_dir():
-            return 0
-        return await anyio.to_thread.run_sync(_remove_dir, doc_dir)
+    async def delete_document(self, app_id: str, project_id: str, doc_id: str) -> int:
+        return await anyio.to_thread.run_sync(
+            _remove_doc_dirs, self._knowledge_dir(app_id, project_id), doc_id
+        )
 
     async def read_document(
         self, app_id: str, project_id: str, doc_id: str
@@ -162,12 +160,11 @@ class MarkdownKnowledgeStore:
             title=fm.get("title", ""),
             source_name=fm.get("source_name"),
             source_type=fm.get("source_type"),
-            md_path=str(index.relative_to(self._root.root)),
         )
 
     async def update_document(
         self, document: KnowledgeDocument, *, previous_category_id: str
-    ) -> KnowledgeDocument:
+    ) -> WrittenDocument:
         index = await self._index_of(document)
         if index is None or not await anyio.Path(index).is_file():
             raise DocumentNotFoundError(f"Document {document.doc_id!r} not found")
@@ -180,39 +177,40 @@ class MarkdownKnowledgeStore:
                 knowledge_dir, index.parent, document.category_id
             )
             await _recategorise_topics(index.parent, document.category_id)
-        return document.model_copy(
-            update={"md_path": str(index.relative_to(self._root.root))}
+        doc_dir = index.parent
+        return self._written(
+            doc_dir, await _original_in([doc_dir], document.source_name)
         )
 
     async def original_file(self, document: KnowledgeDocument) -> str | None:
-        if not document.source_name:
-            return None
-        try:
-            safe_name = _safe_original_filename(document.source_name)
-        except (PathTraversalError, InvalidInputError):
-            return None
-        for doc_dir in await self._dirs_of(document):
-            candidate = doc_dir / _ORIGINAL_DIR_NAME / safe_name
-            if await anyio.Path(candidate).is_file():
-                return str(candidate)
-        return None
+        doc_dirs = await self._dirs_of(
+            document.app_id, document.project_id, document.doc_id
+        )
+        return await _original_in(doc_dirs, document.source_name)
 
-    async def _dirs_of(self, document: KnowledgeDocument) -> list[Path]:
-        """The document's directory: where ``md_path`` says, else by name."""
-        if document.md_path is not None:
-            doc_dir = self._root.root / Path(document.md_path).parent
-            return [doc_dir] if await anyio.Path(doc_dir).is_dir() else []
+    async def _dirs_of(self, app_id: str, project_id: str, doc_id: str) -> list[Path]:
         return await anyio.to_thread.run_sync(
-            _doc_dirs,
-            self._knowledge_dir(document.app_id, document.project_id),
-            document.doc_id,
+            _doc_dirs, self._knowledge_dir(app_id, project_id), doc_id
         )
 
     async def _index_of(self, document: KnowledgeDocument) -> Path | None:
-        if document.md_path is not None:
-            return self._root.root / document.md_path
+        """The document's ``index.md``: by directory name, else by frontmatter."""
+        doc_dirs = await self._dirs_of(
+            document.app_id, document.project_id, document.doc_id
+        )
+        for doc_dir in doc_dirs:
+            index = doc_dir / _INDEX_FILE
+            if await anyio.Path(index).is_file():
+                return index
         return await _locate_index(
             self._knowledge_dir(document.app_id, document.project_id), document.doc_id
+        )
+
+    def _written(self, doc_dir: Path, original_path: str | None) -> WrittenDocument:
+        return WrittenDocument(
+            location=str(doc_dir),
+            md_path=str((doc_dir / _INDEX_FILE).relative_to(self._root.root)),
+            original_file_path=original_path,
         )
 
     def _knowledge_dir(self, app_id: str, project_id: str) -> Path:
@@ -223,16 +221,23 @@ class MarkdownKnowledgeStore:
 
 
 def _doc_dirs(knowledge_dir: Path, doc_id: str) -> list[Path]:
-    """Every visible ``<category>/<title>_<doc_id>`` directory of ``doc_id``."""
-    if not knowledge_dir.is_dir():
-        return []
+    """Every visible directory of ``doc_id``.
+
+    That is each ``<category>/<title>_<doc_id>`` under ``knowledge_dir``, plus
+    a ``<title>_<doc_id>`` an old ``..`` category move left beside it.
+    """
     suffix = f"_{doc_id}"
+    in_tree = (
+        [d for d in knowledge_dir.glob("*/*") if not d.parent.name.startswith(".")]
+        if knowledge_dir.is_dir()
+        else []
+    )
+    project_dir = knowledge_dir.parent
+    escaped = list(project_dir.iterdir()) if project_dir.is_dir() else []
     return [
         d
-        for d in knowledge_dir.glob("*/*")
-        if d.is_dir()
-        and d.name.endswith(suffix)
-        and not any(p.startswith(".") for p in d.relative_to(knowledge_dir).parts)
+        for d in [*in_tree, *escaped]
+        if d.is_dir() and d.name.endswith(suffix) and not d.name.startswith(".")
     ]
 
 
@@ -363,6 +368,21 @@ def _safe_original_filename(source_name: str) -> str:
             f"ceiling (got {size} bytes)"
         )
     return name
+
+
+async def _original_in(doc_dirs: Sequence[Path], source_name: str | None) -> str | None:
+    """The stored upload named ``source_name`` in one of ``doc_dirs``."""
+    if not source_name:
+        return None
+    try:
+        safe_name = _safe_original_filename(source_name)
+    except (PathTraversalError, InvalidInputError):
+        return None
+    for doc_dir in doc_dirs:
+        candidate = doc_dir / _ORIGINAL_DIR_NAME / safe_name
+        if await anyio.Path(candidate).is_file():
+            return str(candidate)
+    return None
 
 
 async def _write_original(doc_dir: Path, safe_name: str, content: bytes) -> Path:

@@ -31,7 +31,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import Foresight, IndexRepository, ParentType
+from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
+    Foresight,
+    IndexRepository,
+    ParentType,
+)
 
 from ._common import (
     optional_int,
@@ -64,7 +69,9 @@ class ForesightHandler(BaseDailyLogHandler):
     excluded — changes there don't propagate."""
 
     def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
-        return (entry.structured.sections.get("Foresight", "").strip(),)
+        return VECTOR_PROJECTIONS[self.kind].texts(
+            {"foresight": entry.structured.sections.get("Foresight", "").strip()}
+        )
 
     async def _build_row(
         self,
@@ -105,5 +112,5 @@ class ForesightHandler(BaseDailyLogHandler):
             evidence_tokens=evidence_tokens,
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vectors[0] if vectors else None,
+            **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

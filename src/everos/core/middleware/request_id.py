@@ -11,7 +11,7 @@ Establishes per-request context at HTTP entry:
   of rooting a new one. Absent → we root our own trace (the common case).
 
 This is the single place a request id enters the system; ``extract_request_id``
-(``entrypoints/api/utils.py``) reads what this middleware sets.
+(``entrypoints/api/dependencies.py``) reads what this middleware sets.
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ __all__ = [
 import datetime as dt
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from everos.memory.models import (
     AgentCase,
@@ -74,9 +74,13 @@ class EpisodeStore(Protocol):
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        """Record ``entry_id -> replacing entry_id`` on one daily-log file."""
+        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
+
+        The adapter groups references for storage; failures propagate after any
+        earlier writes, without an all-or-nothing guarantee.
+        """
         ...
 
 
@@ -89,9 +93,13 @@ class AtomicFactStore(Protocol):
     ) -> list[MemoryRef]: ...
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        """Record ``entry_id -> replacing entry_id`` on one daily-log file."""
+        """Retire ordered ``(md_path, entry_id)`` references in favor of one entry.
+
+        The adapter groups references for storage; failures propagate after any
+        earlier writes, without an all-or-nothing guarantee.
+        """
         ...
 
 
@@ -177,6 +185,24 @@ class MemcellStore(Protocol):
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]: ...
 
+    async def mark_case_extracted(
+        self,
+        memcell_id: str,
+        *,
+        skip_reason: str | None,
+        skip_detail: Mapping[str, Any],
+    ) -> None:
+        """Record that agent-case extraction ran for a memcell, and why it
+        produced nothing if it did not.
+
+        "Extracted" means the extraction ran to completion, not that it
+        produced a case: ``skip_reason`` is ``None`` exactly when a case came
+        out. A gated trajectory is a successful run with no output, so this
+        stamp is the only place its reason survives. An unknown
+        ``memcell_id`` is a no-op.
+        """
+        ...
+
 
 # ── Clusters ─────────────────────────────────────────────────────────────
 
@@ -185,11 +211,13 @@ class MemcellStore(Protocol):
 class ClusterStore(Protocol):
     """Clusters of related memories and their membership."""
 
-    async def list_for_owner(
-        self, scope: Scope, kind: ClusterKind
-    ) -> list[Cluster]: ...
+    async def list_for_owner(self, scope: Scope, kind: ClusterKind) -> list[Cluster]:
+        """Every cluster of one kind the owner has, each with its members."""
+        ...
 
-    async def get(self, cluster_id: str) -> Cluster | None: ...
+    async def get(self, cluster_id: str) -> Cluster | None:
+        """One cluster with its members, or ``None`` when it does not exist."""
+        ...
 
     async def upsert(
         self,
@@ -199,42 +227,42 @@ class ClusterStore(Protocol):
         *,
         member_type: ClusterMemberType,
     ) -> None:
-        """Persist the snapshot and add any members not yet recorded."""
+        """Record a clustering decision: the snapshot plus any new members."""
         ...
 
     async def find_cluster_for_member(
         self, scope: Scope, member_type: ClusterMemberType, member_id: str
-    ) -> str | None: ...
-
-    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
-        """``(member_id, member_type)`` pairs in insertion order."""
+    ) -> str | None:
+        """The cluster a memory already belongs to, or ``None``."""
         ...
 
-    async def add_member(
-        self, cluster_id: str, member_id: str, member_type: ClusterMemberType
-    ) -> None: ...
+    async def members(self, cluster_id: str) -> list[tuple[str, str]]:
+        """``(member_id, member_type)`` pairs in the order they joined."""
+        ...
 
-    async def remove_members(
-        self, cluster_id: str, member_ids: Collection[str]
-    ) -> None: ...
-
-    async def update_metadata(
+    async def replace_members(
         self,
         cluster_id: str,
         *,
+        removed: Collection[str],
+        added: str,
+        member_type: ClusterMemberType,
         centroid: Sequence[float],
         count: int,
         last_ts: int,
         preview: Sequence[str],
-    ) -> None: ...
+    ) -> None:
+        """Fold ``removed`` members into the merged memory ``added``.
 
-    async def list_ids_and_member_counts(
-        self, scope: Scope, kind: ClusterKind
-    ) -> list[tuple[str, int]]: ...
+        The cluster's snapshot (centroid, count, latest timestamp, preview)
+        is restamped in the same step, so membership and snapshot never
+        disagree.
+        """
+        ...
 
-    async def list_distinct_owners(self) -> list[Scope]: ...
-
-    async def count(self) -> int: ...
+    async def list_distinct_owners(self) -> list[Scope]:
+        """Every owner that has at least one cluster."""
+        ...
 
 
 # ── Operational state ────────────────────────────────────────────────────
@@ -322,15 +350,22 @@ class ReflectionReportStore(Protocol):
 
 @dataclass(frozen=True)
 class WrittenDocument:
-    """Where a knowledge document landed.
+    """Where a knowledge document landed -- the storage side of its identity.
+
+    The domain ``KnowledgeDocument`` carries no path; the store finds a
+    document by its id, and this value object hands the location to whoever
+    keeps a record of it (the catalog), as ``MemoryRef`` does for owner
+    memories.
 
     Attributes:
         location: The document's directory, as an absolute path.
+        md_path: The document's ``index.md``, relative to the memory root.
         original_file_path: The stored copy of the uploaded file, when one
-            was kept.
+            exists.
     """
 
     location: str
+    md_path: str
     original_file_path: str | None
 
 
@@ -377,14 +412,8 @@ class KnowledgeStore(Protocol):
         """Write over ``previous``; on any failure its files come back."""
         ...
 
-    async def delete_document(
-        self, app_id: str, project_id: str, doc_id: str, *, md_path: str | None
-    ) -> int:
-        """Remove the document's directory; returns the topic files removed.
-
-        ``md_path`` (when the catalog knows it) names the directory; without
-        it every directory of ``doc_id`` in the project is removed.
-        """
+    async def delete_document(self, app_id: str, project_id: str, doc_id: str) -> int:
+        """Remove every directory of ``doc_id``; returns the topic files removed."""
         ...
 
     async def read_document(
@@ -395,13 +424,13 @@ class KnowledgeStore(Protocol):
 
     async def update_document(
         self, document: KnowledgeDocument, *, previous_category_id: str
-    ) -> KnowledgeDocument:
+    ) -> WrittenDocument:
         """Write ``document``'s title / category to its markdown.
 
         A category other than ``previous_category_id`` moves the directory.
 
         Returns:
-            ``document`` with the ``md_path`` it has afterwards.
+            Where the document is afterwards.
 
         Raises:
             DocumentNotFoundError: The document is not on disk.
@@ -445,8 +474,10 @@ class KnowledgeCatalog(Protocol):
         self, app_id: str, project_id: str
     ) -> dict[str, int]: ...
 
-    async def record_document(self, document: KnowledgeDocument) -> None:
-        """Insert or update ``document`` (``md_path`` included)."""
+    async def record_document(
+        self, document: KnowledgeDocument, *, md_path: str
+    ) -> None:
+        """Insert or update ``document``, stored at ``md_path`` (its ``index.md``)."""
         ...
 
     async def get_topics(self, topic_ids: Sequence[str]) -> list[KnowledgeTopic]: ...

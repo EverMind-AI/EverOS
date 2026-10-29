@@ -13,12 +13,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from everalgo.types import KnowledgeMemory, ParsedContent
 
+from everos.core.errors import DuplicateDocumentError, ExtractionEmptyError
 from everos.infra.persistence import MemoryRoot
-from everos.service.knowledge import (
-    CreateDocumentResult,
-    DuplicateDocumentError,
-    ExtractionEmptyError,
-)
+from everos.service.knowledge import CreateDocumentResult
 from tests.fakes import make_knowledge_service
 
 # ── Fixtures ─────────────────────────────────────────────────────────────

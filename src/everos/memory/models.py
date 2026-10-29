@@ -491,14 +491,8 @@ class KnowledgeCategory(BaseModel):
 class KnowledgeDocument(BaseModel):
     """Domain knowledge document — the metadata of one uploaded document.
 
-    ``md_path`` is the document's ``index.md`` relative to the memory root,
-    as recorded by whoever read it; the knowledge store uses it to find the
-    document's directory. This is a deliberate exception to the rule that
-    domain models carry no storage path: a knowledge document is an entity
-    rooted at its directory, so its location is part of its identity --
-    repairing a directory that escaped ``knowledge/``, the replace backup and
-    the uploaded original are all found through it. Owner-scoped memories
-    keep identity apart, in ``MemoryRef``.
+    Identified by ``doc_id`` alone: where its markdown lives is the knowledge
+    store's business (``WrittenDocument`` reports it to the catalog).
 
     ``created_at`` / ``updated_at`` are set by the catalog that records the
     document; a document read straight from its markdown has neither.
@@ -512,7 +506,6 @@ class KnowledgeDocument(BaseModel):
     summary: str = ""
     source_name: str | None = None
     source_type: str | None = None
-    md_path: str | None = None
     created_at: dt.datetime | None = None
     updated_at: dt.datetime | None = None
 

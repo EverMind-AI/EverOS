@@ -37,7 +37,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import Episode, IndexRepository, ParentType
+from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
+    Episode,
+    IndexRepository,
+    ParentType,
+)
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
@@ -70,7 +75,9 @@ class EpisodeHandler(BaseDailyLogHandler):
         s = entry.structured
         text = s.sections.get("Content", "").strip()
         subject_text = s.sections.get("Subject", "").strip()
-        return (text, subject_text) if subject_text else (text,)
+        return VECTOR_PROJECTIONS[self.kind].texts(
+            {"episode": text, "subject": subject_text}
+        )
 
     async def _build_row(
         self,
@@ -86,9 +93,6 @@ class EpisodeHandler(BaseDailyLogHandler):
         s = entry.structured
         text = s.sections.get("Content", "").strip()
         subject_text = s.sections.get("Subject", "").strip()
-
-        vector = vectors[0] if vectors else None
-        subject_vector = vectors[1] if len(vectors) > 1 else None
 
         # BM25 tokenization covers both body and subject keywords.
         tokenize_source = f"{text} {subject_text}" if subject_text else text
@@ -112,6 +116,5 @@ class EpisodeHandler(BaseDailyLogHandler):
             episode_tokens=" ".join(tokens),
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vector,
-            subject_vector=subject_vector,
+            **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

@@ -285,6 +285,15 @@ async def test_episode_only_probe_covers_metadata_search_and_http(
         description = await asyncio.to_thread(
             client.describe_collection, milvus_repo.collection_name
         )
+        # Read every index before close(): the client is unusable afterwards.
+        raw_indexes = [
+            await asyncio.to_thread(
+                client.describe_index, milvus_repo.collection_name, index_name
+            )
+            for index_name in await asyncio.to_thread(
+                client.list_indexes, milvus_repo.collection_name
+            )
+        ]
     finally:
         await connection.close()
     analyzers = [
@@ -307,12 +316,7 @@ async def test_episode_only_probe_covers_metadata_search_and_http(
         for function in description.get("functions", [])
     ]
     indexes = []
-    for index_name in await asyncio.to_thread(
-        client.list_indexes, milvus_repo.collection_name
-    ):
-        index = await asyncio.to_thread(
-            client.describe_index, milvus_repo.collection_name, index_name
-        )
+    for index in raw_indexes:
         if not isinstance(index, dict):
             continue
         field_name = index.get("field_name")

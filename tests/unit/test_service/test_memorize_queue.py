@@ -1,4 +1,4 @@
-"""Tests for :mod:`everos.service.memorize_queue` — the ``async_mode`` worker.
+"""Tests for :mod:`everos.service.memory._queue` — the ``async_mode`` worker.
 
 Runs against a real SQLite inbox on ``tmp_path`` (the repo singleton and
 the buffer repo singleton are swapped for temp-bound instances) and a fake
@@ -42,7 +42,7 @@ from everos.infra.persistence.sqlite import (
 from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
 from everos.service import MemorizeResult
-from everos.service import memorize_queue as mq
+from everos.service.memory import _queue as mq
 from everos.service.ops import OpsService
 from tests.fakes.application import make_ops
 

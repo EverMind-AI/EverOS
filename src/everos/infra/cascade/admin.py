@@ -15,8 +15,6 @@ __all__ = ["CascadeAdmin"]
 
 from typing import Any
 
-from sqlmodel import SQLModel
-
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
     DerivedIndex,
@@ -63,14 +61,13 @@ class CascadeAdmin:
     # ── system DB ──────────────────────────────────────────────────────────
 
     async def create_schema(self) -> int:
-        """Create every registered SQLite table that does not exist yet.
+        """Create every registered SQLite table that does not exist yet, and
+        add the columns an older ``system.db`` lacks.
 
         Returns:
             The number of registered tables.
         """
-        async with self._database.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        return len(SQLModel.metadata.tables)
+        return await self._database.create_schema()
 
     async def dispose(self) -> None:
         """Dispose the SQLite engine and its connection pool. Idempotent."""

@@ -13,7 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request
 
 from everos.core.errors import NotFoundError
-from everos.entrypoints.api.utils import application, extract_request_id
+from everos.entrypoints.api.dependencies import application, extract_request_id
 from everos.service import TaskItem, TaskPage
 
 from .memorize import SuccessEnvelope

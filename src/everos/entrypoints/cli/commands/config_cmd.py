@@ -7,7 +7,7 @@ import os
 import typer
 
 from everos.config.settings import resolve_root
-from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli._process import configure_interactive
 
 app = typer.Typer(
     name="config",
@@ -26,7 +26,7 @@ def _config_callback(
     ),
 ) -> None:
     """Set log level before any config subcommand runs."""
-    configure_cli_logging(verbose=verbose)
+    configure_interactive(verbose=verbose)
 
 
 _SECRET_FIELDS = {"api_key"}
@@ -45,6 +45,7 @@ _SECTION_NAMES = (
     "clustering",
     "search",
     "knowledge",
+    "logging",
 )
 
 

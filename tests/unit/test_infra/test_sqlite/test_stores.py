@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from everalgo.types import ChatMessage, MemCell
+from everalgo.types import ChatMessage, MemCell, ToolCallResult
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 
@@ -16,6 +18,7 @@ from everos.config import SqliteSettings
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
+    Memcell,
     SqliteClusterStore,
     SqliteMemcellStore,
     SqliteMemorizeInboxStore,
@@ -55,6 +58,10 @@ from everos.memory.ports import (
 
 _SESSION = SessionKey(app_id="app", project_id="proj", session_id="s1")
 _USER = Scope(app_id="app", project_id="proj", owner_id="u1", owner_type="user")
+_FROZEN_MEMCELL = (
+    Path(__file__).resolve().parents[3]
+    / "fixtures/compatibility/head_0d3b502_core_0_6_0/memcell.json"
+)
 
 
 @dataclass
@@ -64,6 +71,7 @@ class _Stores:
     cluster: SqliteClusterStore
     inbox: SqliteMemorizeInboxStore
     report: SqliteReflectionReportStore
+    factory: async_sessionmaker[AsyncSession]
 
 
 @pytest.fixture
@@ -74,7 +82,7 @@ async def stores(tmp_path: Path) -> AsyncIterator[_Stores]:
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
-    yield _Stores(
+    stores = _Stores(
         buffer=SqliteSessionBufferStore(
             UnprocessedBufferRepo(session_factory=factory),
             ConversationStatusRepo(session_factory=factory),
@@ -85,7 +93,9 @@ async def stores(tmp_path: Path) -> AsyncIterator[_Stores]:
         report=SqliteReflectionReportStore(
             ReflectionReportRepo(session_factory=factory)
         ),
+        factory=factory,
     )
+    yield stores
     await engine.dispose()
 
 
@@ -162,6 +172,93 @@ async def test_memcells_round_trip(stores: _Stores) -> None:
     assert await stores.memcell.find_by_ids(["mc_1", "missing"]) == [cell]
 
 
+async def test_memcell_reads_frozen_payload_from_sqlite(stores: _Stores) -> None:
+    payload = _FROZEN_MEMCELL.read_text()
+    async with stores.factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO memcell "
+                "(memcell_id, app_id, project_id, session_id, track, raw_type, "
+                "message_ids_json, sender_ids_json, payload_json, timestamp, "
+                "created_at, updated_at) VALUES "
+                "('mc-frozen', 'app', 'proj', 's1', 'user_memory', 'conversation', "
+                "'[]', '[]', :payload, '2023-11-14 22:13:20.456000', "
+                "'2023-11-14 22:13:20.456000', '2023-11-14 22:13:20.456000')"
+            ),
+            {"payload": payload},
+        )
+        await session.commit()
+
+    cells = await stores.memcell.find_by_ids(["mc-frozen", "missing"])
+
+    assert len(cells) == 1
+    assert cells[0].timestamp == 1_700_000_000_456
+    assert len(cells[0].items) == 2
+    message, tool_result = cells[0].items
+    assert isinstance(message, ChatMessage)
+    assert message.id == "message-frozen"
+    assert message.timestamp == 1_700_000_000_123
+    assert message.content == "Preserve this archived message."
+    assert message.sender_id == "user-frozen"
+    assert message.sender_name is None
+    assert isinstance(tool_result, ToolCallResult)
+    assert tool_result.tool_call_id == "tool-call-frozen"
+    assert tool_result.content == "Archived tool output."
+    assert tool_result.timestamp == 1_700_000_000_456
+
+
+async def test_memcell_case_extraction_outcome_is_stamped(stores: _Stores) -> None:
+    cell = MemCell(
+        items=[
+            ChatMessage(
+                id="m1", role="user", content="hello", sender_id="u1", timestamp=1
+            )
+        ],
+        timestamp=1_747_216_800_000,
+    )
+    records = [
+        MemcellRecord(
+            memcell_id=memcell_id,
+            cell=cell,
+            raw_type="conversation",
+            message_ids=["m1"],
+            sender_ids=["u1"],
+        )
+        for memcell_id in ("mc_skip", "mc_case")
+    ]
+    await stores.memcell.insert_many(_SESSION, records)
+
+    await stores.memcell.mark_case_extracted(
+        "mc_skip",
+        skip_reason="trajectory_not_closed",
+        skip_detail={"last_item_kind": "tool_result", "note": "x" * 5000},
+    )
+    await stores.memcell.mark_case_extracted(
+        "mc_case", skip_reason=None, skip_detail={}
+    )
+    await stores.memcell.mark_case_extracted(
+        "missing", skip_reason=None, skip_detail={}
+    )
+
+    async with stores.factory() as session:
+        rows = {
+            row.memcell_id: row
+            for row in (await session.execute(select(Memcell))).scalars()
+        }
+    skipped, produced = rows["mc_skip"], rows["mc_case"]
+    assert skipped.case_skip_reason == "trajectory_not_closed"
+    assert skipped.case_extracted_at is not None
+    assert skipped.case_extracted_at.tzinfo is not None
+    assert skipped.case_skip_detail_json is not None
+    detail = json.loads(skipped.case_skip_detail_json)
+    assert detail["last_item_kind"] == "tool_result"
+    assert len(detail["note"]) == 512
+    assert produced.case_skip_reason is None
+    assert produced.case_skip_detail_json is None
+    assert produced.case_extracted_at is not None
+    assert set(rows) == {"mc_skip", "mc_case"}
+
+
 async def test_cluster_lifecycle(stores: _Stores) -> None:
     cluster = Cluster(
         id="cl_1",
@@ -181,20 +278,21 @@ async def test_cluster_lifecycle(stores: _Stores) -> None:
         await stores.cluster.find_cluster_for_member(_USER, "episode", "ep_2") == "cl_1"
     )
     assert await stores.cluster.list_distinct_owners() == [_USER]
-    assert await stores.cluster.count() == 1
 
-    await stores.cluster.remove_members("cl_1", {"ep_1"})
-    await stores.cluster.add_member("cl_1", "ep_m", "episode")
-    await stores.cluster.update_metadata(
-        "cl_1", centroid=[1.0, 0.0], count=1, last_ts=200, preview=["merged"]
+    await stores.cluster.replace_members(
+        "cl_1",
+        removed={"ep_1"},
+        added="ep_m",
+        member_type="episode",
+        centroid=[1.0, 0.0],
+        count=1,
+        last_ts=200,
+        preview=["merged"],
     )
 
     assert await stores.cluster.members("cl_1") == [
         ("ep_2", "episode"),
         ("ep_m", "episode"),
-    ]
-    assert await stores.cluster.list_ids_and_member_counts(_USER, "user_memory") == [
-        ("cl_1", 2)
     ]
     updated = await stores.cluster.get("cl_1")
     assert updated is not None

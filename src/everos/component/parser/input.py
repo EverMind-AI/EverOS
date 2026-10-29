@@ -13,6 +13,7 @@ the file locally (with guardrails) and hands everalgo a *hydrated* RawFile
 from __future__ import annotations
 
 import base64
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -21,10 +22,12 @@ from urllib.request import url2pathname
 import anyio
 from everalgo.types import RawFile
 
-from everos.config import load_settings
+from everos.config import Settings
 from everos.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+type RawFileBuilder = Callable[[dict[str, Any]], Awaitable[RawFile]]
 
 
 def to_raw_file(item: dict[str, Any]) -> RawFile:
@@ -79,7 +82,7 @@ def _resolve_file_uri(uri: str) -> Path:
         raise ValueError(f"cannot resolve file uri {uri!r}: {exc}") from exc
 
 
-def _validated_file_path(uri: str) -> Path:
+def _validated_file_path(uri: str, settings_source: Callable[[], Settings]) -> Path:
     """Resolve + guardrail-check a ``file://`` uri (synchronous fs ops).
 
     This is the host-filesystem access everalgo refuses by design, so the
@@ -94,7 +97,7 @@ def _validated_file_path(uri: str) -> Path:
     Raises:
         ValueError: missing / non-regular / oversized / out-of-allowlist file.
     """
-    cfg = load_settings().multimodal
+    cfg = settings_source().multimodal
     path = _resolve_file_uri(uri)
     if not path.is_file():
         raise ValueError(f"file uri target is not a regular file: {path}")
@@ -116,20 +119,32 @@ def _validated_file_path(uri: str) -> Path:
     return path
 
 
-async def read_file_uri(uri: str, *, ext_hint: str | None = None) -> tuple[bytes, str]:
+async def read_file_uri(
+    uri: str,
+    *,
+    settings_source: Callable[[], Settings],
+    ext_hint: str | None = None,
+) -> tuple[bytes, str]:
     """Read a guardrail-checked ``file://`` asset into ``(bytes, extension)``.
+
+    Args:
+        uri: The ``file://`` uri to read.
+        settings_source: Reads the ``[multimodal]`` file guardrails, once per file.
+        ext_hint: Extension to report instead of the file's own suffix.
 
     Raises:
         ValueError: missing / non-regular / oversized / out-of-allowlist file.
     """
-    path = _validated_file_path(uri)
+    path = _validated_file_path(uri, settings_source)
     content = await anyio.Path(path).read_bytes()
     ext = (ext_hint or path.suffix).lstrip(".").lower()
     logger.debug("file_uri_hydrated", path=str(path), ext=ext)
     return content, ext
 
 
-async def build_raw_file(item: dict[str, Any]) -> RawFile:
+async def build_raw_file(
+    item: dict[str, Any], *, settings_source: Callable[[], Settings]
+) -> RawFile:
     """Build a RawFile for the parser, hydrating ``file://`` uris locally.
 
     ``http(s)`` uris and ``base64`` payloads route through the synchronous
@@ -140,6 +155,8 @@ async def build_raw_file(item: dict[str, Any]) -> RawFile:
     """
     uri = item.get("uri")
     if uri and _is_file_uri(uri):
-        content, ext = await read_file_uri(uri, ext_hint=item.get("ext"))
+        content, ext = await read_file_uri(
+            uri, ext_hint=item.get("ext"), settings_source=settings_source
+        )
         return RawFile(content=content, extension=ext, mime=item.get("mime") or "")
     return to_raw_file(item)

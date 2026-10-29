@@ -18,7 +18,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from starlette.status import HTTP_202_ACCEPTED
 
-from everos.entrypoints.api.utils import application, extract_request_id
+from everos.entrypoints.api.dependencies import application, extract_request_id
 from everos.service import Queued
 
 router = APIRouter(prefix="/memory", tags=["memory"])

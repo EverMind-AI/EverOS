@@ -1,4 +1,4 @@
-"""Shared helpers for the API layer (routes + exception handlers)."""
+"""FastAPI request dependencies: the application and the request id."""
 
 from __future__ import annotations
 

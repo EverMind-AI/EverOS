@@ -33,8 +33,6 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import SQLModel
-
 from everos.config import Settings, load_settings
 from everos.infra.cascade.projections import HandlerDeps
 from everos.infra.persistence import MemoryRoot
@@ -64,8 +62,7 @@ class Storage:
 
     async def create_schema(self) -> None:
         """Create every SQLite table, as ``Application.start`` does."""
-        async with self.database.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        await self.database.create_schema()
 
     async def aclose(self) -> None:
         """Close the index connection and dispose the database."""
@@ -108,8 +105,7 @@ class StorageView:
 
     async def create_schema(self) -> None:
         """Create every SQLite table, as ``Application.start`` does."""
-        async with self.database.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        await self.database.create_schema()
 
     async def aclose(self) -> None:
         """Close the index connection and dispose the database."""

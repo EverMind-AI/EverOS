@@ -14,7 +14,7 @@ __all__ = ["check_vector_tables", "run_vectors_phase"]
 import asyncio
 import dataclasses
 import datetime as dt
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -22,7 +22,8 @@ import anyio.to_thread
 
 from everos.core.errors import ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
-from everos.memory.ports import Filter, any_of, is_null, primary_key
+from everos.infra.persistence.index import VECTOR_PROJECTIONS, VectorProjection
+from everos.memory.ports import Filter, primary_key
 from everos.service.ops._backfill import (
     BACKFILL_LOGGER,
     BackfillDeps,
@@ -38,45 +39,13 @@ if TYPE_CHECKING:
 logger = get_logger(BACKFILL_LOGGER)
 
 
-@dataclasses.dataclass(frozen=True)
-class _TableSpec:
-    """One business table's Phase 1 wiring.
-
-    ``text_of`` pulls the same source text each cascade handler feeds to
-    the embedder out of a raw LanceDB row dict (see ``infra/cascade/
-    handlers/*.py``). ``subject_of`` is only set for ``episode``, whose
-    ``subject_vector`` is a second, independent embed of the row's
-    ``subject`` column — mirrors ``EpisodeHandler._build_row``.
-    """
-
-    table: str
-    text_of: Callable[[dict[str, Any]], str]
-    subject_of: Callable[[dict[str, Any]], str | None] | None = None
-
-
-def _agent_skill_embed_text(row: dict[str, Any]) -> str:
-    """Mirrors ``AgentSkillHandler``: embed source is name + description."""
-    return "\n".join(s for s in (row.get("name"), row.get("description")) if s)
-
-
-_TABLE_SPECS: tuple[_TableSpec, ...] = (
-    _TableSpec(
-        "episode",
-        lambda r: r["episode"],
-        subject_of=lambda r: r.get("subject") or None,
-    ),
-    _TableSpec("atomic_fact", lambda r: r["fact"]),
-    _TableSpec("foresight", lambda r: r["foresight"]),
-    _TableSpec("agent_case", lambda r: r["task_intent"]),
-    _TableSpec("agent_skill", _agent_skill_embed_text),
-    _TableSpec("knowledge_topic", lambda r: r["summary"]),
-)
+_TABLE_SPECS = tuple(VECTOR_PROJECTIONS.values())
 
 
 def check_vector_tables(tables: Mapping[str, object]) -> None:
     """Fail loud when the tables to backfill and the table wiring disagree.
 
-    Every index table with a nullable vector column needs a :class:`_TableSpec`
+    Every index table with a nullable vector column needs a :class:`VectorProjection`
     here; one added without it would be counted by the startup "unbackfilled
     rows" hint and silently skipped by backfill.
 
@@ -144,7 +113,7 @@ class _NullVectorRow:
 
 @dataclasses.dataclass(frozen=True)
 class _TableBacklog:
-    spec: _TableSpec
+    spec: VectorProjection
     index: IndexMaintenance
     rows: list[_NullVectorRow]
 
@@ -153,7 +122,7 @@ class _TableBacklog:
         return self.spec.table
 
 
-def _null_filter(spec: _TableSpec) -> Filter:
+def _null_filter(spec: VectorProjection) -> Filter:
     """Where-clause the scan uses to spot rows that need (some) embedding.
 
     Episode carries a ``subject_vector`` alongside ``vector`` — the two
@@ -169,9 +138,7 @@ def _null_filter(spec: _TableSpec) -> Filter:
     would reference an unknown field and LanceDB would reject the
     query, so they keep the round-1 filter.
     """
-    if spec.table == "episode":
-        return any_of(is_null("vector"), is_null("subject_vector"))
-    return is_null("vector")
+    return spec.null_filter()
 
 
 class _RowSkipped:
@@ -186,7 +153,7 @@ _ROW_SKIPPED = _RowSkipped()
 
 
 def _extract_row(
-    raw: dict[str, Any], spec: _TableSpec, tokenizer: Any
+    raw: dict[str, Any], spec: VectorProjection, tokenizer: Any
 ) -> _NullVectorRow | _RowSkipped | None:
     """Pull one raw LanceDB row's embed-source text, token count, and
     which side(s) still need embedding.
@@ -214,16 +181,7 @@ def _extract_row(
             error=repr(exc),
         )
         return None
-    needs_primary = raw.get("vector") is None
-    # Subject-side is only meaningful when the spec has a subject
-    # projection AND this row actually carries subject text. A NULL
-    # ``subject_vector`` on a row whose subject was legitimately
-    # absent is not something to fix — it will always be NULL.
-    needs_subject = (
-        spec.subject_of is not None
-        and subject_text is not None
-        and raw.get("subject_vector") is None
-    )
+    needs_primary, needs_subject = spec.missing_sides(raw, subject_text)
     if not needs_primary and not needs_subject:
         return _ROW_SKIPPED
     token_source = f"{text} {subject_text}" if needs_subject else text
@@ -481,9 +439,9 @@ async def _backfill_table(
         for row in batch:
             updates: dict[str, Any] = {}
             if row.key in primary_map:
-                updates["vector"] = primary_map[row.key]
+                updates[backlog.spec.primary_column] = primary_map[row.key]
             if row.key in subject_vectors:
-                updates["subject_vector"] = subject_vectors[row.key]
+                updates[backlog.spec.subject_column] = subject_vectors[row.key]
             if not updates:
                 continue
             # A row is only "fully processed" if every side it needed

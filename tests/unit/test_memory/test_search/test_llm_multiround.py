@@ -20,6 +20,8 @@ import pytest
 from everalgo.testing import FakeLLMClient
 from everalgo.types import Candidate
 
+from everos.config.search_runtime import SearchConfigSource
+from everos.config.settings import DeciderSettings
 from everos.memory.ports import SearchHit
 from everos.memory.search import llm_multiround
 from everos.memory.search.llm_multiround import (
@@ -127,6 +129,11 @@ def _reply(indices: list[int], nxt: list[str]) -> str:
     return json.dumps({"core": indices, "next_queries": nxt})
 
 
+# These tests drive behaviour through the legacy EVEROS_LLMMR_* environment
+# overrides, so they inject the live reader rather than a fixed snapshot.
+_LIVE_CONFIG = SearchConfigSource()
+
+
 def _run(
     recaller: _Recaller,
     *,
@@ -145,7 +152,13 @@ def _run(
         llm=llm,
         top_k=top_k,
         decider=decider,
+        tuning_source=_LIVE_CONFIG.tuning,
+        trace_path_source=_LIVE_CONFIG.trace_path,
     )
+
+
+def _decider(llm: FakeLLMClient) -> LLMRoundDecider:
+    return LLMRoundDecider(llm, tuning_source=_LIVE_CONFIG.tuning)
 
 
 # ── parse helpers ──────────────────────────────────────────────────────────
@@ -165,7 +178,7 @@ def test_dataset_from_owner() -> None:
 
 async def test_decider_parses_reply() -> None:
     llm = _script_llm([_reply([0, 2], ["gap one"])])
-    d = await LLMRoundDecider(llm)("q?", "(none)", "[block: original question]", 3, 0)
+    d = await _decider(llm)("q?", "(none)", "[block: original question]", 3, 0)
     assert d.core == [0, 2]
     assert d.queries == ["gap one"]
     assert d.stop is False
@@ -173,7 +186,7 @@ async def test_decider_parses_reply() -> None:
 
 
 async def test_decider_stop_when_no_queries() -> None:
-    d = await LLMRoundDecider(_script_llm([_reply([0], [])]))("q", "(none)", "x", 1, 0)
+    d = await _decider(_script_llm([_reply([0], [])]))("q", "(none)", "x", 1, 0)
     assert d.stop is True and d.queries == []
 
 
@@ -194,15 +207,15 @@ async def test_decider_falls_back_to_top_core_on_persistent_error(
     order) and flags itself via ``failed``.
     """
     llm = _script_llm([_reply([0], [])], error_first=99)
-    d = await LLMRoundDecider(llm)("q", "(none)", "x", 5, 0)
+    d = await _decider(llm)("q", "(none)", "x", 5, 0)
     assert d.stop is True and d.queries == []
     assert d.failed is True
-    assert d.core == list(range(llm_multiround._tuning().fallback_core))
+    assert d.core == list(range(SearchConfigSource().tuning().fallback_core))
 
 
 async def test_decider_fallback_core_clamped_to_candidates(_no_backoff: None) -> None:
     llm = _script_llm([_reply([0], [])], error_first=99)
-    d = await LLMRoundDecider(llm)("q", "(none)", "x", 1, 0)
+    d = await _decider(llm)("q", "(none)", "x", 1, 0)
     assert d.core == [0]  # never indexes past the candidates it was given
 
 
@@ -210,7 +223,7 @@ async def test_decider_retries_an_empty_completion() -> None:
     """A reasoning decider can return an empty completion (budget spent on
     reasoning tokens). That is a retryable failure, not a valid 'no decision'."""
     llm = _script_llm(["", _reply([2], [])])
-    d = await LLMRoundDecider(llm)("q", "(none)", "x", 3, 0)
+    d = await _decider(llm)("q", "(none)", "x", 3, 0)
     assert d.core == [2] and d.failed is False
     assert llm.call_count == 2  # empty reply consumed one attempt, then succeeded
 
@@ -218,22 +231,24 @@ async def test_decider_retries_an_empty_completion() -> None:
 async def test_decider_retries_a_reply_that_fails_its_model() -> None:
     """The reply is held to ``_DecisionReply``: a string index is not an index."""
     llm = _script_llm(['{"core": ["2"], "next_queries": []}', _reply([2], [])])
-    d = await LLMRoundDecider(llm)("q", "(none)", "x", 3, 0)
+    d = await _decider(llm)("q", "(none)", "x", 3, 0)
     assert d.core == [2] and d.failed is False
     assert llm.call_count == 2
 
 
 async def test_decider_success_is_not_flagged_failed() -> None:
-    d = await LLMRoundDecider(_script_llm([_reply([0], [])]))("q", "(none)", "x", 1, 0)
+    d = await _decider(_script_llm([_reply([0], [])]))("q", "(none)", "x", 1, 0)
     assert d.failed is False
 
 
 async def test_decider_retries_then_succeeds(_no_backoff: None) -> None:
     # fails _DECIDER_RETRIES times, then the final attempt parses.
-    llm = _script_llm([_reply([1], [])], error_first=llm_multiround._tuning().retries)
-    d = await LLMRoundDecider(llm)("q", "(none)", "x", 3, 0)
+    llm = _script_llm(
+        [_reply([1], [])], error_first=SearchConfigSource().tuning().retries
+    )
+    d = await _decider(llm)("q", "(none)", "x", 3, 0)
     assert d.core == [1]
-    assert llm.call_count == llm_multiround._tuning().retries + 1
+    assert llm.call_count == SearchConfigSource().tuning().retries + 1
 
 
 # ── rendering ──────────────────────────────────────────────────────────────
@@ -244,7 +259,9 @@ def test_render_blocks_global_index_across_blocks() -> None:
         ("original question", [_cand(_ep("a", 0.9)), _cand(_ep("b", 0.8))]),
         ("sub one", [_cand(_ep("c", 0.7))]),
     ]
-    rendered, global_cands, index_meta = _render_blocks(blocks)
+    rendered, global_cands, index_meta = _render_blocks(
+        blocks, tuning_source=SearchConfigSource().tuning
+    )
     assert "[block: original question]" in rendered
     assert "[block: sub one]" in rendered
     # continuous global index 0,1,2 across the two blocks
@@ -259,9 +276,17 @@ def test_render_blocks_global_index_across_blocks() -> None:
 
 
 def test_render_core_so_far_tags_source() -> None:
-    assert _render_core_so_far([], {}, {}) == "(none)"
+    assert (
+        _render_core_so_far([], {}, {}, tuning_source=SearchConfigSource().tuning)
+        == "(none)"
+    )
     cand = {"alice__a": _cand(_ep("a", 0.9))}
-    out = _render_core_so_far(["alice__a"], {"alice__a": "sub one"}, cand)
+    out = _render_core_so_far(
+        ["alice__a"],
+        {"alice__a": "sub one"},
+        cand,
+        tuning_source=SearchConfigSource().tuning,
+    )
     assert out == '  - [from "sub one"] subject a - summary a'
 
 
@@ -293,7 +318,7 @@ async def test_max_rounds_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVEROS_LLMMR_PATIENCE", "99")
     llm = _script_llm([_reply([0], ["again"])])  # last reply repeats forever
     await _run(_Recaller(seed=[_ep("a", 0.9)]), llm=llm, embed=_embed_empty)
-    assert llm.call_count == llm_multiround._tuning().max_rounds
+    assert llm.call_count == SearchConfigSource().tuning().max_rounds
 
 
 async def test_empty_seed_returns_empty_and_skips_decider() -> None:
@@ -421,6 +446,8 @@ async def test_trace_records_every_schema_field(
         embed_query_fn=_embed_empty,
         llm=llm,
         top_k=20,
+        tuning_source=_LIVE_CONFIG.tuning,
+        trace_path_source=_LIVE_CONFIG.trace_path,
     )
     recs = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()]
     per_round = [r for r in recs if r.get("round_idx") is not None]
@@ -465,7 +492,10 @@ def test_decider_text_defaults_to_summary_only(monkeypatch: pytest.MonkeyPatch) 
     cannot silently change behaviour when the code is redeployed."""
     monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "0")
     meta = {"summary": "short 200-char preview", "episode": "the full body " * 50}
-    assert llm_multiround._decider_text(meta) == "short 200-char preview"
+    assert (
+        llm_multiround._decider_text(meta, tuning_source=SearchConfigSource().tuning)
+        == "short 200-char preview"
+    )
 
 
 def test_decider_text_full_mode_picks_the_longer_field(
@@ -478,9 +508,23 @@ def test_decider_text_full_mode_picks_the_longer_field(
     """
     monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "1")
     body = "the full body " * 50
-    assert llm_multiround._decider_text({"summary": "prefix", "episode": body}) == body
-    assert llm_multiround._decider_text({"summary": body, "episode": ""}) == body
-    assert llm_multiround._decider_text({}) == ""
+    assert (
+        llm_multiround._decider_text(
+            {"summary": "prefix", "episode": body},
+            tuning_source=SearchConfigSource().tuning,
+        )
+        == body
+    )
+    assert (
+        llm_multiround._decider_text(
+            {"summary": body, "episode": ""}, tuning_source=SearchConfigSource().tuning
+        )
+        == body
+    )
+    assert (
+        llm_multiround._decider_text({}, tuning_source=SearchConfigSource().tuning)
+        == ""
+    )
 
 
 async def test_injection_never_exceeds_top_k_when_core_is_large() -> None:
@@ -576,7 +620,7 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
         '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}',
     )
     llm = _script_llm([_reply([0], [])])
-    await LLMRoundDecider(llm)("q", "(none)", "x", 1, 0)
+    await _decider(llm)("q", "(none)", "x", 1, 0)
 
     (call,) = llm.calls
     assert call.response_format is _DecisionReply
@@ -584,3 +628,82 @@ async def test_the_decider_sends_its_max_tokens_and_extra(
     assert call.extra["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
+
+
+def test_render_reads_injected_configuration_for_each_candidate() -> None:
+    snapshots = iter(
+        [
+            DeciderSettings(full_text=False),
+            DeciderSettings(full_text=True),
+        ]
+    )
+    candidates = [_cand(_ep("a", 0.9)), _cand(_ep("b", 0.8))]
+    for candidate in candidates:
+        candidate.metadata.update(summary="short", episode="long episode body")
+    rendered, _, _ = _render_blocks(
+        [("question", candidates)], tuning_source=lambda: next(snapshots)
+    )
+    assert "  0: " in rendered and rendered.splitlines()[1].endswith("short")
+    assert rendered.splitlines()[2].endswith("long episode body")
+    with pytest.raises(StopIteration):
+        next(snapshots)
+
+
+async def test_search_keeps_configuration_and_trace_read_boundaries() -> None:
+    reads: list[str] = []
+    tune_count = 0
+
+    def tuning() -> DeciderSettings:
+        nonlocal tune_count
+        tune_count += 1
+        reads.append("tuning")
+        # The second core candidate still rereads the source even after top_k.
+        return DeciderSettings(max_rounds=1, core_overflow=tune_count == 5)
+
+    def trace_path() -> str | None:
+        reads.append("trace")
+        return None
+
+    async def decide(*args: Any) -> RoundDecision:
+        reads.append("decision")
+        return RoundDecision(stop=True, queries=[], core=[0, 1])
+
+    result = await search_episodes_llm_multiround(
+        "q",
+        owner_id="alice",
+        where=_WHERE,
+        episode_recaller=_Recaller(seed=[_ep("a", 0.9), _ep("b", 0.8)]),
+        atomic_fact_recaller=_FactRecaller(),
+        embed_query_fn=_embed_empty,
+        llm=_script_llm([]),
+        top_k=1,
+        decider=decide,
+        tuning_source=tuning,
+        trace_path_source=trace_path,
+    )
+    assert len(result) == 2
+    assert reads == [
+        "tuning",
+        "tuning",
+        "tuning",
+        "decision",
+        "trace",
+        "tuning",
+        "tuning",
+        "trace",
+    ]
+
+
+async def test_decider_rereads_injected_source_on_each_call() -> None:
+    reads: list[int] = []
+
+    def tuning() -> DeciderSettings:
+        reads.append(len(reads))
+        return DeciderSettings()
+
+    decider = LLMRoundDecider(
+        _script_llm([_reply([0], []), _reply([0], [])]), tuning_source=tuning
+    )
+    await decider("q", "", "evidence", 1, 0)
+    await decider("q", "", "evidence", 1, 1)
+    assert reads == [0, 1]

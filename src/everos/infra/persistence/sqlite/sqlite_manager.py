@@ -17,6 +17,7 @@ from everos.core.observability.logging import get_logger
 from everos.infra.persistence.memory_root import MemoryRoot
 from everos.infra.persistence.sqlite.base.engine import create_system_engine
 from everos.infra.persistence.sqlite.base.session import create_session_factory
+from everos.infra.persistence.sqlite.schema import create_schema
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,14 @@ class SqliteDatabase:
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         """Opens sessions bound to :attr:`engine`."""
         return self._session_factory
+
+    async def create_schema(self) -> int:
+        """Create every registered table and add columns an older file lacks.
+
+        Returns:
+            The number of registered tables.
+        """
+        return await create_schema(self._engine)
 
     async def dispose(self) -> None:
         """Close every pooled connection. Idempotent; the engine stays usable."""

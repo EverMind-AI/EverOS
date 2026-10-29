@@ -18,13 +18,13 @@ __all__ = [
 
 import datetime as dt
 import json
-from collections.abc import Collection, Sequence
-from typing import cast
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, cast
 
 import numpy as np
 from everalgo.types import MemCell
 
-from everos.core.utils.datetime import from_timestamp
+from everos.core.utils.datetime import from_timestamp, get_utc_now
 from everos.memory.mappers import cluster as cluster_mapper
 from everos.memory.models import (
     CanonicalMessage,
@@ -54,6 +54,11 @@ _SESSION_TRACK = "memorize"
 _QUARANTINE_TRACK = "quarantine"
 """Track a buffer is moved to when it cannot be segmented."""
 _CENTROID_DTYPE = np.float32
+_MAX_DETAIL_VALUE_CHARS = 512
+"""Cap on each string value of a case-skip detail (e.g. an LLM's free-text
+rationale), so the stored JSON stays parseable in the common case."""
+_MAX_DETAIL_JSON_CHARS = 2000
+"""Hard cap on ``memcell.case_skip_detail_json``; a longer dump is cut."""
 
 
 class SqliteSessionBufferStore:
@@ -142,6 +147,20 @@ class SqliteMemcellStore:
         rows = await self._repo.find_by_ids(list(memcell_ids))
         return [MemCell.model_validate_json(row.payload_json) for row in rows]
 
+    async def mark_case_extracted(
+        self,
+        memcell_id: str,
+        *,
+        skip_reason: str | None,
+        skip_detail: Mapping[str, Any],
+    ) -> None:
+        await self._repo.mark_case_extracted(
+            memcell_id,
+            extracted_at=get_utc_now(),
+            skip_reason=skip_reason,
+            skip_detail_json=_bounded_detail_json(skip_detail),
+        )
+
 
 class SqliteClusterStore:
     """Clusters and membership over ``cluster`` + ``cluster_member``.
@@ -200,45 +219,28 @@ class SqliteClusterStore:
             )
         ]
 
-    async def add_member(
-        self, cluster_id: str, member_id: str, member_type: ClusterMemberType
-    ) -> None:
-        await self._repo.add_member(cluster_id, member_id, member_type)
-
-    async def remove_members(
-        self, cluster_id: str, member_ids: Collection[str]
-    ) -> None:
-        await self._repo.remove_members(cluster_id, set(member_ids))
-
-    async def update_metadata(
+    async def replace_members(
         self,
         cluster_id: str,
         *,
+        removed: Collection[str],
+        added: str,
+        member_type: ClusterMemberType,
         centroid: Sequence[float],
         count: int,
         last_ts: int,
         preview: Sequence[str],
     ) -> None:
-        await self._repo.update_metadata(
+        await self._repo.replace_members(
             cluster_id,
+            removed=set(removed),
+            added=added,
+            member_type=member_type,
             centroid_blob=np.asarray(centroid, dtype=_CENTROID_DTYPE).tobytes(),
             count=count,
             last_ts_ms=last_ts,
             preview_json=json.dumps(list(preview), ensure_ascii=False),
         )
-
-    async def list_ids_and_member_counts(
-        self, scope: Scope, kind: ClusterKind
-    ) -> list[tuple[str, int]]:
-        return [
-            (cluster_id, int(count))
-            for cluster_id, count in await self._repo.list_ids_and_member_counts(
-                scope.owner_id,
-                kind,
-                app_id=scope.app_id,
-                project_id=scope.project_id,
-            )
-        ]
 
     async def list_distinct_owners(self) -> list[Scope]:
         return [
@@ -252,9 +254,6 @@ class SqliteClusterStore:
                 await self._repo.list_distinct_owners()
             )
         ]
-
-    async def count(self) -> int:
-        return await self._repo.count()
 
 
 class SqliteMemorizeInboxStore:
@@ -447,6 +446,18 @@ def _record_to_row(record: MemcellRecord, session: SessionKey) -> Memcell:
         payload_json=record.cell.model_dump_json(),
         timestamp=from_timestamp(record.cell.timestamp),
     )
+
+
+def _bounded_detail_json(detail: Mapping[str, Any]) -> str | None:
+    """Serialise a skip detail with every string value and the dump capped."""
+    if not detail:
+        return None
+    bounded = {
+        key: value[:_MAX_DETAIL_VALUE_CHARS] if isinstance(value, str) else value
+        for key, value in detail.items()
+    }
+    dumped = json.dumps(bounded, ensure_ascii=False, default=str)
+    return dumped[:_MAX_DETAIL_JSON_CHARS]
 
 
 def _row_to_task(row: MemorizeInbox) -> MemorizeTask:

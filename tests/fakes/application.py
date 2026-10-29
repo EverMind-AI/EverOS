@@ -69,6 +69,7 @@ from everos.service import (
 from everos.service.bootstrap import build_replay_engine
 
 from .deps import bundled_instructions, make_stores
+from .sources import unused_raw_file_builder
 from .storage import make_storage
 from .stores import UnusedPort
 
@@ -361,6 +362,7 @@ def make_memory_service(**overrides: Any) -> MemoryService:
         "bus": UnusedPort("bus"),
         "search_manager": UnusedPort("search_manager"),
         "get_manager": UnusedPort("get_manager"),
+        "raw_file_builder": unused_raw_file_builder,
     }
     return MemoryService(**{**fields, **overrides})
 

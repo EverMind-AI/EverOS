@@ -20,6 +20,7 @@ from .settings import EmbeddingSettings as EmbeddingSettings
 from .settings import IndexSettings as IndexSettings
 from .settings import LanceDBSettings as LanceDBSettings
 from .settings import LLMSettings as LLMSettings
+from .settings import LoggingSettings as LoggingSettings
 from .settings import MemorySettings as MemorySettings
 from .settings import MilvusSettings as MilvusSettings
 from .settings import MultimodalSettings as MultimodalSettings
@@ -36,6 +37,7 @@ __all__ = [
     "IndexSettings",
     "LLMSettings",
     "LanceDBSettings",
+    "LoggingSettings",
     "MemorySettings",
     "MilvusSettings",
     "MultimodalSettings",

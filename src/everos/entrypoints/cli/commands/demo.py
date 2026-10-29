@@ -18,7 +18,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli._process import configure_interactive
 from everos.entrypoints.tui.demo import cloud
 from everos.entrypoints.tui.demo.data import DemoStory, default_demo_story
 from everos.entrypoints.tui.demo.widgets.sphere import (
@@ -69,7 +69,7 @@ def register(parent: typer.Typer) -> None:
         ),
     ) -> None:
         """Launch the EverOS first-memory Textual TUI."""
-        configure_cli_logging(verbose=verbose)
+        configure_interactive(verbose=verbose)
         if plain or not sys.stdout.isatty():
             _print_plain_demo()
             return

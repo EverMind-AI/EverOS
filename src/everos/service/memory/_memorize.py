@@ -18,7 +18,7 @@ events with it.
 
 from __future__ import annotations
 
-__all__ = ["Memorizer"]
+__all__ = ["Memorizer", "flush_payload"]
 
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
@@ -35,6 +35,7 @@ from everos.service.memory._session_locks import SessionLocks
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
+    from everos.component.parser import RawFileBuilder
     from everos.config import Settings
     from everos.memory import IngestResult
     from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
@@ -60,6 +61,7 @@ class Memorizer:
         bus: Where each cell's events are published.
         locks: The per-session locks.
         extractions: Keeps extractions alive past a cancelled request.
+        raw_file_builder: Host file hydration capability for ingestion.
     """
 
     def __init__(
@@ -73,7 +75,9 @@ class Memorizer:
         bus: EventBus,
         locks: SessionLocks,
         extractions: ExtractionSupervisor,
+        raw_file_builder: RawFileBuilder,
     ) -> None:
+        self._raw_file_builder = raw_file_builder
         self._settings = settings
         self._boundary = boundary
         self._multimodal_llm = multimodal_llm
@@ -194,7 +198,11 @@ class Memorizer:
         ingested batch and the boundary outcome for :meth:`_extract` to run
         once the lock is released.
         """
-        ingested = await ingest_process(payload, multimodal_llm=self._multimodal_llm)
+        ingested = await ingest_process(
+            payload,
+            multimodal_llm=self._multimodal_llm,
+            raw_file_builder=self._raw_file_builder,
+        )
         if defer_extraction and not is_final:
             buffered = await self._boundary.buffer(ingested, mode=mode)
             return MemorizeResult(
@@ -294,3 +302,13 @@ def _merge_status(
     if user == "extracted" or agent == "extracted":
         return "extracted"
     return "accumulated"
+
+
+def flush_payload(session_id: str, app_id: str, project_id: str) -> dict[str, Any]:
+    """The payload a flush runs with: the session, and no new messages."""
+    return {
+        "session_id": session_id,
+        "app_id": app_id,
+        "project_id": project_id,
+        "messages": [],
+    }

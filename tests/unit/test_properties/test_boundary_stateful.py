@@ -97,7 +97,12 @@ from everos.memory.extract.boundary import detection as detection_mod
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
-from tests.fakes import UNUSABLE_REPLY, boundary_reply, bundled_instructions
+from tests.fakes import (
+    UNUSABLE_REPLY,
+    boundary_reply,
+    bundled_instructions,
+    unused_raw_file_builder,
+)
 
 settings.register_profile(
     "ci",
@@ -280,7 +285,9 @@ class BoundaryMachine(RuleBasedStateMachine):
                 for m in fresh
             ],
         }
-        ingested = await ingest.process(payload, multimodal_llm=None)
+        ingested = await ingest.process(
+            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+        )
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:
             outcome = await self.boundary.buffer(ingested, mode="chat")

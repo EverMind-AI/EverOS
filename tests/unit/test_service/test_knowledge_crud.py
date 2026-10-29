@@ -15,7 +15,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from everos.core.errors import PathTraversalError
+from everos.core.errors import (
+    DocumentNotFoundError,
+    PathTraversalError,
+    TopicNotFoundError,
+)
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite.repos.knowledge import DocumentListPage
@@ -27,14 +31,12 @@ from everos.service.knowledge import (
     DeleteResult,
     DocumentDetail,
     DocumentListResult,
-    DocumentNotFoundError,
     PatchResult,
     TopicDetail,
-    TopicNotFoundError,
 )
 from tests.fakes import make_knowledge_service
 
-_MOD = "everos.service.knowledge"
+_MOD = "everos.service.knowledge._documents"
 _STORE = "everos.infra.persistence.markdown.knowledge_store"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

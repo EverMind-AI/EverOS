@@ -37,12 +37,12 @@ from everos.core.observability.logging import configure_logging
 from everos.infra.cascade.worker import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
 )
+from everos.infra.persistence.index import VectorProjection
 from everos.service import NullBackfillPresenter
 from everos.service.ops._backfill_vectors import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
-    _TableSpec,
 )
 
 _RETENTION = dt.timedelta(seconds=DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS)
@@ -133,7 +133,7 @@ def _row(row_id: str, text: str) -> _NullVectorRow:
 
 
 def _backlog(repo: _FakeRepo, rows: list[_NullVectorRow]) -> _TableBacklog:
-    spec = _TableSpec(
+    spec = VectorProjection(
         table="fake_table",
         text_of=lambda r: r["text"],
         subject_of=None,

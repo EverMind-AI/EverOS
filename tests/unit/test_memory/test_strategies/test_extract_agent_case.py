@@ -5,6 +5,8 @@ scripts (``tests.fakes.agent_track_llm``); stores are in-memory doubles. The
 strategy files one case per assistant sender and logs the gate that rejected
 a memcell when there is no case. With a case judge in the deps, everalgo's
 correctness gate admits the memcell and its decision rides on the case.
+Every completed run stamps the memcell with its skip reason (``None`` when a
+case came out).
 """
 
 from __future__ import annotations
@@ -77,6 +79,14 @@ async def test_writes_the_case_and_announces_it() -> None:
     assert record["fanout"] == 1
 
 
+async def test_stamps_the_memcell_with_no_skip_reason_on_success() -> None:
+    deps = make_deps(llm=agent_track_llm())
+
+    await extract_agent_case(_event(), deps)
+
+    assert deps.stores.memcell.case_marks == {"mc_a": (None, {})}
+
+
 async def test_fans_out_per_assistant_sender() -> None:
     """One extraction, then a write + an event per distinct assistant sender.
 
@@ -112,6 +122,17 @@ async def test_logs_the_reason_when_the_filter_rejects_the_trajectory() -> None:
     assert skipped["reason"] == "filter_rejected"
     want = json.loads(agent_track_script("case_filter_empty"))["reason"]
     assert skipped["detail"] == {"llm_reason": want}
+
+
+async def test_stamps_the_memcell_with_the_skip_reason_and_detail() -> None:
+    deps = make_deps(llm=agent_track_llm(case_filter="case_filter_empty"))
+
+    await extract_agent_case(_event(), deps)
+
+    want = json.loads(agent_track_script("case_filter_empty"))["reason"]
+    assert deps.stores.memcell.case_marks == {
+        "mc_a": ("filter_rejected", {"llm_reason": want})
+    }
 
 
 async def test_logs_the_reason_when_algo_rejects_before_any_model_call() -> None:
@@ -157,6 +178,7 @@ async def test_skips_when_no_assistant_sender() -> None:
     assert events == []
     assert deps.stores.agent_case.records == []
     assert any(e.get("event") == "agent_case_skipped_no_assistant" for e in captured)
+    assert deps.stores.memcell.case_marks == {"mc_a": ("no_agent_sender", {})}
 
 
 # ── correctness gate ([agent_memory] case_gate_enabled) ──────────────────

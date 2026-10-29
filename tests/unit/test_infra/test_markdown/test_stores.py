@@ -135,7 +135,7 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
     )
 
     await store.deprecate(
-        _user(), replaced={ref.entry_id: "ep_merged"}, md_path=ref.md_path
+        _user(), entries=[(ref.md_path, ref.entry_id)], replaced_by="ep_merged"
     )
 
     parsed = await MarkdownReader.read(root.root / ref.md_path)
@@ -151,7 +151,7 @@ async def test_atomic_facts_append_and_deprecate(root: MemoryRoot) -> None:
 
     refs = await store.append_many(_user(), facts)
     await store.deprecate(
-        _user(), replaced={refs[0].entry_id: "ep_m"}, md_path=refs[0].md_path
+        _user(), entries=[(refs[0].md_path, refs[0].entry_id)], replaced_by="ep_m"
     )
 
     assert len({r.entry_id for r in refs}) == 2
@@ -272,3 +272,56 @@ async def test_agent_skill_name_is_sanitized_for_storage(root: MemoryRoot) -> No
 
     assert ref.entry_id != "Fix It"
     assert ref.id == f"a1_{ref.entry_id}"
+
+
+@pytest.mark.parametrize("store_type", [MarkdownEpisodeStore, MarkdownAtomicFactStore])
+@pytest.mark.parametrize("fail_path", [None, "b.md"])
+async def test_deprecation_groups_in_first_seen_order_and_preserves_partial_writes(
+    root: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    store_type: type[MarkdownEpisodeStore] | type[MarkdownAtomicFactStore],
+    fail_path: str | None,
+) -> None:
+    """Grouping retains duplicate collapse, patch merge, and stop-on-error behavior."""
+    store = store_type(root)
+    for name in ("a.md", "b.md", "c.md"):
+        (root.root / name).write_text(
+            "---\ndeprecated_entries:\n  existing: previous\n---\nBody stays.\n"
+        )
+    patch = store._writer.patch_frontmatter
+    visited: list[str] = []
+
+    async def recording_patch(path: Path, updates: dict[str, object]) -> None:
+        visited.append(path.name)
+        if path.name == fail_path:
+            raise OSError("injected patch failure")
+        await patch(path, updates)
+
+    monkeypatch.setattr(store._writer, "patch_frontmatter", recording_patch)
+    entries = [
+        ("a.md", "one"),
+        ("b.md", "two"),
+        ("a.md", "three"),
+        ("a.md", "one"),
+        ("c.md", "four"),
+    ]
+    if fail_path:
+        with pytest.raises(OSError, match="injected patch failure"):
+            await store.deprecate(_user(), entries=entries, replaced_by="merged")
+    else:
+        await store.deprecate(_user(), entries=entries, replaced_by="merged")
+    assert visited == (["a.md", "b.md"] if fail_path else ["a.md", "b.md", "c.md"])
+    for name, replaced in (
+        ("a.md", {"one": "merged", "three": "merged"}),
+        ("b.md", {} if fail_path else {"two": "merged"}),
+        ("c.md", {} if fail_path else {"four": "merged"}),
+    ):
+        parsed = await MarkdownReader.read(root.root / name)
+        assert parsed.frontmatter["deprecated_entries"] == {
+            "existing": "previous",
+            **replaced,
+        }
+        assert "Body stays." in (root.root / name).read_text()
+    visited.clear()
+    await store.deprecate(_user(), entries=[], replaced_by="merged")
+    assert visited == []

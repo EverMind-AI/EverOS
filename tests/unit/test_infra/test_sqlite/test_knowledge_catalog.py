@@ -34,8 +34,11 @@ def _document(doc_id: str, *, category_id: str = "Tech") -> KnowledgeDocument:
         summary="summary",
         source_name="a.pdf",
         source_type="file",
-        md_path=f"app/proj/knowledge/{category_id}/t_{doc_id}/index.md",
     )
+
+
+def _md_path(doc_id: str, category_id: str = "Tech") -> str:
+    return f"app/proj/knowledge/{category_id}/t_{doc_id}/index.md"
 
 
 def test_adapter_satisfies_the_port(storage: Storage) -> None:
@@ -44,8 +47,10 @@ def test_adapter_satisfies_the_port(storage: Storage) -> None:
 
 async def test_documents_round_trip(storage: Storage) -> None:
     catalog = _catalog(storage)
-    await catalog.record_document(_document("d_1"))
-    await catalog.record_document(_document("d_2", category_id="Science"))
+    await catalog.record_document(_document("d_1"), md_path=_md_path("d_1"))
+    await catalog.record_document(
+        _document("d_2", category_id="Science"), md_path=_md_path("d_2", "Science")
+    )
 
     got = await catalog.get_document("d_1")
 
@@ -54,6 +59,8 @@ async def test_documents_round_trip(storage: Storage) -> None:
         "d_1"
     ).model_dump(exclude={"created_at", "updated_at"})
     assert got.created_at is not None
+    row = await storage.sqlite.knowledge_document.get_by_doc_id("d_1")
+    assert row is not None and row.md_path == _md_path("d_1")
     assert await catalog.document_exists("d_2")
     assert not await catalog.document_exists("d_missing")
     assert {d.doc_id for d in await catalog.get_documents({"d_1", "d_2"})} == {

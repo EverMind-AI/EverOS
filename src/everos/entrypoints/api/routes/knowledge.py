@@ -26,7 +26,7 @@ from fastapi.params import Form
 from pydantic import BaseModel, Field
 
 from everos.core.utils.datetime import to_display_tz
-from everos.entrypoints.api.utils import application, extract_request_id
+from everos.entrypoints.api.dependencies import application, extract_request_id
 from everos.service import (
     CreateDocumentResult,
     DocumentDetail,

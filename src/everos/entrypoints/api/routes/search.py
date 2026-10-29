@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from everos.entrypoints.api.utils import application
+from everos.entrypoints.api.dependencies import application
 from everos.service import SearchRequest, SearchResponse
 
 router = APIRouter(prefix="/memory", tags=["memory"])

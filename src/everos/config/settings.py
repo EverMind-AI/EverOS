@@ -800,6 +800,20 @@ class KnowledgeSettings(BaseModel):
     search: KnowledgeSearchSettings = KnowledgeSearchSettings()
 
 
+class LoggingSettings(BaseModel):
+    """``[logging]`` — the process's console log output.
+
+    ``everos server start --log-level`` and ``EVEROS_LOG_LEVEL`` override
+    ``level`` for the server; interactive commands log ``WARNING`` (``INFO``
+    with ``--verbose``) whatever it says.
+
+    Env binding:
+        EVEROS_LOGGING__LEVEL
+    """
+
+    level: str = "INFO"
+
+
 class ObservabilitySettings(BaseModel):
     """``[observability]`` — OpenTelemetry tracing export.
 
@@ -867,6 +881,7 @@ class Settings(BaseSettings):
     cascade: CascadeSettings = CascadeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
+    logging: LoggingSettings = LoggingSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
 
     model_config = SettingsConfigDict(

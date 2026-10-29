@@ -38,7 +38,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from everos.entrypoints.api.utils import application
+from everos.entrypoints.api.dependencies import application
 
 router = APIRouter(prefix="/cascade", tags=["cascade"])
 

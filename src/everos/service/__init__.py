@@ -31,6 +31,7 @@ from .bootstrap import Application as Application
 from .bootstrap import Providers as Providers
 from .bootstrap import build_application as build_application
 from .bootstrap import build_providers as build_providers
+from .bootstrap import configure_process as configure_process
 from .knowledge import CategoryOverview as CategoryOverview
 from .knowledge import CreateDocumentResult as CreateDocumentResult
 from .knowledge import DeleteResult as DeleteResult
@@ -45,13 +46,13 @@ from .knowledge import SearchHit as SearchHit
 from .knowledge import SearchKnowledgeResult as SearchKnowledgeResult
 from .knowledge import TopicDetail as TopicDetail
 from .knowledge import TopicOverview as TopicOverview
-from .memorize_queue import TASK_STATUSES as TASK_STATUSES
-from .memorize_queue import QueueHealth as QueueHealth
-from .memorize_queue import TaskItem as TaskItem
-from .memorize_queue import TaskPage as TaskPage
+from .memory import TASK_STATUSES as TASK_STATUSES
 from .memory import MemorizeResult as MemorizeResult
 from .memory import MemoryService as MemoryService
 from .memory import Queued as Queued
+from .memory import QueueHealth as QueueHealth
+from .memory import TaskItem as TaskItem
+from .memory import TaskPage as TaskPage
 from .ops import BACKFILL_PHASES as BACKFILL_PHASES
 from .ops import BackfillDeps as BackfillDeps
 from .ops import BackfillOutcome as BackfillOutcome
@@ -128,5 +129,6 @@ __all__ = [
     "build_application",
     "build_providers",
     "compute_disabled_features",
+    "configure_process",
     "format_tokens",
 ]

@@ -28,13 +28,14 @@ The manager never writes to storage; it only reads LanceDB + markdown.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
 
 from everos.config import load_settings
+from everos.config.settings import DeciderSettings
 from everos.core.context import resolve_request_id
 from everos.core.errors import ConfigurationError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
@@ -174,7 +175,11 @@ class SearchManager:
         llm_client: LLMClient | None,
         search_tokenizer: Tokenizer | None = None,
         decider_client: LLMClient | None = None,
+        tuning_source: Callable[[], DeciderSettings],
+        trace_path_source: Callable[[], str | None],
     ) -> None:
+        self._tuning_source = tuning_source
+        self._trace_path_source = trace_path_source
         self._ep = episode_recaller
         self._fact = atomic_fact_recaller
         self._case = agent_case_recaller
@@ -396,6 +401,8 @@ class SearchManager:
                 top_k=self._top_k(req.top_k),
                 reranker=self._reranker,  # type: ignore[arg-type]
                 decider=decider,
+                tuning_source=self._tuning_source,
+                trace_path_source=self._trace_path_source,
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")

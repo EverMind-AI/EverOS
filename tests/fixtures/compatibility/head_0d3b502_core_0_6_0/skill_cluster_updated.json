@@ -1,0 +1,7 @@
+{
+  "event_id": "frozen-skill-cluster-event",
+  "ts": "2023-11-14T22:13:20Z",
+  "case_entry_id": "case-frozen",
+  "cluster_id": "cluster-frozen",
+  "agent_id": "agent-frozen"
+}

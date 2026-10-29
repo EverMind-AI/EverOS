@@ -18,12 +18,12 @@ import datetime as dt
 import time
 from typing import Any
 
+from everos.infra.persistence.index import VectorProjection
 from everos.service import NullBackfillPresenter
 from everos.service.ops._backfill_vectors import (
     _backfill_table,
     _NullVectorRow,
     _TableBacklog,
-    _TableSpec,
 )
 
 _RETENTION = dt.timedelta(seconds=60)
@@ -73,14 +73,14 @@ class _FakeSchema:
     TABLE_NAME = "fake_table"
 
 
-def _build_spec(*, with_subject: bool) -> _TableSpec:
-    """Construct a frozen :class:`_TableSpec` wired to a NoopRepo.
+def _build_spec(*, with_subject: bool) -> VectorProjection:
+    """Construct a frozen :class:`VectorProjection` wired to a NoopRepo.
 
     ``with_subject`` toggles ``subject_of`` so a single helper covers
     both the concurrent (episode-like) and single-batch (fact-like)
     call shapes.
     """
-    return _TableSpec(
+    return VectorProjection(
         table=_FakeSchema.TABLE_NAME,
         text_of=lambda r: r["text"],
         subject_of=(lambda r: r.get("subject")) if with_subject else None,

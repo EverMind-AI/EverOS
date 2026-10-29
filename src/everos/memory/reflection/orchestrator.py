@@ -25,8 +25,7 @@ See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 from __future__ import annotations
 
 import uuid
-from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -171,14 +170,17 @@ class ReflectionOrchestrator:
             to ``_MAX_CLUSTERS_PER_RUN``.
         """
         reflected = await self._report_store.reflected_cluster_ids(scope)
-        clusters = await self._cluster_store.list_ids_and_member_counts(scope, kind)
-        count_map = dict(clusters)
+        counts = {
+            cluster.id: len(cluster.members)
+            for cluster in await self._cluster_store.list_for_owner(scope, kind)
+            if cluster.id is not None
+        }
         candidates = [
             cid
-            for cid, count in clusters
+            for cid, count in counts.items()
             if (cid not in reflected and count >= 2) or (cid in reflected and count > 1)
         ]
-        candidates.sort(key=lambda cid: count_map[cid], reverse=True)
+        candidates.sort(key=lambda cid: counts[cid], reverse=True)
         return candidates[:_MAX_CLUSTERS_PER_RUN]
 
     # ── Per-cluster processing ────────────────────────────────────────────
@@ -541,24 +543,22 @@ class ReflectionFinisher:
         to_deprecate: set[str],
         merged_entry_id: str,
     ) -> int:
-        """Mark deprecated episodes in their md files, one patch per file.
+        """Retire the selected episode references through the truth store.
 
         Returns:
             Number of episodes marked.
         """
-        replaced = _replacements_by_file(
+        entries = [
             (ep.md_path, ep.entry_id)
             for ep in episodes
             if ep.md_path
             and (ep.parent_id in to_deprecate or ep.entry_id in to_deprecate)
-        )
-        for md_path, entry_ids in replaced.items():
+        ]
+        if entries:
             await self._episode_store.deprecate(
-                scope,
-                replaced=dict.fromkeys(entry_ids, merged_entry_id),
-                md_path=md_path,
+                scope, entries=entries, replaced_by=merged_entry_id
             )
-        return sum(len(ids) for ids in replaced.values())
+        return len(entries)
 
     async def _deprecate_facts(
         self, *, scope: Scope, parent_ids: Collection[str], merged_entry_id: str
@@ -581,16 +581,14 @@ class ReflectionFinisher:
                 is_null("deprecated_by"),
             )
         )
-        replaced = _replacements_by_file(
+        entries = [
             (hit.stored.ref.md_path, hit.stored.ref.entry_id)
             for hit in hits
             if hit.stored.ref.md_path
-        )
-        for md_path, entry_ids in replaced.items():
+        ]
+        if entries:
             await self._atomic_fact_store.deprecate(
-                scope,
-                replaced=dict.fromkeys(entry_ids, merged_entry_id),
-                md_path=md_path,
+                scope, entries=entries, replaced_by=merged_entry_id
             )
         return len(hits)
 
@@ -601,15 +599,13 @@ class ReflectionFinisher:
         to_deprecate: set[str],
         merged_entry_id: str,
     ) -> None:
-        """Remove old members, add merged, and recompute centroid."""
-        await self._cluster_store.remove_members(context.cluster_id, to_deprecate)
-        await self._cluster_store.add_member(
-            context.cluster_id, merged_entry_id, "episode"
-        )
-
+        """Fold the deprecated members into the merged episode."""
         centroid = await self._embedder.embed(context.merged_episode)
-        await self._cluster_store.update_metadata(
+        await self._cluster_store.replace_members(
             context.cluster_id,
+            removed=to_deprecate,
+            added=merged_entry_id,
+            member_type="episode",
             centroid=centroid,
             count=1,
             last_ts=context.last_ts,
@@ -624,16 +620,6 @@ def _owner_filter(scope: Scope) -> Filter:
         eq("app_id", scope.app_id),
         eq("project_id", scope.project_id),
     )
-
-
-def _replacements_by_file(
-    located: Iterable[tuple[str, str]],
-) -> Mapping[str, list[str]]:
-    """Group ``(md_path, entry_id)`` pairs by file."""
-    by_file: dict[str, list[str]] = defaultdict(list)
-    for md_path, entry_id in located:
-        by_file[md_path].append(entry_id)
-    return by_file
 
 
 def _to_algo_episodes(episodes: list[StoredEpisode]) -> list[AlgoEpisode]:

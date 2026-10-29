@@ -9,8 +9,8 @@ External usage:
     )
 
 Only :func:`enrich_content_items` touches the optional ``everalgo.parser``
-extra, and it does so lazily (inside the call). The availability helpers and
-mapping never import it, so this package is safe to import without the
+extra, and it does so lazily (inside the call). The availability helpers
+never import it, so this package is safe to import without the
 ``everos[multimodal]`` extra installed.
 """
 

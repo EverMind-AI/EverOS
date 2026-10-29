@@ -5,34 +5,50 @@ One method per use case: :meth:`MemoryService.memorize` (``/add``),
 :meth:`~MemoryService.get`, plus the ``async_mode`` queue the ``/add`` route
 can hand a request to instead of running it inline.
 
-The memorize use case itself lives in ``_memorize`` (the private steps:
-lock, cut, extract, publish); ``_extraction`` keeps an extraction alive past
-a cancelled request and ``_session_locks`` holds the per-session locks.
-
+The memorize use case lives in ``_memorize`` (lock, cut, extract, publish);
+``_extraction`` keeps an extraction alive past a cancelled request,
+``_session_locks`` holds the per-session locks, and ``_queue`` is the
+``async_mode`` worker (steps in ``_queue_steps``, data in ``_queue_models``).
 Everything is injected by :func:`everos.service.build_application`; the
-service owns only its two background collaborators -- the extraction
-supervisor and the ``async_mode`` queue worker -- and their lifecycle
-(:meth:`~MemoryService.start` / :meth:`~MemoryService.aclose`).
+service owns only those two background collaborators (extraction supervisor,
+queue worker) and their lifecycle (:meth:`~MemoryService.start` /
+:meth:`~MemoryService.aclose`).
 """
 
 from __future__ import annotations
 
-__all__ = ["ExtractionSupervisor", "MemorizeResult", "MemoryService", "Queued"]
+__all__ = [
+    "TASK_STATUSES",
+    "ExtractionSupervisor",
+    "MemorizeResult",
+    "MemoryService",
+    "QueueHealth",
+    "Queued",
+    "TaskItem",
+    "TaskPage",
+    "to_task_item",
+]
 
 from typing import TYPE_CHECKING, Any
 
 from everos.core.observability.logging import get_logger
-from everos.service.memorize_queue import MemorizeQueueWorker, QueueHealth
 
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
-from ._memorize import Memorizer
+from ._memorize import Memorizer, flush_payload
 from ._models import MemorizeResult as MemorizeResult
 from ._models import Queued as Queued
+from ._queue import MemorizeQueueWorker
+from ._queue_models import TASK_STATUSES as TASK_STATUSES
+from ._queue_models import QueueHealth as QueueHealth
+from ._queue_models import TaskItem as TaskItem
+from ._queue_models import TaskPage as TaskPage
+from ._queue_models import to_task_item as to_task_item
 from ._session_locks import SessionLocks
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
+    from everos.component.parser import RawFileBuilder
     from everos.config import Settings
     from everos.memory.deps import Stores
     from everos.memory.extract.boundary import BoundaryDetection
@@ -62,6 +78,7 @@ class MemoryService:
         bus: Where each cell's events are published.
         search_manager: Answers :meth:`search`.
         get_manager: Answers :meth:`get`.
+        raw_file_builder: Host file hydration capability for ingestion.
     """
 
     def __init__(
@@ -76,6 +93,7 @@ class MemoryService:
         bus: EventBus,
         search_manager: SearchManager,
         get_manager: GetManager,
+        raw_file_builder: RawFileBuilder,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
@@ -89,6 +107,7 @@ class MemoryService:
             bus=bus,
             locks=SessionLocks(),
             extractions=self._extractions,
+            raw_file_builder=raw_file_builder,
         )
         queue_cfg = settings.memorize.async_queue
         self._queue = MemorizeQueueWorker(
@@ -109,17 +128,7 @@ class MemoryService:
     async def aclose(self) -> None:
         """Stop the queue, then wait (bounded) for extractions still running."""
         await self._queue.stop()
-        running = self._extractions.in_flight
-        if not running:
-            return
-        logger.info("memorize_extractions_draining", in_flight=running)
-        left = await self._extractions.drain(_DRAIN_TIMEOUT_SECONDS)
-        if left:
-            logger.error(
-                "memorize_extractions_abandoned",
-                in_flight=left,
-                waited_seconds=_DRAIN_TIMEOUT_SECONDS,
-            )
+        await self._extractions.shutdown(_DRAIN_TIMEOUT_SECONDS)
 
     # ── read use cases ─────────────────────────────────────────────────────
 
@@ -224,7 +233,7 @@ class MemoryService:
         Raises:
             QueueSaturatedError: Queued, and the session or queue is full.
         """
-        payload = _flush_payload(session_id, app_id, project_id)
+        payload = flush_payload(session_id, app_id, project_id)
         if await self._has_backlog(payload):
             return await self._queue_request(
                 payload, request_id=request_id, is_final=True, defer_extraction=False
@@ -265,7 +274,7 @@ class MemoryService:
     ) -> MemorizeResult:
         """Force boundary detection over the session's whole buffer."""
         return await self.memorize(
-            _flush_payload(session_id, app_id, project_id), is_final=True
+            flush_payload(session_id, app_id, project_id), is_final=True
         )
 
     async def memorize(
@@ -287,12 +296,3 @@ class MemoryService:
         return await self._memorizer.run(
             payload, is_final=is_final, defer_extraction=defer_extraction
         )
-
-
-def _flush_payload(session_id: str, app_id: str, project_id: str) -> dict[str, Any]:
-    return {
-        "session_id": session_id,
-        "app_id": app_id,
-        "project_id": project_id,
-        "messages": [],
-    }

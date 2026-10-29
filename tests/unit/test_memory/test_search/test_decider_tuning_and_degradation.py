@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pytest
 
+from everos.config.search_runtime import SearchConfigSource
 from everos.config.settings import DeciderSettings
 from everos.memory.search import llm_multiround as lmr
 
@@ -70,7 +71,7 @@ def test_the_legacy_env_names_still_win(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("EVEROS_LLMMR_MAX_ROUNDS", "7")
     monkeypatch.setenv("EVEROS_LLMMR_DECIDER_FULL_TEXT", "1")
     monkeypatch.setenv("EVEROS_LLMMR_DECIDER_BACKOFF_S", "0.25")
-    t = lmr._tuning()
+    t = SearchConfigSource().tuning()
     assert (t.max_rounds, t.full_text, t.retry_backoff_seconds) == (7, True, 0.25)
 
 
@@ -83,7 +84,7 @@ def test_a_malformed_override_is_ignored_not_guessed(
     environment variable, and the run would already have been paid for.
     """
     monkeypatch.setenv("EVEROS_LLMMR_MAX_ROUNDS", "not-a-number")
-    assert lmr._tuning().max_rounds == DeciderSettings().max_rounds
+    assert SearchConfigSource().tuning().max_rounds == DeciderSettings().max_rounds
 
 
 def test_resolution_is_per_call_not_frozen_at_import(
@@ -95,9 +96,9 @@ def test_resolution_is_per_call_not_frozen_at_import(
     serve a value from whichever test imported the module first.
     """
     monkeypatch.setenv("EVEROS_LLMMR_MAX_ROUNDS", "2")
-    assert lmr._tuning().max_rounds == 2
+    assert SearchConfigSource().tuning().max_rounds == 2
     monkeypatch.setenv("EVEROS_LLMMR_MAX_ROUNDS", "5")
-    assert lmr._tuning().max_rounds == 5
+    assert SearchConfigSource().tuning().max_rounds == 5
 
 
 def test_the_fallback_logs_at_error_not_warning() -> None:

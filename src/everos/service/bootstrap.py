@@ -30,6 +30,7 @@ __all__ = [
     "build_application",
     "build_providers",
     "build_replay_engine",
+    "configure_process",
 ]
 
 import contextlib
@@ -38,6 +39,7 @@ import datetime as dt
 import functools
 import os
 from collections.abc import Awaitable, Callable, Sequence
+from functools import partial
 from pathlib import Path
 from types import TracebackType
 
@@ -54,11 +56,12 @@ from everos.component.llm import (
     resolve_llm_config,
     resolve_multimodal_config,
 )
-from everos.component.parser import aparse_file, parser_available
+from everos.component.parser import aparse_file, build_raw_file, parser_available
 from everos.component.rerank import RerankProvider, build_rerank_provider
 from everos.component.tokenizer import Tokenizer, build_tokenizer
-from everos.config import Settings, resolve_root
-from everos.core.observability.logging import get_logger
+from everos.config import Settings, load_settings, resolve_root
+from everos.config.search_runtime import SearchConfigSource
+from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
 from everos.core.observability.tracing import (
     configure_tracing,
@@ -232,6 +235,18 @@ class Application:
         logger.info("application_closed")
 
 
+def configure_process(settings: Settings) -> None:
+    """Configure process-wide logging, tracing and metrics from ``settings``.
+
+    The one place a process's observability is set up: building the
+    application calls it, and so do commands that never build one. Calling
+    it again replaces the previous configuration.
+    """
+    configure_logging(settings.logging.level)
+    configure_tracing(settings.observability)
+    configure_metrics()
+
+
 def build_providers(settings: Settings) -> Providers:
     """Build every optional provider ``settings`` configures; ``None`` otherwise."""
     return Providers(
@@ -255,8 +270,7 @@ def build_application(
         providers: Providers to build over; ``None`` builds them from
             ``settings``.
     """
-    configure_tracing(settings.observability)
-    configure_metrics()
+    configure_process(settings)
     providers = providers or build_providers(settings)
     tokenizer = build_tokenizer()
     root = MemoryRoot(resolve_root())
@@ -437,6 +451,7 @@ def _build_memory_service(
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
+        raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
             llm=providers.llm,
@@ -467,6 +482,8 @@ def _build_memory_service(
             reranker=providers.rerank,
             llm_client=providers.llm,
             decider_client=providers.decider,
+            tuning_source=SearchConfigSource().tuning,
+            trace_path_source=SearchConfigSource().trace_path,
         ),
         get_manager=GetManager(
             episode_index=indexes.episode,

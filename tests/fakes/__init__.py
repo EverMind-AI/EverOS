@@ -54,6 +54,9 @@ from .llm import knowledge_script as knowledge_script
 from .llm import memorize_llm as memorize_llm
 from .llm import user_track_llm as user_track_llm
 from .llm import user_track_script as user_track_script
+from .sources import static_trace_path as static_trace_path
+from .sources import static_tuning as static_tuning
+from .sources import unused_raw_file_builder as unused_raw_file_builder
 from .storage import Storage as Storage
 from .storage import StorageView as StorageView
 from .storage import handler_deps as handler_deps
@@ -129,8 +132,11 @@ __all__ = [
     "make_stores",
     "memorize_llm",
     "open_storage_view",
+    "static_trace_path",
+    "static_tuning",
     "unscripted_llm",
     "unused_backfill_deps",
+    "unused_raw_file_builder",
     "user_track_llm",
     "user_track_script",
 ]

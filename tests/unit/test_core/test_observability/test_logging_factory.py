@@ -100,7 +100,7 @@ def test_configure_logging_routes_stdlib_loggers_through_same_formatter(
 def test_get_logger_with_same_name_returns_equivalent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """structlog caches bound loggers per name when cache_logger_on_first_use=True."""
+    """Two loggers of one name expose the same logging surface."""
     configure_logging()
     a = get_logger("everos.cache.test")
     b = get_logger("everos.cache.test")
@@ -137,3 +137,18 @@ def test_traceback_rendering_omits_locals_and_caps_frames() -> None:
         f"max_frames={formatter.max_frames} — deep async stacks render "
         "thousands of lines per exception"
     )
+
+
+def test_reconfiguring_reaches_a_logger_that_already_logged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The last configuration wins, even for a logger used under an earlier one."""
+    logger = get_logger("everos.reconfigure.test")
+    configure_logging(level="WARNING")
+    logger.info("before_reconfigure")
+    configure_logging(level="INFO")
+    logger.info("after_reconfigure")
+
+    out = capsys.readouterr().out
+    assert "before_reconfigure" not in out
+    assert "after_reconfigure" in out

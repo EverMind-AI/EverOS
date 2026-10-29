@@ -14,10 +14,10 @@ from everos.component.llm import LLMCallError
 from everos.core.errors import UnsupportedModalityError
 from everos.core.observability.logging import get_logger
 
-from .mapping import build_raw_file
-
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
+
+    from everos.component.parser import RawFileBuilder
 
 logger = get_logger(__name__)
 
@@ -26,6 +26,7 @@ async def enrich_content_items(
     items: list[dict[str, Any]],
     *,
     llm: LLMClient | None,
+    raw_file_builder: RawFileBuilder,
     max_concurrency: int = 4,
 ) -> None:
     """Parse each non-text item and backfill ``parsed_content`` in place.
@@ -39,6 +40,7 @@ async def enrich_content_items(
         items: ContentItem dicts (mutated in place).
         llm: The multimodal LLM the parser reads with; ``None`` when
             ``[multimodal]`` is not configured, which fails the batch.
+        raw_file_builder: Hydrates parser input using host file-access policy.
         max_concurrency: Upper bound on concurrent parse calls.
     """
     from everos.component.parser import aparse_file  # Deferred: optional dep
@@ -56,7 +58,7 @@ async def enrich_content_items(
     async def _parse_one(item: dict[str, Any]) -> None:
         async with semaphore:
             try:
-                raw = await build_raw_file(item)
+                raw = await raw_file_builder(item)
             except ValueError as exc:
                 raise UnsupportedModalityError(str(exc)) from exc
             try:

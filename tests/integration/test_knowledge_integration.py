@@ -32,6 +32,7 @@ from everos.component.parser import aparse_file
 from everos.component.rerank import RerankResult
 from everos.component.tokenizer import build_tokenizer
 from everos.config import load_settings
+from everos.core.errors import ExtractionEmptyError
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes
@@ -44,7 +45,7 @@ from everos.infra.persistence.sqlite import (
     SqliteKnowledgeCatalog,
 )
 from everos.memory.search.recall import KnowledgeTopicRecaller, RecallerDeps
-from everos.service.knowledge import ExtractionEmptyError, KnowledgeService
+from everos.service.knowledge import KnowledgeService
 from tests.fakes.storage import Storage
 from tests.helpers.knowledge_md import find_doc_dir, read_document_md, read_topic_mds
 
@@ -1021,7 +1022,7 @@ async def test_get_nonexistent_document_raises(
     cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """get_document for a missing doc_id raises DocumentNotFoundError."""
-    from everos.service.knowledge import DocumentNotFoundError
+    from everos.core.errors import DocumentNotFoundError
 
     with pytest.raises(DocumentNotFoundError):
         await _knowledge(storage).get_document(
@@ -1050,7 +1051,7 @@ async def test_patch_nonexistent_raises(
     cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
     """Patching a non-existent document raises DocumentNotFoundError."""
-    from everos.service.knowledge import DocumentNotFoundError
+    from everos.core.errors import DocumentNotFoundError
 
     with pytest.raises(DocumentNotFoundError):
         await _knowledge(storage).patch_document(

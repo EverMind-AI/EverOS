@@ -293,6 +293,12 @@ joins it only behind its session's backlog)
 | `lambda` | float | `0.1` | Interpolation weight. |
 | `top_k_cap` | int | `100` | Hard cap on returned results. |
 
+### `[logging]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `level` | str | `"INFO"` | Console log level (`DEBUG` / `INFO` / `WARNING` / `ERROR`). `everos server start --log-level` and `EVEROS_LOG_LEVEL` override it for the server; interactive commands (`cascade`, `init`, `config`, `demo`) log `WARNING`, or `INFO` with `--verbose`, whatever it says. Requires restart. |
+
 ## Troubleshooting
 
 Use `everos config show` to inspect the effective configuration:
@@ -341,3 +347,20 @@ Examples:
 | `[llm] api_key = "sk-..."` | `EVEROS_LLM__API_KEY=sk-...` |
 | `[sqlite] busy_timeout_ms = 10000` | `EVEROS_SQLITE__BUSY_TIMEOUT_MS=10000` |
 | `[memory] timezone = "Asia/Tokyo"` | `EVEROS_MEMORY__TIMEZONE=Asia/Tokyo` |
+
+
+### Multi-round search configuration reads
+
+Multi-round search uses an explicit configuration source. Base `[decider]`
+settings retain the application settings cache; changing ordinary settings
+requires the existing cache invalidation/reload path. Legacy `EVEROS_LLMMR_*`
+overrides still take precedence and are read on each configuration-source call.
+Blank overrides are ignored; malformed numeric overrides log a warning and
+retain the configured value. `EVEROS_LLMMR_TRACE_DUMP` is also read dynamically.
+
+The source is consulted at the existing loop, candidate-rendering, decider and
+final-selection boundaries. It is not a startup snapshot or a uniform
+per-request snapshot. Application assembly passes the readers explicitly;
+standalone search and decider calls retain their existing environment-backed
+behavior when the optional reader arguments are omitted. This internal change
+does not change configuration defaults or retry behavior.

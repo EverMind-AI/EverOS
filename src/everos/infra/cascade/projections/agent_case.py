@@ -31,7 +31,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import AgentCase, IndexRepository, ParentType
+from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
+    AgentCase,
+    IndexRepository,
+    ParentType,
+)
 
 from ._common import require_float, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
@@ -56,7 +61,9 @@ class AgentCaseHandler(BaseDailyLogHandler):
     inline (owner_id / session_id / timestamp / parent_id) is excluded."""
 
     def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
-        return (entry.structured.sections.get("TaskIntent", "").strip(),)
+        return VECTOR_PROJECTIONS[self.kind].texts(
+            {"task_intent": entry.structured.sections.get("TaskIntent", "").strip()}
+        )
 
     async def _build_row(
         self,
@@ -96,5 +103,5 @@ class AgentCaseHandler(BaseDailyLogHandler):
             key_insight=key_insight,
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vectors[0] if vectors else None,
+            **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

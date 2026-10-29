@@ -21,20 +21,95 @@ migration.
 from __future__ import annotations
 
 __all__ = [
+    "QueueHealthProbe",
     "cascade_probe_failed",
     "cascade_report",
     "compute_disabled_features",
+    "health_report",
+    "no_queue",
     "queue_probe_failed",
 ]
 
-from collections.abc import Mapping
+import dataclasses
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
-from everos.service.memorize_queue import QueueHealth
-from everos.service.ops._models import CascadeHealthReport
+from everos.core.observability.logging import get_logger
+from everos.service.memory import QueueHealth
+from everos.service.ops._models import (
+    Capabilities,
+    CascadeHealthReport,
+    HealthReport,
+    ProviderStatus,
+)
 
 if TYPE_CHECKING:
-    from everos.infra.cascade import CascadeHealth
+    from everos.infra.cascade import CascadeAdmin, CascadeHealth, CascadeOrchestrator
+
+logger = get_logger("everos.service.ops")
+
+QueueHealthProbe = Callable[[], Awaitable[QueueHealth | None]]
+
+
+async def no_queue() -> QueueHealth | None:
+    """The queue probe while no memorize queue is wired in."""
+    return None
+
+
+async def health_report(
+    *,
+    admin: CascadeAdmin,
+    capabilities: Capabilities,
+    cascade: CascadeOrchestrator | None,
+    queue_health: QueueHealthProbe,
+) -> HealthReport:
+    """Provider flags, disabled features, and the cascade / queue blocks.
+
+    ``cascade`` is ``None`` while the server is not running it. A probe that
+    raises (a locked or full SQLite, say) is reported as an unhealthy block
+    with the error as its reason instead of propagating: the health endpoint
+    is a liveness signal, and turning it into a 500 would get the process
+    restarted, which fixes neither.
+    """
+    providers = ProviderStatus(
+        llm=True,
+        embed=admin.embedding_probed(),
+        rerank=capabilities.rerank,
+        multimodal_llm=capabilities.multimodal_llm,
+        parser=capabilities.parser,
+    )
+    return HealthReport(
+        providers=providers,
+        # ``embed`` reports the startup probe, but ``disabled_features`` is
+        # a contract about what the server will refuse, and every gate
+        # (search, the embedding strategies, backfill) asks whether a
+        # provider was built.
+        disabled_features=compute_disabled_features(
+            {**dataclasses.asdict(providers), "embed": capabilities.embedding}
+        ),
+        cascade=await _probe_cascade(cascade),
+        memorize_queue=await _probe_queue(queue_health),
+    )
+
+
+async def _probe_cascade(
+    cascade: CascadeOrchestrator | None,
+) -> CascadeHealthReport | None:
+    if cascade is None:
+        return None
+    try:
+        return cascade_report(await cascade.health())
+    except Exception as exc:
+        logger.warning("cascade_health_probe_failed", error=repr(exc))
+        return cascade_probe_failed(exc)
+
+
+async def _probe_queue(queue_health: QueueHealthProbe) -> QueueHealth | None:
+    try:
+        return await queue_health()
+    except Exception as exc:
+        logger.warning("memorize_queue_health_probe_failed", error=repr(exc))
+        return queue_probe_failed(exc)
 
 
 def compute_disabled_features(caps: Mapping[str, bool]) -> list[str]:

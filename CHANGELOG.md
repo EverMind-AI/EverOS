@@ -23,14 +23,73 @@ both use the resulting `Application` through three facades:
   the complexity and value filters deciding. An admitted case drives skill
   extraction whatever its quality score. The judge is
   `everos.component.llm.LLMCaseJudge`.
+- **The log level is configuration** (`[logging] level`, default `"INFO"`).
+  `everos.service.configure_process(settings)` sets up logging, tracing and
+  metrics once per process; `build_application` calls it, and the CLI no
+  longer configures logging itself. `server start --log-level` and
+  `EVEROS_LOG_LEVEL` still override the level for the server, and
+  interactive commands still log `WARNING` (`INFO` with `--verbose`).
 
 ### Changed
 
+- **Local parser input handling lives in the parser component.** Application
+  assembly supplies the raw-file builder to ingestion, and ingestion no longer
+  falls back to a built-in one. `everos.memory.extract.parser.mapping` is
+  removed; import `build_raw_file`, `read_file_uri` and `to_raw_file` from
+  `everos.component.parser`; `build_raw_file` and `read_file_uri` now require
+  a `settings_source` instead of falling back to `load_settings`. URI checks,
+  allowlist rules, size checks and error behavior are preserved. The `file_uri_hydrated` log event is now emitted by
+  the `everos.component.parser.input` logger; update log filters that matched
+  the old module name.
+- **Multi-round search receives explicit configuration readers.** Application
+  assembly supplies tuning and trace-path readers, and `SearchManager`,
+  `LLMRoundDecider` and `search_episodes_llm_multiround` now require them
+  instead of falling back to a built-in reader. The existing settings cache,
+  legacy environment overrides and per-call read timing are preserved. Retry
+  defaults and execution rules are unchanged by this refactor. The
+  `llm_multiround_bad_env_override` log event is now emitted by the
+  `everos.config.search_runtime` logger; update log filters that matched the
+  old module name.
+- **Reflection delegates file grouping to the Markdown stores.** Retirement
+  keeps the existing file order, partial-write failure behavior and report
+  counts. The unreleased `EpisodeStore.deprecate` and
+  `AtomicFactStore.deprecate` contracts now accept ordered `entries` and a
+  `replaced_by` ID instead of a per-file replacement mapping.
+- **Index synchronization and vector backfill share embedding rules.**
+  Episode, atomic fact, foresight, agent case, agent skill and knowledge topic
+  projections now use the same source-text and vector-column declarations.
+  Backfill keeps its existing partial-failure recovery and historical text
+  normalization behavior; no data migration is required.
+- **An agent memcell that produces no case now records why.** everalgo
+  0.6 extracts an agent case only from a closed trajectory (a user request
+  through to the assistant's final answer); when boundary detection leaves
+  an unclosed slice -- typically by cutting just before the final answer --
+  that slice yields no case. The extraction outcome is now persisted on the
+  `memcell` row: `case_extracted_at`, `case_skip_reason` (`NULL` exactly
+  when a case was produced; otherwise everalgo's skip reason, or
+  `no_agent_sender`) and `case_skip_detail_json`. Existing `system.db`
+  files gain the three columns automatically at startup.
+- **`everos.service.memorize_queue` is gone.** The `async_mode` queue now
+  lives in the `MemoryService` package; `TaskItem`, `TaskPage`,
+  `QueueHealth` and `TASK_STATUSES` are imported from `everos.service` (or
+  `everos.service.memory`).
 - **Entry points import only the service.** A new import-linter contract
   (`entrypoints-forbidden`) keeps `everos.entrypoints` off `everos.memory`,
   `everos.infra`, `everos.component` and `everalgo`; request / response
   DTOs (`GetRequest`, `SearchRequest`, ...) are re-exported by
   `everos.service`.
+- **`everos.memory.ports.ClusterStore` speaks in cluster operations.** The
+  port shrinks from eleven methods to seven: `add_member`, `remove_members`
+  and `update_metadata` become one `replace_members(cluster_id, *, removed,
+  added, member_type, centroid, count, last_ts, preview)`, which swaps the
+  members and restamps the cluster in a single SQLite transaction (before,
+  a crash between the three calls could leave the membership and the
+  snapshot disagreeing). `list_ids_and_member_counts` and `count` are gone:
+  read `len(cluster.members)` from `list_for_owner`. Custom `ClusterStore`
+  implementations need the same change.
+- **`everos.entrypoints.api.utils` is now `everos.entrypoints.api.dependencies`**
+  (internal): it holds the FastAPI request dependencies (`application`,
+  `extract_request_id`), named as FastAPI's project layout names them.
 - **`session_lock_timeout_seconds` sits under `[memorize]` in the shipped
   `default.toml`** (it had landed under `[knowledge.search]`, where it was
   ignored). The value, and so the behaviour, is unchanged.
@@ -214,6 +273,17 @@ both use the resulting `Application` through three facades:
   root and two repositories. Replacing a document now extracts its topics
   before touching the old files. `LLMNotConfiguredError` lives in
   `everos.core.errors` (still importable from `everos.component.llm`).
+- **`everos.service.knowledge` is a package** (the facade and its result
+  types stay importable from the same path). The unused
+  `KnowledgeService.parse_file` method is removed. Error types are no longer
+  reachable through the module: import them from `everos.core.errors`.
+- **`KnowledgeDocument` carries no storage path.** The `md_path` field is
+  removed; the knowledge store finds a document by its id.
+  `KnowledgeStore.delete_document` no longer takes `md_path`,
+  `KnowledgeStore.update_document` returns a `WrittenDocument` (which now
+  also carries `md_path`, the document's `index.md` relative to the memory
+  root), and `KnowledgeCatalog.record_document` takes that `md_path` as a
+  keyword. API responses are unchanged.
 
 ### Fixed
 
@@ -236,8 +306,11 @@ the facades. Nothing on disk changes.
 A deployment that customised a prompt slot must move it: keep only the
 requirements the custom template added on top of the default prompt and put
 them in `config/custom_instructions/<operator>.yaml` as `instructions:`
-(the bundled prompt itself can no longer be replaced). Markdown, the
-SQLite tables and the index schema are unchanged.
+(the bundled prompt itself can no longer be replaced). Markdown and the
+index schema are unchanged. The SQLite `memcell` table gains three nullable
+columns (`case_extracted_at`, `case_skip_reason`, `case_skip_detail_json`);
+the first start after upgrading adds them to an existing `system.db` on its
+own (logged as `sqlite_column_added`), so there is nothing to run by hand.
 
 ## [1.5.1] - 2026-10-22
 

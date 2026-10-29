@@ -48,7 +48,12 @@ from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
-from tests.fakes import UNUSABLE_REPLY, boundary_reply, bundled_instructions
+from tests.fakes import (
+    UNUSABLE_REPLY,
+    boundary_reply,
+    bundled_instructions,
+    unused_raw_file_builder,
+)
 
 BASE_TS = 1_700_000_000_000
 GARBAGE: str = UNUSABLE_REPLY
@@ -96,13 +101,21 @@ class _Stage:
 
     async def defer(self, session: str, start: int) -> BoundaryOutcome:
         """A deferred add: the message lands in the buffer with no model call."""
-        ingested = await ingest.process(_payload(session, start), multimodal_llm=None)
+        ingested = await ingest.process(
+            _payload(session, start),
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+        )
         return await self.boundary.buffer(ingested, mode="chat")
 
     async def add(
         self, session: str, start: int, *, final: bool = False
     ) -> BoundaryOutcome:
-        ingested = await ingest.process(_payload(session, start), multimodal_llm=None)
+        ingested = await ingest.process(
+            _payload(session, start),
+            multimodal_llm=None,
+            raw_file_builder=unused_raw_file_builder,
+        )
         return await self.boundary.detect(ingested, mode="chat", is_final=final)
 
     async def add_orphan_tool_row(self, session: str, start: int) -> BoundaryOutcome:
@@ -116,7 +129,9 @@ class _Stage:
                 "role": "tool",
             }
         )
-        ingested = await ingest.process(payload, multimodal_llm=None)
+        ingested = await ingest.process(
+            payload, multimodal_llm=None, raw_file_builder=unused_raw_file_builder
+        )
         return await self.boundary.detect(ingested, mode="agent", is_final=False)
 
     async def tracks(self, session: str) -> dict[str, list[str]]:

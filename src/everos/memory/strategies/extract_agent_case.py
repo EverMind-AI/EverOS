@@ -3,6 +3,18 @@
 Per-memcell extraction: algo's :class:`AgentCaseExtractor` returns no case
 together with the gate that rejected the memcell (logged as
 ``agent_case_skipped`` with its ``reason`` and ``detail``), or a single case.
+
+**Skip reasons are persisted**: every run that completes stamps the memcell
+through :meth:`MemcellStore.mark_case_extracted` -- ``skip_reason`` is
+``None`` exactly when a case came out, otherwise everalgo's
+``CaseSkipReason`` value (or ``no_agent_sender`` for EverOS's own gate below,
+named in the same vocabulary). A gated memcell is a successful run with no
+output, so without the stamp its reason would exist only in a log line.
+The most common reason in practice is everalgo's closure gate
+(``trajectory_not_closed`` / ``no_messages_after_strip``): when boundary
+detection cuts a trajectory before the assistant's final answer, neither
+half is a closed task, and no case is produced -- accepted upstream
+behaviour, made queryable here rather than patched over.
 Quality score is persisted as-is; no everos-side threshold filter
 (opensource parity — let downstream rank / filter handle it).
 
@@ -42,6 +54,9 @@ from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
 
+_NO_AGENT_SENDER = "no_agent_sender"
+"""Skip reason when the memcell has no assistant-side sender to file under."""
+
 
 async def extract_agent_case(
     event: AgentPipelineStarted, deps: MemoryDeps
@@ -54,6 +69,9 @@ async def extract_agent_case(
             "agent_case_skipped_no_assistant",
             memcell_id=event.memcell_id,
             session_id=event.session_id,
+        )
+        await deps.stores.memcell.mark_case_extracted(
+            event.memcell_id, skip_reason=_NO_AGENT_SENDER, skip_detail={}
         )
         return []
 
@@ -69,6 +87,11 @@ async def extract_agent_case(
             reason=result.reason,
             detail=result.detail,
         )
+        await deps.stores.memcell.mark_case_extracted(
+            event.memcell_id,
+            skip_reason=str(result.reason),
+            skip_detail=result.detail,
+        )
         return []
 
     # 3. File the same case under every agent sender and announce each copy
@@ -77,6 +100,9 @@ async def extract_agent_case(
     extracted: list[Event] = [
         await _file_case(algo_case, agent_id, event, deps) for agent_id in agent_ids
     ]
+    await deps.stores.memcell.mark_case_extracted(
+        event.memcell_id, skip_reason=None, skip_detail={}
+    )
     logger.info(
         "agent_case_extracted",
         memcell_id=event.memcell_id,

@@ -30,7 +30,7 @@ def test_demo_configures_requested_log_level(monkeypatch) -> None:
     configured: list[bool] = []
     monkeypatch.setattr(
         demo_command,
-        "configure_cli_logging",
+        "configure_interactive",
         lambda *, verbose: configured.append(verbose),
     )
     app = typer.Typer()

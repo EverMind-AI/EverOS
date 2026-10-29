@@ -68,21 +68,23 @@ async def test_write_read_update_delete_round_trip(root: MemoryRoot) -> None:
     document = await store.read_document("app", "proj", _DOC)
     assert document is not None
     assert (document.title, document.category_id) == ("Guide", "Tech")
-    assert document.md_path == str((doc_dir / "index.md").relative_to(root.root))
+    assert written.md_path == str((doc_dir / "index.md").relative_to(root.root))
     assert await store.original_file(document) == written.original_file_path
 
     moved = await store.update_document(
         document.model_copy(update={"title": "Renamed", "category_id": "Science"}),
         previous_category_id="Tech",
     )
-    new_index = root.root / (moved.md_path or "")
+    new_index = root.root / moved.md_path
+    assert moved.location == str(new_index.parent)
+    assert moved.original_file_path == str(new_index.parent / "_original" / "guide.pdf")
     assert new_index.parent.parent.name == "Science"
     assert "title: Renamed" in _read(new_index)
     assert all(
         "category_id: Science" in _read(f) for f in new_index.parent.glob("[0-9]*.md")
     )
 
-    removed = await store.delete_document("app", "proj", _DOC, md_path=None)
+    removed = await store.delete_document("app", "proj", _DOC)
     assert removed == 2
     assert await store.read_document("app", "proj", _DOC) is None
 
@@ -94,7 +96,7 @@ async def test_update_of_a_missing_document_raises(root: MemoryRoot) -> None:
     )
     document = await store.read_document("app", "proj", _DOC)
     assert document is not None
-    await store.delete_document("app", "proj", _DOC, md_path=document.md_path)
+    await store.delete_document("app", "proj", _DOC)
 
     with pytest.raises(DocumentNotFoundError):
         await store.update_document(document, previous_category_id="Tech")
@@ -109,6 +111,7 @@ async def test_replace_restores_the_previous_files_on_failure(
     )
     previous = await store.read_document("app", "proj", _DOC)
     assert previous is not None
+    before = sorted(root.knowledge_dir("app", "proj").rglob("*.md"))
 
     with pytest.raises(ValueError, match="root node"):
         await store.replace_document(
@@ -120,5 +123,6 @@ async def test_replace_restores_the_previous_files_on_failure(
         )
 
     restored = await store.read_document("app", "proj", _DOC)
-    assert restored is not None and restored.md_path == previous.md_path
+    assert restored == previous
+    assert sorted(root.knowledge_dir("app", "proj").rglob("*.md")) == before
     assert not list(root.knowledge_dir("app", "proj").rglob("*.backup"))

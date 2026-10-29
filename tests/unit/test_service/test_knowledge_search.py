@@ -38,7 +38,7 @@ from tests.unit.test_memory.test_search._records import (
     topic_hit,
 )
 
-_FACADE = "everos.service.knowledge.acategory_retrieve"
+_FACADE = "everos.service.knowledge._search.acategory_retrieve"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

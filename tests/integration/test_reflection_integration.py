@@ -211,6 +211,19 @@ async def _cluster_of(storage: Storage, members: list[str]) -> None:
     )
 
 
+async def _join_cluster(storage: Storage, member: str) -> None:
+    """Add one member to the seeded cluster, snapshot unchanged."""
+    cluster = await storage.sqlite.cluster.get_with_members(CLUSTER)
+    assert cluster is not None
+    await storage.sqlite.cluster.upsert_with_members(
+        cluster.model_copy(update={"members": [*cluster.members, member]}),
+        owner_id=OWNER,
+        owner_type="user",
+        kind="user_memory",
+        member_type="episode",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_partition_locks() -> None:
     _reset_for_tests()
@@ -269,7 +282,7 @@ async def test_update_merge_replaces_the_previous_merge(
     _, (first,) = await world.reflect()
 
     (fourth,) = await world.seed(1, start=3)
-    await world.storage.sqlite.cluster.add_member(CLUSTER, fourth.entry_id, "episode")
+    await _join_cluster(world.storage, fourth.entry_id)
     _, (second,) = await world.reflect()
 
     assert (second.mode, second.source_count) == ("update", 2)

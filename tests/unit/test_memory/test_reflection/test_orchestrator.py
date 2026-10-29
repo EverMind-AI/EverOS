@@ -20,7 +20,7 @@ import pytest
 from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
-from everos.memory.models import AtomicFact, Episode
+from everos.memory.models import AtomicFact, Cluster, Episode
 from everos.memory.ports import MemoryRef, Scope, SearchHit, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from everos.memory.reflection.orchestrator import _MAX_CLUSTERS_PER_RUN
@@ -89,6 +89,19 @@ def _stored_episode(
     )
 
 
+def _clusters(*sizes: tuple[str, int]) -> list[Cluster]:
+    """Clusters with ``n`` placeholder members each."""
+    return [
+        Cluster(
+            id=cid,
+            centroid=(0.0,),
+            last_ts=0,
+            members=[f"{cid}_m{i}" for i in range(n)],
+        )
+        for cid, n in sizes
+    ]
+
+
 def _merged_ref(entry_id: str) -> MemoryRef:
     return MemoryRef(
         id=f"u_alice_{entry_id}",
@@ -146,8 +159,8 @@ def _arm_cluster_flow(
     ports.report_store.reflected_cluster_ids = AsyncMock(
         return_value=reflected or set()
     )
-    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
-        return_value=[(cluster_id, len(members))]
+    ports.cluster_store.list_for_owner = AsyncMock(
+        return_value=_clusters((cluster_id, len(members)))
     )
     ports.episode_index.orphans = AsyncMock(return_value=[])
     ports.cluster_store.members = AsyncMock(return_value=members)
@@ -166,9 +179,7 @@ def _arm_cluster_flow(
     ports.episode_store.deprecate = AsyncMock()
     ports.atomic_fact_index.find = AsyncMock(return_value=[])
     ports.atomic_fact_store.deprecate = AsyncMock()
-    ports.cluster_store.remove_members = AsyncMock()
-    ports.cluster_store.add_member = AsyncMock()
-    ports.cluster_store.update_metadata = AsyncMock()
+    ports.cluster_store.replace_members = AsyncMock()
     ports.embedder.embed = AsyncMock(return_value=[0.1] * 1024)
     ports.report_store.create = AsyncMock()
 
@@ -181,13 +192,13 @@ async def test_select_candidates_init_and_update(ports: _Ports) -> None:
     Reflected clusters with >1 member are UPDATE candidates.
     """
     ports.report_store.reflected_cluster_ids = AsyncMock(return_value={"cl_reflected"})
-    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
-        return_value=[
+    ports.cluster_store.list_for_owner = AsyncMock(
+        return_value=_clusters(
             ("cl_new_3", 3),
             ("cl_new_1", 1),  # only 1 member -> skip
             ("cl_reflected", 2),  # reflected + 2 members -> UPDATE
             ("cl_reflected_1", 1),  # reflected + 1 member -> skip
-        ]
+        )
     )
 
     result = await ports.orchestrator()._select_candidates(
@@ -195,16 +206,16 @@ async def test_select_candidates_init_and_update(ports: _Ports) -> None:
     )
 
     assert result == ["cl_new_3", "cl_reflected"]
-    ports.cluster_store.list_ids_and_member_counts.assert_awaited_once_with(
-        _SCOPE, "user_memory"
-    )
+    ports.cluster_store.list_for_owner.assert_awaited_once_with(_SCOPE, "user_memory")
 
 
 async def test_select_candidates_respects_max_limit(ports: _Ports) -> None:
     """More than ``_MAX_CLUSTERS_PER_RUN`` candidates are truncated."""
     ports.report_store.reflected_cluster_ids = AsyncMock(return_value=set())
-    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
-        return_value=[(f"cl_{i:03d}", i + 2) for i in range(_MAX_CLUSTERS_PER_RUN + 5)]
+    ports.cluster_store.list_for_owner = AsyncMock(
+        return_value=_clusters(
+            *((f"cl_{i:03d}", i + 2) for i in range(_MAX_CLUSTERS_PER_RUN + 5))
+        )
     )
 
     result = await ports.orchestrator()._select_candidates(
@@ -217,8 +228,8 @@ async def test_select_candidates_respects_max_limit(ports: _Ports) -> None:
 async def test_empty_candidates_returns_empty(ports: _Ports) -> None:
     """No qualifying clusters -> run() returns empty list immediately."""
     ports.report_store.reflected_cluster_ids = AsyncMock(return_value=set())
-    ports.cluster_store.list_ids_and_member_counts = AsyncMock(
-        return_value=[("cl_only_one", 1)]
+    ports.cluster_store.list_for_owner = AsyncMock(
+        return_value=_clusters(("cl_only_one", 1))
     )
 
     merged = await ports.orchestrator().run(scope=_SCOPE)
@@ -258,14 +269,15 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
     assert "(project_id = 'alpha')" in rendered
     assert "'ep_20260601_0001'" in rendered
     assert "deprecated_by IS NULL" in rendered
-    calls = {
-        c.kwargs["md_path"]: c.kwargs["replaced"]
-        for c in ports.atomic_fact_store.deprecate.await_args_list
-    }
-    assert calls == {
-        "facts/a.md": {"af_1": "ep_20260614_0001", "af_2": "ep_20260614_0001"},
-        "facts/b.md": {"af_3": "ep_20260614_0001"},
-    }
+    ports.atomic_fact_store.deprecate.assert_awaited_once_with(
+        scope,
+        entries=[
+            ("facts/a.md", "af_1"),
+            ("facts/a.md", "af_2"),
+            ("facts/b.md", "af_3"),
+        ],
+        replaced_by="ep_20260614_0001",
+    )
 
 
 async def test_deprecate_facts_without_parents_reads_nothing(ports: _Ports) -> None:
@@ -338,18 +350,20 @@ async def test_run_init_mode_merges_and_deprecates(ports: _Ports) -> None:
         context=merged.reflection,
     )
 
-    # Deprecation is one md patch for the file holding both originals.
     ports.episode_store.deprecate.assert_awaited_once_with(
         _SCOPE,
-        replaced={
-            "ep_20260601_0001": "ep_20260614_0001",
-            "ep_20260601_0002": "ep_20260614_0001",
-        },
-        md_path=ep1.ref.md_path,
+        entries=[
+            (ep1.ref.md_path, "ep_20260601_0001"),
+            (ep2.ref.md_path, "ep_20260601_0002"),
+        ],
+        replaced_by="ep_20260614_0001",
     )
-    ports.cluster_store.remove_members.assert_awaited_once()
-    ports.cluster_store.add_member.assert_awaited_once_with(
-        "cl_abc", "ep_20260614_0001", "episode"
+    replace = ports.cluster_store.replace_members.await_args
+    assert replace.args == ("cl_abc",)
+    assert replace.kwargs["removed"] == {"ep_20260601_0001", "ep_20260601_0002"}
+    assert (replace.kwargs["added"], replace.kwargs["member_type"]) == (
+        "ep_20260614_0001",
+        "episode",
     )
     ports.report_store.create.assert_awaited_once_with(report)
 
@@ -472,13 +486,11 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
         scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)
     )
 
-    episode_patches = {
-        c.kwargs["md_path"]: c.kwargs["replaced"]
-        for c in ports.episode_store.deprecate.await_args_list
-    }
-    assert episode_patches == {"a.md": {"ep_1": "ep_m"}, "b.md": {"ep_2": "ep_m"}}
+    ports.episode_store.deprecate.assert_awaited_once_with(
+        _SCOPE, entries=[("a.md", "ep_1"), ("b.md", "ep_2")], replaced_by="ep_m"
+    )
     ports.atomic_fact_store.deprecate.assert_awaited_once_with(
-        _SCOPE, replaced={"af_1": "ep_m"}, md_path="f.md"
+        _SCOPE, entries=[("f.md", "af_1")], replaced_by="ep_m"
     )
     ports.episode_index.update.assert_not_called()
     ports.atomic_fact_index.update.assert_not_called()
@@ -486,7 +498,7 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
     assert report.source_members == [("ep_1", "episode"), ("ep_2", "episode")]
     assert report.deprecated_fact_count == 1
     ports.report_store.create.assert_awaited_once_with(report)
-    ports.cluster_store.update_metadata.assert_awaited_once()
+    ports.cluster_store.replace_members.assert_awaited_once()
     ports.embedder.embed.assert_awaited_once_with("merged")
 
 
@@ -522,3 +534,33 @@ def _context(*episodes: Stored[Episode]) -> ReflectionContext:
         merged_episode="merged",
         last_ts=1_780_272_000_000,
     )
+
+
+async def test_retirement_counts_keep_duplicates_and_missing_fact_locations(
+    ports: _Ports,
+) -> None:
+    """Episode counts include selected duplicates; fact counts include all hits."""
+    selected = ReflectedEpisode(entry_id="ep_1", md_path="a.md", parent_id="mc_1")
+    missing = ReflectedEpisode(entry_id="ep_2", md_path="", parent_id="mc_1")
+    unrelated = ReflectedEpisode(entry_id="ep_3", md_path="b.md", parent_id="mc_3")
+    ports.episode_store.deprecate = AsyncMock()
+    ports.atomic_fact_store.deprecate = AsyncMock()
+    finisher = ports.finisher()
+    marked = await finisher._deprecate_episodes(
+        scope=_SCOPE,
+        episodes=[selected, missing, selected, unrelated],
+        to_deprecate={"mc_1"},
+        merged_entry_id="ep_m",
+    )
+    assert marked == 2
+    ports.episode_store.deprecate.assert_awaited_once_with(
+        _SCOPE, entries=[("a.md", "ep_1"), ("a.md", "ep_1")], replaced_by="ep_m"
+    )
+    ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "")])
+    assert (
+        await finisher._deprecate_facts(
+            scope=_SCOPE, parent_ids={"ep_1"}, merged_entry_id="ep_m"
+        )
+        == 1
+    )
+    ports.atomic_fact_store.deprecate.assert_not_awaited()

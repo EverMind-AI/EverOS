@@ -52,7 +52,7 @@ from everos.core.errors import (
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 
-from .utils import extract_request_id
+from .dependencies import extract_request_id
 
 logger = get_logger(__name__)
 

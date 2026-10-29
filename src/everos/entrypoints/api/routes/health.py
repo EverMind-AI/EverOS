@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from everos import __version__
-from everos.entrypoints.api.utils import application
+from everos.entrypoints.api.dependencies import application
 
 router = APIRouter(tags=["health"])
 

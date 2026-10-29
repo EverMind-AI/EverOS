@@ -41,7 +41,7 @@ from typing import Annotated
 
 import typer
 
-from everos.config import load_settings
+from everos.config import Settings, load_settings
 from everos.core.errors import (
     EmbeddingProvenanceError,
     IndexSchemaMismatchError,
@@ -49,7 +49,7 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_display_tz
-from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli._process import configure_interactive
 from everos.entrypoints.cli.commands._backfill_cmd import run_backfill
 from everos.service import OpsService, build_application
 
@@ -64,6 +64,7 @@ app = typer.Typer(
 
 @app.callback()
 def _cascade_callback(
+    ctx: typer.Context,
     root: str | None = typer.Option(
         None,
         "--root",
@@ -76,9 +77,9 @@ def _cascade_callback(
         help="Emit INFO-level lifecycle logs (default: WARNING only).",
     ),
 ) -> None:
-    """Set memory root and log level before any cascade subcommand runs."""
-    configure_cli_logging(verbose=verbose)
+    """Record the group-level memory root and log level for the subcommand."""
     _apply_root_env(root)
+    ctx.ensure_object(dict)["verbose"] = verbose
 
 
 def _apply_root_env(root: str | None) -> None:
@@ -93,21 +94,21 @@ def _apply_root_env(root: str | None) -> None:
         os.environ["EVEROS_ROOT"] = root
 
 
-def _apply_verbose_logging(verbose: bool | None) -> None:
-    """Re-apply the CLI log level from a subcommand-level ``--verbose``.
+def _command_settings(
+    ctx: typer.Context, *, root: str | None = None, verbose: bool | None = None
+) -> Settings:
+    """Settle the subcommand's root and log level; return its settings.
 
-    ``None`` means the subcommand did not receive its own ``--verbose``
-    flag — leave whatever level the group callback set (default
-    WARNING, or INFO if the user passed ``cascade --verbose``). A
-    ``True``/``False`` value came from the subcommand and wins over the
-    group callback (later configuration overrides earlier).
-
-    Mirrors :func:`_apply_root_env`'s "either position works" pattern
-    for symmetry — users can write ``everos cascade --verbose status``
-    or ``everos cascade status --verbose`` and get the same behaviour.
+    A subcommand-level ``--root`` / ``--verbose`` wins over the group's
+    (``None`` means the subcommand did not get its own ``--verbose``), so
+    ``everos cascade --verbose status`` and ``everos cascade status
+    --verbose`` behave the same. Settings are loaded only after the root is
+    settled, since the root decides which ``everos.toml`` they read.
     """
-    if verbose is not None:
-        configure_cli_logging(verbose=verbose)
+    _apply_root_env(root)
+    if verbose is None:
+        verbose = bool(ctx.ensure_object(dict).get("verbose", False))
+    return configure_interactive(verbose=verbose, settings=load_settings())
 
 
 _ROOT_OPTION_HELP = (
@@ -125,7 +126,11 @@ _VERBOSE_OPTION_HELP = (
 
 @asynccontextmanager
 async def _runtime(
-    *, verify: bool = True, ensure: bool = True, exclusive: bool = False
+    settings: Settings,
+    *,
+    verify: bool = True,
+    ensure: bool = True,
+    exclusive: bool = False,
 ) -> AsyncIterator[OpsService]:
     """Build the application and open its storage for one command.
 
@@ -145,7 +150,7 @@ async def _runtime(
     """
     try:
         async with (
-            build_application(load_settings()) as application,
+            build_application(settings) as application,
             application.ops.index_session(
                 verify=verify, ensure=ensure, exclusive=exclusive
             ),
@@ -179,6 +184,7 @@ async def _runtime(
 
 @app.command("sync")
 def sync(
+    ctx: typer.Context,
     path: Annotated[
         Path | None,
         typer.Argument(
@@ -214,14 +220,13 @@ def sync(
     10-hour soak with two concurrent ``cascade sync`` processes). Refused
     with exit code 3 while a server holds the root.
     """
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     if force_all and path is not None:
         raise typer.BadParameter("--force-all re-enqueues every md; do not pass PATH")
 
     async def _run() -> None:
-        async with _runtime(exclusive=True) as ops:
+        async with _runtime(settings, exclusive=True) as ops:
             if force_all:
                 rows = await ops.cascade_force_enqueue_all()
                 by_status = Counter(row.status for row in rows)
@@ -252,6 +257,7 @@ def sync(
 
 @app.command("status")
 def status(
+    ctx: typer.Context,
     root: Annotated[
         str | None,
         typer.Option("--root", help=_ROOT_OPTION_HELP),
@@ -262,11 +268,10 @@ def status(
     ] = None,
 ) -> None:
     """Print the queue / LSN summary."""
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> None:
-        async with _runtime() as ops:
+        async with _runtime(settings) as ops:
             status = await ops.cascade_status()
             summary = status.summary
             lag = max(0, summary.max_lsn - summary.last_processed_lsn)
@@ -323,6 +328,7 @@ def status(
 
 @app.command("fix")
 def fix(
+    ctx: typer.Context,
     apply: Annotated[
         bool,
         typer.Option(
@@ -340,11 +346,10 @@ def fix(
     ] = None,
 ) -> None:
     """List failed rows (default) or re-enqueue retryable ones (``--apply``)."""
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> None:
-        async with _runtime(exclusive=apply) as ops:
+        async with _runtime(settings, exclusive=apply) as ops:
             rows = await ops.cascade_failed()
             if not rows:
                 typer.echo("no failed rows")
@@ -396,6 +401,7 @@ class _BackfillPhaseOption(enum.StrEnum):
 
 @app.command("backfill")
 def backfill(
+    ctx: typer.Context,
     phase: Annotated[
         _BackfillPhaseOption,
         typer.Option(
@@ -443,11 +449,10 @@ def backfill(
     re-running the same ``--phase`` (or ``--phase all``) afterwards only
     picks up what's left — nothing is redone from scratch.
     """
-    _apply_root_env(root)
-    _apply_verbose_logging(verbose)
+    settings = _command_settings(ctx, root=root, verbose=verbose)
 
     async def _run() -> int:
-        async with _runtime() as ops:
+        async with _runtime(settings) as ops:
             return await run_backfill(ops, phase=phase.value, auto_yes=yes)
 
     try:
@@ -472,6 +477,7 @@ def backfill(
 
 @app.command("rebuild")
 def rebuild(
+    ctx: typer.Context,
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
@@ -498,7 +504,8 @@ def rebuild(
       is NOT rebuildable from md — notably ``unprocessed_buffer``
       (messages received but not yet extracted).
     """
-    if not asyncio.run(_root_is_free()):
+    settings = _command_settings(ctx)
+    if not asyncio.run(_root_is_free(settings)):
         typer.echo(
             "error: a server (or another exclusive CLI phase) is running on "
             "this memory root.\n"
@@ -522,7 +529,9 @@ def rebuild(
         # to fix; the startup guard would abort before we could rebuild.
         # ensure=False: the pre-drop migration pass would raise on exactly
         # the damage we are here to repair (see _runtime).
-        async with _runtime(verify=False, ensure=False, exclusive=True) as ops:
+        async with _runtime(
+            settings, verify=False, ensure=False, exclusive=True
+        ) as ops:
             result = await ops.cascade_rebuild()
             typer.echo(f"reset {result.ledger_rows_reset} cascade queue row(s)")
             dropped = result.dropped_tables
@@ -547,9 +556,9 @@ def rebuild(
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
-async def _root_is_free() -> bool:
+async def _root_is_free(settings: Settings) -> bool:
     """Whether no server (or exclusive CLI phase) holds this memory root."""
-    async with build_application(load_settings()) as application:
+    async with build_application(settings) as application:
         return application.ops.ome_lock_is_free()
 
 

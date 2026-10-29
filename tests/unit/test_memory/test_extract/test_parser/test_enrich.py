@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from functools import partial
 from typing import Any
 
 import pytest
@@ -13,12 +14,15 @@ from everalgo.types import ParsedContent
 
 from everos.component import parser as _parser_mod
 from everos.component.llm import LLMCallError
+from everos.component.parser import build_raw_file
+from everos.config import Settings
 from everos.core.errors import UnsupportedModalityError
 from everos.memory.extract.parser import enrich_content_items
 
 _APARSE_FILE_TARGET = "everos.component.parser.aparse_file"
 
 _LLM = object()
+_BUILD_RAW_FILE = partial(build_raw_file, settings_source=Settings)
 """Stands in for the multimodal LLM; the parser itself is faked."""
 
 
@@ -63,7 +67,9 @@ async def test_enrich_backfills_parsed_content(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items: list[dict[str, Any]] = [{"type": "text", "text": "hi"}, _img_item()]
-    await enrich_content_items(items, llm=_LLM, max_concurrency=2)
+    await enrich_content_items(
+        items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE, max_concurrency=2
+    )
 
     assert items[1]["parsed_content"] == "OCR RESULT"
     assert items[1]["parse_status"] == "success"
@@ -78,7 +84,9 @@ async def test_enrich_unsupported_modality_raises(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     with pytest.raises(UnsupportedModalityError):
-        await enrich_content_items([_img_item()], llm=_LLM)
+        await enrich_content_items(
+            [_img_item()], llm=_LLM, raw_file_builder=_BUILD_RAW_FILE
+        )
 
 
 async def test_enrich_transient_llm_error_degrades(
@@ -89,7 +97,7 @@ async def test_enrich_transient_llm_error_degrades(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_img_item()]
-    await enrich_content_items(items, llm=_LLM)
+    await enrich_content_items(items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE)
 
     assert items[0]["parse_status"] == "failed"
     assert "parsed_content" not in items[0]
@@ -107,7 +115,7 @@ async def test_enrich_html_base64_routes_as_html_bytes(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_html_b64_item()]
-    await enrich_content_items(items, llm=_LLM)
+    await enrich_content_items(items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE)
 
     assert items[0]["parsed_content"] == "HTML PARSED"
     assert items[0]["parse_status"] == "success"
@@ -127,7 +135,7 @@ async def test_enrich_http_uri_routes_as_uri(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     items = [_html_uri_item()]
-    await enrich_content_items(items, llm=_LLM)
+    await enrich_content_items(items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE)
 
     assert items[0]["parsed_content"] == "URL PARSED"
     assert items[0]["parse_status"] == "success"
@@ -143,7 +151,11 @@ async def test_enrich_html_text_only_raises_unsupported(
 
     monkeypatch.setattr(_APARSE_FILE_TARGET, fake_aparse)
     with pytest.raises(UnsupportedModalityError):
-        await enrich_content_items([{"type": "html", "text": "<p>hi</p>"}], llm=_LLM)
+        await enrich_content_items(
+            [{"type": "html", "text": "<p>hi</p>"}],
+            llm=_LLM,
+            raw_file_builder=_BUILD_RAW_FILE,
+        )
 
 
 async def test_enrich_file_uri_hydrates_and_parses(
@@ -161,7 +173,7 @@ async def test_enrich_file_uri_hydrates_and_parses(
     f = tmp_path / "doc.html"
     f.write_bytes(b"<html>hello</html>")
     items = [{"type": "html", "uri": f.as_uri()}]
-    await enrich_content_items(items, llm=_LLM)
+    await enrich_content_items(items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE)
 
     assert items[0]["parsed_content"] == "FILE PARSED"
     assert items[0]["parse_status"] == "success"

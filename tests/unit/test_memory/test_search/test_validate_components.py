@@ -21,6 +21,7 @@ import pytest
 from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
+from tests.fakes import static_trace_path, static_tuning
 
 
 class _StubLLM:
@@ -56,6 +57,8 @@ def _build_manager(
         embedding=_StubEmbedding() if embedding_present else None,  # type: ignore[arg-type]
         reranker=_StubReranker() if reranker_present else None,  # type: ignore[arg-type]
         llm_client=_StubLLM() if llm_present else None,
+        tuning_source=static_tuning(),
+        trace_path_source=static_trace_path(),
     )
 
 

@@ -54,9 +54,12 @@ from .schema import IndexField as IndexField
 from .schema import IndexFieldKind as IndexFieldKind
 from .schema import IndexSchema as IndexSchema
 from .schema import schema_for as schema_for
+from .vector_projection import VECTOR_PROJECTIONS as VECTOR_PROJECTIONS
+from .vector_projection import VectorProjection as VectorProjection
 
 __all__ = [
     "BUSINESS_SCHEMAS",
+    "VECTOR_PROJECTIONS",
     "AgentCase",
     "AgentSkill",
     "AgentSkillIndexRepository",
@@ -85,6 +88,7 @@ __all__ = [
     "Predicate",
     "Scalar",
     "UserProfile",
+    "VectorProjection",
     "all_of",
     "any_of",
     "check_primary_keys",

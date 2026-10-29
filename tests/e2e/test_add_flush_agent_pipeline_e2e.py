@@ -34,8 +34,11 @@ race-free, only the driver is conservative.
 
 White-box assertions (audit trail of internal surfaces touched):
     - sqlite ``memcell`` rows per session_id
-    - filesystem ``<root>/agents/<agent>/.cases/*.md`` presence
-    - LanceDB ``agent_case`` rows by ``owner_id`` (count + session_id set)
+    - per session: ≥1 ``agent_case``, or every memcell's persisted
+      ``case_skip_reason`` is an everalgo closure-gate reason (see
+      ``_CLOSURE_GATE_REASONS``); ≥1 case across all sessions
+    - filesystem ``<root>/agents/<agent>/.cases/*.md`` presence and
+      LanceDB session isolation, for every agent that has a case
     - LanceDB ``agent_skill`` rows by ``owner_id`` (aggregate floor — see
       ``test_agent_pipeline_e2e_mixed_tenancy``'s section 4.5)
     - OME ``run_record``: no dead-lettered ``extract_agent_skill`` run
@@ -51,6 +54,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import text
 
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence.index import eq
@@ -79,6 +83,23 @@ _DJANGO_SESSIONS = (
 _AGENT_PYTEST = "agent_pytest"
 _AGENT_SYMPY = "agent_sympy"
 _AGENT_DJANGO = "agent_django"
+_AGENT_SESSIONS: dict[str, frozenset[str]] = {
+    _AGENT_PYTEST: frozenset({_PYTEST_SESSION}),
+    _AGENT_SYMPY: frozenset({_SYMPY_SESSION}),
+    _AGENT_DJANGO: frozenset(_DJANGO_SESSIONS),
+}
+
+_CLOSURE_GATE_REASONS = frozenset({"trajectory_not_closed", "no_messages_after_strip"})
+"""Skip reasons that let a session end with no agent_case.
+
+everalgo-agent-memory 0.6 extracts a case only from a closed trajectory (a
+user request through to the assistant's final text). Boundary detection
+occasionally cuts a trajectory just before that final answer -- measured on
+two of these fixtures at 3 of 5 runs, against 1 of 5 before the everalgo
+upgrade -- and then neither half passes the gate. That is accepted upstream
+behaviour; the strategy persists the reason on each memcell row, which is
+what this test reads instead of demanding a case per agent.
+"""
 
 # Phase 3 drain budget: OME chain (case → cluster → skill) writes md in
 # stages, each picked up by cascade. Multiple drain rounds with brief
@@ -86,6 +107,21 @@ _AGENT_DJANGO = "agent_django"
 _DRAIN_ROUNDS = 4
 _DRAIN_TIMEOUT_SECONDS = 300.0
 _DRAIN_INTER_ROUND_SLEEP_SECONDS = 5.0
+
+
+async def _case_skip_reasons(
+    storage_view: StorageView, session_id: str
+) -> dict[str, str | None]:
+    """``memcell_id`` → ``case_skip_reason`` for every memcell of a session."""
+    async with storage_view.database.engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT memcell_id, case_skip_reason FROM memcell "
+                "WHERE session_id = :sid"
+            ),
+            {"sid": session_id},
+        )
+        return {row[0]: row[1] for row in rows}
 
 
 def _load_fixture(session_id: str) -> dict:
@@ -128,7 +164,13 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     memcell_count: Callable[..., Awaitable[int]],
     storage_view: StorageView,
 ) -> None:
-    """5 SWE-bench trajectories → agent_case + agent_skill on three agents."""
+    """5 SWE-bench trajectories → agent_case + agent_skill on three agents.
+
+    A session may end with no case when every one of its memcells was
+    rejected by everalgo's closure gate (boundary cut the trajectory before
+    the final answer); the persisted ``memcell.case_skip_reason`` proves it.
+    The aggregate floor of one case keeps the downstream checks meaningful.
+    """
     memory_root = core_pipeline_runtime
 
     pytest_fx = _load_fixture(_PYTEST_SESSION)
@@ -158,53 +200,49 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
         n = await memcell_count(sid)
         assert n >= 1, f"no memcell for session {sid!r} (got {n})"
 
-    # 4.2 each agent has a .cases dir with ≥1 .md file
+    # 4.2 per session: at least one case, or every memcell closure-gated.
+    # See ``_CLOSURE_GATE_REASONS`` for why a session may legitimately end
+    # with no case.
+    cases_by_agent = {
+        agent_id: await storage_view.repos.agent_case.find_where(
+            eq("owner_id", agent_id)
+        )
+        for agent_id in _AGENT_SESSIONS
+    }
+    case_sessions = {c.session_id for cases in cases_by_agent.values() for c in cases}
+    for sid in all_sessions:
+        if sid in case_sessions:
+            continue
+        reasons = await _case_skip_reasons(storage_view, sid)
+        assert reasons and set(reasons.values()) <= _CLOSURE_GATE_REASONS, (
+            f"session {sid!r} produced no agent_case and not every memcell was "
+            f"closure-gated; case_skip_reason per memcell: {reasons}"
+        )
+
+    # Aggregate floor: without at least one case, 4.5-4.7 would run empty.
+    total_cases = sum(len(cases) for cases in cases_by_agent.values())
+    assert total_cases >= 1, (
+        "no agent_case across all 5 sessions — "
+        f"{ {a: len(c) for a, c in cases_by_agent.items()} }"
+    )
+
+    # 4.3 every agent with a LanceDB case also has its case md on disk
     agents_dir = memory_root / "default_app" / "default_project" / "agents"
     case_dir_name = AgentCaseDailyFrontmatter.DIR_NAME
-    for agent_id in (_AGENT_PYTEST, _AGENT_SYMPY, _AGENT_DJANGO):
+    agents_with_cases = [a for a, cases in cases_by_agent.items() if cases]
+    for agent_id in agents_with_cases:
         case_dir = agents_dir / agent_id / case_dir_name
         assert case_dir.is_dir(), f"missing {case_dir!s} for agent={agent_id!r}"
-        md_files = list(case_dir.glob("*.md"))
-        assert md_files, f"no agent_case md under {case_dir!s}"
-
-    # 4.3 LanceDB agent_case rows per owner
-    pytest_cases = await storage_view.repos.agent_case.find_where(
-        eq("owner_id", _AGENT_PYTEST)
-    )
-    sympy_cases = await storage_view.repos.agent_case.find_where(
-        eq("owner_id", _AGENT_SYMPY)
-    )
-    django_cases = await storage_view.repos.agent_case.find_where(
-        eq("owner_id", _AGENT_DJANGO)
-    )
-
-    assert len(pytest_cases) >= 1, (
-        f"no agent_pytest rows in LanceDB (got {len(pytest_cases)})"
-    )
-    assert len(sympy_cases) >= 1, (
-        f"no agent_sympy rows in LanceDB (got {len(sympy_cases)})"
-    )
-    # Each django session writes at least one cell → at least one case per
-    # session. Lower bound 3 covers the minimum; LLM may produce more.
-    assert len(django_cases) >= 3, (
-        f"agent_django expected ≥3 LanceDB cases (3 sessions), got {len(django_cases)}"
-    )
+        assert list(case_dir.glob("*.md")), f"no agent_case md under {case_dir!s}"
 
     # 4.4 cross-owner isolation — each agent's cases trace back only to
     # its own sessions
-    pytest_session_ids = {c.session_id for c in pytest_cases}
-    assert pytest_session_ids == {_PYTEST_SESSION}, (
-        f"agent_pytest cases leaked across sessions: {pytest_session_ids}"
-    )
-    sympy_session_ids = {c.session_id for c in sympy_cases}
-    assert sympy_session_ids == {_SYMPY_SESSION}, (
-        f"agent_sympy cases leaked across sessions: {sympy_session_ids}"
-    )
-    django_session_ids = {c.session_id for c in django_cases}
-    assert django_session_ids == set(_DJANGO_SESSIONS), (
-        f"agent_django session set mismatch — got {django_session_ids}, "
-        f"want {set(_DJANGO_SESSIONS)}"
-    )
+    for agent_id in agents_with_cases:
+        session_ids = {c.session_id for c in cases_by_agent[agent_id]}
+        assert session_ids <= _AGENT_SESSIONS[agent_id], (
+            f"{agent_id} cases leaked across sessions: {session_ids}, "
+            f"want a subset of {_AGENT_SESSIONS[agent_id]}"
+        )
 
     # 4.5 agent_skill — aggregate floor across all three agents. Per-agent
     # emission depends on everalgo's per-case quality gate
@@ -267,7 +305,7 @@ async def test_agent_pipeline_e2e_mixed_tenancy(
     # check enforces byte-exact id-set + content_sha256 parity across
     # every md the agent pipeline wrote.
     #
-    # ``expect_at_least`` pins agent_case (every session writes ≥1 case)
+    # ``expect_at_least`` pins agent_case (4.2's aggregate floor)
     # so an empty glob would fail loudly. agent_skill is NOT pinned —
     # emission depends on the LLM clustering quality gate per 4.5; a
     # legitimately empty agent_skill md set is still a passing run.

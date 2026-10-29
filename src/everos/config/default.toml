@@ -273,6 +273,12 @@ optimize_rebuild_interval_seconds = 43200.0
 # stats every md file, which over a slow mount is the cost of a short interval.
 scan_interval_seconds = 30.0
 
+[logging]
+# Console log level: DEBUG | INFO | WARNING | ERROR. `everos server start
+# --log-level` (or EVEROS_LOG_LEVEL) overrides it for the server; interactive
+# commands (cascade / init / config / demo) log WARNING, INFO with --verbose.
+level = "INFO"
+
 [observability]
 # OpenTelemetry tracing export. Off by default; pure OTLP/HTTP, vendor-neutral
 # (Langfuse, an OTel Collector, or any OTLP backend). EverOS ships no vendor SDK.

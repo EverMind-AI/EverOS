@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from everos.infra.persistence.sqlite import QueueSummary
-    from everos.service.memorize_queue import QueueHealth
+    from everos.service.memory import QueueHealth
 
 
 @dataclasses.dataclass(frozen=True)

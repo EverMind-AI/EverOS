@@ -19,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.service import MemorizeResult, MemoryService, build_application
-from everos.service import memorize_queue as mq
+from everos.service.memory import _queue as mq
 from tests.fakes.storage import Storage
 
 

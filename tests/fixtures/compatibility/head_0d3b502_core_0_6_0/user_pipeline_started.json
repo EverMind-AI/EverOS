@@ -1,0 +1,19 @@
+{
+  "event_id": "frozen-user-pipeline-event",
+  "ts": "2023-11-14T22:13:20Z",
+  "memcell_id": "mc-frozen",
+  "session_id": "session-frozen",
+  "memcell": {
+    "items": [
+      {
+        "kind": "text",
+        "id": "message-frozen",
+        "role": "user",
+        "content": "Preserve this archived message.",
+        "timestamp": 1700000000123,
+        "sender_id": "user-frozen"
+      }
+    ],
+    "timestamp": 1700000000123
+  }
+}

@@ -88,8 +88,11 @@ class _DailyLog[T]:
             refs.append(ref)
         return refs
 
-    async def _deprecate(self, *, replaced: Mapping[str, str], md_path: str) -> None:
-        self.deprecated[md_path].update(replaced)
+    async def _deprecate(
+        self, *, entries: Sequence[tuple[str, str]], replaced_by: str
+    ) -> None:
+        for md_path, entry_id in entries:
+            self.deprecated[md_path][entry_id] = replaced_by
 
 
 class InMemoryEpisodeStore(_DailyLog[Episode]):
@@ -106,9 +109,9 @@ class InMemoryEpisodeStore(_DailyLog[Episode]):
         return await self._append_many(scope, episodes)
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        await self._deprecate(replaced=replaced, md_path=md_path)
+        await self._deprecate(entries=entries, replaced_by=replaced_by)
 
 
 class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
@@ -121,9 +124,9 @@ class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
         return await self._append_many(scope, facts)
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        await self._deprecate(replaced=replaced, md_path=md_path)
+        await self._deprecate(entries=entries, replaced_by=replaced_by)
 
 
 class InMemoryForesightStore(_DailyLog[Foresight]):
@@ -207,6 +210,7 @@ class InMemoryMemcellStore:
 
     def __init__(self) -> None:
         self.cells: dict[str, MemCell] = {}
+        self.case_marks: dict[str, tuple[str | None, dict[str, Any]]] = {}
 
     def seed(self, memcell_id: str, cell: MemCell) -> None:
         self.cells[memcell_id] = cell
@@ -219,6 +223,15 @@ class InMemoryMemcellStore:
 
     async def find_by_ids(self, memcell_ids: Sequence[str]) -> list[MemCell]:
         return [self.cells[i] for i in memcell_ids if i in self.cells]
+
+    async def mark_case_extracted(
+        self,
+        memcell_id: str,
+        *,
+        skip_reason: str | None,
+        skip_detail: Mapping[str, Any],
+    ) -> None:
+        self.case_marks[memcell_id] = (skip_reason, dict(skip_detail))
 
 
 class InMemoryClusterStore:
@@ -271,54 +284,33 @@ class InMemoryClusterStore:
         types = self.member_types[cluster_id]
         return [(m, types.get(m, "episode")) for m in cluster.members]
 
-    async def add_member(
-        self, cluster_id: str, member_id: str, member_type: ClusterMemberType
-    ) -> None:
-        cluster = self.clusters[cluster_id]
-        self.clusters[cluster_id] = cluster.model_copy(
-            update={"members": [*cluster.members, member_id]}
-        )
-        self.member_types[cluster_id][member_id] = member_type
-
-    async def remove_members(
-        self, cluster_id: str, member_ids: Collection[str]
-    ) -> None:
-        cluster = self.clusters[cluster_id]
-        kept = [m for m in cluster.members if m not in member_ids]
-        self.clusters[cluster_id] = cluster.model_copy(update={"members": kept})
-
-    async def update_metadata(
+    async def replace_members(
         self,
         cluster_id: str,
         *,
+        removed: Collection[str],
+        added: str,
+        member_type: ClusterMemberType,
         centroid: Sequence[float],
         count: int,
         last_ts: int,
         preview: Sequence[str],
     ) -> None:
-        self.clusters[cluster_id] = self.clusters[cluster_id].model_copy(
+        cluster = self.clusters[cluster_id]
+        kept = [m for m in cluster.members if m not in removed]
+        self.clusters[cluster_id] = cluster.model_copy(
             update={
+                "members": [*kept, added],
                 "centroid": tuple(centroid),
                 "count": count,
                 "last_ts": last_ts,
                 "preview": list(preview),
             }
         )
-
-    async def list_ids_and_member_counts(
-        self, scope: Scope, kind: ClusterKind
-    ) -> list[tuple[str, int]]:
-        return [
-            (cid, len(c.members))
-            for cid, c in self.clusters.items()
-            if self.owners[cid] == (scope, kind)
-        ]
+        self.member_types[cluster_id][added] = member_type
 
     async def list_distinct_owners(self) -> list[Scope]:
         return list(dict.fromkeys(scope for scope, _ in self.owners.values()))
-
-    async def count(self) -> int:
-        return len(self.clusters)
 
 
 class InMemoryReflectionReportStore:

@@ -45,16 +45,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
-from everos.config.settings import DeciderSettings, load_settings
+from everos.config.settings import DeciderSettings
 from everos.core.observability.logging import get_logger
 from everos.memory.models import Episode
 from everos.memory.ports import Filter, Stored
@@ -83,76 +82,7 @@ if TYPE_CHECKING:
 # sub-queries, not sum — max keeps a specialist that is #1 for one sub-query).
 _SEED_CANDIDATES: int = 50
 """Sparse / dense episode recall pool size per sub-query per round."""
-# ── Loop tuning ──────────────────────────────────────────────────────────────
-# Resolved per search from ``[decider]``, not frozen at import.
-#
-# These were twelve module-level ``int(os.getenv("EVEROS_LLMMR_...", ...))`` reads. Two
-# problems with that, and the second is the one that matters: nothing in the
-# configuration named them, so an operator had no way to discover they existed; and a
-# value read at import time cannot respond to a config reload, which is why the test
-# suite -- whose conftest resets the settings cache per test -- could not exercise them
-# without monkeypatching module attributes.
-#
-# The legacy env names still take precedence when set. Deployments and launch scripts
-# that export them keep working unchanged, and an in-flight comparison cannot shift
-# because this landed.
-_LEGACY_ENV: dict[str, str] = {
-    "max_rounds": "EVEROS_LLMMR_MAX_ROUNDS",
-    "seed_topk": "EVEROS_LLMMR_SEED_TOPK",
-    "subq_topk": "EVEROS_LLMMR_SUBQ_TOPK",
-    "max_subqueries": "EVEROS_LLMMR_MAX_SUBQUERIES",
-    "rrf_k": "EVEROS_LLMMR_RRF_K",
-    "no_new_core_patience": "EVEROS_LLMMR_PATIENCE",
-    "per_subquery_guarantee": "EVEROS_LLMMR_GUARANTEE",
-    "retries": "EVEROS_LLMMR_DECIDER_RETRIES",
-    "retry_backoff_seconds": "EVEROS_LLMMR_DECIDER_BACKOFF_S",
-    "core_overflow": "EVEROS_LLMMR_CORE_OVERFLOW",
-    "full_text": "EVEROS_LLMMR_DECIDER_FULL_TEXT",
-    "fallback_core": "EVEROS_LLMMR_DECIDER_FALLBACK_CORE",
-}
-
-
-def _tuning() -> DeciderSettings:
-    """The decider's loop settings, with the legacy env vars applied on top.
-
-    Returns a copy rather than the live settings object so a legacy override cannot
-    leak into anything else reading ``[decider]``.
-    """
-    cfg = load_settings().decider
-    over: dict[str, Any] = {}
-    for field, env in _LEGACY_ENV.items():
-        raw = os.getenv(env, "").strip()
-        if not raw:
-            continue
-        current = getattr(cfg, field)
-        try:
-            if isinstance(current, bool):
-                over[field] = raw == "1"
-            elif isinstance(current, int):
-                over[field] = int(raw)
-            else:
-                over[field] = float(raw)
-        except ValueError:
-            # A malformed override is worth saying out loud rather than silently
-            # falling back: the run would report a configuration it never used.
-            logger.warning("llm_multiround_bad_env_override", env=env, value=raw[:40])
-    return cfg.model_copy(update=over) if over else cfg
-
-
-_TRACE_DUMP_ENV: str = "EVEROS_LLMMR_TRACE_DUMP"
-"""Env var naming the JSONL file that receives one per-round decision record.
-
-Unset / empty ⇒ tracing is off and the loop does zero extra work (production
-default). Set to a path ⇒ each round appends a record whose schema mirrors
-MemoryRL ``tasks/retrieval_policy/prepare_data.py`` (``load_phase1_traces`` /
-``trace_to_sft_example``), so the trace feeds the Phase-2 GRPO cold-start
-(behavior cloning) directly. This is a formal, first-class dump — read per call
-(not at import) so a run or a test can toggle it via env without re-importing.
-
-The search layer only knows what a ``/search`` request carries (query +
-owner), so it emits every field it owns and leaves ``question_id`` (``None``
-placeholder) plus the ``gold_session_ids`` / ``core_precision`` / ``core_recall``
-labels to a downstream labeling step that has the eval ground truth."""
+# Configuration sources are called at each existing decision boundary.
 
 
 # ── Decider hook (pluggable: prompt-LLM in P1, trained policy in P2) ──────────
@@ -310,10 +240,18 @@ class LLMRoundDecider:
         llm: everalgo LLM client.
         prompt: Template exposing ``{question}``, ``{core_so_far}``,
             ``{evidence}``, ``{max_sub}``. Defaults to :data:`_DECIDER_PROMPT`.
+        tuning_source: Read current settings when this decider is invoked.
     """
 
-    def __init__(self, llm: LLMClient, *, prompt: str | None = None) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        *,
+        prompt: str | None = None,
+        tuning_source: Callable[[], DeciderSettings],
+    ) -> None:
         self._llm = llm
+        self._tuning_source = tuning_source
         self._prompt = prompt or _DECIDER_PROMPT
 
     async def __call__(
@@ -324,7 +262,7 @@ class LLMRoundDecider:
         n_candidates: int,
         round_idx: int,
     ) -> RoundDecision:
-        tune = _tuning()
+        tune = self._tuning_source()
         prompt = self._prompt.format(
             question=question,
             core_so_far=core_so_far or "(none)",
@@ -431,6 +369,8 @@ async def search_episodes_llm_multiround(
     top_k: int,
     reranker: RerankProvider | None = None,
     decider: RoundDecider | None = None,
+    tuning_source: Callable[[], DeciderSettings],
+    trace_path_source: Callable[[], str | None],
 ) -> list[SearchEpisodeItem]:
     """LLM-guided iterative multi-round episode search (per-sub-query RRF blocks).
 
@@ -457,6 +397,8 @@ async def search_episodes_llm_multiround(
         decider: Round-control hook. When given, it REPLACES the built-in
             :class:`LLMRoundDecider` and drives every round, which is how a
             Phase-2 RL policy reuses this loop as its environment.
+        tuning_source: Read settings at each existing loop/render/decision boundary.
+        trace_path_source: Read the optional trace destination at each write boundary.
 
     Returns:
         Ranked ``SearchEpisodeItem`` list, empty on an empty seed.
@@ -474,11 +416,15 @@ async def search_episodes_llm_multiround(
         top_k=top_k,
         reranker=reranker,
         decider=decider,
+        tuning_source=tuning_source,
+        trace_path_source=trace_path_source,
     )
 
 
 def _render_blocks(
     blocks: list[tuple[str, list[Candidate]]],
+    *,
+    tuning_source: Callable[[], DeciderSettings],
 ) -> tuple[str, list[Candidate], list[dict[str, object]]]:
     """Render per-sub-query blocks into the decider text + a global-index map.
 
@@ -498,7 +444,7 @@ def _render_blocks(
         lines.append(f"[block: {sub_query}]")
         for rank, c in enumerate(cands):
             subject = str(c.metadata.get("subject", ""))
-            summary = _decider_text(c.metadata)
+            summary = _decider_text(c.metadata, tuning_source=tuning_source)
             lines.append(f"  {gi}: {subject} - {summary}")
             global_cands.append(c)
             index_meta.append(
@@ -517,6 +463,8 @@ def _render_core_so_far(
     core_order: list[str],
     core_source: dict[str, str],
     cand_by_id: dict[str, Candidate],
+    *,
+    tuning_source: Callable[[], DeciderSettings],
 ) -> str:
     """Render accumulated core for the decider, each item tagged with the
     sub-query that first surfaced it. Empty core renders as ``(none)``."""
@@ -526,13 +474,13 @@ def _render_core_so_far(
         if c is None:
             continue
         subject = str(c.metadata.get("subject", ""))
-        summary = _decider_text(c.metadata)
+        summary = _decider_text(c.metadata, tuning_source=tuning_source)
         src = core_source.get(cid, "original question")
         out.append(f'  - [from "{src}"] {subject} - {summary}')
     return "\n".join(out) or "(none)"
 
 
-def _decider_text(meta: dict) -> str:
+def _decider_text(meta: dict, *, tuning_source: Callable[[], DeciderSettings]) -> str:
     """Text shown to the decider for one candidate.
 
     Stores disagree on which column carries the full episode body (see
@@ -542,7 +490,7 @@ def _decider_text(meta: dict) -> str:
     ``summary``-only view so in-flight comparisons stay reproducible.
     """
     summary = str(meta.get("summary", "") or "")
-    if not _tuning().full_text:
+    if not tuning_source().full_text:
         return summary
     episode = str(meta.get("episode", "") or "")
     return episode if len(episode) > len(summary) else summary
@@ -636,6 +584,8 @@ async def _search_episodes_subq(
     top_k: int,
     reranker: RerankProvider | None,
     decider: RoundDecider | None,
+    tuning_source: Callable[[], DeciderSettings],
+    trace_path_source: Callable[[], str | None],
 ) -> list[SearchEpisodeItem]:
     """Retrieval loop: per-sub-query RRF blocks + guarantee-then-fill, no cross-encoder.
 
@@ -667,7 +617,7 @@ async def _search_episodes_subq(
     # sampled sub-queries (Jaccard median 0.538): the HTTP search route it called
     # dispatches to the hierarchy/heap-expand hybrid pipeline, not this file's
     # per-sub-query rrf(sparse, dense)[:topk].
-    decide = decider or LLMRoundDecider(llm)
+    decide = decider or LLMRoundDecider(llm, tuning_source=tuning_source)
 
     core_by_id: dict[str, Candidate] = {}  # accumulated core (best-score candidate)
     core_ids: set[str] = set()
@@ -681,7 +631,7 @@ async def _search_episodes_subq(
     no_new_core_streak = 0
     cur_queries = [query]  # round 0 seeds with the user question
 
-    tune = _tuning()
+    tune = tuning_source()
     for round_idx in range(tune.max_rounds):
         _ts_round_start = time.monotonic()
         round_kind = "seed" if round_idx == 0 else "subquery"
@@ -754,8 +704,12 @@ async def _search_episodes_subq(
             return []  # empty seed — nothing to rank or decide over
 
         # Render the blocked decider view + CORE-SO-FAR (global index across blocks).
-        rendered, global_cands, index_meta = _render_blocks(blocks)
-        core_so_far = _render_core_so_far(core_order, core_source, cand_by_id)
+        rendered, global_cands, index_meta = _render_blocks(
+            blocks, tuning_source=tuning_source
+        )
+        core_so_far = _render_core_so_far(
+            core_order, core_source, cand_by_id, tuning_source=tuning_source
+        )
         _ts_decide_start = time.monotonic()
         decision = await decide(
             query, core_so_far, rendered, len(global_cands), round_idx
@@ -784,7 +738,7 @@ async def _search_episodes_subq(
         added = len(core_ids) - n_before
         no_new_core_streak = 0 if added else no_new_core_streak + 1
 
-        dump_path = _trace_dump_path()
+        dump_path = trace_path_source()
         if dump_path:
             _append_round_trace(
                 dump_path,
@@ -849,6 +803,8 @@ async def _search_episodes_subq(
         subq_hits=subq_hits,
         guarantee=guarantee,
         subqueries_seen=subqueries_seen,
+        tuning_source=tuning_source,
+        trace_path_source=trace_path_source,
     )
 
 
@@ -864,6 +820,8 @@ def _finalize_injection(
     subq_hits: dict[str, dict[str, float]],
     guarantee: list[tuple[str, str]],
     subqueries_seen: list[str],
+    tuning_source: Callable[[], DeciderSettings],
+    trace_path_source: Callable[[], str | None],
 ) -> list[SearchEpisodeItem]:
     """Assemble the final top_k and dump the final-injection trace (schema C).
 
@@ -904,7 +862,7 @@ def _finalize_injection(
         if cid in slot_source:
             continue
         n_core_selected += 1
-        if not _tuning().core_overflow and len(chosen) >= top_k:
+        if not tuning_source().core_overflow and len(chosen) >= top_k:
             continue  # keep counting for the trace, but do not exceed the budget
         chosen.append(cid)
         slot_source[cid] = "core"
@@ -940,7 +898,7 @@ def _finalize_injection(
     ordered_cands = [cand_by_id[cid] for cid in chosen if cid in cand_by_id]
     episodes = shape_episodes(ordered_cands, episodes_by_id)
 
-    dump_path = _trace_dump_path()
+    dump_path = trace_path_source()
     if dump_path:
         _append_round_trace(
             dump_path,
@@ -974,17 +932,6 @@ def _finalize_injection(
             },
         )
     return episodes
-
-
-def _trace_dump_path() -> str | None:
-    """Return the trace JSONL path, or ``None`` when the dump is disabled.
-
-    Read per call (not memoised at import) so a run or a test can toggle
-    ``EVEROS_LLMMR_TRACE_DUMP`` via env without re-importing the module. An
-    unset or whitespace-only value disables the dump.
-    """
-    path = os.getenv(_TRACE_DUMP_ENV, "").strip()
-    return path or None
 
 
 def _dataset_from_owner(owner_id: str) -> str:

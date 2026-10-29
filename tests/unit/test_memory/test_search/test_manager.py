@@ -39,6 +39,7 @@ from everos.memory.search.recall import (
     EpisodeRecaller,
 )
 from everos.memory.search.recall.base import RecallerDeps
+from tests.fakes import static_trace_path, static_tuning
 
 from ._records import (
     ScriptedIndex,
@@ -202,6 +203,8 @@ def _build_manager(
         embedding=embedding,
         reranker=reranker,
         llm_client=llm_client,
+        tuning_source=static_tuning(),
+        trace_path_source=static_trace_path(),
     )
 
 
@@ -317,6 +320,8 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
         embedding=None,
         reranker=None,
         llm_client=None,
+        tuning_source=static_tuning(),
+        trace_path_source=static_trace_path(),
     )
     await mgr.search(_user_req())
     from everos.infra.persistence.lancedb import render_predicate

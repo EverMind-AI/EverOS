@@ -24,7 +24,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from everos.infra.persistence.index import AtomicFact, IndexRepository, ParentType
+from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
+    AtomicFact,
+    IndexRepository,
+    ParentType,
+)
 
 from ._common import parse_inline_list, require_iso_timestamp
 from ._daily_log_base import BaseDailyLogHandler, ParsedEntry
@@ -44,7 +49,9 @@ class AtomicFactHandler(BaseDailyLogHandler):
     BM25 source. Audit inline is excluded."""
 
     def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
-        return (entry.structured.sections.get("Fact", "").strip(),)
+        return VECTOR_PROJECTIONS[self.kind].texts(
+            {"fact": entry.structured.sections.get("Fact", "").strip()}
+        )
 
     async def _build_row(
         self,
@@ -76,5 +83,5 @@ class AtomicFactHandler(BaseDailyLogHandler):
             fact_tokens=" ".join(tokens),
             md_path=md_path,
             content_sha256=entry.content_sha256,
-            vector=vectors[0] if vectors else None,
+            **VECTOR_PROJECTIONS[self.kind].values(vectors),
         )

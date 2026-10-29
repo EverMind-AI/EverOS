@@ -37,6 +37,7 @@ from typing import Any, ClassVar
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now
 from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
     IndexRepository,
     KnowledgeTopic,
     primary_key,
@@ -206,7 +207,9 @@ class KnowledgeTopicHandler(Handler):
         vector = (
             None
             if embedding is None
-            else list(await embedding.embed(fields["summary"]))
+            else list(
+                await embedding.embed(VECTOR_PROJECTIONS[self.kind].text_of(fields))
+            )
         )
         if vector is None:
             logger.debug(
@@ -232,7 +235,7 @@ class KnowledgeTopicHandler(Handler):
             content_labels=list(fields["content_labels"]),
             md_path=md_path,
             content_sha256=digest,
-            vector=vector,
+            **VECTOR_PROJECTIONS[self.kind].values([vector]),
             created_at=now,
             updated_at=now,
         )

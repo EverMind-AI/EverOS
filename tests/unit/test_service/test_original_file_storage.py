@@ -171,7 +171,7 @@ async def test_get_document_returns_original_file_path(
     MemoryRoot._instance = None
 
     # Set up: doc dir with _original/ and a fake SQLite row
-    doc_rel = Path("app/proj/knowledge/Sports/my_doc")
+    doc_rel = Path("app/proj/knowledge/Sports/Test_d_test00000003")
     doc_abs = tmp_path / doc_rel
     doc_abs.mkdir(parents=True)
     original_dir = doc_abs / _ORIGINAL_DIR

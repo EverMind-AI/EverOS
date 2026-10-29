@@ -88,12 +88,10 @@ def _reset_settings_cache() -> Iterator[None]:
     from everos.core.utils import datetime as dt_module
     from everos.memory import _partition_locks
 
-    # ``configure_logging`` (called by some e2e fixtures / the CLI entry)
-    # sets ``cache_logger_on_first_use=True``; once a logger is cached,
-    # ``structlog.testing.capture_logs`` can no longer intercept events,
-    # which silently breaks log-assertion tests that run *after* it in the
-    # same process. Reset structlog to defaults around every test so that
-    # global config never leaks across the suite.
+    # ``structlog.testing.capture_logs`` swaps structlog's global
+    # configuration, and every application build (``configure_process``)
+    # installs the production one. Reset structlog to defaults around every
+    # test so neither leaks into the next one.
     # ``_partition_locks`` caches one ``asyncio.Lock`` per (strategy,
     # partition key) and never evicts it — correct for a single-loop
     # production process, wrong across tests: pytest-asyncio gives each

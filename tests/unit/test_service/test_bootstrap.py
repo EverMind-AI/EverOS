@@ -15,6 +15,7 @@ refuses to start; building the same application for a CLI command does not.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from everos.service import (
     OpsService,
     build_application,
     build_providers,
+    configure_process,
 )
 from everos.service.bootstrap import _case_judge
 from tests.fakes import FakeEmbeddingProvider, make_application, unscripted_llm
@@ -83,6 +85,29 @@ def test_unconfigured_settings_build_three_facades_without_touching_disk(
     )
     assert snapshot.index_backend == settings.index.backend
     assert not (tmp_path / "root").exists(), "building must not write anything"
+
+
+def _with_level(settings: Settings, level: str) -> Settings:
+    return settings.model_copy(
+        update={"logging": settings.logging.model_copy(update={"level": level})}
+    )
+
+
+def test_building_configures_logging_from_the_logging_section(
+    settings: Settings,
+) -> None:
+    build_application(_with_level(settings, "ERROR"))
+
+    assert logging.getLogger().level == logging.ERROR
+
+
+def test_configure_process_can_run_again_and_the_last_call_wins(
+    settings: Settings,
+) -> None:
+    configure_process(_with_level(settings, "DEBUG"))
+    configure_process(_with_level(settings, "WARNING"))
+
+    assert logging.getLogger().level == logging.WARNING
 
 
 @pytest.mark.parametrize("embedding", [True, False], ids=["tier2", "tier1"])

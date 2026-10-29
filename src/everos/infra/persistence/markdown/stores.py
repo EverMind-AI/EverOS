@@ -17,7 +17,8 @@ __all__ = [
     "MarkdownProfileStore",
 ]
 
-from collections.abc import Callable, Mapping, Sequence
+from collections import defaultdict
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import anyio
@@ -82,10 +83,16 @@ class _DailyLogStore[T]:
         )
         return [self._ref(scope, eid) for eid in eids]
 
-    async def _deprecate(self, *, replaced: Mapping[str, str], md_path: str) -> None:
-        await self._writer.patch_frontmatter(
-            self._root.root / md_path, {"deprecated_entries": dict(replaced)}
-        )
+    async def _deprecate(
+        self, *, entries: Sequence[tuple[str, str]], replaced_by: str
+    ) -> None:
+        by_file: dict[str, dict[str, str]] = defaultdict(dict)
+        for md_path, entry_id in entries:
+            by_file[md_path][entry_id] = replaced_by
+        for md_path, replaced in by_file.items():
+            await self._writer.patch_frontmatter(
+                self._root.root / md_path, {"deprecated_entries": replaced}
+            )
 
     def _ref(self, scope: Scope, eid: EntryId) -> MemoryRef:
         path = self._writer.path_for(
@@ -122,9 +129,9 @@ class MarkdownEpisodeStore(_DailyLogStore[Episode]):
         return await self._append_many(scope, episodes)
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        await self._deprecate(replaced=replaced, md_path=md_path)
+        await self._deprecate(entries=entries, replaced_by=replaced_by)
 
 
 class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
@@ -143,9 +150,9 @@ class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
         return await self._append_many(scope, facts)
 
     async def deprecate(
-        self, scope: Scope, *, replaced: Mapping[str, str], md_path: str
+        self, scope: Scope, *, entries: Sequence[tuple[str, str]], replaced_by: str
     ) -> None:
-        await self._deprecate(replaced=replaced, md_path=md_path)
+        await self._deprecate(entries=entries, replaced_by=replaced_by)
 
 
 class MarkdownForesightStore(_DailyLogStore[Foresight]):

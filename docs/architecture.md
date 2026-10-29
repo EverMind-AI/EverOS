@@ -2,6 +2,11 @@
 
 > Companion: [.claude/rules/architecture.md](../.claude/rules/architecture.md) (auto-loaded coding rules)
 
+This document defines responsibility boundaries and describes the current
+mechanisms that implement them. Directory and type examples are not mandatory
+layouts. Passing import checks does not establish delivery, recovery,
+idempotency, or upgrade guarantees; those require separate evidence.
+
 ## DDD layered architecture
 
 - `entrypoints/` (Presentation) — cli + api + tui; translates protocols to
@@ -13,7 +18,9 @@
 - `infra/` (Adapters) — `persistence/` (markdown + sqlite + derived index)
   implementing `memory.ports`, and the cascade and OME engines.
 
-Cross-cutting (used by all layers, depends on none):
+Cross-cutting capabilities have no dependency on business layers. Access
+depends on the capability: shared data and utilities differ from external
+services or storage access.
 
 - `component/` — injectable providers (LLM / embedding / rerank / parser /
   tokenizer / config loader).
@@ -22,7 +29,7 @@ Cross-cutting (used by all layers, depends on none):
 - `config/` — configuration data (Settings schema + default.toml +
   custom-instruction YAML).
 
-## Dependency direction (single-direction, enforced)
+## Dependency direction and responsibility
 
 ```
 entrypoints → service → memory ← infra
@@ -36,20 +43,27 @@ domain, never the other way round (dependency inversion).
 | from → to | Allowed? |
 |---|---|
 | entrypoints → service | ✅ |
-| entrypoints → memory / infra / component / everalgo | ❌ (must go through service; DTOs and errors come from `everos.service` / `everos.core`) |
+| entrypoints → business operations | Through service; direct imports of memory / infra / component / everalgo, including data types, are prohibited at entrypoints. Use service request/response contracts and permitted core/config entry APIs. Current import checks cover this package boundary. |
 | service → memory | ✅ |
 | memory → infra | ❌ (go through `memory/ports`) |
 | memory → service | ❌ |
-| infra → memory.ports / models / events / mappers | ✅ (adapters implement the ports in domain types) |
+| infra → memory.ports / models / events / pure conversions / dependency declarations | ✅ when implementing a declared contract; a conversion must not invoke business workflows or perform hidden I/O. Shared data is not a dependency on a business service. |
 | infra → any other memory module, service, entrypoints | ❌ |
-| infra.ome → memory.ports | ✅ (`infra.ome` imports only `everos.memory.ports` — the types the domain declares for it); any other memory module ❌ |
-| service.bootstrap → infra / component implementations | ✅ — the one module that builds adapters and providers and injects them (`service-usecases-forbidden`) |
-| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only (backfill included: its collaborators arrive as `BackfillDeps`) |
-| infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
-| any → component / core / config | ✅ (cross-cutting) |
-| `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` imports only `component` protocols (`EmbeddingProvider`, `Tokenizer`) for the collaborators it is handed. |
+| infra.ome → scheduling/event contracts | ✅ — the engine consumes declared contracts without interpreting memory business rules. The current `ome-ports-only` guard restricts direct domain imports to `memory.ports`. |
+| service.bootstrap → infra / component implementations | ✅ — selects application-level implementations, wires collaborators, and assigns lifecycle ownership. |
+| service use cases → external capabilities | Receive collaborators instead of locating or choosing application-level implementations. Operational protocols and result data are reviewed by responsibility, not rejected solely because their package is infra. |
+| business logic → concrete storage rows / layout | ❌ — adapters and projections own row conversion, file grouping, and backend-specific updates. |
+| infra cross-subpackage | Internal storage collaboration and shared record declarations are allowed where needed; infra must not take over application use-case orchestration. |
+| layers → core / config helpers and shared data | ✅ without introducing reverse business dependencies. Configuration that determines business behavior should be explicit; a formatting helper is not a service locator. |
+| memory / infra → component capabilities | Distinguish pure helpers, fixed algorithm integration, and replaceable I/O capabilities. The latter need explicit configuration and ownership; a direct import alone does not establish which category applies. |
 
-Enforced via `import-linter` in CI:
+The embedding provenance check currently constructs a short-lived provider
+with a separate probe budget and untruncated output width. That is an internal
+infrastructure collaborator, not a global service lookup. If application-level
+provider substitution must also replace this probe, expose the probe capability
+at assembly; do not require every internal helper to become an injected service.
+
+`import-linter` enforces a subset of these boundaries in CI:
 
 ```toml
 [tool.importlinter]
@@ -70,16 +84,25 @@ layers = [
 # (see pyproject.toml)
 ```
 
-`make lint` also runs `scripts/check_singletons.py`: no module-level lazy
-singleton slot (`_x: X | None = None`), no no-argument `get_*()` accessor and
-no import-time `*_repo` instance in `src/`. Objects are built by the
-application bootstrap and injected.
+The current configuration excludes `TYPE_CHECKING` imports and uses explicit
+forbidden-module lists. An annotation import may describe shared data, a
+protocol, or a concrete implementation; its presence is not itself a defect.
+Conversely, a green check does not prove that a mapper is free of I/O or that
+runtime dependencies are explicit. Changes to guards need both rejected and
+allowed examples that reflect the responsibility being protected.
+
+`make lint` also runs `scripts/check_singletons.py`, which detects selected lazy
+singleton and import-time repository patterns. Review must still reject hidden
+business service lookup. Configured process-wide logging, metrics, tracing, and
+request context are permitted runtime facilities, not business service locators.
 
 ### Storage ports
 
 `memory/ports` is the domain's declaration of what it needs from the outside
 world, in domain types only — storage, and the event / strategy vocabulary
-the scheduler runs:
+the scheduler runs. A port never exposes a backend row class, a markdown
+parse structure or a backend handle, and never asks business logic to
+interpret storage layout.
 
 | Module | Contents |
 |---|---|
@@ -148,6 +171,8 @@ database is visible at its construction, and closing is the owner's call
 
 ## Write path
 
+The following is a responsibility sketch, not a transaction protocol:
+
 ```
 External message
        │
@@ -158,8 +183,8 @@ External message
 2. memory.extract.pipeline    (calls everalgo)
        │
        ▼
-3. infra.persistence.markdown.write       (atomic: tmp + fsync + rename)
-       │  ✅ md write success → return immediately
+3. infra.persistence.markdown.write       (file persistence)
+       │  service coordinates results and follow-up events
        │
    ┌───┴────┐
    │        │
@@ -168,10 +193,37 @@ External message
     audit        watches md → diff entries → index sync
 ```
 
-**Key guarantee**: md write is strongly consistent (fsync). The derived
-index is eventually consistent. Index backend unavailability does not block
-response — changes buffer in the SQLite `md_change_state` queue, replayed on
-recovery.
+Markdown is the source for derived index content. Cascade uses a persisted
+change queue and reconciliation to synchronize the index asynchronously.
+A durable file write does not atomically commit event publication, SQLite
+state, or every downstream result. Neither this flow nor eventual consistency
+alone proves that every interrupted operation will recover.
+
+### Completion, recovery, and retry responsibilities
+
+| Owner | Required responsibility |
+|---|---|
+| service | Distinguish request acceptance, business persistence, and derived completion; coordinate the handoff between them through declared contracts. |
+| memory | Define business identity, permissible duplicates, completion with no output, and the invariants that partial execution must preserve. |
+| infra | Implement persistence, scheduling, recovery, and deduplication mechanisms; cascade synchronizes and repairs derived indexes. Engines do not invent business duplicate semantics. |
+| component | Expose classified failures and bounded call behavior that can be accounted for in the caller's budget. |
+| entrypoints | Report the service's actual completion and failure semantics without upgrading their guarantees. |
+
+These are acceptance obligations, not a claim that every current path has
+passed them. In the `0d3b502` implementation, write-to-publication handoff,
+interrupted OME recovery, repeated side effects, and combined retry policy
+remain areas requiring retained, reproducible fault tests and explicit
+contracts. See [API completion behavior](api.md) for the public interface.
+
+Retries must be evaluated along the actual call path: SDK transport attempts,
+provider reply validation, host operator retries, OME execution, and queue
+replay do not apply to every failure in the same way. OME already has backoff
+and a per-attempt timeout; neither is an end-to-end deadline. Define the owner
+of the combined call/time budget, cancellation behavior, and the budget after
+recovery. A terminal result for one provider call is neither a blanket ban on
+future execution under changed conditions nor permission for unconditional
+outer retries. Delivery and duplicate guarantees must be selected explicitly;
+this architecture does not prescribe exactly-once delivery, outbox, or UoW.
 
 ## Read path
 
@@ -198,42 +250,66 @@ User query
 
 The application layer has two jobs, kept in separate modules:
 
-- **Assembly** — `service/bootstrap.py`. `build_application(settings)` builds
-  every provider (`build_providers`), storage adapter, the OME engine with all
+- **Assembly** — `service/bootstrap.py`. `build_application(settings)` selects
+  application providers (`build_providers`), storage adapters, the OME engine with
   strategies registered, the event bus, the cascade orchestrator and the domain
   pipelines and managers, and returns an `Application`: three facades plus a
-  `Capabilities` snapshot of which optional providers were configured. Building
-  opens nothing; `Application.start()` brings up the system DB, the index, the
+  `Capabilities` snapshot of which optional providers were configured.
+  `Application.start()` brings up the system DB, the index, the
   cascade, OME and the `async_mode` queue in that order (the queue publishes
   into OME, so it starts last and stops first), and `aclose()` unwinds what was
   started, then closes the storage connections whether or not `start()` ran.
   `aclose()` is idempotent and `async with build_application(settings) as
-  app:` closes on exit. Tracing and metrics are configured once here
-  (`configure_tracing` / `configure_metrics`).
+  app:` closes on exit. Process observability is configured through
+  `bootstrap.configure_process`; internal helpers can be constructed by their
+  owning component without becoming separate application dependencies.
 - **Use cases** — one facade per kind of caller, one method per use case:
   `MemoryService` (memorize / flush / search / get, plus the `async_mode`
   queue), `KnowledgeService` (document CRUD and knowledge search) and
   `OpsService` (cascade status / sync / fix / rebuild / quiesce / backfill, OME
-  trigger, health signals, task readers). They receive their collaborators;
-  none builds or looks one up. The rules an entry point would otherwise carry
+  trigger, health signals, task readers). They receive external collaborators;
+  they do not select application providers or look up hidden business services.
+  The rules an entry point would otherwise carry
   live here too: which task statuses exist, when an `/add` is queued instead
   of run inline, how an upload is size-checked and parsed, what a failed
   health probe reads as, when a backfill run stops. A facade that outgrows
   one module becomes a package with the facade class in `__init__` and the
-  use-case steps in private modules (`service/memory/`, `service/ops/` —
-  backfill's three phases are `service/ops/_backfill_*`).
+  use-case steps in private modules (`service/memory/`, `service/ops/`,
+  `service/knowledge/` — backfill's three phases are `service/ops/_backfill_*`).
 
 Entry points hold the one `Application`: the HTTP lifespan builds and starts it
 (`app.state.application`), routes call its facades, and a CLI command builds it
 without starting it (`async with`) and opens storage per command through
-`OpsService.index_session`. Why one assembly point: every object's
-construction is visible in one file, a test swaps any provider by passing
-`Providers`, and no module can reach a half-configured singleton.
+`OpsService.index_session`. Application-level selection and lifecycle ownership
+are visible at assembly; tests can replace those providers through `Providers`.
+This does not imply that every internal helper or independently constructed
+probe is replaced by that argument.
+
+Operational use cases may consume management protocols and result data. They
+should coordinate confirmation, phases, progress, and outcomes, while storage
+adapters/projections own concrete row conversion and updates. In particular,
+normal projection and backfill should share embedding-source and column rules;
+duplicating those rules in both paths is a maintenance risk, independent of
+where a protocol's Python type is declared.
+
+`infra.persistence.index.VectorProjection` and `VECTOR_PROJECTIONS` provide
+the shared embedding declarations for normal cascade projection and vector
+backfill. The backfill module may import these two declarations through the
+public index facade; it may not import backend factories or implementations.
+Import-linter limits the module exception, and the backfill boundary tests
+check permitted symbols with both accepted and rejected examples.
+
+Reflection selects ordered retirement references and retains business report
+counts. Markdown stores group those references by file and apply replacement
+markers in file order. This boundary does not add cross-file atomicity or
+change partial-write failure behavior.
 
 ### `component/`
 
-Each injectable capability exposes three things: a protocol, its
-implementations, and a factory — no process-wide accessor.
+Replaceable external capabilities expose a contract and implementations, with
+application selection at assembly. A factory is useful where construction
+varies; pure helpers and fixed integrations do not each need a new protocol.
+Do not add process-wide accessors for business services or providers.
 
 | Package | Protocol | Implementations | Factory |
 |---|---|---|---|
@@ -241,6 +317,14 @@ implementations, and a factory — no process-wide accessor.
 | `embedding` | `EmbeddingProvider` | `OpenAIEmbeddingProvider` | `build_embedding_provider(settings.embedding)` |
 | `rerank` | `RerankProvider` | DeepInfra / vLLM / DashScope providers | `build_rerank_provider(settings.rerank)` |
 | `parser` | everalgo parser entry | — | `aparse_file(raw, llm=...)` takes the multimodal LLM from its caller |
+
+Calling EverAlgo's parser from this component is normal integration. Reusing
+`RawFile` or `ParsedContent` does not introduce storage dependencies. Separate
+file acquisition and access policy from content conversion where independent
+testing or substitution is needed; inject a callable when sufficient instead
+of requiring a class for every function. Stable behavior settings should be
+passed explicitly; deliberate live configuration needs an explicit source and
+compatibility rules for existing environment overrides.
 
 A factory raises when its section is missing or wrong
 (`LLMNotConfiguredError` / `ValueError`); the bootstrap's `build_providers`
@@ -268,9 +352,10 @@ extract/
 quarantine of a session the model keeps failing to segment. Why in the
 domain: deciding where an episode ends is a memory rule, and keeping it out
 of the service lets it be tested against in-memory stores and a scripted
-model. Why one retry module: everalgo operators never retry (an unusable
-reply raises `LLMOutputError`), so the host owns the policy, and one place
-keeps the attempt count from multiplying across layers.
+model. `llm_retry.py` centralizes the host's retry of `LLMOutputError` for
+boundary detection and user episode extraction. It does not eliminate SDK,
+provider, or scheduler retries; their combined behavior needs the separate
+budget and failure-classification checks described above.
 
 ### `infra/cascade/`
 
@@ -307,9 +392,12 @@ re-extracted its facts, `finish_reflection` hands that context to
 ### `memory/strategies/`
 
 OME strategy implementations — one file per strategy. A strategy is an async
-function `fn(event, deps: MemoryDeps) -> list[Event]`: it works only through
-`deps` and returns its follow-up events instead of publishing them. Each file
-declares its `StrategySpec` next to the function; `STRATEGY_SPECS` collects
+function `fn(event, deps: MemoryDeps) -> list[Event]`: it receives collaborators
+through `deps` and returns follow-up events instead of publishing them. It may
+perform I/O and is not a pure function. Behavior-affecting configuration must
+also be explicit; current deep configuration reads are not evidence of complete
+dependency isolation. Each file declares its `StrategySpec` next to the
+function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
@@ -340,8 +428,12 @@ Three-piece observability:
 
 These are the facades: business layers (`entrypoints` / `service` / `memory` /
 `infra`) never import `structlog`, `logging` or `opentelemetry` directly
-(`no-bypass-facade`), so a backend is swapped where it is configured — once,
-in the bootstrap — not where it is called.
+(`no-bypass-facade`). Backend configuration belongs at the process assembly
+entry point. These controlled runtime facilities may hold process state, but
+must not own business truth or provide access to Store, Service, or provider
+instances. The current logging settings expose the level with console output;
+additional formats or sinks are capability choices, not prerequisites for a
+sound dependency structure.
 
 ## Markdown layout
 
@@ -370,7 +462,7 @@ protection (L1 read-only / L2 system / L3 business / L4 user).
 `everalgo` is a set of PyPI-published packages (`everalgo-user-memory`,
 `everalgo-agent-memory`, `everalgo-rank`, `everalgo-knowledge`, plus the
 optional `everalgo-parser` extra), imported under the `everalgo` namespace,
-holding **only memory extraction algorithms**:
+providing memory algorithms, parsing, and their data contracts:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
 - `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
@@ -379,14 +471,24 @@ holding **only memory extraction algorithms**:
 - `everalgo.rank` — fusion + rerank
 - `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
 
-everalgo is:
+The integration separates responsibilities:
 
-- **Stateless** — pure functions, no class hierarchy
-- **No I/O** — does not touch md files, derived indexes, or SQLite
-- **Owns its prompts** — every operator ships its rules and its strict reply schema together; EverOS can only append requirements (`custom_instructions=`), never replace a prompt
-- **Never retries** — an unusable reply raises `LLMOutputError`; the host decides (`memory/extract/llm_retry.py`)
+- **Algorithm contracts** belong to EverAlgo. Host orchestration and callbacks
+  may use those contracts directly; sharing a candidate type is not the same
+  as duplicating ranking rules in the host.
+- **Host persistence** belongs to EverOS. Algorithm calls may invoke an injected
+  LLM or parsing capability; that does not make them pure functions or grant
+  them responsibility for EverOS markdown, index rows, or SQLite transactions.
+- **Operator prompts** belong to EverAlgo. Custom instructions append host
+  requirements through the operator's supported contract.
+- **Retry policy** belongs to the layers responsible for the operation being
+  retried. An operator output error is distinct from provider transport or
+  validation failure; a retry must preserve the applicable side-effect rules.
 
 This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
+
+Import the LLM contract types (`LLMClient`, `LLMMessage`, `LLMOutputError`,
+`StrictOutputModel`) from `everalgo.llm`; EverOS does not re-export them.
 
 ## Error handling architecture
 
@@ -408,14 +510,14 @@ AppError
 │   │   └── FilterError
 │   ├── PathTraversalError         → 400 BAD_REQUEST
 │   └── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
-├── InfrastructureError            (transient, retryable)     → 503
+├── InfrastructureError            (infrastructure failure)  → 503
 │   ├── StorageError
 │   ├── VectorStoreError
 │   └── ExternalServiceError
 │       ├── LLMServiceError
 │       ├── EmbeddingServiceError
 │       └── RerankServiceError
-├── CapabilityError                (permanent, not retryable) → 503
+├── CapabilityError                (capability unavailable)  → 503
 │   └── MultimodalNotEnabledError
 └── ConfigurationError             (misconfiguration)         → 500
 ```
@@ -423,7 +525,9 @@ AppError
 ### Error propagation strategy
 
 Exceptions are raised at the layer where the error is detected and
-propagate naturally — **service and route layers do not catch-and-wrap**.
+normally propagate to the boundary that can interpret them. Catching an error
+to coordinate cleanup, partial results, or a documented fallback is legitimate;
+avoid indiscriminate wrapping that loses its classification.
 The entrypoints layer registers per-type exception handlers
 (`entrypoints/api/exception_handlers.py`) via Starlette's MRO dispatch.
 Each handler converts the exception into a canonical error envelope with
@@ -431,11 +535,16 @@ an `ErrorCode` enum value and the appropriate HTTP status code.
 
 ### Boundary translation
 
-Third-party exception types are translated at the component boundary to
-prevent external types from leaking into upper layers:
+Translate provider-specific failures at their integration boundary. Shared
+EverAlgo contract errors may remain visible to callers that own their policy:
 
-- `everalgo.llm.LLMError` → `LLMServiceError` at `component/parser/_core.py`
+- `LLMCallError` → `LLMServiceError` at `component/parser/_core.py`
 - Embedding / rerank provider errors → `EmbeddingServiceError` / `RerankServiceError` at their respective protocol modules
+
+An exception family or HTTP status alone does not decide whether repeating a
+partially completed operation is safe. Classify the cause, request conditions,
+and side effects, then apply the combined budget rather than treating every
+infrastructure error as transient.
 
 ## Further reading
 

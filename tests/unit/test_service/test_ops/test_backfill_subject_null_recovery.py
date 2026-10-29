@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+from everos.infra.persistence.index import VectorProjection
 from everos.memory.ports.query import AnyOf, Filter, IsNull
 from everos.service import NullBackfillPresenter
 from everos.service.ops._backfill_vectors import (
@@ -38,7 +39,6 @@ from everos.service.ops._backfill_vectors import (
     _null_filter,
     _NullVectorRow,
     _TableBacklog,
-    _TableSpec,
 )
 
 _RETENTION = dt.timedelta(seconds=60)
@@ -97,8 +97,8 @@ class _DistinctProvider:
         return [[float(len(t))] * 3 for t in texts]
 
 
-def _episode_spec() -> _TableSpec:
-    return _TableSpec(
+def _episode_spec() -> VectorProjection:
+    return VectorProjection(
         table=_EpisodeLikeSchema.TABLE_NAME,
         text_of=lambda r: r["episode"],
         subject_of=lambda r: r.get("subject") or None,
@@ -238,7 +238,7 @@ def test_null_filter_widens_only_for_episode() -> None:
     ep_spec = _episode_spec()
     assert _null_filter(ep_spec) == AnyOf((IsNull("vector"), IsNull("subject_vector")))
 
-    fact_spec = _TableSpec(
+    fact_spec = VectorProjection(
         table=_NonSubjectSchema.TABLE_NAME,
         text_of=lambda r: r["fact"],
     )

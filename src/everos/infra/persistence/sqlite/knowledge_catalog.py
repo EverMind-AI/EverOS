@@ -3,7 +3,9 @@
 Wraps the ``knowledge_documents`` / ``knowledge_topics`` repositories (which
 the cascade fills from the markdown tree) and owns the row <-> domain
 conversion: the JSON-encoded list columns are decoded here, so the domain
-sees ``list[str]``.
+sees ``list[str]``. ``md_path`` is a storage column only (the cascade deletes
+rows by it); it is written from the store's ``WrittenDocument`` and never
+surfaces on the domain document.
 """
 
 from __future__ import annotations
@@ -68,7 +70,9 @@ class SqliteKnowledgeCatalog:
     async def count_by_category(self, app_id: str, project_id: str) -> dict[str, int]:
         return await self._documents.count_by_category(app_id, project_id)
 
-    async def record_document(self, document: KnowledgeDocument) -> None:
+    async def record_document(
+        self, document: KnowledgeDocument, *, md_path: str
+    ) -> None:
         await self._documents.upsert_from_handler(
             DocumentUpsertPayload(
                 doc_id=document.doc_id,
@@ -79,7 +83,7 @@ class SqliteKnowledgeCatalog:
                 summary=document.summary,
                 source_name=document.source_name,
                 source_type=document.source_type,
-                md_path=document.md_path or "",
+                md_path=md_path,
             )
         )
 
@@ -105,7 +109,6 @@ def _document(row: KnowledgeDocumentRow) -> KnowledgeDocument:
         summary=row.summary,
         source_name=row.source_name,
         source_type=row.source_type,
-        md_path=row.md_path,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

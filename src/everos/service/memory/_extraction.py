@@ -74,3 +74,17 @@ class ExtractionSupervisor:
         if pending:
             await asyncio.wait(pending, timeout=wait_seconds)
         return sum(1 for t in self._tasks if not t.done())
+
+    async def shutdown(self, wait_seconds: float) -> None:
+        """:meth:`drain` for shutdown: log what runs, and what is abandoned."""
+        running = self.in_flight
+        if not running:
+            return
+        logger.info("memorize_extractions_draining", in_flight=running)
+        left = await self.drain(wait_seconds)
+        if left:
+            logger.error(
+                "memorize_extractions_abandoned",
+                in_flight=left,
+                waited_seconds=wait_seconds,
+            )

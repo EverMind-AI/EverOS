@@ -11,7 +11,7 @@ from __future__ import annotations
 
 __all__ = ["run_clusters_phase"]
 
-from typing import Any
+from typing import Any, get_args
 from uuid import uuid4
 
 import anyio
@@ -21,7 +21,8 @@ from everos.core.errors import MemoryRootLockedError, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
-from everos.memory.ports import OwnerType, Scope
+from everos.memory.models import ClusterKind
+from everos.memory.ports import ClusterStore, OwnerType, Scope
 from everos.memory.strategies import (
     TRIGGER_PROFILE_CLUSTERING_SPEC,
     TRIGGER_SKILL_CLUSTERING_SPEC,
@@ -46,6 +47,17 @@ def _row_scope(raw: dict[str, Any], owner_type: OwnerType) -> Scope:
         owner_id=raw["owner_id"],
         owner_type=owner_type,
     )
+
+
+async def _count_clusters(clusters: ClusterStore) -> int:
+    """Clusters of every kind across all owners."""
+    ids = {
+        cluster.id
+        for owner in await clusters.list_distinct_owners()
+        for kind in get_args(ClusterKind)
+        for cluster in await clusters.list_for_owner(owner, kind)
+    }
+    return len(ids)
 
 
 async def _scan_all_rows(deps: BackfillDeps, table: str) -> list[dict[str, Any]]:
@@ -232,7 +244,7 @@ async def run_clusters_phase(
         return ClustersPhaseResult(aborted=True)
 
     await deps.ensure_schema()
-    clusters_before = await deps.clusters.count()
+    clusters_before = await _count_clusters(deps.clusters)
 
     engine = deps.engine_for(
         (TRIGGER_PROFILE_CLUSTERING_SPEC, TRIGGER_SKILL_CLUSTERING_SPEC)
@@ -258,7 +270,7 @@ async def run_clusters_phase(
     finally:
         await engine.stop()
 
-    clusters_after = await deps.clusters.count()
+    clusters_after = await _count_clusters(deps.clusters)
     presenter.phase_2_complete(clusters_before, clusters_after, emitted)
     return ClustersPhaseResult(
         events_emitted=emitted,

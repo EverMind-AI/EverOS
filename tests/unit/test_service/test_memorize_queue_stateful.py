@@ -100,7 +100,7 @@ from everos.infra.persistence.sqlite import (
 from everos.infra.persistence.sqlite.repos.memorize_inbox import MemorizeInboxRepo
 from everos.infra.persistence.sqlite.tables import MemorizeInbox
 from everos.service import MemorizeResult
-from everos.service import memorize_queue as mq
+from everos.service.memory import _queue as mq
 from tests.fakes.application import make_ops
 
 settings.register_profile(

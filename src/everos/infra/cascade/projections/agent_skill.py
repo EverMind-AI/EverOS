@@ -41,6 +41,7 @@ import anyio
 
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import (
+    VECTOR_PROJECTIONS,
     AgentSkill,
     IndexRepository,
     all_of,
@@ -154,7 +155,9 @@ class AgentSkillHandler(Handler):
         description_tokens = " ".join(self._deps.tokenizer.tokenize(description))
         content_tokens = " ".join(self._deps.tokenizer.tokenize(content))
         # Embedding source: name + description joined (opensource parity).
-        embed_text = "\n".join(s for s in [name, description] if s)
+        embed_text = VECTOR_PROJECTIONS[self.kind].text_of(
+            {"name": name, "description": description}
+        )
         embedding = self._deps.embedding
         vector = None if embedding is None else list(await embedding.embed(embed_text))
         if vector is None:
@@ -182,7 +185,7 @@ class AgentSkillHandler(Handler):
             cluster_id=fm.get("cluster_id"),  # type: ignore[arg-type]
             md_path=md_path,
             content_sha256=digest,
-            vector=vector,
+            **VECTOR_PROJECTIONS[self.kind].values([vector]),
         )
         await self.index_repo.upsert([row])
         return HandlerOutcome(

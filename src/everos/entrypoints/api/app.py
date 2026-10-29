@@ -5,7 +5,7 @@ lifespan, and registers the public routes (``/health``, ``/metrics``).
 
 The lifespan owns one :class:`~everos.service.Application`: it starts it on
 startup, keeps it on ``app.state.application`` (the only object routes read,
-via :func:`everos.entrypoints.api.utils.application`) and closes it on
+via :func:`everos.entrypoints.api.dependencies.application`) and closes it on
 shutdown.
 """
 

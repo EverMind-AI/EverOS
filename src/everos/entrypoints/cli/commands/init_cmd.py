@@ -17,7 +17,7 @@ from pathlib import Path
 import typer
 
 from everos.config.settings import resolve_root
-from everos.entrypoints.cli._log_setup import configure_cli_logging
+from everos.entrypoints.cli._process import configure_interactive
 
 from .server import MCP_GUIDE_URL
 
@@ -66,7 +66,7 @@ def register(parent: typer.Typer) -> None:
         - 0 — files created successfully (or printed to stdout).
         - 1 — files already exist and ``--force`` was not given.
         """
-        configure_cli_logging(verbose=verbose)
+        configure_interactive(verbose=verbose)
         if print_:
             import sys
 

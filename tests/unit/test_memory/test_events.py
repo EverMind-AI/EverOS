@@ -1,4 +1,9 @@
+"""Domain event contracts and frozen-payload compatibility checks."""
+
 from __future__ import annotations
+
+import datetime as dt
+from pathlib import Path
 
 import pydantic
 import pytest
@@ -10,6 +15,61 @@ from everos.memory.events import (
     SkillClusterUpdated,
     UserPipelineStarted,
 )
+
+_FROZEN_PAYLOADS = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures/compatibility/head_0d3b502_core_0_6_0"
+)
+
+
+def test_frozen_agent_case_payload_keeps_identity_and_omitted_defaults() -> None:
+    payload = (_FROZEN_PAYLOADS / "agent_case_extracted.json").read_text()
+
+    event = AgentCaseExtracted.model_validate_json(payload)
+
+    assert event.event_id == "frozen-agent-case-event"
+    assert event.ts == dt.datetime(2023, 11, 14, 22, 13, 20, tzinfo=dt.UTC)
+    assert event.case_timestamp_ms == 1_700_000_000_123
+    assert event.quality_score == 0.8
+    assert event.task_intent == "cook risotto"
+    assert (event.app_id, event.project_id) == ("default", "default")
+    assert event.approach == ""
+    assert event.key_insight is None
+    assert event.case_gate is None
+
+
+def test_frozen_skill_cluster_payload_keeps_omitted_defaults() -> None:
+    payload = (_FROZEN_PAYLOADS / "skill_cluster_updated.json").read_text()
+
+    event = SkillClusterUpdated.model_validate_json(payload)
+
+    assert event.event_id == "frozen-skill-cluster-event"
+    assert event.cluster_id == "cluster-frozen"
+    assert (event.app_id, event.project_id) == ("default", "default")
+    assert event.task_intent == event.approach == ""
+    assert event.key_insight is None
+    assert event.quality_score == 0.0
+    assert event.case_timestamp_ms == 0
+    assert event.case_vector is None
+    assert event.case_gate is None
+
+
+def test_frozen_pipeline_payload_preserves_nested_memcell() -> None:
+    payload = (_FROZEN_PAYLOADS / "user_pipeline_started.json").read_text()
+
+    event = UserPipelineStarted.model_validate_json(payload)
+
+    assert event.event_id == "frozen-user-pipeline-event"
+    assert (event.app_id, event.project_id) == ("default", "default")
+    assert event.memcell_id == "mc-frozen"
+    assert event.session_id == "session-frozen"
+    assert event.memcell.timestamp == 1_700_000_000_123
+    assert len(event.memcell.items) == 1
+    message = event.memcell.items[0]
+    assert isinstance(message, ChatMessage)
+    assert message.id == "message-frozen"
+    assert message.content == "Preserve this archived message."
+    assert message.sender_name is None
 
 
 def _sample_memcell() -> MemCell:

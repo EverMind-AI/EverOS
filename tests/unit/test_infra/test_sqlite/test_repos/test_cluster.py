@@ -400,95 +400,18 @@ async def test_find_cluster_id_for_member_scoped_to_owner(
     )
 
 
-# ── remove_members ─────────────────────────────────────────────────────
+# ── replace_members ────────────────────────────────────────────────────
 
 
-async def test_remove_members_deletes_specified(repo: ClusterRepo) -> None:
-    """Removing a subset of members leaves the rest intact."""
+async def test_replace_members_swaps_members_and_restamps_the_row(
+    repo: ClusterRepo,
+) -> None:
+    """Removed members go, the merged one joins, the snapshot is restamped."""
     cluster = _make_cluster(
-        cluster_id="cl_rm_000000001",
+        cluster_id="cl_rep_00000001",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one", "mc_two", "mc_three"],
+        members=["ep_one", "ep_two", "ep_three"],
         count=3,
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.remove_members("cl_rm_000000001", {"mc_one", "mc_three"})
-
-    members = await repo.get_members_with_type("cl_rm_000000001")
-    assert [mid for mid, _ in members] == ["mc_two"]
-
-
-async def test_remove_members_empty_set_is_noop(
-    repo: ClusterRepo,
-) -> None:
-    """An empty member_ids set should not touch the database."""
-    cluster = _make_cluster(
-        cluster_id="cl_noop0000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.remove_members("cl_noop0000001", set())
-
-    members = await repo.get_members_with_type("cl_noop0000001")
-    assert len(members) == 1
-
-
-# ── add_member ─────────────────────────────────────────────────────────
-
-
-async def test_add_member_with_episode_type(repo: ClusterRepo) -> None:
-    """Add a single member and verify it appears in the membership list."""
-    cluster = _make_cluster(
-        cluster_id="cl_add_00000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-    )
-    await repo.upsert_with_members(
-        cluster,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
-    )
-
-    await repo.add_member("cl_add_00000001", "ep_new_001", "episode")
-
-    members = await repo.get_members_with_type("cl_add_00000001")
-    member_ids = [mid for mid, _ in members]
-    assert "ep_new_001" in member_ids
-    # Verify type stored correctly
-    ep_row = [(mid, mt) for mid, mt in members if mid == "ep_new_001"]
-    assert ep_row[0][1] == "episode"
-
-
-# ── update_metadata ────────────────────────────────────────────────────
-
-
-async def test_update_metadata_changes_cluster_row(
-    repo: ClusterRepo,
-) -> None:
-    """update_metadata overwrites centroid, count, last_ts_ms, preview."""
-    cluster = _make_cluster(
-        cluster_id="cl_meta0000001",
-        centroid_vals=[1.0, 0.0],
-        members=["mc_one"],
-        count=1,
-        last_ts_ms=1_700_000_000_000,
         preview=["old preview"],
     )
     await repo.upsert_with_members(
@@ -496,68 +419,66 @@ async def test_update_metadata_changes_cluster_row(
         owner_id="u_alice",
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
-    new_centroid = np.array([0.5, 0.5], dtype=np.float32).tobytes()
-    await repo.update_metadata(
-        "cl_meta0000001",
-        centroid_blob=new_centroid,
-        count=3,
+    await repo.replace_members(
+        "cl_rep_00000001",
+        removed={"ep_one", "ep_three"},
+        added="ep_merged",
+        member_type="episode",
+        centroid_blob=np.array([0.5, 0.5], dtype=np.float32).tobytes(),
+        count=1,
         last_ts_ms=1_700_000_099_000,
         preview_json='["new preview"]',
     )
 
-    rows = await repo.list_for_owner("u_alice", "user_memory")
-    assert len(rows) == 1
-    got = rows[0]
-    assert got.count == 3
-    assert got.last_ts == 1_700_000_099_000
-    assert got.preview == ["new preview"]
+    assert await repo.get_members_with_type("cl_rep_00000001") == [
+        ("ep_two", "episode"),
+        ("ep_merged", "episode"),
+    ]
+    got = await repo.get_with_members("cl_rep_00000001")
+    assert got is not None
+    assert (got.count, got.last_ts, got.preview) == (
+        1,
+        1_700_000_099_000,
+        ["new preview"],
+    )
     np.testing.assert_allclose(
-        np.asarray(got.centroid),
-        np.array([0.5, 0.5], dtype=np.float32),
+        np.asarray(got.centroid), np.array([0.5, 0.5], dtype=np.float32)
     )
 
 
-# ── list_ids_and_member_counts ─────────────────────────────────────────
-
-
-async def test_list_ids_and_member_counts_returns_actual_member_count(
+async def test_replace_members_with_nothing_removed_only_appends(
     repo: ClusterRepo,
 ) -> None:
-    """Count comes from cluster_member rows, not the Cluster.count field."""
-    c1 = _make_cluster(
-        cluster_id="cl_cnt_00000001",
+    """An empty ``removed`` set keeps every existing member."""
+    cluster = _make_cluster(
+        cluster_id="cl_rep_00000002",
         centroid_vals=[1.0, 0.0],
-        members=["mc_one", "mc_two"],
-        count=99,  # deliberately wrong — repo counts actual rows
-    )
-    c2 = _make_cluster(
-        cluster_id="cl_cnt_00000002",
-        centroid_vals=[0.0, 1.0],
-        members=["mc_three"],
-        count=99,
+        members=["ep_one"],
     )
     await repo.upsert_with_members(
-        c1,
+        cluster,
         owner_id="u_alice",
         owner_type="user",
         kind="user_memory",
-        member_type="memcell",
-    )
-    await repo.upsert_with_members(
-        c2,
-        owner_id="u_alice",
-        owner_type="user",
-        kind="user_memory",
-        member_type="memcell",
+        member_type="episode",
     )
 
-    result = await repo.list_ids_and_member_counts("u_alice", "user_memory")
-    result_dict = dict(result)
-    assert result_dict["cl_cnt_00000001"] == 2
-    assert result_dict["cl_cnt_00000002"] == 1
+    await repo.replace_members(
+        "cl_rep_00000002",
+        removed=set(),
+        added="ep_merged",
+        member_type="episode",
+        centroid_blob=np.array([1.0, 0.0], dtype=np.float32).tobytes(),
+        count=1,
+        last_ts_ms=1_700_000_000_000,
+        preview_json="[]",
+    )
+
+    members = await repo.get_members_with_type("cl_rep_00000002")
+    assert [mid for mid, _ in members] == ["ep_one", "ep_merged"]
 
 
 # ── get_members_with_type ──────────────────────────────────────────────
