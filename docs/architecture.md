@@ -369,8 +369,7 @@ extract/
 ├── parser/       Input parsing (format normalization, message preprocessing)
 ├── boundary/     BoundaryDetection: session buffer -> memcells (+ ledger, quarantine)
 ├── pipeline/     Per-cell extraction (Episode md + the events that announce it)
-├── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
-└── evolution/    Async memory evolution (event/counter/cron triggers)
+└── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
 ```
 
 `BoundaryDetection` is built by the bootstrap and injected into

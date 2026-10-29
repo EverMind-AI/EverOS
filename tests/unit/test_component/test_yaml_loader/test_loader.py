@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from everos.component.config import YamlConfigLoader
+from everos.component.yaml_loader import YamlConfigLoader
 
 
 @pytest.fixture

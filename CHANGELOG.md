@@ -48,6 +48,10 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **`everos.component.config` is renamed to `everos.component.yaml_loader`.**
+  The package name no longer collides with `everos.config`. Update imports to
+  `from everos.component.yaml_loader import YamlConfigLoader`; the class name
+  is unchanged.
 - **`MemoryService` write use cases are `add` and `flush`.**
   `MemoryService.submit_add` / `submit_flush` are now `add` / `flush`, the
   names the HTTP API uses; the inline `memorize()` / `flush()` steps are

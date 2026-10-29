@@ -76,5 +76,5 @@ operator name.
 ## See also
 
 - [`src/everos/memory/custom_instructions/`](../src/everos/memory/custom_instructions/) — `CustomInstructions`
-- [`src/everos/component/config/loader.py`](../src/everos/component/config/loader.py) — generic `YamlConfigLoader`
+- [`src/everos/component/yaml_loader/loader.py`](../src/everos/component/yaml_loader/loader.py) — generic `YamlConfigLoader`
 - [`docs/architecture.md`](architecture.md) — layer placement

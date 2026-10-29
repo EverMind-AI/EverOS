@@ -18,7 +18,7 @@ __all__ = ["CustomInstructions", "Operator"]
 from pathlib import Path
 from typing import Literal
 
-from everos.component.config import YamlConfigLoader
+from everos.component.yaml_loader import YamlConfigLoader
 
 type Operator = Literal[
     "boundary_detection", "episode_extract", "profile_extract", "reflect"

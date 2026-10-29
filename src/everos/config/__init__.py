@@ -8,7 +8,7 @@ Public API:
         load_settings, resolve_root, missing_config_error,
     )
 
-Distinct from ``everos.component.config`` (which is a *capability* —
+Distinct from ``everos.component.yaml_loader`` (which is a *capability* —
 loader / merger / env reader).
 """
 
