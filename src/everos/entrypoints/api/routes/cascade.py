@@ -25,9 +25,9 @@ empty context handed to the answer model, and a scored zero.
 
 The fix is not a longer window -- that only moves the race. It is to notice that
 a read-only phase creates no new fragments, so there is nothing for optimize or
-prune to do, and the whole subsystem is pure risk. ``EVEROS_DISABLE_CASCADE``
+prune to do, and the whole subsystem is pure risk. ``[cascade] enabled = false``
 already covers a process that starts read-only; this covers the process that
-writes first and *becomes* read-only, which an env var read once at startup
+writes first and *becomes* read-only, which a setting read once at startup
 cannot express.
 
 Quiesce is deliberately one-way. Restart the process to get the projection back.
@@ -60,7 +60,7 @@ async def quiesce(app: ApplicationDep) -> QuiesceResponse:
             status_code=503,
             detail=(
                 "cascade subsystem is not running; nothing to quiesce "
-                "(disabled via EVEROS_DISABLE_CASCADE, or the application "
+                "(disabled via [cascade] enabled = false, or the application "
                 "was not started)"
             ),
         )

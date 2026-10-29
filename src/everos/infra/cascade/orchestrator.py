@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
@@ -216,6 +215,8 @@ class CascadeOrchestrator:
         sqlite: The system-DB repositories: the ``md_change_state`` ledger
             and the knowledge tables.
         config: Cadences; ``None`` reads them from settings.
+        watcher_enabled: Run the filesystem watcher; ``False`` leaves the
+            scanner as the only path an md edit takes to the index.
     """
 
     def __init__(
@@ -227,8 +228,10 @@ class CascadeOrchestrator:
         index: DerivedIndex,
         sqlite: SqliteRepos,
         config: CascadeConfig | None = None,
+        watcher_enabled: bool = True,
     ) -> None:
         self._memory_root = memory_root
+        self._watcher_enabled = watcher_enabled
         self._index = index
         self._ledger = sqlite.md_change_state
         self._config = config or CascadeConfig.from_settings()
@@ -279,16 +282,9 @@ class CascadeOrchestrator:
         ``claim_pending_batch`` can't re-claim on its own (the WHERE
         filter is ``status='pending'``).
 
-        ``EVEROS_DISABLE_CASCADE_WATCHER`` skips the inotify half. The scanner
-        already re-derives the same truth from the filesystem every
-        ``scan_interval`` seconds, so the only thing lost is latency: an md edit
-        is picked up within one scan instead of immediately. That trade is
-        forced on a shared host, where inotify watches are a per-user kernel
-        resource -- an IDE indexing the workspace can hold 350k of the 524k
-        ceiling by itself, and every EverOS server then dies at startup with
-        ``OSError: [Errno 28] inotify watch limit reached``. Unlike
-        ``EVEROS_DISABLE_CASCADE`` this keeps the worker, so md still reaches
-        LanceDB -- which an ingesting run cannot do without.
+        With ``watcher_enabled=False`` the inotify half is skipped and the
+        scanner alone picks up md edits (see
+        :class:`everos.config.CascadeSettings` for when that trade is forced).
         """
         if self._started:
             return
@@ -297,16 +293,12 @@ class CascadeOrchestrator:
             logger.info("cascade_recovered_orphan_processing", count=orphans)
         await reconcile_index_once(self._memory_root, self._ledger)
         await self._snapshot_index_rows()
-        if os.getenv("EVEROS_DISABLE_CASCADE_WATCHER", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            logger.info("cascade_watcher_disabled_by_env")
-        else:
+        if self._watcher_enabled:
             loop = asyncio.get_running_loop()
             self._watcher = CascadeWatcher(self._memory_root, loop, self._ledger)
             self._watcher.start()
+        else:
+            logger.info("cascade_watcher_disabled")
         await self._scanner.start()
         await self._worker.start()
         self._started = True

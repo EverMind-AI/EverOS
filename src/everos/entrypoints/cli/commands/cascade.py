@@ -165,9 +165,9 @@ async def _runtime(
             "same index insert rows\n"
             "  twice, so this command needs the root to itself. A server "
             "projects markdown changes\n"
-            "  on its own unless it was started with EVEROS_DISABLE_CASCADE=1 "
-            "or quiesced; stop it\n"
-            "  first, then re-run.",
+            "  on its own unless it was started with [cascade] enabled = false "
+            "or quiesced;\n"
+            "  stop it first, then re-run.",
             err=True,
         )
         raise typer.Exit(code=3) from None

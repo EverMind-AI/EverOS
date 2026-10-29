@@ -53,11 +53,10 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from everos.core.utils.datetime import get_utc_now, to_iso_format
 from everos.infra.ome import RunStatus
 from everos.infra.ome._stores import storage as storage_mod
-from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Event, Immediate, StrategySpec
 from tests.fakes import make_deps
-from tests.helpers.ome import strategy_spec
+from tests.helpers.ome import StrategyTestHarness, strategy_spec
 
 settings.register_profile(
     "ci",

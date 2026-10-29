@@ -424,7 +424,7 @@ def server_env_for(
     """
     env = {str(k): str(v) for k, v in retrieval_env.items()}
     if "add" not in stages:
-        env["EVEROS_DISABLE_CASCADE"] = "1"
+        env["EVEROS_CASCADE__ENABLED"] = "false"
     return env
 
 

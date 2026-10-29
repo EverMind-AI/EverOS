@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from everos.config import OmeSettings
 from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 from everos.infra.ome._stores.run_record import RunRecordStore
 from everos.infra.ome._stores.storage import OMEStorage
@@ -45,7 +46,9 @@ _CLUSTER_SPECS = (TRIGGER_PROFILE_CLUSTERING_SPEC, TRIGGER_SKILL_CLUSTERING_SPEC
 def test_replay_engines_have_crash_recovery_disabled(
     tmp_path: Path, specs: tuple[Any, ...]
 ) -> None:
-    engine = build_replay_engine(MemoryRoot(tmp_path), make_deps(), specs)
+    engine = build_replay_engine(
+        MemoryRoot(tmp_path), make_deps(), OmeSettings(), specs
+    )
     assert engine._config.crash_recovery_enabled is False
 
 
@@ -88,7 +91,7 @@ async def test_backfill_engine_start_does_not_reenqueue_stale_running_rows(
         )
         await conn.commit()
 
-    engine = build_replay_engine(root, make_deps(), _CLUSTER_SPECS)
+    engine = build_replay_engine(root, make_deps(), OmeSettings(), _CLUSTER_SPECS)
     await engine.start()
     try:
         rec = await rec_store.get("r_server_stale")

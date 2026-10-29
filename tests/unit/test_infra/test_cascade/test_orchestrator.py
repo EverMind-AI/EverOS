@@ -41,7 +41,11 @@ async def runtime(
 
 
 def _make_orchestrator(
-    storage: Storage, memory_root: MemoryRoot, **config: Any
+    storage: Storage,
+    memory_root: MemoryRoot,
+    *,
+    watcher_enabled: bool = True,
+    **config: Any,
 ) -> CascadeOrchestrator:
     knobs: dict[str, Any] = {
         "scan_interval_seconds": 60.0,
@@ -57,6 +61,7 @@ def _make_orchestrator(
         config=CascadeConfig(**{**knobs, **config}),
         index=storage.index,
         sqlite=storage.sqlite,
+        watcher_enabled=watcher_enabled,
     )
 
 
@@ -280,12 +285,15 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
     manufactures failures on a healthy table, too high leaves a wedged one
     invisible for longer. Neither end is a tuning preference, so exposing them
     invites a change that can only make things worse. Cadences are the opposite
-    — they depend on write volume — which is why only those moved.
+    — they depend on write volume — which is why only those moved, next to the
+    two on/off switches.
     """
     from everos.config import CascadeSettings
 
     exposed = set(CascadeSettings.model_fields)
     assert exposed == {
+        "enabled",
+        "watcher_enabled",
         "optimize_heartbeat_seconds",
         "optimize_prune_interval_seconds",
         "optimize_prune_retention_seconds",
@@ -296,9 +304,9 @@ def test_deadlines_are_deliberately_not_configurable() -> None:
 
 
 async def test_watcher_can_be_disabled_without_losing_the_worker(
-    runtime: MemoryRoot, monkeypatch: pytest.MonkeyPatch, storage: Storage
+    runtime: MemoryRoot, storage: Storage
 ) -> None:
-    """``EVEROS_DISABLE_CASCADE_WATCHER`` drops inotify, keeps md -> LanceDB.
+    """``watcher_enabled=False`` drops inotify, keeps md -> LanceDB.
 
     Forced by a shared host: inotify watches are a per-user kernel resource, the
     ceiling lives in read-only ``/proc/sys``, and an IDE indexer can hold 350k of
@@ -306,9 +314,8 @@ async def test_watcher_can_be_disabled_without_losing_the_worker(
     scanner re-derives the same truth every 30s, so what is lost is latency. The
     worker must survive, or an ingesting run writes md that never gets indexed.
     """
-    monkeypatch.setenv("EVEROS_DISABLE_CASCADE_WATCHER", "1")
     with patch("everos.infra.cascade.orchestrator.CascadeWatcher") as watcher_cls:
-        orch = _make_orchestrator(storage, runtime)
+        orch = _make_orchestrator(storage, runtime, watcher_enabled=False)
         await orch.start()
         assert watcher_cls.call_count == 0, "watcher was constructed anyway"
         assert orch._watcher is None

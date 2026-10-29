@@ -11,11 +11,10 @@ import asyncio
 import pytest
 
 from everos.infra.ome._dispatch.scheduling import cron_entry
-from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Counter, Cron, CronTick, Event, Immediate
 from tests.fakes import make_deps
-from tests.helpers.ome import strategy_spec
+from tests.helpers.ome import StrategyTestHarness, strategy_spec
 
 
 class MemCellSaved(Event):

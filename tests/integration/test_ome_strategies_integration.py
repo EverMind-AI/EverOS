@@ -15,6 +15,7 @@ import pytest
 from everalgo.types import AtomicFact, ChatMessage, Foresight, MemCell
 from structlog.testing import capture_logs
 
+from everos.config import OmeSettings
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps
@@ -187,7 +188,9 @@ async def test_emit_dispatches_both_strategies_to_success(
         )
         await storage.create_schema()
 
-        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
+        engine = _build_engine(
+            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+        )
         await engine.start()
         try:
             # `ConfigReloader.start()` fires its initial load as a task, so
@@ -286,7 +289,9 @@ async def test_emit_dispatches_agent_case_strategy_to_success(
         (tmp_path / "ome.toml").write_text("# test\n")
         await storage.create_schema()
 
-        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
+        engine = _build_engine(
+            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+        )
         await engine.start()
         try:
             await engine.emit(
@@ -360,7 +365,9 @@ async def test_skill_chain_e2e(
         (tmp_path / "ome.toml").write_text("# test\n")
         await storage.create_schema()
 
-        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
+        engine = _build_engine(
+            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+        )
         await engine.start()
         try:
             await engine.emit(
@@ -503,7 +510,9 @@ async def test_profile_chain_e2e(
         (tmp_path / "ome.toml").write_text("# test\n")
         await storage.create_schema()
 
-        engine = _build_engine(MemoryRoot(root=tmp_path), _installed["deps"])
+        engine = _build_engine(
+            MemoryRoot(root=tmp_path), _installed["deps"], OmeSettings()
+        )
         await engine.start()
         try:
             await engine.emit(

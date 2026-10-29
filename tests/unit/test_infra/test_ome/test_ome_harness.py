@@ -1,11 +1,11 @@
-"""Tests for the OME StrategyTestHarness."""
+"""Tests for the OME StrategyTestHarness test fixture (tests.helpers.ome)."""
 
 from __future__ import annotations
 
-from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Event, Immediate, StrategySpec
 from tests.fakes import make_deps
+from tests.helpers.ome import StrategyTestHarness
 
 
 class _E(Event):

@@ -90,8 +90,8 @@ EVEROS_LLMMR_DECIDER_FULL_TEXT = "1"    # decider reads full episode text instea
 # decider produces. Revisit only together with a decision to re-measure the baselines.
 EVEROS_DECIDER__TIMEOUT_SECONDS = "600"   # 33.8s/call measured; 180s default left no queue headroom
 EVEROS_LLM__SEARCH_TIMEOUT_SECONDS = "600"
-EVEROS_DISABLE_CASCADE_WATCHER = "1"    # inotify is exhausted by the IDE on this host;
-                                        # the 30s scanner covers the same ground
+EVEROS_CASCADE__WATCHER_ENABLED = "false"  # inotify is exhausted by the IDE on this host;
+                                            # the 30s scanner covers the same ground
 # --- ANSWER ----------------------------------------------------------------
 [answer]
 model = "google/gemini-3-flash-preview"

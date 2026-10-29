@@ -14,7 +14,6 @@ singletons never leak level state between invocations.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -22,26 +21,12 @@ from pathlib import Path
 
 import pytest
 
+from .conftest import hermetic_env
+
 
 @pytest.fixture
 def isolated_root(tmp_path: Path) -> Iterator[Path]:
     yield tmp_path
-
-
-# Base subprocess env — inherits current PATH etc but explicitly BLANKS
-# every ``EVEROS_*`` variable a developer may have exported (real
-# provider keys under ~/.everos/everos.toml are a common source of
-# ambient state that would let a test accidentally succeed against a
-# live provider). Round-4 review M11: without this scrub, the same
-# hermetic-env footgun that round-2 B1 already burned us on would
-# re-appear inside every subprocess these tests spawn.
-def _hermetic_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("EVEROS_")}
-    env["EVEROS_ROOT"] = env.get("EVEROS_ROOT", "")
-    env["EVEROS_LLM__API_KEY"] = "test-key"  # required to build; never called
-    env["EVEROS_EMBEDDING__API_KEY"] = ""
-    env["EVEROS_RERANK__API_KEY"] = ""
-    return env
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -50,7 +35,7 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
-        env=_hermetic_env(),
+        env=hermetic_env(),
     )
 
 

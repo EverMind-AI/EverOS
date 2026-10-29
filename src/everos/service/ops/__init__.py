@@ -134,7 +134,7 @@ class OpsService:
     # ── server lifecycle ───────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the cascade subsystem unless ``EVEROS_DISABLE_CASCADE`` is set."""
+        """Start the cascade subsystem unless ``[cascade] enabled`` is false."""
         self._cascade_attached = await _cascade.start(
             self._cascade,
             enabled=self._run_cascade,

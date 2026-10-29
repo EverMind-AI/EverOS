@@ -48,6 +48,14 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **The cascade and OME engine switches are settings.** `[cascade]
+  enabled` and `[cascade] watcher_enabled` replace the
+  `EVEROS_DISABLE_CASCADE` and `EVEROS_DISABLE_CASCADE_WATCHER` environment
+  variables, and the new `[ome]` section's `max_concurrent_runs` and
+  `run_timeout_seconds` (`0` disables the ceiling) replace
+  `EVEROS_OME_MAX_CONCURRENT_RUNS` and `EVEROS_OME_RUN_TIMEOUT_SECONDS`.
+  The old variables are no longer read; set the keys in `everos.toml`
+  instead.
 - **Building the application requires `[llm]`.** `build_providers` (and so
   `build_application`) raises `LLMNotConfiguredError` when `[llm]` has no
   `api_key` or `base_url`, instead of building without an extraction LLM
@@ -333,6 +341,11 @@ both use the resulting `Application` through three facades:
   `everos.service.backfill`; update log filters that matched the old name.
   `BackfillDeps` takes a `vectors` backfill object in place of its
   `tokenizer` and `prune_retention` fields.
+
+### Removed
+
+- **`everos.infra.ome.testing` is no longer shipped.** `StrategyTestHarness`
+  was a test fixture; it now lives in the repository's own test helpers.
 
 ### Fixed
 

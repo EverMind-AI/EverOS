@@ -39,7 +39,7 @@ from unittest.mock import AsyncMock
 
 from everos.component.parser import aparse_file
 from everos.component.tokenizer import build_tokenizer
-from everos.config import Settings, load_settings
+from everos.config import OmeSettings, Settings, load_settings
 from everos.core.errors import MemoryRootLockedError, QueueSaturatedError
 from everos.infra.cascade import CascadeOrchestrator
 from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
@@ -472,7 +472,9 @@ def make_backfill_deps(
         "clusters": deps.stores.cluster,
         "skills": deps.indexes.agent_skill,
         "skill_files": MarkdownAgentSkillStore(storage.root),
-        "engine_for": functools.partial(build_replay_engine, storage.root, deps),
+        "engine_for": functools.partial(
+            build_replay_engine, storage.root, deps, OmeSettings()
+        ),
         "ensure_schema": storage.create_schema,
         "cascade": CascadeOrchestrator(
             memory_root=storage.root,

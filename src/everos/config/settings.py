@@ -709,12 +709,28 @@ class LanceDBSettings(BaseModel):
 
 
 class CascadeSettings(BaseModel):
-    """Cascade maintenance cadences.
+    """Cascade on/off switches and maintenance cadences.
 
-    These are *how often* each background job runs, not how long it is allowed
-    to take — the deadlines that bound a hung call stay as constants next to the
-    code they guard, sized from measurement, because a wrong value there either
-    masks a hang or manufactures failures.
+    ``enabled``:
+      Whether the server runs the cascade at all (watcher + scanner + worker).
+      Turned off, md edits never reach the index -- only useful for a run that
+      does not search, or one that drives ``everos cascade sync`` itself.
+
+    ``watcher_enabled``:
+      Whether the filesystem watcher runs. The scanner already re-derives the
+      same truth from the filesystem every ``scan_interval_seconds``, so the
+      only thing lost is latency: an md edit is picked up within one scan
+      instead of immediately. That trade is forced on a shared host, where
+      inotify watches are a per-user kernel resource -- an IDE indexing the
+      workspace can hold 350k of the 524k ceiling by itself, and every EverOS
+      server then dies at startup with ``OSError: [Errno 28] inotify watch
+      limit reached``. Unlike ``enabled = false`` this keeps the worker, so md
+      still reaches the index -- which an ingesting run cannot do without.
+
+    The cadences below are *how often* each background job runs, not how long
+    it is allowed to take — the deadlines that bound a hung call stay as
+    constants next to the code they guard, sized from measurement, because a
+    wrong value there either masks a hang or manufactures failures.
 
     ``optimize_heartbeat_seconds``:
       Idle sweep that offers every kind to the optimizer, so an unindexed tail
@@ -748,11 +764,44 @@ class CascadeSettings(BaseModel):
       which over a slow mount is the cost to weigh against it.
     """
 
+    enabled: bool = True
+    watcher_enabled: bool = True
     optimize_heartbeat_seconds: float = 60.0
     optimize_prune_interval_seconds: float = 300.0
     optimize_prune_retention_seconds: float = 60.0
     optimize_rebuild_interval_seconds: float = 12 * 60 * 60.0
     scan_interval_seconds: float = Field(default=30.0, gt=0)
+
+
+class OmeSettings(BaseModel):
+    """Offline memory engine (OME) tunables.
+
+    Engine-wide knobs only. Per-strategy overrides (enable / gate / cron) live
+    in ``<memory-root>/ome.toml``, a separate file the engine reads itself.
+
+    ``max_concurrent_runs``:
+      Engine-wide cap on concurrent strategy invocations. The default suits an
+      interactive install; a bulk ingest of many conversations is throttled by
+      it long before the machine is, since each slot spends almost all its
+      time waiting on a remote extraction call rather than using CPU.
+
+    ``run_timeout_seconds``:
+      Wall-clock ceiling on one strategy attempt; ``0`` (or ``None``) disables
+      it -- TOML has no null, so ``0`` is the operator's off switch.
+      Without a ceiling, a coroutine parked on an await that carries no
+      deadline of its own (a lock held by another stuck coroutine, a
+      connection-pool wait) keeps its slot forever: it never raises, so it
+      never retries. The 30-minute default is a deadlock backstop, not a
+      latency target.
+    """
+
+    max_concurrent_runs: int = Field(default=20, gt=0)
+    run_timeout_seconds: float | None = Field(default=1800.0, ge=0)
+
+    @field_validator("run_timeout_seconds")
+    @classmethod
+    def _zero_disables(cls, value: float | None) -> float | None:
+        return value or None
 
 
 class IndexSettings(BaseModel):
@@ -879,6 +928,7 @@ class Settings(BaseSettings):
     agent_memory: AgentMemorySettings = AgentMemorySettings()
     clustering: ClusteringSettings = ClusteringSettings()
     cascade: CascadeSettings = CascadeSettings()
+    ome: OmeSettings = OmeSettings()
     multimodal: MultimodalSettings = MultimodalSettings()
     knowledge: KnowledgeSettings = KnowledgeSettings()
     logging: LoggingSettings = LoggingSettings()

@@ -37,7 +37,6 @@ import contextlib
 import dataclasses
 import datetime as dt
 import functools
-import os
 from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from pathlib import Path
@@ -59,7 +58,7 @@ from everos.component.llm import (
 from everos.component.parser import aparse_file, build_raw_file, parser_available
 from everos.component.rerank import RerankProvider, build_rerank_provider
 from everos.component.tokenizer import Tokenizer, build_tokenizer
-from everos.config import Settings, load_settings, resolve_root
+from everos.config import OmeSettings, Settings, load_settings, resolve_root
 from everos.config.search_runtime import SearchConfigSource
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
@@ -122,8 +121,6 @@ logger = get_logger(__name__)
 
 _CONFIG_ROOT = Path(__file__).resolve().parent.parent / "config"
 """Bundled custom instructions (``src/everos/config/``), shipped in the wheel."""
-
-_TRUE_VALUES = ("1", "true", "yes")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -297,7 +294,7 @@ def build_application(
         instructions=CustomInstructions(_CONFIG_ROOT),
         case_judge=_case_judge(settings, providers.llm),
     )
-    engine = _build_engine(root, deps)
+    engine = _build_engine(root, deps, settings.ome)
     ome_lock = OmeLock(root.ome_db)
     capabilities = _capabilities(settings, providers)
     admin = CascadeAdmin(
@@ -314,6 +311,7 @@ def build_application(
         embedding=providers.embedding,
         index=index,
         sqlite=sqlite,
+        watcher_enabled=settings.cascade.watcher_enabled,
     )
     memory = _build_memory_service(
         settings, providers, deps, tokenizer, OmeEventBus(engine)
@@ -329,7 +327,7 @@ def build_application(
             root=root,
             admin=admin,
             cascade=cascade,
-            run_cascade=not _env_flag("EVEROS_DISABLE_CASCADE"),
+            run_cascade=settings.cascade.enabled,
             engine=engine,
             ome_lock=ome_lock,
             inbox=stores.memorize_inbox,
@@ -346,7 +344,9 @@ def build_application(
                 clusters=stores.cluster,
                 skills=indexes.agent_skill,
                 skill_files=MarkdownAgentSkillStore(root),
-                engine_for=functools.partial(build_replay_engine, root, deps),
+                engine_for=functools.partial(
+                    build_replay_engine, root, deps, settings.ome
+                ),
                 ensure_schema=admin.create_schema,
                 cascade=cascade,
                 ome_lock=ome_lock,
@@ -422,7 +422,9 @@ def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
 # ── engine and facades ─────────────────────────────────────────────────────
 
 
-def _build_engine(root: MemoryRoot, deps: MemoryDeps) -> OfflineEngine:
+def _build_engine(
+    root: MemoryRoot, deps: MemoryDeps, ome: OmeSettings
+) -> OfflineEngine:
     """The OME engine with every strategy registered over ``deps``.
 
     Strategies that need an embedding provider return no events when
@@ -430,7 +432,12 @@ def _build_engine(root: MemoryRoot, deps: MemoryDeps) -> OfflineEngine:
     change needs a restart.
     """
     engine = OfflineEngine(
-        config=OMEConfig(jobstore_path=root.ome_db, config_path=root.ome_config)
+        config=OMEConfig(
+            jobstore_path=root.ome_db,
+            config_path=root.ome_config,
+            max_concurrent_runs=ome.max_concurrent_runs,
+            run_timeout_seconds=ome.run_timeout_seconds,
+        )
     )
     for spec in STRATEGY_SPECS:
         engine.register(to_ome_strategy(spec, deps))
@@ -438,7 +445,10 @@ def _build_engine(root: MemoryRoot, deps: MemoryDeps) -> OfflineEngine:
 
 
 def build_replay_engine(
-    root: MemoryRoot, deps: MemoryDeps, specs: Sequence[StrategySpec]
+    root: MemoryRoot,
+    deps: MemoryDeps,
+    ome: OmeSettings,
+    specs: Sequence[StrategySpec],
 ) -> OfflineEngine:
     """An unstarted, throw-away engine running only ``specs`` (backfill's replay).
 
@@ -452,7 +462,12 @@ def build_replay_engine(
     """
     root.ome_db.parent.mkdir(parents=True, exist_ok=True)
     engine = OfflineEngine(
-        config=OMEConfig(jobstore_path=root.ome_db, crash_recovery_enabled=False)
+        config=OMEConfig(
+            jobstore_path=root.ome_db,
+            crash_recovery_enabled=False,
+            max_concurrent_runs=ome.max_concurrent_runs,
+            run_timeout_seconds=ome.run_timeout_seconds,
+        )
     )
     for spec in specs:
         engine.register(to_ome_strategy(spec, deps))
@@ -578,7 +593,3 @@ def _shielded(
             logger.exception("application_stop_failed", component=name)
 
     return _run
-
-
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in _TRUE_VALUES

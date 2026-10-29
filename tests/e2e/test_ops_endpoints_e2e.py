@@ -109,7 +109,7 @@ async def test_quiesce_drains_and_stops_a_running_cascade(
 async def test_quiesce_without_a_running_cascade_is_503(
     core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("EVEROS_DISABLE_CASCADE", "1")
+    monkeypatch.setenv("EVEROS_CASCADE__ENABLED", "false")
     async with _client(monkeypatch) as client:
         resp = await client.post("/api/v2/cascade/quiesce")
     assert resp.status_code == 503

@@ -13,12 +13,16 @@ import os
 import pytest
 
 
-def hermetic_env() -> dict[str, str]:
+def hermetic_env(*, plain_output: bool = False) -> dict[str, str]:
     """Subprocess environment with every ambient EverOS setting stripped.
 
     The extraction LLM is required to build the application, so it gets a
     placeholder key (building a client never calls it; ``base_url`` comes
     from the bundled defaults); the optional providers stay unconfigured.
+
+    ``plain_output`` also turns colour off: CI runners export ``FORCE_COLOR``,
+    and Typer then splits option names with escape sequences that substring
+    assertions on the output must not see.
     """
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("EVEROS_")
@@ -26,6 +30,10 @@ def hermetic_env() -> dict[str, str]:
     env["EVEROS_LLM__API_KEY"] = "test-key"
     env["EVEROS_EMBEDDING__API_KEY"] = ""
     env["EVEROS_RERANK__API_KEY"] = ""
+    if plain_output:
+        env.pop("FORCE_COLOR", None)
+        env["NO_COLOR"] = "1"
+        env["TERM"] = "dumb"
     return env
 
 

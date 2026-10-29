@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from everos.component.llm import LLMCaseJudge, LLMNotConfiguredError
-from everos.config import Settings, load_settings
+from everos.config import OmeSettings, Settings, load_settings
 from everos.infra.ome import OmeEventBus
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service import (
@@ -161,16 +161,39 @@ def test_the_case_judge_exists_only_with_the_gate_on(
     load_settings.cache_clear()
 
 
-@pytest.mark.parametrize(
-    ("value", "runs"),
-    [("1", False), ("true", False), ("Yes", False), ("", True), ("0", True)],
-)
-def test_the_disable_switch_keeps_the_cascade_from_running(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, value: str, runs: bool
+def _with(settings: Settings, **sections: object) -> Settings:
+    return settings.model_copy(update=sections)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_cascade_switch_decides_whether_the_cascade_runs(
+    settings: Settings, enabled: bool
 ) -> None:
-    """A retrieval-only server opts out; anything not clearly "yes" ingests."""
-    monkeypatch.setenv("EVEROS_DISABLE_CASCADE", value)
-    assert build_application(settings).ops._run_cascade is runs
+    """A retrieval-only server opts out with ``[cascade] enabled = false``."""
+    switched = _with(
+        settings, cascade=settings.cascade.model_copy(update={"enabled": enabled})
+    )
+    assert build_application(switched).ops._run_cascade is enabled
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_watcher_switch_reaches_the_orchestrator(
+    settings: Settings, enabled: bool
+) -> None:
+    switched = _with(
+        settings,
+        cascade=settings.cascade.model_copy(update={"watcher_enabled": enabled}),
+    )
+    assert build_application(switched).ops._cascade._watcher_enabled is enabled
+
+
+def test_the_ome_tunables_reach_the_engine(settings: Settings) -> None:
+    tuned = _with(
+        settings, ome=OmeSettings(max_concurrent_runs=7, run_timeout_seconds=None)
+    )
+    config = build_application(tuned).ops._engine._config
+    assert config.max_concurrent_runs == 7
+    assert config.run_timeout_seconds is None
 
 
 # ── lifecycle ──────────────────────────────────────────────────────────────

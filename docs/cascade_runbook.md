@@ -134,7 +134,7 @@ upgrading from a release before 1.4.2 (a server start, or an unscoped
 `.index/.index_reconcile_version`, so no upgrade step is needed and later
 starts are ordinary. Delete the marker to make the next start repeat it,
 or run `--force-all` for an explicit pass. Two roots need the explicit
-pass: a server started with `EVEROS_DISABLE_CASCADE=1` never runs it
+pass: a server started with `[cascade] enabled = false` never runs it
 (stop the server, run `--force-all` once), and a multi-project root where
 reflection ran before 1.4.2 needs `cascade rebuild` once -- the pass does
 not clear the `deprecated_by` stamps one project's reflection left on
@@ -151,7 +151,7 @@ next to a server). The same rule applies to `cascade fix --apply` and
 `cascade rebuild`; `cascade status` and `cascade fix` (listing) are
 read-only and work alongside a server. A running server projects every
 markdown change itself, so nothing is lost by waiting for it — unless it
-was started with `EVEROS_DISABLE_CASCADE=1` or has been quiesced, in
+was started with `[cascade] enabled = false` or has been quiesced, in
 which case stop it before syncing.
 
 ## Rebuild the index: `everos cascade rebuild`

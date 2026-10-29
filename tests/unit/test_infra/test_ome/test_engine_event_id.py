@@ -5,11 +5,10 @@ from __future__ import annotations
 import pytest
 
 from everos.infra.ome import RunStatus
-from everos.infra.ome.testing import StrategyTestHarness
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Event, Immediate
 from tests.fakes import make_deps
-from tests.helpers.ome import strategy_spec
+from tests.helpers.ome import StrategyTestHarness, strategy_spec
 
 
 class _Ping(Event):

@@ -50,10 +50,10 @@ async def start(
     A read-only retrieval server does not ingest markdown, so the
     watcher / scanner / worker are pure overhead -- and the periodic scan
     re-enqueues a large store's whole markdown set, which starves search
-    on a dense store. ``EVEROS_DISABLE_CASCADE`` keeps it off.
+    on a dense store. ``[cascade] enabled = false`` keeps it off.
     """
     if not enabled:
-        logger.info("cascade_lifespan_disabled_by_env")
+        logger.info("cascade_lifespan_disabled")
         return False
     if embedding:
         logger.info("cascade_startup_embed_available")

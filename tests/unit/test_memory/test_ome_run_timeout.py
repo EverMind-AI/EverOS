@@ -18,8 +18,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from pydantic import ValidationError
 
-from everos.infra.ome.config import OMEConfig, _env_float
+from everos.config import OmeSettings
+from everos.infra.ome.config import OMEConfig
 
 
 def _cfg(**kw: object) -> OMEConfig:
@@ -33,23 +35,18 @@ def test_a_ceiling_is_on_by_default() -> None:
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [
-        ("300", 300.0),
-        ("0", None),
-        ("off", None),
-        ("none", None),
-        ("false", None),
-        ("", 1800.0),
-        ("garbage", 1800.0),
-        ("-5", None),
-    ],
+    [(300, 300.0), (0, None), (None, None)],
 )
-def test_env_parsing(
-    raw: str, expected: float | None, monkeypatch: pytest.MonkeyPatch
+def test_the_setting_has_an_off_switch(
+    raw: float | None, expected: float | None
 ) -> None:
-    """Operators need an off switch, and a typo must not take the process down."""
-    monkeypatch.setenv("EVEROS_OME_RUN_TIMEOUT_SECONDS", raw)
-    assert _env_float("EVEROS_OME_RUN_TIMEOUT_SECONDS", 1800.0) == expected
+    """Operators need an off switch, and TOML has no null: ``0`` is it."""
+    assert OmeSettings(run_timeout_seconds=raw).run_timeout_seconds == expected
+
+
+def test_a_negative_ceiling_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        OmeSettings(run_timeout_seconds=-5)
 
 
 def test_disabled_ceiling_is_representable() -> None:

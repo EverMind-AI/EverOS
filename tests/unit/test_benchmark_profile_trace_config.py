@@ -133,15 +133,15 @@ def test_every_benchmark_disables_the_inotify_watcher(name: str) -> None:
     startup with ``OSError: [Errno 28] inotify watch limit reached``. The ceiling is
     in ``/proc/sys``, which is read-only here, so raising it is not an option. The
     cascade scanner re-derives the same truth every 30s, so the watcher is latency,
-    not correctness -- but ``EVEROS_DISABLE_CASCADE`` would take the worker with it
+    not correctness -- but ``EVEROS_CASCADE__ENABLED`` would take the worker with it
     and md would never reach LanceDB at all.
     """
     raw = tomllib.loads(
         (_BENCH / "configs" / f"{name}.toml").read_text(encoding="utf-8")
     )
-    assert raw["retrieval_env"]["EVEROS_DISABLE_CASCADE_WATCHER"] == "1"
+    assert raw["retrieval_env"]["EVEROS_CASCADE__WATCHER_ENABLED"] == "false"
     # The worker must survive: this is an ingesting run.
-    assert "EVEROS_DISABLE_CASCADE" not in raw["retrieval_env"]
+    assert "EVEROS_CASCADE__ENABLED" not in raw["retrieval_env"]
 
 
 def test_smoke_does_not_discard_an_explicit_conv_list() -> None:
