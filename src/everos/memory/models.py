@@ -458,6 +458,91 @@ class Cluster(BaseModel):
     members: list[str] = Field(default_factory=list)
 
 
+class KnowledgeMemory(BaseModel):
+    """Domain knowledge memory — one node of an extracted topic tree.
+
+    Mirrors everalgo-knowledge ``KnowledgeMemory`` (flattened DFS form; the
+    node at ``topic_index=0`` is the document root and carries the title as
+    ``topic`` and the document summary). :mod:`everos.memory.mappers.knowledge`
+    converts between the two.
+    """
+
+    doc_id: str
+    topic_index: int
+    topic: str
+    summary: str
+    content: str = ""
+    block_refs: list[int] = Field(default_factory=list)
+    depth: int
+    parent_index: int | None = None
+    children_index: list[int] = Field(default_factory=list)
+    topic_path: str
+    content_labels: list[str] = Field(default_factory=list)
+    category_id: str = ""
+
+
+class KnowledgeCategory(BaseModel):
+    """One entry of a project's knowledge taxonomy."""
+
+    id: str
+    description: str = ""
+
+
+class KnowledgeDocument(BaseModel):
+    """Domain knowledge document — the metadata of one uploaded document.
+
+    ``md_path`` is the document's ``index.md`` relative to the memory root,
+    as recorded by whoever read it; the knowledge store uses it to find the
+    document's directory. This is a deliberate exception to the rule that
+    domain models carry no storage path: a knowledge document is an entity
+    rooted at its directory, so its location is part of its identity --
+    repairing a directory that escaped ``knowledge/``, the replace backup and
+    the uploaded original are all found through it. Owner-scoped memories
+    keep identity apart, in ``MemoryRef``.
+
+    ``created_at`` / ``updated_at`` are set by the catalog that records the
+    document; a document read straight from its markdown has neither.
+    """
+
+    doc_id: str
+    app_id: str
+    project_id: str
+    category_id: str
+    title: str
+    summary: str = ""
+    source_name: str | None = None
+    source_type: str | None = None
+    md_path: str | None = None
+    created_at: dt.datetime | None = None
+    updated_at: dt.datetime | None = None
+
+
+class KnowledgeTopic(BaseModel):
+    """Domain knowledge topic — one node of a document's topic tree.
+
+    Knowledge is project-level, not owned by a user or agent, so the topic
+    carries its own ``app_id`` / ``project_id`` instead of an owner
+    ``Scope``. ``content``, ``content_labels`` and ``children_topic_ids`` are
+    only held by the catalog; a search hit leaves them empty.
+    """
+
+    topic_id: str
+    doc_id: str
+    app_id: str
+    project_id: str
+    category_id: str
+    topic_name: str
+    topic_path: str
+    depth: int
+    summary: str
+    parent_topic_id: str | None = None
+    content: str = ""
+    content_labels: list[str] = Field(default_factory=list)
+    children_topic_ids: list[str] = Field(default_factory=list)
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
 ClusterKind = Literal["user_memory", "agent_case"]
 ClusterMemberType = Literal["episode", "case"]
 

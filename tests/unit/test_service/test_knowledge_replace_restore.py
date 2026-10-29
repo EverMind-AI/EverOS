@@ -26,8 +26,8 @@ from everalgo.types import KnowledgeMemory, ParsedContent
 
 from everos.component.utils.datetime import get_utc_now
 from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import knowledge_store
 from everos.infra.persistence.sqlite.tables.knowledge import KnowledgeDocumentRow
-from everos.service import knowledge as knowledge_mod
 from tests.fakes import make_knowledge_service
 
 DOC_ID = "d_abc123000000"
@@ -98,9 +98,9 @@ async def test_replace_leaves_one_directory_for_the_document(
         original_file = (
             AsyncMock(side_effect=OSError("disk full"))
             if fail_where == "after_write"
-            else knowledge_mod._write_original_file
+            else knowledge_store._write_original
         )
-        with patch.object(knowledge_mod, "_write_original_file", original_file):
+        with patch.object(knowledge_store, "_write_original", original_file):
             raised: type[BaseException] | None = None
             try:
                 await service.replace_document(

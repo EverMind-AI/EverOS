@@ -5,75 +5,67 @@ Methods (one per use case):
     get_document      — fetch document detail with topic list.
     list_documents    — paginated document listing.
     get_topic         — fetch a single topic with content.
-    delete_document   — remove document directory (cascade handles SQLite/LanceDB).
-    replace_document  — atomic replace (backup + restore on failure).
+    delete_document   — remove the document's markdown (cascade clears state).
+    replace_document  — atomic replace (the store restores on failure).
     patch_document    — update mutable document metadata fields.
     list_categories   — taxonomy categories with document counts.
     search_knowledge  — knowledge retrieval pipeline (keyword / vector / hybrid).
 
-The service is a wrapper: each method forwards to the module function that
-holds the use case, passing the memory root and the providers it was built
-with. The module still reaches the SQLite repositories and the markdown
-helpers directly; moving those behind ports is stage 5.
+Storage is reached through two ports: :class:`KnowledgeStore` (the markdown
+truth: document trees, taxonomy, uploaded originals) and
+:class:`KnowledgeCatalog` (the document / topic records the cascade keeps).
+Markdown is the truth: when the catalog has not caught up with a document
+yet, reads that must still work (delete, patch) fall back to the store.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import re
-import shutil
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
-from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-import anyio
-from everalgo.rank.fusion import rrf
+from everalgo.rank import acategory_retrieve
 from everalgo.types import (
-    Candidate,
     CategorySpec,
     KnowledgeMemory,
     ParsedContent,
     RawFile,
 )
 
-from everos.component.llm import LLMNotConfiguredError
 from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import (
     DocumentNotFoundError,
     DuplicateDocumentError,
     ExtractionEmptyError,
-    InvalidInputError,
-    PathTraversalError,
+    LLMNotConfiguredError,
     ProviderNotConfiguredError,
     TopicNotFoundError,
 )
 from everos.core.observability.logging import get_logger
-from everos.infra.persistence.index import Predicate, all_of, eq
-from everos.infra.persistence.markdown import (
-    KnowledgeWriter,
-    dump_frontmatter,
-    ensure_taxonomy,
-    parse_frontmatter,
-    parse_taxonomy,
-    sanitize_dirname,
+from everos.memory.mappers import knowledge as knowledge_mapper
+from everos.memory.models import KnowledgeDocument, KnowledgeTopic
+from everos.memory.models import KnowledgeMemory as DomainKnowledgeMemory
+from everos.memory.ports import (
+    Filter,
+    KnowledgeCatalog,
+    KnowledgeStore,
+    Page,
+    WrittenDocument,
+    all_of,
+    eq,
 )
-from everos.infra.persistence.sqlite import (
-    DocumentUpsertPayload,
-    KnowledgeDocumentRepo,
-    KnowledgeTopicRowRepo,
-)
+from everos.memory.search.callbacks import build_fetched_rerank_fn
 
 if TYPE_CHECKING:
     from everos.component.embedding import EmbeddingProvider
     from everos.component.rerank import RerankProvider
     from everos.config.settings import KnowledgeSearchSettings
-    from everos.infra.persistence import MemoryRoot
-    from everos.memory.search.recall import KnowledgeTopicRecaller
+    from everos.memory.search.recall import KnowledgeMethod, KnowledgeTopicRecaller
 
 logger = get_logger(__name__)
 
@@ -82,7 +74,6 @@ _DOC_ID_PREFIX = "d_"
 _DOC_ID_HEX_LEN = 12
 _MAX_MINT_RETRIES = 5
 _SCOPE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-@+]+$")
-_ORIGINAL_DIR_NAME = "_original"
 _KNOWLEDGE_FEATURE = "knowledge"
 
 
@@ -115,156 +106,6 @@ class CreateDocumentResult:
     source_name: str | None
     md_path: str
     original_file_path: str | None = None
-
-
-async def _extract_memories(
-    extractor: KnowledgeExtractor,
-    parsed: ParsedContent,
-    doc_id: str,
-    title: str,
-    *,
-    categories: list[CategorySpec],
-    category_id: str | None,
-) -> list[KnowledgeMemory]:
-    """Run the algo extractor and return non-empty memories.
-
-    Args:
-        extractor: Algo extractor injected by the caller.
-        parsed: Parsed document content to extract from.
-        doc_id: Document identifier passed to the extractor.
-        title: Human-readable document title.
-        categories: Taxonomy categories for LLM classification.
-        category_id: Pre-known category; empty string lets the LLM classify.
-
-    Returns:
-        Non-empty list of KnowledgeMemory with category fallback applied.
-
-    Raises:
-        ExtractionEmptyError: When the extractor produces no memories.
-    """
-    memories: list[KnowledgeMemory] = await extractor.aextract(
-        parsed,
-        doc_id=doc_id,
-        title=title,
-        categories=categories,
-        category_id=category_id or "",
-    )
-    if not memories:
-        raise ExtractionEmptyError(
-            f"Extractor returned no memories for doc_id={doc_id!r}"
-        )
-    return _apply_category_fallback(memories)
-
-
-async def _create_document(
-    *,
-    extractor: KnowledgeExtractor,
-    parsed: ParsedContent,
-    title: str,
-    knowledge_dir: Path,
-    source_name: str | None = None,
-    source_type: str | None = None,
-    doc_id: str | None = None,
-    category_id: str | None = None,
-    file_content: bytes | None = None,
-    documents: KnowledgeDocumentRepo,
-) -> CreateDocumentResult:
-    """Create a knowledge document from parsed content.
-
-    Args:
-        extractor: Algo extractor injected by the caller.
-        parsed: Parsed document content (from parser or raw text).
-        title: Human-readable document title.
-        knowledge_dir: Absolute path from ``MemoryRoot.knowledge_dir``.
-        source_name: Optional provenance label (URL, filename, ...).
-        source_type: Optional provenance type (``"url"``, ``"file"``, ...).
-        doc_id: Caller-provided doc_id; ``None`` mints a new one.
-        category_id: Pre-known category; ``None`` lets the LLM classify.
-        file_content: Raw uploaded file bytes to persist in ``_original/``.
-
-    Returns:
-        Result containing doc_id, category, topic count, and md path.
-
-    Raises:
-        DuplicateDocumentError: When ``doc_id`` already exists.
-        ExtractionEmptyError: When the extractor produces no memories.
-    """
-    doc_id = doc_id or await _mint_doc_id(documents=documents)
-    if await documents.doc_id_exists(doc_id):
-        raise DuplicateDocumentError(
-            f"Document {doc_id!r} already exists; use PUT to replace"
-        )
-    return await _write_document(
-        extractor=extractor,
-        parsed=parsed,
-        title=title,
-        knowledge_dir=knowledge_dir,
-        source_name=source_name,
-        source_type=source_type,
-        doc_id=doc_id,
-        category_id=category_id,
-        file_content=file_content,
-    )
-
-
-async def _write_document(
-    *,
-    extractor: KnowledgeExtractor,
-    parsed: ParsedContent,
-    title: str,
-    knowledge_dir: Path,
-    source_name: str | None,
-    source_type: str | None,
-    doc_id: str,
-    category_id: str | None,
-    file_content: bytes | None = None,
-) -> CreateDocumentResult:
-    """Extract topics and write markdown — shared by create and replace."""
-    await ensure_taxonomy(knowledge_dir)
-    categories = await parse_taxonomy(knowledge_dir / ".taxonomy.md")
-
-    memories = await _extract_memories(
-        extractor,
-        parsed,
-        doc_id,
-        title,
-        categories=categories,
-        category_id=category_id,
-    )
-    resolved_category = memories[0].category_id
-
-    md_path = await KnowledgeWriter.write(
-        memories,
-        knowledge_dir,
-        source_name=source_name,
-        source_type=source_type,
-    )
-
-    original_file_path: str | None = None
-    if file_content and source_name:
-        written = await _write_original_file(md_path, source_name, file_content)
-        original_file_path = str(written)
-
-    topic_count = sum(1 for m in memories if m.topic_index != 0)
-
-    logger.info(
-        "document created",
-        doc_id=doc_id,
-        category_id=resolved_category,
-        topic_count=topic_count,
-    )
-
-    return CreateDocumentResult(
-        doc_id=doc_id,
-        category_id=resolved_category,
-        topic_count=topic_count,
-        source_name=source_name,
-        md_path=str(md_path),
-        original_file_path=original_file_path,
-    )
-
-
-# ── CRUD result types ─────────────────────────────────────────────────────────
 
 
 @dataclasses.dataclass(frozen=True)
@@ -360,790 +201,6 @@ class PatchResult:
     updated_at: datetime
 
 
-# ── CRUD functions ────────────────────────────────────────────────────────────
-
-
-async def _get_document(
-    doc_id: str,
-    app_id: str,
-    project_id: str,
-    *,
-    memory_root: MemoryRoot,
-    documents: KnowledgeDocumentRepo,
-    topics: KnowledgeTopicRowRepo,
-) -> DocumentDetail:
-    """Fetch a document with its topic list.
-
-    Args:
-        doc_id: Document primary key.
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-
-    Returns:
-        DocumentDetail with all topics.
-
-    Raises:
-        DocumentNotFoundError: When no row exists for ``doc_id``.
-    """
-    row = await documents.get_by_doc_id(doc_id)
-    if row is None:
-        raise DocumentNotFoundError(f"Document {doc_id!r} not found")
-
-    topic_rows = await topics.get_topics_by_doc_id(doc_id)
-    topics = [
-        TopicOverview(
-            topic_id=t.node_id,
-            topic_name=t.topic_name,
-            topic_path=t.topic_path,
-            depth=t.depth,
-            summary=t.summary,
-        )
-        for t in topic_rows
-    ]
-
-    original_file_path = await _resolve_original_file_path(
-        row.md_path, row.source_name, memory_root
-    )
-
-    return DocumentDetail(
-        doc_id=row.doc_id,
-        category_id=row.category_id,
-        title=row.title,
-        summary=row.summary,
-        source_name=row.source_name,
-        source_type=row.source_type,
-        original_file_path=original_file_path,
-        topics=topics,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
-async def _list_documents(
-    app_id: str,
-    project_id: str,
-    category_id: str | None = None,
-    *,
-    page: int = 1,
-    page_size: int = 20,
-    sort_by: str = "created_at",
-    sort_order: str = "desc",
-    documents: KnowledgeDocumentRepo,
-    topics: KnowledgeTopicRowRepo,
-) -> DocumentListResult:
-    """Return a paginated document list with per-document topic counts.
-
-    Args:
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-        category_id: Optional category filter.
-        page: 1-based page number.
-        page_size: Rows per page.
-        sort_by: Sort column — ``created_at``, ``updated_at``, or ``title``.
-        sort_order: ``"asc"`` or ``"desc"``.
-
-    Returns:
-        DocumentListResult with items, total, page, and page_size.
-    """
-    page_result = await documents.list_documents(
-        app_id=app_id,
-        project_id=project_id,
-        category_id=category_id,
-        page=page,
-        page_size=page_size,
-        sort_by=sort_by,
-        sort_order=sort_order,
-    )
-
-    doc_ids = [r.doc_id for r in page_result.rows]
-    counts = await asyncio.gather(*[topics.count_by_doc_id(did) for did in doc_ids])
-    topic_counts = dict(zip(doc_ids, counts, strict=True))
-
-    items = [
-        DocumentOverviewItem(
-            doc_id=r.doc_id,
-            category_id=r.category_id,
-            title=r.title,
-            topic_count=topic_counts.get(r.doc_id, 0),
-            created_at=r.created_at,
-        )
-        for r in page_result.rows
-    ]
-
-    return DocumentListResult(
-        documents=items,
-        total=page_result.total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-async def _get_topic(
-    topic_id: str, app_id: str, project_id: str, *, topics: KnowledgeTopicRowRepo
-) -> TopicDetail:
-    """Fetch a single topic with full content.
-
-    Args:
-        topic_id: Topic node_id primary key.
-        app_id: Tenant application identifier (unused but part of scoped API).
-        project_id: Tenant project identifier (unused but part of scoped API).
-
-    Returns:
-        TopicDetail with parsed JSON list fields.
-
-    Raises:
-        TopicNotFoundError: When no row exists for ``topic_id``.
-    """
-    rows = await topics.get_topics_by_ids([topic_id])
-    if not rows:
-        raise TopicNotFoundError(f"Topic {topic_id!r} not found")
-
-    t = rows[0]
-    children = json.loads(t.children_node_ids) if t.children_node_ids else []
-    labels = json.loads(t.content_labels) if t.content_labels else []
-
-    return TopicDetail(
-        topic_id=t.node_id,
-        doc_id=t.doc_id,
-        category_id=t.category_id,
-        topic_name=t.topic_name,
-        topic_path=t.topic_path,
-        depth=t.depth,
-        summary=t.summary,
-        content=t.content,
-        content_labels=labels,
-        parent_topic_id=t.parent_node_id,
-        children_topic_ids=children,
-        created_at=t.created_at,
-        updated_at=t.updated_at,
-    )
-
-
-async def _delete_document(
-    doc_id: str,
-    app_id: str,
-    project_id: str,
-    *,
-    memory_root: MemoryRoot,
-    documents: KnowledgeDocumentRepo,
-    topics: KnowledgeTopicRowRepo,
-) -> DeleteResult:
-    """Remove a document directory; cascade handles SQLite/LanceDB cleanup.
-
-    Idempotent: returns ``deleted_topics=0`` when neither the index nor the
-    disk has the document, and also when the directory was removed before the
-    cascade had indexed its topics.
-
-    Args:
-        doc_id: Document primary key.
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-
-    Returns:
-        DeleteResult with the topic count that was present before deletion.
-    """
-    row = await documents.get_by_doc_id(doc_id)
-    if row is None:
-        # The index trails the markdown by seconds, so a document created a
-        # moment ago has a directory but no row yet. Deleting by the index
-        # alone leaves that directory behind for the cascade to index right
-        # back in, and the "deleted" document reappears. Markdown is the
-        # truth: find the directory by its name and count the topic files
-        # it holds, so the response says what was actually removed.
-        topic_count = await anyio.to_thread.run_sync(
-            _remove_unindexed_doc_dirs,
-            memory_root.knowledge_dir(app_id, project_id),
-            doc_id,
-        )
-        logger.info(
-            "document deleted",
-            doc_id=doc_id,
-            topic_count=topic_count,
-            indexed=False,
-        )
-        return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
-
-    topic_count = await topics.count_by_doc_id(doc_id)
-    doc_dir = memory_root.root / Path(row.md_path).parent
-    if await anyio.Path(doc_dir).is_dir():
-        await anyio.to_thread.run_sync(shutil.rmtree, doc_dir)
-
-    logger.info(
-        "document deleted",
-        doc_id=doc_id,
-        topic_count=topic_count,
-    )
-    return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
-
-
-def _remove_unindexed_doc_dirs(knowledge_dir: Path, doc_id: str) -> int:
-    """Remove every ``knowledge/<category>/<title>_<doc_id>/`` directory.
-
-    Returns the number of topic files (``N_*.md``) that were on disk. The
-    directory name is compared literally — ``delete_document`` is a public
-    service function, so a caller-supplied ``doc_id`` must not act as a glob
-    pattern or a path; only the HTTP route validates the id's shape.
-    """
-    if not knowledge_dir.is_dir():
-        return 0
-    suffix = f"_{doc_id}"
-    topics = 0
-    for doc_dir in knowledge_dir.glob("*/*"):
-        if not doc_dir.is_dir() or not doc_dir.name.endswith(suffix):
-            continue
-        # ``Path.glob`` walks hidden directories too, and a replace in
-        # progress keeps the document's backup under a ``.<name>.backup``
-        # path; a cleanup that reached into it would delete the very copy
-        # the restore is about to bring back.
-        if any(
-            part.startswith(".") for part in doc_dir.relative_to(knowledge_dir).parts
-        ):
-            continue
-        topics += sum(1 for _ in doc_dir.glob("[0-9]*.md"))
-        shutil.rmtree(doc_dir)
-    return topics
-
-
-async def _replace_document(
-    *,
-    extractor: KnowledgeExtractor,
-    parsed: ParsedContent,
-    title: str,
-    doc_id: str,
-    knowledge_dir: Path,
-    memory_root: MemoryRoot,
-    source_name: str | None = None,
-    source_type: str | None = None,
-    category_id: str | None = None,
-    file_content: bytes | None = None,
-    documents: KnowledgeDocumentRepo,
-) -> CreateDocumentResult:
-    """Replace a document atomically — old data preserved on failure.
-
-    The replacement is performed in-place: the md directory is backed up,
-    then ``create_document`` overwrites both md files and SQLite rows via
-    upsert.  No explicit SQLite delete happens before the write, so a
-    failure during extraction leaves the database intact and the backup
-    restore brings the md directory back to its original state.
-
-    Args:
-        extractor: Algo extractor injected by the caller.
-        parsed: Parsed document content.
-        title: Human-readable document title.
-        doc_id: Existing document id to replace.
-        knowledge_dir: Absolute path from ``MemoryRoot.knowledge_dir``.
-        memory_root: Root the document's stored ``md_path`` is relative to.
-        source_name: Optional provenance label.
-        source_type: Optional provenance type.
-        category_id: Pre-known category or ``None`` for LLM classification.
-        file_content: Raw uploaded file bytes to persist in ``_original/``.
-
-    Returns:
-        CreateDocumentResult for the new document.
-
-    Raises:
-        DocumentNotFoundError: When *doc_id* does not exist.
-        ExtractionEmptyError: When extraction produces no memories.
-            The original document is restored in this case.
-        Exception: All extraction-pipeline errors propagate after the
-            backup directory is restored.
-    """
-    row = await documents.get_by_doc_id(doc_id)
-    if row is None:
-        raise DocumentNotFoundError(f"Document {doc_id!r} not found")
-
-    backup = await _backup_doc_dir(doc_id, memory_root, documents=documents)
-    try:
-        result = await _write_document(
-            extractor=extractor,
-            parsed=parsed,
-            title=title,
-            knowledge_dir=knowledge_dir,
-            source_name=source_name,
-            source_type=source_type,
-            doc_id=doc_id,
-            category_id=category_id,
-            file_content=file_content,
-        )
-    except Exception:
-        # The failure may have come after the writer created the new
-        # directory (the original-file step, for one). Remove every
-        # directory that carries this doc_id before moving the backup back:
-        # with the same name still present, ``shutil.move`` would bury the
-        # backup inside the half-written directory, and with a new name the
-        # half-written directory would stay next to the restored one. The
-        # backup's own name ends in ``.backup``, so the suffix match leaves
-        # it alone.
-        await anyio.to_thread.run_sync(
-            _remove_unindexed_doc_dirs, knowledge_dir, doc_id
-        )
-        await _restore_backup(backup, doc_id)
-        raise
-
-    await _drop_backup(backup)
-    return result
-
-
-async def _backup_doc_dir(
-    doc_id: str, memory_root: MemoryRoot, *, documents: KnowledgeDocumentRepo
-) -> tuple[Path, Path] | None:
-    """Move the existing document directory to a hidden backup path.
-
-    Returns ``(backup_path, original_path)`` so callers can restore
-    without reverse-engineering the name, or ``None`` when no directory
-    exists.
-    """
-    row = await documents.get_by_doc_id(doc_id)
-    if row is None:
-        return None
-
-    original_dir = memory_root.root / Path(row.md_path).parent
-    if not await anyio.Path(original_dir).is_dir():
-        return None
-
-    backup_dir = original_dir.with_name(f".{original_dir.name}.backup")
-    await anyio.to_thread.run_sync(shutil.move, str(original_dir), str(backup_dir))
-    return backup_dir, original_dir
-
-
-async def _restore_backup(
-    backup: tuple[Path, Path] | None,
-    doc_id: str,
-) -> None:
-    """Restore a backup created by :func:`_backup_doc_dir`.
-
-    No-op when ``backup`` is ``None`` or the backup no longer exists.
-    """
-    if backup is None:
-        return
-    backup_dir, original_dir = backup
-    if not await anyio.Path(backup_dir).is_dir():
-        return
-
-    await anyio.to_thread.run_sync(shutil.move, str(backup_dir), str(original_dir))
-    logger.info("document_backup_restored", doc_id=doc_id)
-
-
-async def _drop_backup(backup: tuple[Path, Path] | None) -> None:
-    """Remove the backup directory after a successful replacement.
-
-    No-op when ``backup`` is ``None`` or already absent.
-    """
-    if backup is None:
-        return
-    backup_dir, _ = backup
-    if await anyio.Path(backup_dir).is_dir():
-        await anyio.to_thread.run_sync(shutil.rmtree, str(backup_dir))
-
-
-async def _locate_index_md(
-    knowledge_dir: Path,
-    doc_id: str,
-) -> Path | None:
-    """Scan knowledge_dir to find the index.md whose frontmatter doc_id matches.
-
-    Used when the SQLite row is absent (cascade hasn't processed the file yet).
-    Returns the absolute index.md path, or None if not found.
-    """
-    adir = anyio.Path(knowledge_dir)
-    if not await adir.exists():
-        return None
-    async for index_md in adir.rglob("index.md"):
-        text = await index_md.read_text(encoding="utf-8")
-        fm, _ = parse_frontmatter(text)
-        if fm.get("doc_id") == doc_id:
-            # anyio.Path → stdlib Path for callers that need synchronous ops.
-            return Path(str(index_md))
-    return None
-
-
-async def _update_index_frontmatter(
-    index_path: Path,
-    title: str,
-    category_id: str,
-) -> None:
-    """Rewrite index.md frontmatter with updated title/category, preserving body."""
-    apath = anyio.Path(index_path)
-    text = await apath.read_text(encoding="utf-8")
-    fm, body = parse_frontmatter(text)
-    fm["title"] = title
-    fm["category_id"] = category_id
-    await apath.write_text(dump_frontmatter(fm) + body, encoding="utf-8")
-
-
-async def _move_doc_directory(
-    memory_root: MemoryRoot,
-    current: _ResolvedDoc,
-    new_category: str,
-) -> str:
-    """Move document directory to new category folder, return new md_path.
-
-    The category becomes a directory segment through the same
-    ``sanitize_dirname`` rule the create path uses, so ``.``/``..`` fall back
-    to ``Others`` instead of walking out of ``knowledge/``. The resolved
-    target is then asserted to stay inside the project's knowledge directory
-    before any directory is created or moved.
-    """
-    knowledge_dir = memory_root.knowledge_dir(current.app_id, current.project_id)
-    old_dir = (memory_root.root / current.md_path).parent
-    new_dir = knowledge_dir / sanitize_dirname(new_category, "Others") / old_dir.name
-    if not new_dir.resolve().is_relative_to(knowledge_dir.resolve()):
-        raise PathTraversalError(f"category move target escapes knowledge/: {new_dir}")
-    await anyio.Path(new_dir.parent).mkdir(parents=True, exist_ok=True)
-    await anyio.to_thread.run_sync(shutil.move, str(old_dir), str(new_dir))
-    new_index = new_dir / "index.md"
-    return str(new_index.relative_to(memory_root.root))
-
-
-async def _update_topics_category(doc_dir: Path, new_category: str) -> None:
-    """Rewrite category_id in all topic md files within doc_dir."""
-    entries = await anyio.to_thread.run_sync(lambda: sorted(doc_dir.iterdir()))
-    topic_files = [f for f in entries if f.suffix == ".md" and f.name != "index.md"]
-
-    async def _rewrite(path: Path) -> None:
-        apath = anyio.Path(path)
-        text = await apath.read_text(encoding="utf-8")
-        fm, body = parse_frontmatter(text)
-        if fm.get("category_id") == new_category:
-            return
-        fm["category_id"] = new_category
-        await apath.write_text(dump_frontmatter(fm) + body, encoding="utf-8")
-
-    await asyncio.gather(*[_rewrite(f) for f in topic_files])
-
-
-@dataclasses.dataclass(frozen=True)
-class _ResolvedDoc:
-    """Snapshot of current document state used by :func:`patch_document`."""
-
-    title: str
-    category_id: str
-    md_path: str
-    app_id: str
-    project_id: str
-    summary: str
-    source_name: str | None
-    source_type: str | None
-
-
-async def _resolve_current_doc(
-    doc_id: str,
-    app_id: str,
-    project_id: str,
-    memory_root: MemoryRoot,
-    *,
-    documents: KnowledgeDocumentRepo,
-) -> _ResolvedDoc:
-    """Resolve the authoritative document state for patching.
-
-    Raises:
-        DocumentNotFoundError: When neither SQLite nor md contain ``doc_id``.
-    """
-    row = await documents.get_by_doc_id(doc_id)
-    if row is not None:
-        return _ResolvedDoc(
-            title=row.title,
-            category_id=row.category_id,
-            md_path=row.md_path,
-            app_id=row.app_id,
-            project_id=row.project_id,
-            summary=row.summary,
-            source_name=row.source_name,
-            source_type=row.source_type,
-        )
-
-    # Cascade may not have synced yet — scan md as fallback.
-    knowledge_dir = memory_root.knowledge_dir(app_id, project_id)
-    index_md = await _locate_index_md(knowledge_dir, doc_id)
-    if index_md is None:
-        raise DocumentNotFoundError(f"Document {doc_id!r} not found")
-    raw = await anyio.Path(index_md).read_text(encoding="utf-8")
-    fm, _ = parse_frontmatter(raw)
-    return _ResolvedDoc(
-        title=fm.get("title", ""),
-        category_id=fm.get("category_id", ""),
-        md_path=str(index_md.relative_to(memory_root.root)),
-        app_id=app_id,
-        project_id=project_id,
-        summary="",
-        source_name=None,
-        source_type=None,
-    )
-
-
-async def _apply_patch_writes(
-    doc_id: str,
-    current: _ResolvedDoc,
-    new_title: str,
-    *,
-    new_category: str,
-    new_md_path: str,
-    memory_root: MemoryRoot,
-    documents: KnowledgeDocumentRepo,
-) -> str:
-    """Write md frontmatter, move directory if needed, upsert SQLite.
-
-    Returns the (possibly updated) md_path after a category move.
-    """
-    index_path = memory_root.root / current.md_path
-    await _update_index_frontmatter(index_path, new_title, new_category)
-
-    if new_category != current.category_id:
-        new_md_path = await _move_doc_directory(memory_root, current, new_category)
-        new_doc_dir = memory_root.root / Path(new_md_path).parent
-        await _update_topics_category(new_doc_dir, new_category)
-
-    await documents.upsert_from_handler(
-        DocumentUpsertPayload(
-            doc_id=doc_id,
-            app_id=current.app_id,
-            project_id=current.project_id,
-            category_id=new_category,
-            title=new_title,
-            summary=current.summary,
-            source_name=current.source_name,
-            source_type=current.source_type,
-            md_path=new_md_path,
-        )
-    )
-    return new_md_path
-
-
-async def _patch_document(
-    doc_id: str,
-    app_id: str,
-    project_id: str,
-    title: str | None = None,
-    category_id: str | None = None,
-    *,
-    memory_root: MemoryRoot,
-    documents: KnowledgeDocumentRepo,
-) -> PatchResult:
-    """Update mutable document metadata in md (truth) and SQLite (immediate).
-
-    Args:
-        doc_id: Document primary key.
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-        title: New title, or ``None`` to leave unchanged.
-        category_id: New category, or ``None`` to leave unchanged.
-
-    Returns:
-        PatchResult listing updated fields.
-
-    Raises:
-        DocumentNotFoundError: When neither SQLite nor md files contain ``doc_id``.
-    """
-    current = await _resolve_current_doc(
-        doc_id, app_id, project_id, memory_root, documents=documents
-    )
-
-    new_title = title if title is not None else current.title
-    new_category = category_id if category_id is not None else current.category_id
-
-    updated_fields: list[str] = []
-    if new_title != current.title:
-        updated_fields.append("title")
-    if new_category != current.category_id:
-        updated_fields.append("category_id")
-
-    if not updated_fields:
-        return PatchResult(doc_id=doc_id, updated_fields=[], updated_at=get_utc_now())
-
-    await _apply_patch_writes(
-        doc_id,
-        current,
-        new_title,
-        new_category=new_category,
-        new_md_path=current.md_path,
-        memory_root=memory_root,
-        documents=documents,
-    )
-    now = get_utc_now()
-    return PatchResult(doc_id=doc_id, updated_fields=updated_fields, updated_at=now)
-
-
-async def _list_categories(
-    knowledge_dir: Path,
-    app_id: str,
-    project_id: str,
-    *,
-    documents: KnowledgeDocumentRepo,
-) -> list[CategoryOverview]:
-    """List taxonomy categories with per-category document counts.
-
-    Creates the taxonomy file if it does not yet exist.
-
-    Args:
-        knowledge_dir: The tenant's knowledge directory.
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-
-    Returns:
-        List of CategoryOverview with document counts from SQLite.
-    """
-    await ensure_taxonomy(knowledge_dir)
-    specs = await parse_taxonomy(knowledge_dir / ".taxonomy.md")
-    counts = await documents.count_by_category(app_id, project_id)
-    return [
-        CategoryOverview(
-            category_id=s.id,
-            description=s.description,
-            document_count=counts.get(s.id, 0),
-        )
-        for s in specs
-    ]
-
-
-async def _mint_doc_id(*, documents: KnowledgeDocumentRepo) -> str:
-    """Generate a unique ``d_<hex12>`` document id.
-
-    Retries up to ``_MAX_MINT_RETRIES`` times if the id already exists
-    in SQLite (astronomically unlikely with 48-bit hex, but defensive).
-    """
-    for _ in range(_MAX_MINT_RETRIES):
-        candidate = f"{_DOC_ID_PREFIX}{uuid4().hex[:_DOC_ID_HEX_LEN]}"
-        if not await documents.doc_id_exists(candidate):
-            return candidate
-    # Last-resort: use full uuid hex to avoid infinite loops.
-    return f"{_DOC_ID_PREFIX}{uuid4().hex}"
-
-
-def _apply_category_fallback(
-    memories: list[KnowledgeMemory],
-) -> list[KnowledgeMemory]:
-    """Replace empty ``category_id`` with the fallback category."""
-    patched: list[KnowledgeMemory] = []
-    for m in memories:
-        if not m.category_id:
-            m = m.model_copy(update={"category_id": _FALLBACK_CATEGORY})
-        patched.append(m)
-    return patched
-
-
-_MAX_FILENAME_BYTES = 255
-"""Portable filesystem filename byte-length ceiling.
-
-macOS HFS+/APFS, most Linux filesystems (ext4/xfs/btrfs) and Windows
-NTFS all cap a single directory entry at 255 bytes of UTF-8. Rather
-than let the OS surface the ceiling as a raw ``OSError[ENAMETOOLONG]``
-at ``write_bytes`` time (which reaches the HTTP layer as a 500), we
-validate up front and raise a caller-friendly ``InvalidInputError``
-that maps to 400.
-"""
-
-
-def _safe_original_filename(source_name: str) -> str:
-    """Reduce an untrusted upload filename to a single safe path component.
-
-    The multipart ``filename`` is attacker-controlled. Used verbatim as a
-    path segment it enables traversal (CWE-22): ``Path(base) / "/abs/path"``
-    discards ``base`` because the right operand is absolute, and
-    ``base / ".."`` walks upward — so a filename of ``/home/u/.bashrc`` or
-    ``../../x`` would let a caller write (or read back) outside the
-    ``_original/`` directory. Reducing to the trailing component of both
-    POSIX and Windows-style paths strips any directory part; the residual
-    ``.`` / ``..`` / empty cases (which a basename can still be, e.g. a
-    filename of ``..``) are rejected outright.
-
-    Also validates two failure modes the OS would otherwise raise as
-    500 during ``write_bytes`` (round-4 review M1):
-
-    - **NUL byte** in the filename → ``ValueError: embedded null
-      character`` from the syscall layer. Rejected up front as a
-      400-mapped ``InvalidInputError``.
-    - **Filename > 255 bytes UTF-8** → ``OSError[ENAMETOOLONG]`` from
-      the syscall layer. Same up-front rejection.
-
-    Both are validated **before** ``KnowledgeWriter.write`` runs, so a
-    doomed upload never leaves half-a-document on disk.
-
-    Args:
-        source_name: The client-supplied multipart filename.
-
-    Returns:
-        A single filename component safe to join under ``_original/``.
-
-    Raises:
-        PathTraversalError: If no safe filename can be derived.
-        InvalidInputError: If the filename contains a NUL byte or
-            exceeds the filesystem's byte-length ceiling.
-    """
-    if "\x00" in source_name:
-        raise InvalidInputError(
-            f"upload filename must not contain a NUL byte (got {source_name!r})"
-        )
-    # PurePosixPath does not split on "\\"; strip backslash segments too so a
-    # Windows-style ``..\\..\\x`` or ``C:\\x`` filename cannot survive.
-    name = PurePosixPath(source_name).name.rsplit("\\", 1)[-1]
-    if name in {"", ".", ".."}:
-        raise PathTraversalError(
-            f"upload filename is not a valid file component: {source_name!r}"
-        )
-    if len(name.encode("utf-8")) > _MAX_FILENAME_BYTES:
-        raise InvalidInputError(
-            "upload filename exceeds the "
-            f"{_MAX_FILENAME_BYTES}-byte filesystem ceiling "
-            f"(got {len(name.encode('utf-8'))} bytes)"
-        )
-    return name
-
-
-async def _resolve_original_file_path(
-    md_path: str, source_name: str | None, memory_root: MemoryRoot
-) -> str | None:
-    """Derive the original file path from md_path and source_name.
-
-    Returns the absolute path string if the file exists on disk,
-    ``None`` otherwise (legacy documents, missing source_name, or a stored
-    source_name that does not reduce to a safe in-``_original/`` filename —
-    the read side sanitises identically to the write side so a crafted
-    provenance label can never resolve to an out-of-directory file).
-    """
-    if not source_name:
-        return None
-    try:
-        safe_name = _safe_original_filename(source_name)
-    except PathTraversalError:
-        return None
-    doc_dir = memory_root.root / Path(md_path).parent
-    candidate = doc_dir / _ORIGINAL_DIR_NAME / safe_name
-    if await anyio.Path(candidate).is_file():
-        return str(candidate)
-    return None
-
-
-async def _write_original_file(
-    doc_dir: Path, source_name: str, file_content: bytes
-) -> Path:
-    """Write the uploaded binary to ``_original/`` and return its path.
-
-    ``source_name`` is the untrusted multipart filename: it is reduced to a
-    safe basename, and the resolved target is asserted to stay inside
-    ``_original/`` *before* any filesystem touch, so a crafted filename can
-    neither escape the document directory nor create out-of-root parents.
-    """
-    original_dir = doc_dir / _ORIGINAL_DIR_NAME
-    safe_name = _safe_original_filename(source_name)
-    target = original_dir / safe_name
-    # Defense-in-depth backstop mirroring the markdown writer's
-    # ``_ensure_within_root``: resolve() collapses ``..``/symlinks before the
-    # containment check, which holds even though target does not exist yet.
-    if not target.resolve().is_relative_to(original_dir.resolve()):
-        raise PathTraversalError(
-            f"original file target escapes {_ORIGINAL_DIR_NAME}/: {target}"
-        )
-    await anyio.Path(original_dir).mkdir(parents=True, exist_ok=True)
-    await anyio.Path(target).write_bytes(file_content)
-    return target
-
-
-# ── Knowledge search ─────────────────────────────────────────────────────────
-
-
-# ── Search result types ──────────────────────────────────────────────────────
-
-
 @dataclasses.dataclass(frozen=True)
 class DocumentContext:
     """L1 document metadata attached to every :class:`SearchHit`."""
@@ -1179,15 +236,11 @@ class SearchKnowledgeResult:
     took_ms: float
 
 
-# ── Where-clause builder ─────────────────────────────────────────────────────
+# ── Search filter ────────────────────────────────────────────────────────────
 
 
 def _validate_scope_id(value: str, name: str) -> None:
-    """Reject scope ids with characters that could break LanceDB SQL.
-
-    Args:
-        value: The identifier value to validate.
-        name: The parameter name (for error messages).
+    """Reject scope ids with characters that could break an index filter.
 
     Raises:
         ValueError: If the value is empty or contains invalid characters.
@@ -1196,15 +249,8 @@ def _validate_scope_id(value: str, name: str) -> None:
         raise ValueError(f"{name} contains invalid characters: {value!r}")
 
 
-def compile_knowledge_where(app_id: str, project_id: str) -> Predicate:
-    """Build a backend-neutral predicate scoped to the given tenant.
-
-    Args:
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-
-    Returns:
-        Predicate safe for the active derived-index backend.
+def compile_knowledge_where(app_id: str, project_id: str) -> Filter:
+    """Build a backend-neutral filter scoped to the given tenant.
 
     Raises:
         ValueError: If either id contains invalid characters.
@@ -1214,246 +260,15 @@ def compile_knowledge_where(app_id: str, project_id: str) -> Predicate:
     return all_of(eq("app_id", app_id), eq("project_id", project_id))
 
 
-# ── Recall helpers ───────────────────────────────────────────────────────────
-
-
-async def _base_retrieve(
-    recaller: KnowledgeTopicRecaller,
-    where: Predicate,
-    *,
-    method: str,
-    query: str,
-    vector: list[float],
-    limit: int,
-) -> list[Candidate]:
-    """Run the appropriate recall path and return ranked candidates."""
-    if method == "keyword":
-        return await recaller.sparse_recall(query, where, limit=limit)
-    if method == "vector":
-        return await recaller.dense_recall(vector, where, limit=limit)
-    # hybrid: parallel sparse + dense, fuse with RRF
-    sparse, dense = await asyncio.gather(
-        recaller.sparse_recall(query, where, limit=limit),
-        recaller.dense_recall(vector, where, limit=limit),
-    )
-    return rrf(sparse, dense)[:limit]
-
-
-async def _enrich_with_content(
-    candidates: list[Candidate], *, topics: KnowledgeTopicRowRepo
-) -> list[Candidate]:
-    """Batch-fetch SQLite content and attach to candidate metadata.
-
-    Acts as a no-reranker path: returns candidates in their original
-    order with ``content`` added to metadata for downstream hit
-    conversion.
-    """
-    if not candidates:
-        return candidates
-
-    topic_ids = [c.id for c in candidates]
-    topics = await topics.get_topics_by_ids(topic_ids)
-    content_map = {t.node_id: t.content for t in topics}
-
-    return [
-        c.model_copy(
-            update={
-                "metadata": {**c.metadata, "content": content_map.get(c.id, "")},
-            }
-        )
-        for c in candidates
-    ]
-
-
-async def _to_search_hits(
-    candidates: list[Candidate],
-    include_content: bool,
-    method: str,
-    *,
-    documents: KnowledgeDocumentRepo,
-) -> list[SearchHit]:
-    """Convert ranked ``Candidate`` list into ``SearchHit`` DTOs."""
-    if not candidates:
-        return []
-
-    doc_ids = {c.metadata.get("doc_id", "") for c in candidates} - {""}
-    docs = await documents.get_documents_by_ids(doc_ids)
-    doc_map = {d.doc_id: d for d in docs}
-
-    hits: list[SearchHit] = []
-    for c in candidates:
-        doc = doc_map.get(c.metadata.get("doc_id", ""))
-        content = c.metadata.get("content", "") if include_content else None
-        source = c.source if c.source != "other" else None
-        hits.append(
-            SearchHit(
-                topic_id=c.id,
-                category_id=c.metadata.get("category_id", ""),
-                topic_name=c.metadata.get("topic_name", ""),
-                topic_path=c.metadata.get("topic_path", ""),
-                depth=int(c.metadata.get("depth", 0)),
-                summary=c.metadata.get("summary", ""),
-                content=content,
-                score=c.score,
-                retrieval_method=method,
-                source=source,
-                document=DocumentContext(
-                    doc_id=doc.doc_id if doc else "",
-                    title=doc.title if doc else "",
-                    summary=doc.summary if doc else "",
-                ),
-            )
-        )
-    return hits
-
-
-# ── Public search entry point ────────────────────────────────────────────────
-
-
-def _require_search_providers(
-    embed: EmbeddingProvider | None, rerank: RerankProvider | None
-) -> tuple[EmbeddingProvider, RerankProvider]:
-    """Return embedding + reranker providers, raising if not configured.
-
-    The HTTP router (``entrypoints.api.routes.knowledge``) already gates
-    both capabilities via ``Depends(_require_knowledge_capabilities)``, so
-    this check is normally redundant for HTTP callers -- it exists for
-    any non-HTTP caller of :func:`search_knowledge` that bypasses the
-    router dependency.
-
-    Raises:
-        ProviderNotConfiguredError: When the embedding or rerank provider
-            is not configured (-> HTTP 422 when it does surface via HTTP).
-    """
-    if embed is None:
-        raise ProviderNotConfiguredError(
-            provider="embedding", feature=_KNOWLEDGE_FEATURE
-        )
-    if rerank is None:
-        raise ProviderNotConfiguredError(provider="rerank", feature=_KNOWLEDGE_FEATURE)
-    return embed, rerank
-
-
-async def _run_category_pipeline(
-    query: str,
-    where: Predicate,
-    *,
-    recaller: KnowledgeTopicRecaller,
-    method: str,
-    vector: list[float],
-    reranker: RerankProvider,
-    config: KnowledgeSearchSettings,
-    top_k: int,
-    topics: KnowledgeTopicRowRepo,
-) -> list[Candidate]:
-    """Execute the full acategory_retrieve pipeline."""
-    from everalgo.rank import acategory_retrieve  # Deferred: heavy dep
-
-    from everos.memory.search.callbacks import (  # Deferred: heavy dep
-        build_rerank_fn,
-    )
-
-    async def _retrieve(q: str, k: int) -> list[Candidate]:
-        return await _base_retrieve(
-            recaller, where, method=method, query=q, vector=vector, limit=k
-        )
-
-    raw_rerank = build_rerank_fn(reranker, text_field="content")
-
-    async def _rerank_with_enrich(
-        q: str, candidates: Sequence[Candidate]
-    ) -> list[Candidate]:
-        enriched = await _enrich_with_content(list(candidates), topics=topics)
-        return await raw_rerank(q, enriched)
-
-    effective_k = min(top_k, config.top_k_cap)
-    return await acategory_retrieve(
-        query,
-        base_retrieve=_retrieve,
-        rerank_fn=_rerank_with_enrich,
-        recall_n=config.recall_n,
-        rerank_n=config.rerank_n,
-        mass_top_m=config.mass_top_m,
-        lam=config.lam,
-        top_n=effective_k,
-    )
-
-
-async def _search_knowledge(
-    *,
-    query: str,
-    method: str = "hybrid",
-    top_k: int = 10,
-    score_threshold: float | None = None,
-    include_content: bool = False,
-    app_id: str = "default",
-    project_id: str = "default",
-    embedding: EmbeddingProvider | None,
-    reranker: RerankProvider | None,
-    recaller: KnowledgeTopicRecaller,
-    config: KnowledgeSearchSettings,
-    documents: KnowledgeDocumentRepo,
-    topics: KnowledgeTopicRowRepo,
-) -> SearchKnowledgeResult:
-    """Search knowledge topics by keyword, vector, or hybrid retrieval.
-
-    Args:
-        query: User search query string.
-        method: Retrieval mode — ``"keyword"``, ``"vector"``, or ``"hybrid"``.
-        top_k: Maximum hits to return.
-        score_threshold: Drop candidates scoring below this value.
-        include_content: When ``True``, populate ``SearchHit.content``.
-        app_id: Tenant application identifier.
-        project_id: Tenant project identifier.
-        embedding: Query embedder; ``None`` when not configured.
-        reranker: Reranker; ``None`` when not configured.
-        recaller: Sparse / dense recall over the knowledge-topic index.
-        config: The ``[knowledge.search]`` section.
-
-    Returns:
-        SearchKnowledgeResult with ranked hits and timing.
-    """
-    t0 = time.monotonic()
-    where = compile_knowledge_where(app_id, project_id)
-
-    embedder, rerank = _require_search_providers(embedding, reranker)
-    vector = await embedder.embed(query)
-
-    ranked = await _run_category_pipeline(
-        query,
-        where,
-        recaller=recaller,
-        method=method,
-        vector=vector,
-        reranker=rerank,
-        config=config,
-        top_k=top_k,
-        topics=topics,
-    )
-
-    if score_threshold is not None:
-        ranked = [c for c in ranked if c.score >= score_threshold]
-    hits = await _to_search_hits(ranked, include_content, method, documents=documents)
-
-    took_ms = (time.monotonic() - t0) * 1000
-    logger.info(
-        "knowledge_search_complete",
-        method=method,
-        query_len=len(query),
-        hits=len(hits),
-        took_ms=round(took_ms, 1),
-    )
-    return SearchKnowledgeResult(hits=hits, total=len(hits), took_ms=took_ms)
-
-
 # ── Facade ───────────────────────────────────────────────────────────────────
 
 
 class KnowledgeService:
-    """Knowledge document CRUD and search, over the providers it is built with.
+    """Knowledge document CRUD and search, over the ports it is built with.
 
     Args:
-        root: Memory root the knowledge directories and stored paths live under.
+        store: The markdown truth of documents, topics and the taxonomy.
+        catalog: The document / topic records the cascade keeps.
         extractor: Topic extractor for uploads; ``None`` when no LLM is
             configured, in which case create / replace raise.
         embedding: Query embedder for search; ``None`` when not configured.
@@ -1462,32 +277,28 @@ class KnowledgeService:
         search_config: The ``[knowledge.search]`` section.
         parse_file: Parses an uploaded non-text file with the multimodal
             LLM the application was built with.
-        documents: The ``knowledge_documents`` table.
-        topics: The ``knowledge_topics`` table.
     """
 
     def __init__(
         self,
         *,
-        root: MemoryRoot,
+        store: KnowledgeStore,
+        catalog: KnowledgeCatalog,
         extractor: KnowledgeExtractor | None,
         embedding: EmbeddingProvider | None,
         reranker: RerankProvider | None,
         recaller: KnowledgeTopicRecaller,
         search_config: KnowledgeSearchSettings,
         parse_file: Callable[[RawFile], Awaitable[ParsedContent]],
-        documents: KnowledgeDocumentRepo,
-        topics: KnowledgeTopicRowRepo,
     ) -> None:
-        self._root = root
+        self._store = store
+        self._catalog = catalog
         self._extractor = extractor
         self._embedding = embedding
         self._reranker = reranker
         self._recaller = recaller
         self._search_config = search_config
         self._parse_file = parse_file
-        self._documents = documents
-        self._topics = topics
 
     async def parse_file(self, raw_file: RawFile) -> ParsedContent:
         """Parse an uploaded file with the application's multimodal parser.
@@ -1497,6 +308,8 @@ class KnowledgeService:
             UnsupportedModalityError: The parser does not support the format.
         """
         return await self._parse_file(raw_file)
+
+    # ── Upload ───────────────────────────────────────────────────────────
 
     async def create_document(
         self,
@@ -1518,18 +331,24 @@ class KnowledgeService:
             DuplicateDocumentError: When ``doc_id`` already exists.
             ExtractionEmptyError: When the extractor produces no memories.
         """
-        return await _create_document(
-            extractor=self._require_extractor(),
-            parsed=parsed,
-            title=title,
-            knowledge_dir=self._root.knowledge_dir(app_id, project_id),
+        extractor = self._require_extractor()
+        doc_id = doc_id or await self._mint_doc_id()
+        if await self._catalog.document_exists(doc_id):
+            raise DuplicateDocumentError(
+                f"Document {doc_id!r} already exists; use PUT to replace"
+            )
+        memories = await self._extract(
+            extractor, parsed, doc_id, title, app_id, project_id, category_id
+        )
+        written = await self._store.write_document(
+            app_id,
+            project_id,
+            memories,
             source_name=source_name,
             source_type=source_type,
-            doc_id=doc_id,
-            category_id=category_id,
-            file_content=file_content,
-            documents=self._documents,
+            original=file_content,
         )
+        return _created(doc_id, memories, source_name, written)
 
     async def replace_document(
         self,
@@ -1546,24 +365,33 @@ class KnowledgeService:
     ) -> CreateDocumentResult:
         """Replace a document atomically — old data preserved on failure.
 
+        Extraction runs before anything on disk changes; the store then
+        swaps the document's files and brings the old ones back if the
+        write fails. Catalog rows are upserted by the cascade, so nothing is
+        deleted from it here.
+
         Raises:
             LLMNotConfiguredError: No LLM is configured to extract topics.
             DocumentNotFoundError: When ``doc_id`` does not exist.
             ExtractionEmptyError: When extraction produces no memories.
         """
-        return await _replace_document(
-            extractor=self._require_extractor(),
-            parsed=parsed,
-            title=title,
-            doc_id=doc_id,
-            knowledge_dir=self._root.knowledge_dir(app_id, project_id),
-            memory_root=self._root,
+        extractor = self._require_extractor()
+        previous = await self._catalog.get_document(doc_id)
+        if previous is None:
+            raise DocumentNotFoundError(f"Document {doc_id!r} not found")
+        memories = await self._extract(
+            extractor, parsed, doc_id, title, app_id, project_id, category_id
+        )
+        written = await self._store.replace_document(
+            previous,
+            memories,
             source_name=source_name,
             source_type=source_type,
-            category_id=category_id,
-            file_content=file_content,
-            documents=self._documents,
+            original=file_content,
         )
+        return _created(doc_id, memories, source_name, written)
+
+    # ── Reads ────────────────────────────────────────────────────────────
 
     async def get_document(
         self, doc_id: str, app_id: str, project_id: str
@@ -1571,15 +399,24 @@ class KnowledgeService:
         """Fetch a document with its topic list.
 
         Raises:
-            DocumentNotFoundError: When no row exists for ``doc_id``.
+            DocumentNotFoundError: When no record exists for ``doc_id``.
         """
-        return await _get_document(
-            doc_id,
-            app_id,
-            project_id,
-            memory_root=self._root,
-            documents=self._documents,
-            topics=self._topics,
+        document = await self._catalog.get_document(doc_id)
+        if document is None:
+            raise DocumentNotFoundError(f"Document {doc_id!r} not found")
+        topics = await self._catalog.topics_of(doc_id)
+        original = await self._store.original_file(document)
+        return DocumentDetail(
+            doc_id=document.doc_id,
+            category_id=document.category_id,
+            title=document.title,
+            summary=document.summary,
+            source_name=document.source_name,
+            source_type=document.source_type,
+            original_file_path=original,
+            topics=[_topic_overview(t) for t in topics],
+            created_at=_recorded(document.created_at),
+            updated_at=_recorded(document.updated_at),
         )
 
     async def list_documents(
@@ -1594,16 +431,34 @@ class KnowledgeService:
         sort_order: str = "desc",
     ) -> DocumentListResult:
         """Paginated document list with per-document topic counts."""
-        return await _list_documents(
+        listed = await self._catalog.list_documents(
             app_id,
             project_id,
-            category_id,
+            category_id=category_id,
+            page=Page(
+                sort_by=sort_by,
+                number=page,
+                size=page_size,
+                descending=sort_order.lower() != "asc",
+            ),
+        )
+        counts = await asyncio.gather(
+            *(self._catalog.count_topics(d.doc_id) for d in listed.items)
+        )
+        return DocumentListResult(
+            documents=[
+                DocumentOverviewItem(
+                    doc_id=d.doc_id,
+                    category_id=d.category_id,
+                    title=d.title,
+                    topic_count=count,
+                    created_at=_recorded(d.created_at),
+                )
+                for d, count in zip(listed.items, counts, strict=True)
+            ],
+            total=listed.total,
             page=page,
             page_size=page_size,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            documents=self._documents,
-            topics=self._topics,
         )
 
     async def get_topic(
@@ -1612,22 +467,74 @@ class KnowledgeService:
         """Fetch a single topic with full content.
 
         Raises:
-            TopicNotFoundError: When no row exists for ``topic_id``.
+            TopicNotFoundError: When no record exists for ``topic_id``.
         """
-        return await _get_topic(topic_id, app_id, project_id, topics=self._topics)
+        topics = await self._catalog.get_topics([topic_id])
+        if not topics:
+            raise TopicNotFoundError(f"Topic {topic_id!r} not found")
+        t = topics[0]
+        return TopicDetail(
+            topic_id=t.topic_id,
+            doc_id=t.doc_id,
+            category_id=t.category_id,
+            topic_name=t.topic_name,
+            topic_path=t.topic_path,
+            depth=t.depth,
+            summary=t.summary,
+            content=t.content,
+            content_labels=t.content_labels,
+            parent_topic_id=t.parent_topic_id,
+            children_topic_ids=t.children_topic_ids,
+            created_at=t.created_at,
+            updated_at=t.updated_at,
+        )
+
+    async def list_categories(
+        self, app_id: str, project_id: str
+    ) -> list[CategoryOverview]:
+        """Taxonomy categories with per-category document counts.
+
+        Creates the taxonomy with its defaults if it does not exist yet.
+        """
+        categories = await self._store.categories(app_id, project_id)
+        counts = await self._catalog.count_by_category(app_id, project_id)
+        return [
+            CategoryOverview(
+                category_id=c.id,
+                description=c.description,
+                document_count=counts.get(c.id, 0),
+            )
+            for c in categories
+        ]
+
+    # ── Writes ───────────────────────────────────────────────────────────
 
     async def delete_document(
         self, doc_id: str, app_id: str, project_id: str
     ) -> DeleteResult:
-        """Remove a document directory; cascade handles SQLite / index cleanup."""
-        return await _delete_document(
-            doc_id,
-            app_id,
-            project_id,
-            memory_root=self._root,
-            documents=self._documents,
-            topics=self._topics,
+        """Remove the document's markdown; the cascade clears its state.
+
+        Idempotent: ``deleted_topics=0`` when neither the catalog nor the
+        disk has the document. The catalog trails the markdown by seconds,
+        so a document created a moment ago is deleted from disk all the
+        same -- otherwise the cascade would index it right back in.
+        """
+        document = await self._catalog.get_document(doc_id)
+        if document is None:
+            removed = await self._store.delete_document(
+                app_id, project_id, doc_id, md_path=None
+            )
+            logger.info(
+                "document deleted", doc_id=doc_id, topic_count=removed, indexed=False
+            )
+            return DeleteResult(doc_id=doc_id, deleted_topics=removed)
+
+        topic_count = await self._catalog.count_topics(doc_id)
+        await self._store.delete_document(
+            document.app_id, document.project_id, doc_id, md_path=document.md_path
         )
+        logger.info("document deleted", doc_id=doc_id, topic_count=topic_count)
+        return DeleteResult(doc_id=doc_id, deleted_topics=topic_count)
 
     async def patch_document(
         self,
@@ -1637,37 +544,47 @@ class KnowledgeService:
         title: str | None = None,
         category_id: str | None = None,
     ) -> PatchResult:
-        """Update mutable document metadata in md (truth) and SQLite (immediate).
+        """Update mutable document metadata in md (truth) and the catalog (now).
 
         Raises:
-            DocumentNotFoundError: When neither SQLite nor md contain ``doc_id``.
+            DocumentNotFoundError: When neither the catalog nor the markdown
+                has ``doc_id``.
         """
-        return await _patch_document(
-            doc_id,
-            app_id,
-            project_id,
-            title=title,
-            category_id=category_id,
-            memory_root=self._root,
-            documents=self._documents,
+        current = await self._catalog.get_document(
+            doc_id
+        ) or await self._store.read_document(app_id, project_id, doc_id)
+        if current is None:
+            raise DocumentNotFoundError(f"Document {doc_id!r} not found")
+
+        updated = current.model_copy(
+            update={
+                "title": current.title if title is None else title,
+                "category_id": current.category_id
+                if category_id is None
+                else category_id,
+            }
+        )
+        changed = [
+            name
+            for name in ("title", "category_id")
+            if getattr(updated, name) != getattr(current, name)
+        ]
+        if changed:
+            recorded = await self._store.update_document(
+                updated, previous_category_id=current.category_id
+            )
+            await self._catalog.record_document(recorded)
+        return PatchResult(
+            doc_id=doc_id, updated_fields=changed, updated_at=get_utc_now()
         )
 
-    async def list_categories(
-        self, app_id: str, project_id: str
-    ) -> list[CategoryOverview]:
-        """Taxonomy categories with per-category document counts."""
-        return await _list_categories(
-            self._root.knowledge_dir(app_id, project_id),
-            app_id,
-            project_id,
-            documents=self._documents,
-        )
+    # ── Search ───────────────────────────────────────────────────────────
 
     async def search_knowledge(
         self,
         *,
         query: str,
-        method: str = "hybrid",
+        method: KnowledgeMethod = "hybrid",
         top_k: int = 10,
         score_threshold: float | None = None,
         include_content: bool = False,
@@ -1676,24 +593,111 @@ class KnowledgeService:
     ) -> SearchKnowledgeResult:
         """Search knowledge topics by keyword, vector, or hybrid retrieval.
 
+        Recall feeds everalgo's category-aware retrieval: the recall pool's
+        category mass is rolled up, the pool is reranked on the topics' full
+        content (read from the catalog), and a small category boost breaks
+        ties.
+
         Raises:
             ProviderNotConfiguredError: Embedding or rerank is not configured.
         """
-        return await _search_knowledge(
-            query=query,
-            method=method,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            include_content=include_content,
-            app_id=app_id,
-            project_id=project_id,
-            embedding=self._embedding,
-            reranker=self._reranker,
-            recaller=self._recaller,
-            config=self._search_config,
-            documents=self._documents,
-            topics=self._topics,
+        t0 = time.monotonic()
+        where = compile_knowledge_where(app_id, project_id)
+        embedder, reranker = self._require_search_providers()
+        vector = await embedder.embed(query)
+
+        retriever = self._recaller.retriever(where, method=method, vector=vector)
+        contents: dict[str, str] = {}
+
+        async def passages(topic_ids: Sequence[str]) -> list[str]:
+            topics = await self._catalog.get_topics(topic_ids)
+            contents.update({t.topic_id: t.content for t in topics})
+            return [contents.get(tid, "") for tid in topic_ids]
+
+        config = self._search_config
+        ranked = await acategory_retrieve(
+            query,
+            base_retrieve=retriever,
+            rerank_fn=build_fetched_rerank_fn(reranker, passages=passages),
+            recall_n=config.recall_n,
+            rerank_n=config.rerank_n,
+            mass_top_m=config.mass_top_m,
+            lam=config.lam,
+            top_n=min(top_k, config.top_k_cap),
         )
+        if score_threshold is not None:
+            ranked = [c for c in ranked if c.score >= score_threshold]
+
+        documents = {
+            d.doc_id: d
+            for d in await self._catalog.get_documents(
+                {retriever.topics_by_id[c.id].doc_id for c in ranked}
+            )
+        }
+        hits = [
+            _search_hit(
+                retriever.topics_by_id[c.id],
+                score=c.score,
+                source=None if c.source == "other" else c.source,
+                method=method,
+                document=documents.get(retriever.topics_by_id[c.id].doc_id),
+                content=contents.get(c.id, "") if include_content else None,
+            )
+            for c in ranked
+        ]
+
+        took_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "knowledge_search_complete",
+            method=method,
+            query_len=len(query),
+            hits=len(hits),
+            took_ms=round(took_ms, 1),
+        )
+        return SearchKnowledgeResult(hits=hits, total=len(hits), took_ms=took_ms)
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    async def _extract(
+        self,
+        extractor: KnowledgeExtractor,
+        parsed: ParsedContent,
+        doc_id: str,
+        title: str,
+        app_id: str,
+        project_id: str,
+        category_id: str | None,
+    ) -> list[DomainKnowledgeMemory]:
+        """Extract the topic tree, classifying into the project's taxonomy.
+
+        Raises:
+            ExtractionEmptyError: When the extractor produces no memories.
+        """
+        categories = await self._store.categories(app_id, project_id)
+        extracted = await extractor.aextract(
+            parsed,
+            doc_id=doc_id,
+            title=title,
+            categories=[knowledge_mapper.category_to_algo(c) for c in categories],
+            category_id=category_id or "",
+        )
+        if not extracted:
+            raise ExtractionEmptyError(
+                f"Extractor returned no memories for doc_id={doc_id!r}"
+            )
+        return [_with_category(knowledge_mapper.memory_from_algo(m)) for m in extracted]
+
+    async def _mint_doc_id(self) -> str:
+        """Generate a unique ``d_<hex12>`` document id.
+
+        Retries up to ``_MAX_MINT_RETRIES`` times if the id already exists
+        (astronomically unlikely with 48-bit hex, but defensive).
+        """
+        for _ in range(_MAX_MINT_RETRIES):
+            candidate = f"{_DOC_ID_PREFIX}{uuid4().hex[:_DOC_ID_HEX_LEN]}"
+            if not await self._catalog.document_exists(candidate):
+                return candidate
+        return f"{_DOC_ID_PREFIX}{uuid4().hex}"
 
     def _require_extractor(self) -> KnowledgeExtractor:
         if self._extractor is None:
@@ -1701,3 +705,101 @@ class KnowledgeService:
                 "knowledge uploads need an LLM; set [llm] api_key and base_url"
             )
         return self._extractor
+
+    def _require_search_providers(self) -> tuple[EmbeddingProvider, RerankProvider]:
+        """The embedding + rerank providers, which search cannot run without.
+
+        The HTTP router already gates both capabilities; this guards any
+        caller that bypasses it.
+
+        Raises:
+            ProviderNotConfiguredError: When either provider is missing.
+        """
+        if self._embedding is None:
+            raise ProviderNotConfiguredError(
+                provider="embedding", feature=_KNOWLEDGE_FEATURE
+            )
+        if self._reranker is None:
+            raise ProviderNotConfiguredError(
+                provider="rerank", feature=_KNOWLEDGE_FEATURE
+            )
+        return self._embedding, self._reranker
+
+
+# ── Mapping to results ───────────────────────────────────────────────────────
+
+
+def _with_category(memory: DomainKnowledgeMemory) -> DomainKnowledgeMemory:
+    """An unclassified node falls back to the ``Others`` category."""
+    if memory.category_id:
+        return memory
+    return memory.model_copy(update={"category_id": _FALLBACK_CATEGORY})
+
+
+def _created(
+    doc_id: str,
+    memories: Sequence[DomainKnowledgeMemory],
+    source_name: str | None,
+    written: WrittenDocument,
+) -> CreateDocumentResult:
+    category_id = memories[0].category_id
+    topic_count = sum(1 for m in memories if m.topic_index != 0)
+    logger.info(
+        "document created",
+        doc_id=doc_id,
+        category_id=category_id,
+        topic_count=topic_count,
+    )
+    return CreateDocumentResult(
+        doc_id=doc_id,
+        category_id=category_id,
+        topic_count=topic_count,
+        source_name=source_name,
+        md_path=written.location,
+        original_file_path=written.original_file_path,
+    )
+
+
+def _topic_overview(topic: KnowledgeTopic) -> TopicOverview:
+    return TopicOverview(
+        topic_id=topic.topic_id,
+        topic_name=topic.topic_name,
+        topic_path=topic.topic_path,
+        depth=topic.depth,
+        summary=topic.summary,
+    )
+
+
+def _search_hit(
+    topic: KnowledgeTopic,
+    *,
+    score: float,
+    source: str | None,
+    method: str,
+    document: KnowledgeDocument | None,
+    content: str | None,
+) -> SearchHit:
+    return SearchHit(
+        topic_id=topic.topic_id,
+        category_id=topic.category_id,
+        topic_name=topic.topic_name,
+        topic_path=topic.topic_path,
+        depth=topic.depth,
+        summary=topic.summary,
+        content=content,
+        score=score,
+        retrieval_method=method,
+        source=source,
+        document=DocumentContext(
+            doc_id=document.doc_id if document else "",
+            title=document.title if document else "",
+            summary=document.summary if document else "",
+        ),
+    )
+
+
+def _recorded(stamp: datetime | None) -> datetime:
+    """A catalog timestamp; the catalog always sets one."""
+    if stamp is None:
+        raise ValueError("catalog document without a timestamp")
+    return stamp

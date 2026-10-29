@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,6 +30,7 @@ from everos.infra.persistence.lancedb import (
     ParentType,
 )
 from everos.memory.ports.query import all_of, eq
+from everos.memory.search._candidates import FactCandidate
 from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
 from everos.memory.search.recall.base import RecallerDeps
 from tests.fakes.storage import Storage
@@ -84,6 +86,12 @@ def _recaller(storage: Storage) -> AtomicFactRecaller:
     )
 
 
+async def _buckets(
+    recaller: AtomicFactRecaller, *args: Any, **kwargs: Any
+) -> dict[str, list[FactCandidate]]:
+    return (await recaller.facts_for_episodes(*args, **kwargs)).buckets
+
+
 _ALICE_WHERE = all_of(eq("owner_id", "alice"), eq("owner_type", "user"))
 
 
@@ -108,8 +116,8 @@ async def test_facts_for_episodes_buckets_by_shared_memcell(storage: Storage) ->
         "alice_ep_b": ["mc_shared"],
         "alice_ep_c": ["mc_other"],
     }
-    out = await _recaller(storage).facts_for_episodes(
-        ep_to_parents, _ALICE_WHERE, per_episode=10
+    out = await _buckets(
+        _recaller(storage), ep_to_parents, _ALICE_WHERE, per_episode=10
     )
 
     assert sorted(out.keys()) == ["alice_ep_a", "alice_ep_b", "alice_ep_c"]
@@ -127,9 +135,7 @@ async def test_facts_for_episodes_buckets_by_shared_memcell(storage: Storage) ->
 async def test_facts_for_episodes_returns_empty_for_no_episodes(
     storage: Storage,
 ) -> None:
-    out: dict = await _recaller(storage).facts_for_episodes(
-        {}, _ALICE_WHERE, per_episode=10
-    )
+    out: dict = await _buckets(_recaller(storage), {}, _ALICE_WHERE, per_episode=10)
     assert out == {}
 
 
@@ -139,7 +145,8 @@ async def test_facts_for_episodes_skips_unknown_memcells(storage: Storage) -> No
         [_fact_row(fid="alice_af_1", memcell_id="mc_a", fact="hello")]
     )
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": ["mc_a"], "alice_ep_b": ["mc_missing"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -168,7 +175,8 @@ async def test_facts_for_episodes_filters_by_where_clause(storage: Storage) -> N
         ]
     )
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": ["mc_a"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -188,7 +196,8 @@ async def test_facts_for_episodes_drops_empty_parent_ids(storage: Storage) -> No
         [_fact_row(fid="alice_af_1", memcell_id="", fact="orphan fact")]
     )
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": [""]},
         _ALICE_WHERE,
         per_episode=10,
@@ -238,7 +247,8 @@ async def test_facts_for_episodes_assigns_real_cosine_score_with_query_vector(
     row_b.vector = _unit_vector(1)
     await storage.repos.atomic_fact.upsert([row_a, row_b])
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": ["mc_shared"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -268,7 +278,8 @@ async def test_facts_for_episodes_score_zero_without_query_vector(
     row.vector = _unit_vector(0)
     await storage.repos.atomic_fact.upsert([row])
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": ["mc_a"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -298,7 +309,8 @@ async def test_facts_for_episodes_dual_parent_id_finds_both_eras(
         ]
     )
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {"alice_ep_a": ["ep_entry_1", "mc_1"]},
         _ALICE_WHERE,
         per_episode=10,
@@ -325,7 +337,8 @@ async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes(
         ]
     )
 
-    out = await _recaller(storage).facts_for_episodes(
+    out = await _buckets(
+        _recaller(storage),
         {
             "alice_ep_a": ["ep_entry_1", "mc_shared"],
             "alice_ep_b": ["ep_entry_2", "mc_shared"],
@@ -340,3 +353,19 @@ async def test_facts_for_episodes_multiple_parent_ids_dedup_across_episodes(
     # Only ep_a gets the ep_entry_1-linked fact
     assert "alice_af_2" in {f.id for f in out["alice_ep_a"]}
     assert "alice_af_2" not in {f.id for f in out.get("alice_ep_b", [])}
+
+
+async def test_facts_for_episodes_returns_the_stored_facts(storage: Storage) -> None:
+    """Each bucketed fact's record comes back beside it for the shaper."""
+    await storage.repos.atomic_fact.upsert(
+        [_fact_row(fid="alice_af_1", memcell_id="mc_1", fact="likes hiking")]
+    )
+
+    out = await _recaller(storage).facts_for_episodes(
+        {"alice_ep_a": ["mc_1"]}, _ALICE_WHERE, per_episode=10
+    )
+
+    stored = out.stored_by_id["alice_af_1"]
+    assert stored.item.content == "likes hiking"
+    assert stored.item.parent_id == "mc_1"
+    assert out.buckets["alice_ep_a"][0].metadata == {"parent_id": "mc_1"}

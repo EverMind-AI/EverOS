@@ -70,7 +70,7 @@ def _root_of(knowledge_dir: Path) -> Path:
 
 # ── Shared patch targets ─────────────────────────────────────────────────
 
-_MOD = "everos.service.knowledge"
+_MOD = "everos.infra.persistence.markdown.knowledge_store"
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -288,4 +288,4 @@ async def test_create_document_ensures_taxonomy(
         )
 
     mock_ensure.assert_called_once_with(knowledge_dir)
-    mock_parse.assert_called_once_with(knowledge_dir / ".taxonomy.md")
+    mock_parse.assert_called_once_with(mock_ensure.return_value)

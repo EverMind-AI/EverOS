@@ -67,7 +67,12 @@ from everos.infra.persistence.factories import (
     build_stores,
 )
 from everos.infra.persistence.index import EmbeddingProvenance
-from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.infra.persistence.sqlite import (
+    SqliteDatabase,
+    SqliteKnowledgeCatalog,
+    SqliteRepos,
+)
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps
 from everos.memory.extract.boundary import BoundaryDetection
@@ -406,7 +411,10 @@ def _build_knowledge_service(
     tokenizer: Tokenizer,
 ) -> KnowledgeService:
     return KnowledgeService(
-        root=root,
+        store=MarkdownKnowledgeStore(root),
+        catalog=SqliteKnowledgeCatalog(
+            sqlite.knowledge_document, sqlite.knowledge_topic
+        ),
         extractor=_knowledge_extractor(providers.llm),
         embedding=providers.embedding,
         reranker=providers.rerank,
@@ -415,8 +423,6 @@ def _build_knowledge_service(
         ),
         search_config=settings.knowledge.search,
         parse_file=functools.partial(aparse_file, llm=providers.multimodal_llm),
-        documents=sqlite.knowledge_document,
-        topics=sqlite.knowledge_topic,
     )
 
 

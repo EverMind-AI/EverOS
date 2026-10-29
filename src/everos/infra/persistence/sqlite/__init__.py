@@ -34,6 +34,7 @@ from .base import SQLModel as SQLModel
 from .base import create_session_factory as create_session_factory
 from .base import create_system_engine as create_system_engine
 from .base import session_scope as session_scope
+from .knowledge_catalog import SqliteKnowledgeCatalog as SqliteKnowledgeCatalog
 from .repos import MTIME_TOLERANCE_SECONDS as MTIME_TOLERANCE_SECONDS
 from .repos import ClusterRepo as ClusterRepo
 from .repos import ConversationStatusRepo as ConversationStatusRepo
@@ -95,6 +96,7 @@ __all__ = [
     "SQLModel",
     "SqliteClusterStore",
     "SqliteDatabase",
+    "SqliteKnowledgeCatalog",
     "SqliteMemcellStore",
     "SqliteMemorizeInboxStore",
     "SqliteReflectionReportStore",

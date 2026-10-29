@@ -50,6 +50,7 @@ from .base import parse_structured_entry as parse_structured_entry
 from .base import render_structured_entry as render_structured_entry
 from .base import sanitize_dirname as sanitize_dirname
 from .base import split_entries as split_entries
+from .knowledge_store import MarkdownKnowledgeStore as MarkdownKnowledgeStore
 from .mds import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
 from .mds import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .mds import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
@@ -116,6 +117,7 @@ __all__ = [
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
     "MarkdownForesightStore",
+    "MarkdownKnowledgeStore",
     "MarkdownProfileStore",
     "MarkdownReader",
     "MarkdownWriter",

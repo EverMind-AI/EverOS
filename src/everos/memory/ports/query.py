@@ -6,7 +6,8 @@ leaks into the domain. The value objects next to it name what the ports
 pass around: the ownership ``Scope`` a record lives in, the ``SessionKey``
 a conversation buffer lives under, the identity a write returns
 (``MemoryRef``), a persisted domain object together with that identity
-(``Stored``), and a raw search hit (``IndexHit``).
+(``Stored``), and a scored search match (``SearchHit``, or
+``ScoredKnowledgeTopic`` for the owner-less knowledge topics).
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ __all__ = [
     "Contains",
     "Filter",
     "In",
-    "IndexHit",
     "IsNull",
     "MemoryRef",
     "OwnerType",
@@ -26,6 +26,8 @@ __all__ = [
     "PageResult",
     "Scalar",
     "Scope",
+    "ScoredKnowledgeTopic",
+    "SearchHit",
     "SessionKey",
     "Stored",
     "all_of",
@@ -44,9 +46,10 @@ __all__ = [
 ]
 
 import datetime as dt
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
+
+from everos.memory.models import KnowledgeTopic
 
 type Scalar = str | int | float | bool | dt.datetime
 type ComparisonOperator = Literal["eq", "ne", "gt", "gte", "lt", "lte"]
@@ -289,16 +292,30 @@ class Stored[T]:
 
 
 @dataclass(frozen=True)
-class IndexHit:
-    """One raw hit from a derived-index search.
+class SearchHit[T]:
+    """One match of a derived-index search, as the stored domain object.
 
     Attributes:
-        id: Global key of the matched record.
-        score: Backend relevance score when the query produced one.
-        fields: The record's columns by name, including backend scoring
-            columns such as ``_score`` / ``_distance``.
+        stored: The matched record.
+        score: Relevance on the query's own scale -- BM25 for a keyword
+            search, cosine similarity in ``[0, 1]`` for a vector search;
+            ``None`` for a filtered scan, which has no query to score against.
     """
 
-    id: str
+    stored: Stored[T]
     score: float | None
-    fields: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ScoredKnowledgeTopic:
+    """One knowledge-topic match. Topics have no owner, so no ``Stored``.
+
+    Attributes:
+        topic: The matched topic.
+        md_path: Markdown file holding the topic, relative to the memory root.
+        score: Relevance as in :class:`SearchHit`.
+    """
+
+    topic: KnowledgeTopic
+    md_path: str
+    score: float | None

@@ -18,9 +18,9 @@ module covers the agentic retrieve flow only.
 
 from __future__ import annotations
 
-import datetime as _dt
+import dataclasses
 import json
-from typing import Any, ClassVar
+from typing import Any
 from unittest.mock import patch
 
 from everalgo.rank.protocols import AgenticDecision
@@ -28,6 +28,7 @@ from everalgo.testing.fake_llm import FakeLLMClient
 from everalgo.types import Candidate
 
 from everos.component.rerank import RerankResult
+from everos.memory.ports import SearchHit
 from everos.memory.search.agentic_agent import (
     search_agent_cases_agentic,
     search_agent_skills_agentic,
@@ -37,77 +38,66 @@ from everos.memory.search.callbacks import (
     _SKILL_RERANK_INSTRUCTION,
 )
 from everos.memory.search.dto import SearchAgentCaseItem, SearchAgentSkillItem
+from everos.memory.search.recall import RecallResult
+
+from ._records import hit, recalled, stored_case, stored_skill
 
 # ── Stubs ────────────────────────────────────────────────────────────────
 
 
-def _ts() -> _dt.datetime:
-    return _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
+def _case_hit(
+    cid: str,
+    score: float = 0.8,
+    *,
+    task_intent: str | None = None,
+    approach: str | None = None,
+) -> SearchHit[Any]:
+    stored = stored_case(
+        cid,
+        owner_id="agent_a",
+        task_intent=f"intent {cid}" if task_intent is None else task_intent,
+        approach=f"approach {cid}" if approach is None else approach,
+    )
+    return hit(_keyed(stored, cid), score)
 
 
-def _case_candidate(cid: str, score: float = 0.8) -> Candidate:
-    return Candidate(
-        id=cid,
-        score=score,
-        source="vector",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "session_id": "sess_b",
-            "timestamp": _ts(),
-            "task_intent": f"intent {cid}",
-            "approach": f"approach {cid}",
-            "quality_score": 0.8,
-        },
+def _skill_hit(
+    sid: str,
+    score: float = 0.75,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> SearchHit[Any]:
+    stored = stored_skill(
+        sid,
+        owner_id="agent_a",
+        name=f"skill_{sid}" if name is None else name,
+        description=f"desc {sid}" if description is None else description,
+    )
+    return hit(stored, score)
+
+
+def _keyed(stored: Any, record_id: str) -> Any:
+    """Give a stored record the global id ``record_id``."""
+    return dataclasses.replace(
+        stored, ref=dataclasses.replace(stored.ref, id=record_id)
     )
 
 
-def _skill_candidate(sid: str, score: float = 0.75) -> Candidate:
-    return Candidate(
-        id=sid,
-        score=score,
-        source="vector",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "name": f"skill_{sid}",
-            "description": f"desc {sid}",
-            "content": f"content {sid}",
-            "confidence": 0.9,
-            "maturity_score": 0.6,
-            "source_case_ids": [],
-        },
-    )
+class _StubRecaller:
+    """Agent recaller returning prepared hits as the production mapping does."""
 
-
-class _StubCaseRecaller:
-    kind: ClassVar[str] = "agent_case"
-    everalgo_memory_type: ClassVar[str] = "case"
-    text_field: ClassVar[str] = "task_intent"
-
-    def __init__(self, dense: list[Candidate]) -> None:
+    def __init__(
+        self, dense: list[SearchHit[Any]], sparse: list[SearchHit[Any]] | None = None
+    ) -> None:
         self._dense = dense
+        self._sparse = dense if sparse is None else sparse
 
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
+    async def sparse_recall(self, *_: Any, **__: Any) -> RecallResult[Any]:
+        return recalled(*self._sparse, source="keyword")
 
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-
-class _StubSkillRecaller:
-    kind: ClassVar[str] = "agent_skill"
-    everalgo_memory_type: ClassVar[str] = "skill"
-    text_field: ClassVar[str] = "description"
-
-    def __init__(self, dense: list[Candidate]) -> None:
-        self._dense = dense
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
+    async def dense_recall(self, *_: Any, **__: Any) -> RecallResult[Any]:
+        return recalled(*self._dense)
 
 
 class _StubReranker:
@@ -164,7 +154,7 @@ async def test_search_agent_cases_agentic_calls_aagentic_retrieve_with_benchmark
         await search_agent_cases_agentic(
             "How did agent handle login failure?",
             where="owner_id = 'agent_a' AND owner_type = 'agent'",
-            case_recaller=_StubCaseRecaller([]),
+            case_recaller=_StubRecaller([]),
             embed_query_fn=_fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -218,7 +208,7 @@ async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmar
         await search_agent_skills_agentic(
             "What skill handles auth token refresh?",
             where="owner_id = 'agent_a' AND owner_type = 'agent'",
-            skill_recaller=_StubSkillRecaller([]),
+            skill_recaller=_StubRecaller([]),
             embed_query_fn=_fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -237,18 +227,18 @@ async def test_search_agent_skills_agentic_calls_aagentic_retrieve_with_benchmar
 
 async def test_search_agent_cases_agentic_shapes_result() -> None:
     """Output must be list[SearchAgentCaseItem] built from aagentic_retrieve results."""
-    cand = _case_candidate("c_1")
+    cand = _case_hit("c_1")
 
     async def fake_aagentic(
-        *_: Any, **__: Any
+        query: str, *, base_retrieve: Any, **__: Any
     ) -> tuple[list[Candidate], AgenticDecision]:
-        return [cand], AgenticDecision(is_multi_round=False)
+        return await base_retrieve(query, 10), AgenticDecision(is_multi_round=False)
 
     with patch("everos.memory.search.agentic_agent.aagentic_retrieve", fake_aagentic):
         result = await search_agent_cases_agentic(
             "intent query",
             where="owner_id = 'agent_a' AND owner_type = 'agent'",
-            case_recaller=_StubCaseRecaller([cand]),
+            case_recaller=_StubRecaller([cand]),
             embed_query_fn=_fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -263,18 +253,18 @@ async def test_search_agent_cases_agentic_shapes_result() -> None:
 
 async def test_search_agent_skills_agentic_shapes_result() -> None:
     """Output must be list[SearchAgentSkillItem] from aagentic_retrieve results."""
-    cand = _skill_candidate("s_1")
+    cand = _skill_hit("s_1")
 
     async def fake_aagentic(
-        *_: Any, **__: Any
+        query: str, *, base_retrieve: Any, **__: Any
     ) -> tuple[list[Candidate], AgenticDecision]:
-        return [cand], AgenticDecision(is_multi_round=False)
+        return await base_retrieve(query, 10), AgenticDecision(is_multi_round=False)
 
     with patch("everos.memory.search.agentic_agent.aagentic_retrieve", fake_aagentic):
         result = await search_agent_skills_agentic(
             "skill query",
             where="owner_id = 'agent_a' AND owner_type = 'agent'",
-            skill_recaller=_StubSkillRecaller([cand]),
+            skill_recaller=_StubRecaller([cand]),
             embed_query_fn=_fake_embed,
             reranker=_StubReranker(),
             llm=FakeLLMClient(responses=[]),
@@ -307,47 +297,6 @@ _SUFFICIENT_LLM_RESPONSE = json.dumps(
 )
 
 
-class _StubSkillRecallerAsym:
-    """Like ``_StubSkillRecaller`` but with independently controllable
-    dense/sparse routes, needed to pin an exact fused score."""
-
-    kind: ClassVar[str] = "agent_skill"
-    everalgo_memory_type: ClassVar[str] = "skill"
-    text_field: ClassVar[str] = "description"
-
-    def __init__(
-        self, *, dense: list[Candidate], sparse: list[Candidate] | None = None
-    ) -> None:
-        self._dense = dense
-        self._sparse = sparse if sparse is not None else list(dense)
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._sparse)
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-
-class _StubCaseRecallerAsym:
-    """Case-kind counterpart of :class:`_StubSkillRecallerAsym`."""
-
-    kind: ClassVar[str] = "agent_case"
-    everalgo_memory_type: ClassVar[str] = "case"
-    text_field: ClassVar[str] = "task_intent"
-
-    def __init__(
-        self, *, dense: list[Candidate], sparse: list[Candidate] | None = None
-    ) -> None:
-        self._dense = dense
-        self._sparse = sparse if sparse is not None else list(dense)
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._sparse)
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-
 class _IdentityReranker:
     """Rerank stub that preserves input order; accepts ``instruction`` like
     a real :class:`RerankProvider` (unlike ``_StubReranker`` above, which
@@ -359,32 +308,15 @@ class _IdentityReranker:
         return [RerankResult(index=i, score=1.0) for i in range(len(passages))]
 
 
-def _skill_metadata(*, name: str, description: str) -> dict[str, Any]:
-    return {
-        "owner_id": "agent_a",
-        "owner_type": "agent",
-        "name": name,
-        "description": description,
-        "content": "some remediation content",
-        "confidence": 0.9,
-        "maturity_score": 0.6,
-        "source_case_ids": [],
-    }
-
-
 async def test_agentic_survives_name_only_skill() -> None:
     """A skill with an empty description is a valid everalgo output (see
     everalgo ``agent_memory/skill_ops.py`` — the guard is ``if not name and
     not description``). The metadata bridge must produce a non-empty
     passage for ``_format_docs``, otherwise everalgo raises ``ValueError``
     and the request 500s. This is the regression test for that defect."""
-    skill = Candidate(
-        id="s_name_only",
-        score=0.9,
-        source="vector",
-        metadata=_skill_metadata(name="rotate_secrets", description=""),
+    recaller = _StubRecaller(
+        [_skill_hit("s_name_only", 0.9, name="rotate_secrets", description="")]
     )
-    recaller = _StubSkillRecallerAsym(dense=[skill])
 
     result = await search_agent_skills_agentic(
         "how to rotate credentials",
@@ -421,13 +353,9 @@ async def test_agentic_uses_skill_rerank_passage() -> None:
             captured_instruction = instruction
             return [RerankResult(index=i, score=1.0) for i in range(len(passages))]
 
-    skill = Candidate(
-        id="s_revive",
-        score=0.9,
-        source="vector",
-        metadata=_skill_metadata(name="revive_replica", description="restart node"),
+    recaller = _StubRecaller(
+        [_skill_hit("s_revive", 0.9, name="revive_replica", description="restart node")]
     )
-    recaller = _StubSkillRecallerAsym(dense=[skill])
 
     await search_agent_skills_agentic(
         "how to bring a replica back",
@@ -463,21 +391,16 @@ async def test_agentic_uses_case_rerank_passage() -> None:
             captured_instruction = instruction
             return [RerankResult(index=i, score=1.0) for i in range(len(passages))]
 
-    case = Candidate(
-        id="c_restart",
-        score=0.9,
-        source="vector",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "session_id": "sess_b",
-            "timestamp": _ts(),
-            "task_intent": "restart the pod",
-            "approach": "kubectl rollout restart",
-            "quality_score": 0.8,
-        },
+    recaller = _StubRecaller(
+        [
+            _case_hit(
+                "c_restart",
+                0.9,
+                task_intent="restart the pod",
+                approach="kubectl rollout restart",
+            )
+        ]
     )
-    recaller = _StubCaseRecallerAsym(dense=[case])
 
     await search_agent_cases_agentic(
         "how to restart a stuck pod",

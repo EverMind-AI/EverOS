@@ -11,6 +11,7 @@ White-box surfaces touched:
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -53,6 +54,8 @@ def _make_row(
         "content_labels": [],
         "md_path": f"knowledge/default/{rid}.md",
         "content_sha256": "a" * 64,
+        "created_at": dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        "updated_at": dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
     }
     if distance is not None:
         row["_distance"] = distance
@@ -88,7 +91,9 @@ async def test_sparse_recall_queries_both_columns(
         new_callable=AsyncMock,
         return_value=rows,
     ) as mock_sparse:
-        result = await recaller.sparse_recall("topic query", _WHERE, limit=10)
+        result = (
+            await recaller.sparse_recall("topic query", _WHERE, limit=10)
+        ).candidates
 
     mock_sparse.assert_awaited_once()
     assert list(mock_sparse.await_args.args[0]) == ["topic", "query"]
@@ -111,7 +116,7 @@ async def test_sparse_recall_merges_by_max_score(
         new_callable=AsyncMock,
         return_value=[_make_row(shared_id, score=0.9)],
     ):
-        result = await recaller.sparse_recall("overlap", _WHERE, limit=10)
+        result = (await recaller.sparse_recall("overlap", _WHERE, limit=10)).candidates
 
     assert len(result) == 1
     assert result[0].id == shared_id
@@ -133,7 +138,7 @@ async def test_sparse_recall_returns_sorted_by_score(
         new_callable=AsyncMock,
         return_value=rows,
     ):
-        result = await recaller.sparse_recall("query", _WHERE, limit=2)
+        result = (await recaller.sparse_recall("query", _WHERE, limit=2)).candidates
 
     assert len(result) == 2
     assert result[0].id == "b"
@@ -155,7 +160,7 @@ async def test_sparse_recall_empty_query_returns_empty(
         "sparse_search",
         new_callable=AsyncMock,
     ) as mock_sparse:
-        result = await r.sparse_recall("", _WHERE, limit=10)
+        result = (await r.sparse_recall("", _WHERE, limit=10)).candidates
 
     assert result == []
     mock_sparse.assert_not_called()
@@ -180,7 +185,9 @@ async def test_dense_recall_cosine_conversion(
         new_callable=AsyncMock,
         return_value=rows,
     ):
-        result = await recaller.dense_recall([0.1] * 1024, _WHERE, limit=10)
+        result = (
+            await recaller.dense_recall([0.1] * 1024, _WHERE, limit=10)
+        ).candidates
 
     assert len(result) == 2
     scores = {c.id: c.score for c in result}
@@ -198,7 +205,7 @@ async def test_dense_recall_empty_vector_returns_empty(
         "dense_search",
         new_callable=AsyncMock,
     ) as mock_dense:
-        result = await recaller.dense_recall([], _WHERE, limit=10)
+        result = (await recaller.dense_recall([], _WHERE, limit=10)).candidates
 
     assert result == []
     mock_dense.assert_not_called()
@@ -217,8 +224,24 @@ async def test_dense_recall_metadata_excludes_noise_columns(
         new_callable=AsyncMock,
         return_value=[row],
     ):
-        result = await recaller.dense_recall([0.1] * 1024, _WHERE, limit=5)
+        result = (await recaller.dense_recall([0.1] * 1024, _WHERE, limit=5)).candidates
 
     assert len(result) == 1
     assert "vector" not in result[0].metadata
     assert "_distance" not in result[0].metadata
+
+
+async def test_recall_returns_the_domain_topics_beside_the_candidates(
+    recaller: KnowledgeTopicRecaller,
+) -> None:
+    with patch.object(
+        _REPO,
+        "sparse_search",
+        new_callable=AsyncMock,
+        return_value=[_make_row("t1", score=0.9)],
+    ):
+        recall = await recaller.sparse_recall("q", _WHERE, limit=5)
+
+    topic = recall.topics_by_id["t1"]
+    assert topic.doc_id == "doc_1" and topic.parent_topic_id is None
+    assert recall.candidates[0].metadata["category_id"] == "cat_1"

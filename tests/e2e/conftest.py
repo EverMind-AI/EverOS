@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import pytest_asyncio
-from dotenv import load_dotenv
+from dotenv.main import load_dotenv
 from sqlalchemy import text
 
 if TYPE_CHECKING:
@@ -52,6 +52,8 @@ if TYPE_CHECKING:
     from tests.fakes import StorageView
 
 # Load real .env creds before any everos import touches load_settings().
+# ``dotenv.main`` on purpose: tests/conftest.py neutralises the package-level
+# ``dotenv.load_dotenv`` so an import-time call (pymilvus) cannot leak .env.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_PROJECT_ROOT / ".env", override=False)
 

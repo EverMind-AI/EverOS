@@ -16,15 +16,19 @@ __all__ = [
     "ClusterStore",
     "EpisodeStore",
     "ForesightStore",
+    "KnowledgeCatalog",
+    "KnowledgeStore",
     "MemcellStore",
     "MemorizeInboxStore",
     "ProfileStore",
     "ReflectionReportStore",
     "SessionBufferStore",
+    "WrittenDocument",
 ]
 
 import datetime as dt
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from everos.memory.models import (
@@ -37,6 +41,10 @@ from everos.memory.models import (
     ClusterMemberType,
     Episode,
     Foresight,
+    KnowledgeCategory,
+    KnowledgeDocument,
+    KnowledgeMemory,
+    KnowledgeTopic,
     MemCell,
     MemcellRecord,
     MemorizeTask,
@@ -45,6 +53,7 @@ from everos.memory.models import (
 )
 from everos.memory.ports.query import (
     MemoryRef,
+    Page,
     PageResult,
     Scope,
     SessionKey,
@@ -303,3 +312,145 @@ class ReflectionReportStore(Protocol):
     async def create(self, report: ReflectionReport) -> None: ...
 
     async def reflected_cluster_ids(self, scope: Scope) -> set[str]: ...
+
+
+# ── Knowledge base ───────────────────────────────────────────────────────
+#
+# Knowledge is project-level: records are addressed by ``(app_id,
+# project_id)`` and their own ids, never by an owner ``Scope``.
+
+
+@dataclass(frozen=True)
+class WrittenDocument:
+    """Where a knowledge document landed.
+
+    Attributes:
+        location: The document's directory, as an absolute path.
+        original_file_path: The stored copy of the uploaded file, when one
+            was kept.
+    """
+
+    location: str
+    original_file_path: str | None
+
+
+@runtime_checkable
+class KnowledgeStore(Protocol):
+    """Knowledge truth: one markdown directory per document, plus the taxonomy.
+
+    Every file-system detail of the knowledge tree lives behind this port:
+    directory layout, frontmatter, the uploaded originals, the backup a
+    replacement keeps until it succeeds.
+    """
+
+    async def categories(self, app_id: str, project_id: str) -> list[KnowledgeCategory]:
+        """The project's taxonomy, created with its defaults on first use."""
+        ...
+
+    async def write_document(
+        self,
+        app_id: str,
+        project_id: str,
+        memories: Sequence[KnowledgeMemory],
+        *,
+        source_name: str | None,
+        source_type: str | None,
+        original: bytes | None,
+    ) -> WrittenDocument:
+        """Write a document's topic tree, keeping ``original`` under its name.
+
+        Raises:
+            InvalidInputError: ``source_name`` cannot hold ``original``.
+            PathTraversalError: ``source_name`` would escape the document.
+        """
+        ...
+
+    async def replace_document(
+        self,
+        previous: KnowledgeDocument,
+        memories: Sequence[KnowledgeMemory],
+        *,
+        source_name: str | None,
+        source_type: str | None,
+        original: bytes | None,
+    ) -> WrittenDocument:
+        """Write over ``previous``; on any failure its files come back."""
+        ...
+
+    async def delete_document(
+        self, app_id: str, project_id: str, doc_id: str, *, md_path: str | None
+    ) -> int:
+        """Remove the document's directory; returns the topic files removed.
+
+        ``md_path`` (when the catalog knows it) names the directory; without
+        it every directory of ``doc_id`` in the project is removed.
+        """
+        ...
+
+    async def read_document(
+        self, app_id: str, project_id: str, doc_id: str
+    ) -> KnowledgeDocument | None:
+        """The document as its ``index.md`` records it; ``None`` when absent."""
+        ...
+
+    async def update_document(
+        self, document: KnowledgeDocument, *, previous_category_id: str
+    ) -> KnowledgeDocument:
+        """Write ``document``'s title / category to its markdown.
+
+        A category other than ``previous_category_id`` moves the directory.
+
+        Returns:
+            ``document`` with the ``md_path`` it has afterwards.
+
+        Raises:
+            DocumentNotFoundError: The document is not on disk.
+            PathTraversalError: The category would leave the knowledge tree.
+        """
+        ...
+
+    async def original_file(self, document: KnowledgeDocument) -> str | None:
+        """Absolute path of the stored upload, when it exists."""
+        ...
+
+
+@runtime_checkable
+class KnowledgeCatalog(Protocol):
+    """Knowledge state: the document and topic records the cascade keeps.
+
+    Reads serve the document / topic APIs and search; the one write records a
+    metadata patch at once instead of waiting for the cascade.
+    """
+
+    async def get_document(self, doc_id: str) -> KnowledgeDocument | None: ...
+
+    async def get_documents(
+        self, doc_ids: Collection[str]
+    ) -> list[KnowledgeDocument]: ...
+
+    async def document_exists(self, doc_id: str) -> bool: ...
+
+    async def list_documents(
+        self,
+        app_id: str,
+        project_id: str,
+        *,
+        category_id: str | None,
+        page: Page,
+    ) -> PageResult[KnowledgeDocument]:
+        """``page.sort_by`` is ``created_at``, ``updated_at`` or ``title``."""
+        ...
+
+    async def count_by_category(
+        self, app_id: str, project_id: str
+    ) -> dict[str, int]: ...
+
+    async def record_document(self, document: KnowledgeDocument) -> None:
+        """Insert or update ``document`` (``md_path`` included)."""
+        ...
+
+    async def get_topics(self, topic_ids: Sequence[str]) -> list[KnowledgeTopic]: ...
+
+    async def topics_of(self, doc_id: str) -> list[KnowledgeTopic]: ...
+
+    async def count_topics(self, doc_id: str) -> int: ...

@@ -1,6 +1,6 @@
 """Callback factories handed to ``everalgo.rank.arank``.
 
-Four callbacks the rank pipeline expects:
+Four rerank callbacks the rank pipelines take:
 
 * :func:`build_rerank_fn` — cross-encoder scorer used by ``agentic``
   Round-1 + final rerank, and by ``rrf`` / ``lr`` when LLM rerank is
@@ -15,10 +15,8 @@ Four callbacks the rank pipeline expects:
 * :func:`build_case_rerank_fn` — case-shaped variant, mirrors
   :func:`build_skill_rerank_fn` for ``"Agent Case: {task_intent} -
   {approach}"`` passages.
-* :func:`build_retrieve_fn` — Round-2 recall callback for ``agentic``.
-  Re-runs the sparse + dense recall path for a refined query and fuses
-  the two routes with RRF (``k=60``) before handing back to the agentic
-  loop.
+* :func:`build_fetched_rerank_fn` — the passage is fetched by candidate id
+  (knowledge topics keep their body in the catalog, not in the index).
 
 ``_format_skill_passage_from_metadata`` / ``_format_case_passage_from_metadata``
 take the raw ``Candidate.metadata`` dict rather than a ``Candidate`` so the
@@ -31,18 +29,12 @@ sufficiency check sees and what the reranker sees.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING
 
-from everalgo.rank.fusion import rrf
-from everalgo.rank.protocols import RerankFn, RetrieveFn
+from everalgo.rank.protocols import RerankFn
 from everalgo.types import Candidate
 
 from everos.component.rerank import RerankProvider
 from everos.core.observability.tracing import memory_span
-from everos.memory.ports import Filter
-
-if TYPE_CHECKING:
-    from .recall import KindRecaller
 
 
 def build_rerank_fn(
@@ -211,33 +203,37 @@ def build_case_rerank_fn(provider: RerankProvider) -> RerankFn:
     return _rerank
 
 
-def build_retrieve_fn(
-    recaller: KindRecaller,
+def build_fetched_rerank_fn(
+    provider: RerankProvider,
     *,
-    where: Filter,
-    embed_query_fn: Callable[[str], Awaitable[list[float]]],
-    rrf_k: int = 60,
-) -> RetrieveFn:
-    """Build an everalgo ``RetrieveFn`` that fuses fresh sparse + dense recall.
+    passages: Callable[[Sequence[str]], Awaitable[Sequence[str]]],
+    instruction: str | None = None,
+) -> RerankFn:
+    """``RerankFn`` whose passages come from ``passages(candidate_ids)``.
 
-    ``embed_query_fn`` is an async ``(str) -> list[float]`` that produces
-    a 1024-d vector for an arbitrary query — typically the project's
-    :class:`EmbeddingProvider.embed`. We re-embed the refined queries
-    that the agentic loop emits in Round 2.
+    ``passages`` returns one text per id, in order. Used where the passage is
+    not carried by the recall candidate -- knowledge topics keep their body
+    in the catalog, so it is read only for the pool actually reranked.
     """
 
-    async def _retrieve(query: str, top_n: int) -> list[Candidate]:
-        recall_limit = top_n * 5
-        vector = await embed_query_fn(query)
-        sparse = await recaller.sparse_recall(query, where, limit=recall_limit)
-        dense = (
-            await recaller.dense_recall(vector, where, limit=recall_limit)
-            if vector
-            else []
-        )
-        if not sparse and not dense:
+    async def _rerank(
+        query: str,
+        candidates: Sequence[Candidate],
+    ) -> list[Candidate]:
+        items = list(candidates)
+        if not items:
             return []
-        fused = rrf(dense, sparse, k=rrf_k)
-        return fused[:top_n]
+        texts = list(await passages([c.id for c in items]))
+        with memory_span(
+            "everos.search.rank",
+            observation_type="span",
+            metadata={"phase": "cross_encoder"},
+        ):
+            results = await provider.rerank(query, texts, instruction=instruction)
+        return [
+            items[r.index].model_copy(update={"score": float(r.score)})
+            for r in results
+            if 0 <= r.index < len(items)
+        ]
 
-    return _retrieve
+    return _rerank

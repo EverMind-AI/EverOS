@@ -149,10 +149,12 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     assert page.total == 1 and page.items[0].item == episode
     assert [s.item for s in after] == [episode]
     assert await index.count(_USER, parent_type="memcell") == 1
-    assert [h.id for h in hits] == [ref.id] and hits[0].score is not None
-    assert [h.id for h in dense] == [ref.id] and "_distance" in dense[0].fields
-    assert [h.id for h in subject] == [ref.id]
-    assert [h.fields["entry_id"] for h in every] == [ref.entry_id]
+    assert [h.stored.ref for h in hits] == [ref] and hits[0].score is not None
+    assert [h.stored.item for h in hits] == [episode]
+    assert [h.stored.ref.id for h in dense] == [ref.id]
+    assert dense[0].score is not None and 0.0 <= dense[0].score <= 1.0
+    assert [h.stored.ref.id for h in subject] == [ref.id]
+    assert [(h.stored.ref.entry_id, h.score) for h in every] == [(ref.entry_id, None)]
     orphans = await index.orphans(
         all_of(_USER.to_filter(), eq("parent_type", "cluster")), limit=10
     )
@@ -183,9 +185,14 @@ async def test_atomic_fact_find_with_and_without_limit(storage: Storage) -> None
     unbounded = await index.find(eq("parent_id", "ep_1"))
     bounded = await index.find(eq("parent_id", "ep_1"), limit=2)
 
-    assert sorted(h.id for h in unbounded) == ["u1_af_0", "u1_af_1", "u1_af_2"]
+    assert sorted(h.stored.ref.id for h in unbounded) == [
+        "u1_af_0",
+        "u1_af_1",
+        "u1_af_2",
+    ]
     assert len(bounded) == 2
-    assert all(h.fields["md_path"] for h in bounded)
+    assert all(h.stored.ref.md_path for h in bounded)
+    assert {h.stored.item.content for h in unbounded} == {"fact 0", "fact 1", "fact 2"}
 
 
 async def test_agent_case_reads_return_domain_cases(storage: Storage) -> None:

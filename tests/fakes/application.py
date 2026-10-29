@@ -38,6 +38,8 @@ from everos.config import Settings, load_settings
 from everos.core.errors import QueueSaturatedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.infra.persistence.sqlite import SqliteKnowledgeCatalog
 from everos.memory.deps import MemoryDeps
 from everos.service import (
     Application,
@@ -278,23 +280,28 @@ def make_knowledge_service(
 ) -> KnowledgeService:
     """A real :class:`KnowledgeService`; unset providers read as unconfigured.
 
-    ``root`` defaults to the configured memory root (``EVEROS_ROOT``) at call
-    time, so a test that sets the env var first gets a service over it.
+    The service runs over the production adapters: a markdown knowledge
+    store under ``root`` and a SQLite catalog over ``documents`` / ``topics``
+    (the repositories, often mocks). ``root`` defaults to the configured
+    memory root (``EVEROS_ROOT``) at call time, so a test that sets the env
+    var first gets a service over it.
     """
     if root is None:
         root = MemoryRoot.resolve()
     elif not isinstance(root, MemoryRoot):
         root = MemoryRoot(root)
     return KnowledgeService(
-        root=root,
+        store=MarkdownKnowledgeStore(root),
+        catalog=SqliteKnowledgeCatalog(
+            documents or UnusedPort("knowledge documents"),
+            topics or UnusedPort("knowledge topics"),
+        ),
         extractor=extractor,
         embedding=embedding,
         reranker=reranker,
         recaller=recaller,
         search_config=search_config or load_settings().knowledge.search,
         parse_file=parse_file or functools.partial(aparse_file, llm=None),
-        documents=documents or UnusedPort("knowledge documents"),
-        topics=topics or UnusedPort("knowledge topics"),
     )
 
 

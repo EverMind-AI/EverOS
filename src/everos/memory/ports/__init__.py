@@ -31,7 +31,6 @@ from .query import Comparison as Comparison
 from .query import Contains as Contains
 from .query import Filter as Filter
 from .query import In as In
-from .query import IndexHit as IndexHit
 from .query import IsNull as IsNull
 from .query import MemoryRef as MemoryRef
 from .query import OwnerType as OwnerType
@@ -39,6 +38,8 @@ from .query import Page as Page
 from .query import PageResult as PageResult
 from .query import Scalar as Scalar
 from .query import Scope as Scope
+from .query import ScoredKnowledgeTopic as ScoredKnowledgeTopic
+from .query import SearchHit as SearchHit
 from .query import SessionKey as SessionKey
 from .query import Stored as Stored
 from .query import all_of as all_of
@@ -62,11 +63,14 @@ from .stores import AtomicFactStore as AtomicFactStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
 from .stores import ForesightStore as ForesightStore
+from .stores import KnowledgeCatalog as KnowledgeCatalog
+from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore
 from .stores import MemorizeInboxStore as MemorizeInboxStore
 from .stores import ProfileStore as ProfileStore
 from .stores import ReflectionReportStore as ReflectionReportStore
 from .stores import SessionBufferStore as SessionBufferStore
+from .stores import WrittenDocument as WrittenDocument
 from .strategy import AppliesTo as AppliesTo
 from .strategy import Counter as Counter
 from .strategy import Cron as Cron
@@ -104,8 +108,9 @@ __all__ = [
     "IdleTick",
     "Immediate",
     "In",
-    "IndexHit",
     "IsNull",
+    "KnowledgeCatalog",
+    "KnowledgeStore",
     "KnowledgeTopicIndex",
     "ManualTick",
     "MemcellStore",
@@ -119,12 +124,15 @@ __all__ = [
     "ReflectionReportStore",
     "Scalar",
     "Scope",
+    "ScoredKnowledgeTopic",
+    "SearchHit",
     "SessionBufferStore",
     "SessionKey",
     "Stored",
     "StrategyFn",
     "StrategySpec",
     "Trigger",
+    "WrittenDocument",
     "all_of",
     "any_of",
     "compare",

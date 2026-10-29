@@ -338,10 +338,29 @@ async def test_long_conversation_produces_all_memory_types(
 
 
 async def test_async_client_starts_and_health_responds(
-    async_client: httpx.AsyncClient,
+    core_pipeline_runtime: Path,
 ) -> None:
-    """Tiny smoke — proves the conftest fixture brings the app up."""
-    resp = await async_client.get("/health")
+    """Tiny smoke — the full lifespan comes up and ``/health`` answers.
+
+    Runs on a canned model (no credentials): the point is the lifespan
+    wiring, which the ``async_client`` fixture of the live suites shares.
+    """
+    from everos.config import load_settings
+    from everos.entrypoints.api.app import create_app
+    from everos.service import build_application, build_providers
+
+    settings = load_settings()
+    providers = dataclasses.replace(
+        build_providers(settings), llm=user_track_llm(), embedding=None, rerank=None
+    )
+    app = create_app(application=build_application(settings, providers=providers))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        resp = await client.get("/health")
     assert resp.status_code == 200, resp.text
 
 

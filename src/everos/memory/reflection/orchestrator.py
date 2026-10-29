@@ -582,9 +582,9 @@ class ReflectionFinisher:
             )
         )
         replaced = _replacements_by_file(
-            (hit.fields["md_path"], hit.fields["entry_id"])
+            (hit.stored.ref.md_path, hit.stored.ref.entry_id)
             for hit in hits
-            if hit.fields.get("md_path")
+            if hit.stored.ref.md_path
         )
         for md_path, entry_ids in replaced.items():
             await self._atomic_fact_store.deprecate(

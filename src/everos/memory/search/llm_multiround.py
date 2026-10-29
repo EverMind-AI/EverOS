@@ -47,24 +47,26 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
-from everalgo.llm import LLMMessage as LLMChatMessage
+from everalgo.llm import LLMMessage, StrictOutputModel, parse_reply
 from everalgo.rank.fusion import rrf
 from everalgo.types import Candidate
 
 from everos.config.settings import DeciderSettings, load_settings
 from everos.core.observability.logging import get_logger
-from everos.memory.ports import Filter
+from everos.memory.models import Episode
+from everos.memory.ports import Filter, Stored
 
 from .dto import SearchEpisodeItem
-from .shaper import shape_episode_from_candidate
+from .recall import RecallResult
+from .shaper import shape_episodes
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from everalgo.llm.protocols import LLMClient
+    from everalgo.llm import LLMClient
 
     from everos.component.rerank import RerankProvider
     from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
@@ -108,9 +110,6 @@ _LEGACY_ENV: dict[str, str] = {
     "full_text": "EVEROS_LLMMR_DECIDER_FULL_TEXT",
     "fallback_core": "EVEROS_LLMMR_DECIDER_FALLBACK_CORE",
 }
-
-_SEED_CANDIDATES: int = 50
-"""Sparse / dense episode recall pool size per sub-query per round."""
 
 
 def _tuning() -> DeciderSettings:
@@ -177,10 +176,10 @@ class RoundDecision(NamedTuple):
     stop: bool
     queries: list[str]
     core: list[int]
-    usage: dict[str, object] | None = (
-        None  # decider LLM token usage (trace); None on failure
-    )
-    raw: str | None = None  # decider raw output before _parse_decision (trace)
+    usage: dict[str, object] | None = None
+    """Token usage a policy decider chooses to report (trace); the prompt-LLM
+    decider leaves it ``None`` because ``achat`` returns text only."""
+    raw: str | None = None  # decider raw reply text (trace)
     failed: bool = False
     """Every decider attempt failed; ``core`` is the deterministic fallback.
 
@@ -286,6 +285,13 @@ GLOBAL indices into the candidates above:
 {{"core": [<indices>], "next_queries": ["<q1>", "..."]}}"""
 
 
+class _DecisionReply(StrictOutputModel):
+    """The decider's reply: the skeleton the prompt's last line shows."""
+
+    core: list[int]
+    next_queries: list[str]
+
+
 class LLMRoundDecider:
     """Prompt-LLM decider: select core across per-sub-query blocks by global index.
 
@@ -297,7 +303,8 @@ class LLMRoundDecider:
     :class:`RoundDecision` (global core indices + next_queries) so the loop — and
     a future Phase-2 policy that learns the core-selection step — keep one
     contract. The ``core_so_far`` / ``evidence`` strings are built in
-    :func:`_search_episodes_subq`; this class only formats + parses.
+    :func:`_search_episodes_subq`; this class only formats the request and
+    reads the validated reply.
 
     Args:
         llm: everalgo LLM client.
@@ -324,37 +331,16 @@ class LLMRoundDecider:
             evidence=evidence or "(no evidence retrieved this round)",
             max_sub=tune.max_subqueries,
         )
-        data: dict | None = None
-        last_error: str = ""
-        _usage: dict[str, object] | None = None  # decider token usage (trace)
-        _raw: str | None = None  # decider raw output (trace)
+        reply: _DecisionReply | None = None
+        raw: str | None = None
+        last_error = ""
         for attempt in range(tune.retries + 1):
             try:
-                # max_tokens and extra come from [decider], not from the client's
-                # defaults. `extra` is where a Qwen endpoint gets
-                # `chat_template_kwargs.enable_thinking=false`: left on, an
-                # un-finetuned decider spends the whole deadline reasoning and the
-                # round is lost to a timeout -- measured at 39.3% of rounds on
-                # Qwen3.5-0.8B, each costing ~729s of nested retries before the
-                # fixed top-3 fallback. The field existed and was documented as
-                # configurable, but nothing read it, so setting it changed nothing.
-                _t = _tuning()
-                resp = await self._llm.chat(
-                    messages=[LLMChatMessage(role="user", content=prompt)],
-                    max_tokens=_t.max_tokens,
-                    **(_t.extra or {}),
-                )
-                _raw = resp.content or ""
-                _u = getattr(resp, "usage", None)
-                _usage = _u.model_dump() if hasattr(_u, "model_dump") else None
-                # Reasoning deciders intermittently return an EMPTY completion
-                # (output budget spent on reasoning tokens). Name that case so the
-                # log distinguishes "model said nothing" from "reply was unparseable".
-                if not _raw.strip():
-                    raise ValueError("empty decider reply")
-                data = _parse_decision(_raw)
+                raw, reply = await self._ask(prompt, tune)
                 break
             except Exception as err:
+                # Any failure degrades this round to the deterministic fallback
+                # below; the search request itself must never fail on the decider.
                 last_error = f"{type(err).__name__}: {err}"
                 logger.warning(
                     "llm_multiround_decider_error",
@@ -363,7 +349,7 @@ class LLMRoundDecider:
                 )
                 if attempt < tune.retries and tune.retry_backoff_seconds > 0:
                     await asyncio.sleep(tune.retry_backoff_seconds * (2**attempt))
-        if data is None:
+        if reply is None:
             # Every attempt failed. Fall back to a deterministic core (the evidence
             # list is in fused-score order) rather than returning an empty one: an
             # empty core silently disables core-first injection for this question
@@ -380,71 +366,48 @@ class LLMRoundDecider:
                 last_error=last_error[:200],
             )
             return RoundDecision(
-                stop=True,
-                queries=[],
-                core=fallback,
-                usage=_usage,
-                raw=_raw,
-                failed=True,
+                stop=True, queries=[], core=fallback, raw=raw, failed=True
             )
-        core = _coerce_core_indices(data.get("core", []), n_candidates)
-        nxt_raw = data.get("next_queries")
-        if not isinstance(nxt_raw, list):
-            nxt_raw = []
-        queries = [str(q).strip() for q in nxt_raw if str(q).strip()][
+        core = _coerce_core_indices(reply.core, n_candidates)
+        queries = [q.strip() for q in reply.next_queries if q.strip()][
             : tune.max_subqueries
         ]
-        return RoundDecision(
-            stop=not queries, queries=queries, core=core, usage=_usage, raw=_raw
+        return RoundDecision(stop=not queries, queries=queries, core=core, raw=raw)
+
+    async def _ask(
+        self, prompt: str, tune: DeciderSettings
+    ) -> tuple[str, _DecisionReply]:
+        """One decider call: the raw reply text and its validated form.
+
+        ``max_tokens`` and ``extra`` come from ``[decider]``, not from the
+        client's defaults. ``extra`` is where a Qwen endpoint gets
+        ``chat_template_kwargs.enable_thinking=false``: left on, an un-finetuned
+        decider spends the whole deadline reasoning and the round is lost to a
+        timeout (39.3% of rounds on Qwen3.5-0.8B).
+
+        Raises:
+            LLMOutputError: The reply is not a valid :class:`_DecisionReply`.
+        """
+        text = await self._llm.achat(
+            [LLMMessage(role="user", content=prompt)],
+            response_format=_DecisionReply,
+            max_tokens=tune.max_tokens,
+            **tune.extra,
+        )
+        return text, parse_reply(
+            _DecisionReply, text, operator="llm_multiround decider"
         )
 
 
-def _parse_decision(text: str) -> dict:
-    """Extract the JSON decision object from an LLM reply (tolerant of prose).
+def _coerce_core_indices(raw: Sequence[int], n_evidence: int) -> list[int]:
+    """Keep a decider's ``core`` indices that address the evidence, each once.
 
-    Decodes with the JSON decoder from every ``{`` in the reply, in order,
-    and returns the first object that parses as a dict; the decoder itself
-    knows where a string value ends, so braces in prose before or after the
-    object and braces inside the object's string values cannot corrupt the
-    result. Raises ``ValueError`` only when no ``dict`` object can be
-    recovered -- the caller treats that as a safe stop with no core.
-
-    The two earlier strategies both broke on braces: a widest ``{...}`` span
-    swallowed a stray ``}`` after the object, and a brace counter that did
-    not understand strings returned the ``{}`` inside a value as the
-    decision (found by the parse law in the property tests).
+    Out-of-range indices are dropped, and a repeated index keeps its first
+    position. An empty result makes the caller fall back to the unfiltered path.
     """
-    decoder = json.JSONDecoder()
-    for start in (i for i, ch in enumerate(text) if ch == "{"):
-        try:
-            obj, _ = decoder.raw_decode(text, start)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict):
-            return obj
-    raise ValueError(f"no JSON object in decider reply: {text[:120]!r}")
-
-
-def _coerce_core_indices(raw: object, n_evidence: int) -> list[int]:
-    """Coerce a decider's ``core`` field into valid, de-duplicated evidence indices.
-
-    Tolerates ints and int-like strings (``"2"``), silently dropping anything
-    out of range, non-integral, or duplicated. A non-list ``raw`` yields ``[]``
-    (empty core ⇒ the caller falls back to the unfiltered / blind path).
-    """
-    if not isinstance(raw, list):
-        return []
     seen: set[int] = set()
     core: list[int] = []
-    for value in raw:
-        if isinstance(value, bool):  # bool is an int subclass — reject explicitly
-            continue
-        if isinstance(value, int):
-            idx = value
-        elif isinstance(value, str) and value.strip().lstrip("-").isdigit():
-            idx = int(value)
-        else:
-            continue
+    for idx in raw:
         if 0 <= idx < n_evidence and idx not in seen:
             seen.add(idx)
             core.append(idx)
@@ -712,6 +675,7 @@ async def _search_episodes_subq(
     core_source: dict[str, str] = {}  # id -> sub-query that first cored it (#4)
     subq_hits: dict[str, dict[str, float]] = {}  # id -> {sub_query: rrf_score}
     cand_by_id: dict[str, Candidate] = {}  # id -> best-score candidate ever seen
+    episodes_by_id: dict[str, Stored[Episode]] = {}  # id -> recalled record
     guarantee: list[tuple[str, str]] = []  # (sub_query, top id) per block, in order
     subqueries_seen: list[str] = []
     no_new_core_streak = 0
@@ -733,7 +697,7 @@ async def _search_episodes_subq(
                     episode_recaller.sparse_recall(q, where, limit=_SEED_CANDIDATES),
                     episode_recaller.dense_recall(v, where, limit=_SEED_CANDIDATES)
                     if v
-                    else _empty_candidates(),
+                    else _no_recall(),
                 )
                 for q, v in zip(cur_queries, vecs, strict=True)
             ]
@@ -741,7 +705,10 @@ async def _search_episodes_subq(
         _ts_recall_done = time.monotonic()
         blocks: list[tuple[str, list[Candidate]]] = []
         block_meta: list[dict[str, object]] = []
-        for q, (r_sparse, r_dense) in zip(cur_queries, recalls, strict=True):
+        for q, (sparse_result, dense_result) in zip(cur_queries, recalls, strict=True):
+            episodes_by_id.update(sparse_result.stored_by_id)
+            episodes_by_id.update(dense_result.stored_by_id)
+            r_sparse, r_dense = sparse_result.candidates, dense_result.candidates
             # Block LABEL shown to the decider (and stored as each candidate's
             # source): round 0 labels its one block "original question" — the raw
             # question is already displayed above it and the few-shot uses this
@@ -878,6 +845,7 @@ async def _search_episodes_subq(
         core_ids=core_ids,
         core_order=core_order,
         cand_by_id=cand_by_id,
+        episodes_by_id=episodes_by_id,
         subq_hits=subq_hits,
         guarantee=guarantee,
         subqueries_seen=subqueries_seen,
@@ -892,6 +860,7 @@ def _finalize_injection(
     core_ids: set[str],
     core_order: list[str],
     cand_by_id: dict[str, Candidate],
+    episodes_by_id: dict[str, Stored[Episode]],
     subq_hits: dict[str, dict[str, float]],
     guarantee: list[tuple[str, str]],
     subqueries_seen: list[str],
@@ -969,11 +938,7 @@ def _finalize_injection(
         n_filled += 1
 
     ordered_cands = [cand_by_id[cid] for cid in chosen if cid in cand_by_id]
-    episodes = [
-        ep
-        for ep in (shape_episode_from_candidate(c) for c in ordered_cands)
-        if ep is not None
-    ]
+    episodes = shape_episodes(ordered_cands, episodes_by_id)
 
     dump_path = _trace_dump_path()
     if dump_path:
@@ -1092,5 +1057,5 @@ def _append_round_trace(path: str, record: dict[str, object]) -> None:
         logger.warning("llm_multiround_trace_dump_error", error=str(err)[:200])
 
 
-async def _empty_candidates() -> list[Candidate]:
-    return []
+async def _no_recall() -> RecallResult[Episode]:
+    return RecallResult.empty()

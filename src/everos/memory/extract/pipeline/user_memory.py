@@ -29,7 +29,7 @@ from everos.memory.models import Episode, IngestResult
 from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
 
 if TYPE_CHECKING:
-    from everalgo.llm.protocols import LLMClient
+    from everalgo.llm import LLMClient
 
 logger = get_logger(__name__)
 

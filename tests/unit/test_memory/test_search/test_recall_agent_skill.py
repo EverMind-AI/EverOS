@@ -1,4 +1,4 @@
-"""Real-LanceDB tests for ``AgentSkillRecaller.fetch_by_case_ids``.
+"""Real-LanceDB tests for ``AgentSkillRecaller.bridged_from_cases``.
 
 The case→skill bridge reverse-resolves skills by ``source_case_ids``
 membership using DataFusion's ``array_has`` on a ``list<utf8>`` column.
@@ -78,7 +78,14 @@ def _recaller(storage: Storage) -> AgentSkillRecaller:
 _OWNER_WHERE = all_of(eq("owner_id", "agt"), eq("owner_type", "agent"))
 
 
-async def test_fetch_by_case_ids_matches_any_lineage_case(storage: Storage) -> None:
+async def _bridge(storage: Storage, case_scores: dict[str, float]) -> list[str]:
+    got = await _recaller(storage).bridged_from_cases(
+        case_scores, _OWNER_WHERE, top_k=10
+    )
+    return sorted(c.id for c in got.candidates)
+
+
+async def test_bridge_matches_any_lineage_case(storage: Storage) -> None:
     """OR over case ids: a skill surfaces when its ``source_case_ids``
     contains at least one queried case."""
     await storage.repos.agent_skill.upsert(
@@ -89,14 +96,10 @@ async def test_fetch_by_case_ids_matches_any_lineage_case(storage: Storage) -> N
         ]
     )
 
-    got = await _recaller(storage).fetch_by_case_ids(
-        ["c_a", "c_c"], _OWNER_WHERE, limit=10
-    )
-
-    assert sorted(c.id for c in got) == ["agt_s1", "agt_s2"]
+    assert await _bridge(storage, {"c_a": 0.5, "c_c": 0.5}) == ["agt_s1", "agt_s2"]
 
 
-async def test_fetch_by_case_ids_respects_owner_partition(storage: Storage) -> None:
+async def test_bridge_respects_owner_partition(storage: Storage) -> None:
     """The ``where`` clause is AND-composed with ``array_has(...)`` — a
     skill in a different owner partition must not leak through."""
     await storage.repos.agent_skill.upsert(
@@ -106,45 +109,38 @@ async def test_fetch_by_case_ids_respects_owner_partition(storage: Storage) -> N
         ]
     )
 
-    got = await _recaller(storage).fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
-
-    assert [c.id for c in got] == ["agt_s1"]
+    assert await _bridge(storage, {"c_a": 0.5}) == ["agt_s1"]
 
 
-async def test_fetch_by_case_ids_returns_empty_for_no_ids(storage: Storage) -> None:
-    """Empty input short-circuits — no LanceDB query is issued."""
-    got = await _recaller(storage).fetch_by_case_ids([], _OWNER_WHERE, limit=10)
-    assert got == []
+async def test_bridge_returns_empty_for_no_cases(storage: Storage) -> None:
+    """Empty input short-circuits — no index query is issued."""
+    assert await _bridge(storage, {}) == []
 
 
-async def test_fetch_by_case_ids_escapes_single_quotes(storage: Storage) -> None:
-    """A case id with a single quote must not break the SQL literal.
-
-    The ``_q`` escaper turns ``'`` into ``''`` (SQL standard); without it
-    the where-clause would close the string literal prematurely.
-    """
+async def test_bridge_escapes_single_quotes(storage: Storage) -> None:
+    """A case id with a single quote must not break the rendered literal."""
     quoted_id = "ac_o'brien_0001"
     await storage.repos.agent_skill.upsert(
         [_skill_row(name="s1", owner_id="agt", source_case_ids=[quoted_id])]
     )
 
-    got = await _recaller(storage).fetch_by_case_ids(
-        [quoted_id], _OWNER_WHERE, limit=10
-    )
-
-    assert [c.id for c in got] == ["agt_s1"]
+    assert await _bridge(storage, {quoted_id: 0.5}) == ["agt_s1"]
 
 
-async def test_fetch_by_case_ids_carries_source_case_ids_in_metadata(
-    storage: Storage,
-) -> None:
-    """The full ``source_case_ids`` list must ride back in metadata so the
-    manager's max-pool can score against the caller's case_score map."""
+async def test_bridge_max_pools_score_across_source_cases(storage: Storage) -> None:
+    """A skill learned from several matched cases takes the best case score;
+    the record rides beside the candidate for the shaper."""
     await storage.repos.agent_skill.upsert(
-        [_skill_row(name="s1", owner_id="agt", source_case_ids=["c_a", "c_b", "c_c"])]
+        [
+            _skill_row(name="s1", owner_id="agt", source_case_ids=["c_a", "c_b"]),
+            _skill_row(name="s2", owner_id="agt", source_case_ids=["c_b", "c_z"]),
+        ]
     )
 
-    got = await _recaller(storage).fetch_by_case_ids(["c_a"], _OWNER_WHERE, limit=10)
+    got = await _recaller(storage).bridged_from_cases(
+        {"c_a": 0.9, "c_b": 0.4}, _OWNER_WHERE, top_k=10
+    )
 
-    assert len(got) == 1
-    assert sorted(got[0].metadata["source_case_ids"]) == ["c_a", "c_b", "c_c"]
+    scores = {c.id: c.score for c in got.candidates}
+    assert scores == {"agt_s1": 0.9, "agt_s2": 0.4}
+    assert got.stored_by_id["agt_s1"].item.source_case_ids == ["c_a", "c_b"]

@@ -32,10 +32,10 @@ from pathlib import Path
 
 import anyio
 import yaml
-from everalgo.types import KnowledgeMemory
 
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.markdown.base.path_safety import sanitize_dirname
+from everos.memory.models import KnowledgeMemory
 
 logger = get_logger(__name__)
 
@@ -57,7 +57,7 @@ class KnowledgeWriter:
         """Write md files and return the document directory path.
 
         Args:
-            memories: Flat list of nodes produced by everalgo extraction.
+            memories: Flat list of topic-tree nodes of one document.
                 Must contain exactly one root node (``topic_index=0``).
             knowledge_dir: Base ``knowledge/`` directory (from
                 ``MemoryRoot.knowledge_dir``).

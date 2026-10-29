@@ -1,25 +1,30 @@
 """Unit tests for knowledge search service.
 
-White-box surfaces mocked:
-    ``acategory_retrieve`` (the everalgo facade)
-    ``documents`` repo (get_documents_by_ids)
-    the embedding / rerank providers, the recaller and the search settings
-    the ``KnowledgeService`` is built with
+The real recaller runs over a scripted knowledge-topic index; the everalgo
+facade (``acategory_retrieve``) is replaced by a driver that does what it
+does -- recall through ``base_retrieve``, rerank through ``rerank_fn`` --
+so the service's wiring of both callbacks is exercised. The catalog runs
+over mocked repositories (topic content, document context).
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from everalgo.types import Candidate
 
+from everos.component.rerank import RerankResult
+from everos.component.tokenizer import Tokenizer
 from everos.component.utils.datetime import get_utc_now
 from everos.core.errors import ProviderNotConfiguredError
 from everos.infra.persistence.sqlite.tables.knowledge import (
     KnowledgeDocumentRow,
+    KnowledgeTopicRow,
 )
+from everos.memory.search.recall import KnowledgeTopicRecaller, RecallerDeps
 from everos.service.knowledge import (
     DocumentContext,
     KnowledgeService,
@@ -27,37 +32,50 @@ from everos.service.knowledge import (
     compile_knowledge_where,
 )
 from tests.fakes import make_knowledge_service
+from tests.unit.test_memory.test_search._records import (
+    ScriptedIndex,
+    topic,
+    topic_hit,
+)
 
-_MOD = "everos.service.knowledge"
+_FACADE = "everos.service.knowledge.acategory_retrieve"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _candidate(
+def _hit(
     node_id: str = "n_001",
-    score: float = 0.85,
-    source: str = "keyword",
-    doc_id: str = "d_testdoc00001",
-    category_id: str = "Technology",
+    *,
     topic_name: str = "Neural Networks",
     topic_path: str = "Technology / Neural Networks",
-    depth: int = 1,
     summary: str = "Overview of neural networks.",
-    content: str = "",
-) -> Candidate:
-    return Candidate(
-        id=node_id,
-        score=score,
-        source=source,
-        metadata={
-            "doc_id": doc_id,
-            "category_id": category_id,
+) -> Any:
+    t = topic(node_id, category_id="Technology").model_copy(
+        update={
+            "doc_id": "d_testdoc00001",
             "topic_name": topic_name,
             "topic_path": topic_path,
-            "depth": depth,
             "summary": summary,
-            "content": content,
-        },
+        }
+    )
+    return topic_hit(t, score=1.0)
+
+
+def _topic_row(node_id: str, content: str) -> KnowledgeTopicRow:
+    now = get_utc_now()
+    return KnowledgeTopicRow(
+        node_id=node_id,
+        doc_id="d_testdoc00001",
+        category_id="Technology",
+        topic_index=1,
+        topic_name="t",
+        topic_path="t",
+        depth=1,
+        summary="s",
+        content=content,
+        md_path="knowledge/x/index.md",
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -90,46 +108,70 @@ def _mock_settings() -> MagicMock:
     s.knowledge.search.mass_top_m = 50
     s.knowledge.search.lam = 0.1
     s.knowledge.search.top_k_cap = 100
-    s.embedding.model = ""
-    s.embedding.api_key = None
     return s
 
 
+def _driver() -> AsyncMock:
+    """Stands in for ``acategory_retrieve``: recall, rerank, truncate."""
+
+    async def _run(
+        query: str,
+        *,
+        base_retrieve: Any,
+        rerank_fn: Any,
+        recall_n: int,
+        top_n: int,
+        **_: Any,
+    ) -> list[Any]:
+        recalled = await base_retrieve(query, recall_n)
+        return (await rerank_fn(query, recalled))[:top_n]
+
+    return AsyncMock(side_effect=_run)
+
+
 def _patch_stack(
-    facade_return: list[Candidate] | None = None,
+    hits: Sequence[Any] = (),
+    *,
+    scores: Sequence[float] = (),
+    contents: dict[str, str] | None = None,
     doc_rows: list[KnowledgeDocumentRow] | None = None,
-    embed_vector: list[float] | None = None,
-):
-    """Return a dict of patches for common mocks.
-
-    ``acategory_retrieve`` is mocked at the module level — its internal
-    behavior (recall -> rollup -> rerank -> boost) is tested in everalgo.
-    """
-    acategory = AsyncMock(return_value=facade_return or [])
-
+) -> dict[str, Any]:
+    """Mocks for one search; the reranker scores the pool with ``scores``."""
     doc_repo = AsyncMock()
     doc_repo.get_documents_by_ids = AsyncMock(return_value=doc_rows or [])
+    topic_repo = AsyncMock()
+    topic_repo.get_topics_by_ids = AsyncMock(
+        return_value=[_topic_row(tid, text) for tid, text in (contents or {}).items()]
+    )
 
     embedder = AsyncMock()
-    embedder.embed = AsyncMock(return_value=embed_vector or [0.1] * 1024)
+    embedder.embed = AsyncMock(return_value=[0.1] * 4)
 
     reranker = AsyncMock()
+    reranker.rerank = AsyncMock(
+        side_effect=lambda q, passages, **kw: [
+            RerankResult(index=i, score=scores[i] if i < len(scores) else 0.5)
+            for i in range(len(passages))
+        ]
+    )
 
-    recaller = AsyncMock()
-
-    settings = _mock_settings()
-
+    tok = MagicMock(spec=Tokenizer)
+    tok.tokenize.return_value = ["q"]
+    recaller = KnowledgeTopicRecaller(
+        RecallerDeps(tokenizer=tok),
+        ScriptedIndex(sparse=hits, dense=hits),  # type: ignore[arg-type]
+    )
     return {
-        "acategory": acategory,
         "doc_repo": doc_repo,
+        "topic_repo": topic_repo,
         "embedder": embedder,
         "reranker": reranker,
         "recaller": recaller,
-        "settings": settings,
+        "settings": _mock_settings(),
     }
 
 
-def _service(mocks: dict, **overrides: object) -> KnowledgeService:
+def _service(mocks: dict[str, Any], **overrides: object) -> KnowledgeService:
     """A service over the mocks of :func:`_patch_stack`; overrides replace one."""
     fields = {
         "embedding": mocks["embedder"],
@@ -137,6 +179,7 @@ def _service(mocks: dict, **overrides: object) -> KnowledgeService:
         "recaller": mocks["recaller"],
         "search_config": mocks["settings"].knowledge.search,
         "documents": mocks["doc_repo"],
+        "topics": mocks["topic_repo"],
     }
     return make_knowledge_service(root=Path("/unused"), **{**fields, **overrides})
 
@@ -196,73 +239,72 @@ class TestCompileKnowledgeWhere:
 
 
 class TestSearchKnowledgeFacadeWiring:
-    """Verify search_knowledge delegates to acategory_retrieve correctly."""
+    """search_knowledge delegates to acategory_retrieve with the config."""
 
     async def test_calls_facade_with_config_params(self) -> None:
-        c = _candidate(node_id="n_001", score=0.9, content="Neural net content.")
-        mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
+        mocks = _patch_stack([_hit()], doc_rows=[_doc_row()])
 
-        with (
-            patch(
-                "everalgo.rank.acategory_retrieve", mocks["acategory"]
-            ) as mock_facade,
-        ):
+        with patch(_FACADE, _driver()) as facade:
             await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword"
             )
 
-        mock_facade.assert_awaited_once()
-        call_kwargs = mock_facade.call_args
-        assert call_kwargs[0][0] == "neural nets"
-        assert call_kwargs[1]["recall_n"] == 200
-        assert call_kwargs[1]["rerank_n"] == 50
-        assert call_kwargs[1]["mass_top_m"] == 50
-        assert call_kwargs[1]["lam"] == pytest.approx(0.1)
-        assert call_kwargs[1]["top_n"] == 10
+        facade.assert_awaited_once()
+        args, kwargs = facade.call_args
+        assert args[0] == "neural nets"
+        assert kwargs["recall_n"] == 200
+        assert kwargs["rerank_n"] == 50
+        assert kwargs["mass_top_m"] == 50
+        assert kwargs["lam"] == pytest.approx(0.1)
+        assert kwargs["top_n"] == 10
 
     async def test_top_n_capped_by_top_k_cap(self) -> None:
-        mocks = _patch_stack(doc_rows=[_doc_row()])
+        mocks = _patch_stack()
 
-        with (
-            patch(
-                "everalgo.rank.acategory_retrieve", mocks["acategory"]
-            ) as mock_facade,
-        ):
+        with patch(_FACADE, _driver()) as facade:
             await _service(mocks).search_knowledge(
                 query="test", method="keyword", top_k=200
             )
 
-        assert mock_facade.call_args[1]["top_n"] == 100
+        assert facade.call_args.kwargs["top_n"] == 100
+
+    async def test_reranks_on_the_catalog_content(self) -> None:
+        """Passages are the topics' full content, read from the catalog."""
+        mocks = _patch_stack(
+            [_hit("n_001"), _hit("n_002")],
+            contents={"n_001": "Content A.", "n_002": "Content B."},
+        )
+
+        with patch(_FACADE, _driver()):
+            await _service(mocks).search_knowledge(query="q", method="keyword")
+
+        passages = mocks["reranker"].rerank.await_args.args[1]
+        assert passages == ["Content A.", "Content B."]
 
 
 class TestSearchKnowledgeResults:
-    """Verify result assembly from facade output."""
-
     async def test_returns_hits_with_scores(self) -> None:
-        c1 = _candidate(node_id="n_001", score=0.9, content="Content A.")
-        c2 = _candidate(
-            node_id="n_002", score=0.7, topic_name="CNNs", content="Content B."
+        mocks = _patch_stack(
+            [_hit("n_001"), _hit("n_002", topic_name="CNNs")],
+            scores=[0.9, 0.7],
+            doc_rows=[_doc_row()],
         )
-        mocks = _patch_stack(facade_return=[c1, c2], doc_rows=[_doc_row()])
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="neural networks", method="keyword"
             )
 
         assert isinstance(result, SearchKnowledgeResult)
-        assert len(result.hits) == 2
+        assert [(h.topic_id, h.score) for h in result.hits] == [
+            ("n_001", 0.9),
+            ("n_002", 0.7),
+        ]
         assert result.total == 2
 
     async def test_empty_results(self) -> None:
-        mocks = _patch_stack()
-
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
-            result = await _service(mocks).search_knowledge(
+        with patch(_FACADE, _driver()):
+            result = await _service(_patch_stack()).search_knowledge(
                 query="nothing", method="keyword"
             )
 
@@ -272,26 +314,20 @@ class TestSearchKnowledgeResults:
 
 class TestSearchKnowledgeIncludeContent:
     async def test_content_populated_when_true(self) -> None:
-        content_text = "Full content of neural networks topic."
-        c = _candidate(node_id="n_001", score=0.9, content=content_text)
-        mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
+        text = "Full content of neural networks topic."
+        mocks = _patch_stack([_hit("n_001")], contents={"n_001": text})
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", include_content=True
             )
 
-        assert result.hits[0].content == content_text
+        assert result.hits[0].content == text
 
     async def test_content_none_when_false(self) -> None:
-        c = _candidate(node_id="n_001", score=0.9, content="Some content.")
-        mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
+        mocks = _patch_stack([_hit("n_001")], contents={"n_001": "Some content."})
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", include_content=False
             )
@@ -301,28 +337,23 @@ class TestSearchKnowledgeIncludeContent:
 
 class TestSearchKnowledgeScoreThreshold:
     async def test_filters_low_score_candidates(self) -> None:
-        high = _candidate(node_id="n_001", score=0.9)
-        low = _candidate(node_id="n_002", score=0.1, topic_name="Low")
-        mocks = _patch_stack(facade_return=[high, low], doc_rows=[_doc_row()])
+        mocks = _patch_stack(
+            [_hit("n_001"), _hit("n_002", topic_name="Low")], scores=[0.9, 0.1]
+        )
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="neural nets", method="keyword", score_threshold=0.5
             )
 
-        assert len(result.hits) == 1
-        assert result.hits[0].topic_id == "n_001"
+        assert [h.topic_id for h in result.hits] == ["n_001"]
 
     async def test_no_filtering_when_threshold_none(self) -> None:
-        c1 = _candidate(node_id="n_001", score=0.9)
-        c2 = _candidate(node_id="n_002", score=0.1, topic_name="Low")
-        mocks = _patch_stack(facade_return=[c1, c2], doc_rows=[_doc_row()])
+        mocks = _patch_stack(
+            [_hit("n_001"), _hit("n_002", topic_name="Low")], scores=[0.9, 0.1]
+        )
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="test", method="keyword"
             )
@@ -332,13 +363,10 @@ class TestSearchKnowledgeScoreThreshold:
 
 class TestSearchKnowledgeDocumentContext:
     async def test_hits_carry_document_context(self) -> None:
-        c = _candidate(node_id="n_001", score=0.9)
         doc = _doc_row(title="AI Handbook", summary="A handbook on AI.")
-        mocks = _patch_stack(facade_return=[c], doc_rows=[doc])
+        mocks = _patch_stack([_hit("n_001")], doc_rows=[doc])
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="AI", method="keyword"
             )
@@ -352,12 +380,8 @@ class TestSearchKnowledgeDocumentContext:
 
 class TestSearchKnowledgeTookMs:
     async def test_took_ms_positive(self) -> None:
-        mocks = _patch_stack()
-
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
-            result = await _service(mocks).search_knowledge(
+        with patch(_FACADE, _driver()):
+            result = await _service(_patch_stack()).search_knowledge(
                 query="test", method="keyword"
             )
 
@@ -368,22 +392,9 @@ class TestSearchKnowledgeReturnFields:
     """Verify all SearchHit fields are correctly populated."""
 
     async def test_all_hit_fields_populated(self) -> None:
-        c = _candidate(
-            node_id="n_001",
-            score=0.85,
-            source="keyword",
-            doc_id="d_testdoc00001",
-            category_id="Technology",
-            topic_name="Neural Networks",
-            topic_path="Technology / Neural Networks",
-            depth=1,
-            summary="Overview of neural networks.",
-        )
-        mocks = _patch_stack(facade_return=[c], doc_rows=[_doc_row()])
+        mocks = _patch_stack([_hit("n_001")], doc_rows=[_doc_row()])
 
-        with (
-            patch("everalgo.rank.acategory_retrieve", mocks["acategory"]),
-        ):
+        with patch(_FACADE, _driver()):
             result = await _service(mocks).search_knowledge(
                 query="neural", method="keyword"
             )
@@ -398,22 +409,28 @@ class TestSearchKnowledgeReturnFields:
         assert hit.retrieval_method == "keyword"
         assert hit.source == "keyword"
 
+    async def test_hybrid_fuses_both_routes(self) -> None:
+        """Hybrid recalls both routes and fuses them before the rerank."""
+        mocks = _patch_stack([_hit("n_001")])
+
+        with patch(_FACADE, _driver()):
+            result = await _service(mocks).search_knowledge(query="q", method="hybrid")
+
+        assert [h.topic_id for h in result.hits] == ["n_001"]
+        assert result.hits[0].retrieval_method == "hybrid"
+
 
 class TestSearchKnowledgeProviderRequired:
     """Missing providers raise ProviderNotConfiguredError (HTTP 422)."""
 
     async def test_raises_without_embedding(self) -> None:
-        mocks = _patch_stack()
-
         with pytest.raises(ProviderNotConfiguredError, match="embedding"):
-            await _service(mocks, embedding=None).search_knowledge(
+            await _service(_patch_stack(), embedding=None).search_knowledge(
                 query="test", method="keyword"
             )
 
     async def test_raises_without_reranker(self) -> None:
-        mocks = _patch_stack()
-
         with pytest.raises(ProviderNotConfiguredError, match="rerank"):
-            await _service(mocks, reranker=None).search_knowledge(
+            await _service(_patch_stack(), reranker=None).search_knowledge(
                 query="test", method="keyword"
             )

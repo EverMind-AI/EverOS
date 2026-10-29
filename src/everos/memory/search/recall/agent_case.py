@@ -16,15 +16,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from everalgo.types import Candidate
-
+from everos.memory.models import AgentCase
 from everos.memory.ports import AgentCaseIndex, Filter
 
-from .base import (
-    RecallerDeps,
-    cosine_score_from_distance,
-    row_to_candidate,
-)
+from .base import RecallerDeps, RecallResult, from_hits
 
 
 class AgentCaseRecaller:
@@ -37,7 +32,6 @@ class AgentCaseRecaller:
 
     kind: ClassVar[str] = "agent_case"
     everalgo_memory_type: ClassVar[str] = "case"
-    text_field: ClassVar[str] = "task_intent"
 
     def __init__(self, deps: RecallerDeps, index: AgentCaseIndex) -> None:
         self._deps = deps
@@ -45,7 +39,7 @@ class AgentCaseRecaller:
 
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
-    ) -> list[Candidate]:
+    ) -> RecallResult[AgentCase]:
         """Dual-column BM25 recall via OR-mode BooleanQuery per column.
 
         Each tokenised term becomes a ``SHOULD`` clause so a single
@@ -56,23 +50,14 @@ class AgentCaseRecaller:
         """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
-            return []
+            return RecallResult.empty()
         hits = await self._index.sparse_search(terms, where, limit=limit)
-        return [
-            row_to_candidate(h, source="keyword", score=h.score or 0.0) for h in hits
-        ]
+        return from_hits(hits, source="keyword")
 
     async def dense_recall(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[Candidate]:
+    ) -> RecallResult[AgentCase]:
         if not vector:
-            return []
+            return RecallResult.empty()
         hits = await self._index.dense_search(vector, where, limit=limit)
-        return [
-            row_to_candidate(
-                h,
-                source="vector",
-                score=cosine_score_from_distance(h.fields.get("_distance")),
-            )
-            for h in hits
-        ]
+        return from_hits(hits, source="vector")

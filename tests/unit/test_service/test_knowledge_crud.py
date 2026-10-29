@@ -35,6 +35,7 @@ from everos.service.knowledge import (
 from tests.fakes import make_knowledge_service
 
 _MOD = "everos.service.knowledge"
+_STORE = "everos.infra.persistence.markdown.knowledge_store"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -201,33 +202,23 @@ async def test_get_topic_not_found() -> None:
 
 
 async def test_delete_document_success(tmp_path: Path) -> None:
-    """Calls rmtree on the document directory and returns topic count."""
+    """Removes the indexed document's directory; reports the catalog's count."""
     mock_doc_repo = MagicMock()
     mock_topic_repo = MagicMock()
-    doc_dir = tmp_path / "d_testdoc00001"
-    doc_dir.mkdir()
-    doc = _doc_row(md_path=str(doc_dir))
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    doc = _doc_row(md_path=str((doc_dir / "index.md").relative_to(root.root)))
+    mock_doc_repo.get_by_doc_id = AsyncMock(return_value=doc)
+    mock_topic_repo.count_by_doc_id = AsyncMock(return_value=3)
 
-    with (
-        patch(f"{_MOD}.anyio") as mock_anyio,
-    ):
-        mock_doc_repo.get_by_doc_id = AsyncMock(return_value=doc)
-        mock_topic_repo.count_by_doc_id = AsyncMock(return_value=3)
-
-        mock_path_instance = AsyncMock()
-        mock_path_instance.is_dir = AsyncMock(return_value=True)
-        mock_anyio.Path.return_value = mock_path_instance
-        mock_anyio.to_thread.run_sync = AsyncMock(return_value=None)
-
-        result = await make_knowledge_service(
-            documents=mock_doc_repo,
-            topics=mock_topic_repo,
-        ).delete_document("d_testdoc00001", "app1", "proj1")
+    result = await make_knowledge_service(
+        documents=mock_doc_repo, topics=mock_topic_repo, root=root
+    ).delete_document("d_testdoc00001", "app1", "proj1")
 
     assert isinstance(result, DeleteResult)
     assert result.doc_id == "d_testdoc00001"
     assert result.deleted_topics == 3
-    mock_anyio.to_thread.run_sync.assert_awaited_once()
+    assert not doc_dir.exists()
 
 
 async def test_delete_document_idempotent(
@@ -354,30 +345,31 @@ async def test_list_documents_returns_paginated_result() -> None:
 # ── patch_document ────────────────────────────────────────────────────────────
 
 
-async def test_patch_document_title_updates_correctly() -> None:
-    """Returns PatchResult with updated_fields=['title'] on title change."""
+async def test_patch_document_title_updates_correctly(tmp_path: Path) -> None:
+    """Rewrites the title in the markdown and records it in the catalog."""
     mock_doc_repo = MagicMock()
-    doc = _doc_row(title="Old Title")
+    root = MemoryRoot(tmp_path)
+    doc_dir = _lay_out_doc(root, "Technology")
+    md_path = str((doc_dir / "index.md").relative_to(root.root))
+    doc = _doc_row(title="Old Title", md_path=md_path)
 
-    with (
-        patch(f"{_MOD}._update_index_frontmatter", new_callable=AsyncMock),
-        patch(f"{_MOD}.get_utc_now") as mock_now,
-    ):
+    with patch(f"{_MOD}.get_utc_now") as mock_now:
         mock_doc_repo.get_by_doc_id = AsyncMock(return_value=doc)
         mock_doc_repo.upsert_from_handler = AsyncMock(return_value=None)
         fixed_now = get_utc_now()
         mock_now.return_value = fixed_now
 
         result = await make_knowledge_service(
-            documents=mock_doc_repo,
+            documents=mock_doc_repo, root=root
         ).patch_document("d_testdoc00001", "app1", "proj1", title="New Title")
 
     assert isinstance(result, PatchResult)
     assert result.doc_id == "d_testdoc00001"
-    assert "title" in result.updated_fields
-    assert "category_id" not in result.updated_fields
+    assert result.updated_fields == ["title"]
     assert result.updated_at == fixed_now
-    mock_doc_repo.upsert_from_handler.assert_awaited_once()
+    assert "title: New Title" in (doc_dir / "index.md").read_text()
+    (payload,) = mock_doc_repo.upsert_from_handler.await_args.args
+    assert payload.title == "New Title" and payload.md_path == md_path
 
 
 async def test_patch_document_no_changes_returns_empty_fields() -> None:
@@ -410,7 +402,7 @@ async def test_patch_document_not_found_raises() -> None:
     """Raises DocumentNotFoundError when doc_id does not exist in SQLite or md."""
     mock_doc_repo = MagicMock()
     with (
-        patch(f"{_MOD}._locate_index_md", new_callable=AsyncMock) as mock_locate,
+        patch(f"{_STORE}._locate_index", new_callable=AsyncMock) as mock_locate,
     ):
         mock_doc_repo.get_by_doc_id = AsyncMock(return_value=None)
         mock_locate.return_value = None

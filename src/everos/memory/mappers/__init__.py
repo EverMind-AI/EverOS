@@ -15,11 +15,13 @@ from __future__ import annotations
 from . import agent_case as agent_case
 from . import agent_skill as agent_skill
 from . import cluster as cluster
+from . import knowledge as knowledge
 from . import profile as profile
 
 __all__ = [
     "agent_case",
     "agent_skill",
     "cluster",
+    "knowledge",
     "profile",
 ]

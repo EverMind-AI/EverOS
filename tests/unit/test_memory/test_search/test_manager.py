@@ -17,20 +17,37 @@ candidate list; the manager's job is to:
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
-from collections.abc import Mapping, Sequence
-from typing import Any, ClassVar
+from collections.abc import Sequence
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-from everalgo.types import Candidate
 
+from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
 from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.models import CanonicalMessage, Cluster
-from everos.memory.ports import Scope, SessionKey
-from everos.memory.search._candidates import FactCandidate
+from everos.memory.ports import Scope, SearchHit, SessionKey
 from everos.memory.search.dto import SearchMethod, SearchRequest
 from everos.memory.search.manager import SearchManager
+from everos.memory.search.recall import (
+    AgentCaseRecaller,
+    AgentSkillRecaller,
+    AtomicFactRecaller,
+    EpisodeRecaller,
+)
+from everos.memory.search.recall.base import RecallerDeps
+
+from ._records import (
+    ScriptedIndex,
+    hit,
+    stored_case,
+    stored_episode,
+    stored_fact,
+    stored_skill,
+)
 
 # ── Stubs ───────────────────────────────────────────────────────────────
 
@@ -39,178 +56,57 @@ def _ts() -> _dt.datetime:
     return _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
 
 
+def _keyed(stored: Any, record_id: str) -> Any:
+    """Give a stored record the global id ``record_id``."""
+    return dataclasses.replace(
+        stored, ref=dataclasses.replace(stored.ref, id=record_id)
+    )
+
+
 def _episode_row(
     eid: str, score: float = 0.8, memcell_id: str | None = None
-) -> Candidate:
-    return Candidate(
-        id=eid,
-        score=score,
-        source="keyword",
-        metadata={
-            "owner_id": "alice",
-            "owner_type": "user",
-            "session_id": "sess_a",
-            "timestamp": _ts(),
-            "sender_ids": ["alice"],
-            "subject": f"subj {eid}",
-            "summary": f"summary {eid}",
-            "episode": f"body {eid}",
-            "entry_id": eid,
-            "parent_id": memcell_id if memcell_id is not None else f"mc_{eid}",
-        },
+) -> SearchHit[Any]:
+    """An episode match whose global id and entry id are both ``eid``."""
+    stored = stored_episode(
+        eid, parent_id=memcell_id if memcell_id is not None else f"mc_{eid}"
     )
+    return hit(_keyed(stored, eid), score)
 
 
-def _case_row(cid: str) -> Candidate:
-    return Candidate(
-        id=cid,
-        score=0.7,
-        source="keyword",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "session_id": "sess_b",
-            "timestamp": _ts(),
-            "task_intent": f"intent {cid}",
-            "approach": f"approach {cid}",
-            "quality_score": 0.8,
-        },
+def _case_row(cid: str) -> SearchHit[Any]:
+    stored = stored_case(
+        cid,
+        owner_id="agent_a",
+        task_intent=f"intent {cid}",
+        approach=f"approach {cid}",
     )
+    return hit(_keyed(stored, cid), 0.7)
 
 
-def _skill_row(sid: str) -> Candidate:
-    return Candidate(
-        id=sid,
-        score=0.65,
-        source="keyword",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "name": f"skill_{sid}",
-            "description": f"desc {sid}",
-            "content": f"content {sid}",
-            "confidence": 0.9,
-            "maturity_score": 0.6,
-            "source_case_ids": [],
-        },
+def _skill_row(sid: str, source_case_ids: Sequence[str] = ()) -> SearchHit[Any]:
+    stored = stored_skill(
+        sid,
+        owner_id="agent_a",
+        name=f"skill_{sid}",
+        description=f"desc {sid}",
+        source_case_ids=source_case_ids,
     )
+    return hit(stored, 0.65)
 
 
-class _StubEpisodeRecaller:
-    kind: ClassVar[str] = "episode"
-    everalgo_memory_type: ClassVar[str] = "episodic"
-    text_field: ClassVar[str] = "episode"
-
-    def __init__(self, sparse: list[Candidate], dense: list[Candidate]) -> None:
-        self._sparse = sparse
-        self._dense = dense
-        self.last_where: str | None = None
-
-    async def sparse_recall(
-        self, query: str, where: str, *, limit: int
-    ) -> list[Candidate]:
-        self.last_where = where
-        return list(self._sparse[:limit])
-
-    async def dense_recall(
-        self, vector: Sequence[float], where: str, *, limit: int
-    ) -> list[Candidate]:
-        self.last_where = where
-        return list(self._dense[:limit])
-
-    async def fetch_by_parent_ids(
-        self, parent_ids: Sequence[str], where: str
-    ) -> list[Candidate]:
-        by_parent = {str(c.metadata.get("parent_id", "")): c for c in self._dense}
-        return [by_parent[p] for p in parent_ids if p in by_parent]
-
-    async def fetch_by_entry_ids(
-        self, entry_ids: Sequence[str], where: str
-    ) -> list[Candidate]:
-        by_entry = {str(c.metadata.get("entry_id", "")): c for c in self._dense}
-        return [by_entry[e] for e in entry_ids if e in by_entry]
+def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> SearchHit[Any]:
+    """An atomic-fact match hanging off episode entry ``parent_id``."""
+    return hit(_keyed(stored_fact(fid, parent_id=parent_id), fid), score)
 
 
-class _StubAtomicFactRecaller:
-    kind: ClassVar[str] = "atomic_fact"
-    everalgo_memory_type: ClassVar[str] = "episodic"
-    text_field: ClassVar[str] = "fact"
-
-    def __init__(
-        self,
-        facts_map: dict[str, list[FactCandidate]] | None = None,
-        dense: list[Candidate] | None = None,
-    ) -> None:
-        self._facts_map = facts_map or {}
-        self._dense = dense or []
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return []
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-    async def facts_for_episodes(
-        self,
-        ep_to_parents: Mapping[str, Sequence[str]],
-        where: str,
-        *,
-        per_episode: int,
-        query_vector: Any = None,
-    ) -> dict[str, list[FactCandidate]]:
-        # Accepted to match the real recaller signature; stub doesn't use it.
-        return {
-            eid: self._facts_map.get(eid, [])[:per_episode] for eid in ep_to_parents
-        }
-
-
-class _StubAgentCaseRecaller:
-    kind: ClassVar[str] = "agent_case"
-    everalgo_memory_type: ClassVar[str] = "case"
-    text_field: ClassVar[str] = "task_intent"
-
-    def __init__(self, sparse: list[Candidate], dense: list[Candidate]) -> None:
-        self._sparse = sparse
-        self._dense = dense
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._sparse)
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-
-class _StubAgentSkillRecaller:
-    kind: ClassVar[str] = "agent_skill"
-    everalgo_memory_type: ClassVar[str] = "skill"
-    text_field: ClassVar[str] = "description"
-
-    def __init__(
-        self,
-        sparse: list[Candidate],
-        dense: list[Candidate],
-        by_case: list[Candidate] | None = None,
-    ) -> None:
-        self._sparse = sparse
-        self._dense = dense
-        # Bridge recall fixture: reverse-resolved skills (``fetch_by_case_ids``).
-        # Default empty — only the bridge tests populate this.
-        self._by_case = by_case or []
-
-    async def sparse_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._sparse)
-
-    async def dense_recall(self, *_: Any, **__: Any) -> list[Candidate]:
-        return list(self._dense)
-
-    async def fetch_by_case_ids(
-        self, case_ids: Sequence[str], where: str, *, limit: int
-    ) -> list[Candidate]:
-        return list(self._by_case)
+def _tokenizer() -> Tokenizer:
+    tok = MagicMock(spec=Tokenizer)
+    tok.tokenize.return_value = ["hi"]
+    return tok
 
 
 class _StubProfileRecaller:
-    async def fetch(self, owner_id: str) -> list:
+    async def fetch(self, owner_id: str, **_: Any) -> list[Any]:
         return []
 
 
@@ -251,28 +147,56 @@ class _StubEmbedding:
 
 def _build_manager(
     *,
-    episode_sparse: list[Candidate] | None = None,
-    episode_dense: list[Candidate] | None = None,
-    case_sparse: list[Candidate] | None = None,
-    case_dense: list[Candidate] | None = None,
-    skill_sparse: list[Candidate] | None = None,
-    skill_dense: list[Candidate] | None = None,
-    skill_by_case: list[Candidate] | None = None,
-    facts_map: dict[str, list[FactCandidate]] | None = None,
-    atomic_fact_dense: list[Candidate] | None = None,
+    episode_sparse: list[SearchHit[Any]] | None = None,
+    episode_dense: list[SearchHit[Any]] | None = None,
+    case_sparse: list[SearchHit[Any]] | None = None,
+    case_dense: list[SearchHit[Any]] | None = None,
+    skill_sparse: list[SearchHit[Any]] | None = None,
+    skill_dense: list[SearchHit[Any]] | None = None,
+    skill_by_case: list[SearchHit[Any]] | None = None,
+    atomic_fact_dense: list[SearchHit[Any]] | None = None,
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
 ) -> SearchManager:
-    ep_recaller = _StubEpisodeRecaller(episode_sparse or [], episode_dense or [])
+    """A manager over the real recallers, each reading a scripted index.
+
+    ``find`` on the episode index evaluates its filter (the MaxSim parent
+    fetch narrows by entry id); the fact index answers both the fact ANN and
+    the HYBRID fact expansion from ``atomic_fact_dense``.
+    """
+    deps = RecallerDeps(tokenizer=_tokenizer())
+    episodes = [*(episode_sparse or []), *(episode_dense or [])]
     return SearchManager(
-        episode_recaller=ep_recaller,
-        atomic_fact_recaller=_StubAtomicFactRecaller(facts_map, atomic_fact_dense),
-        agent_case_recaller=_StubAgentCaseRecaller(case_sparse or [], case_dense or []),
-        agent_skill_recaller=_StubAgentSkillRecaller(
-            skill_sparse or [], skill_dense or [], skill_by_case
+        episode_recaller=EpisodeRecaller(
+            deps,
+            ScriptedIndex(  # type: ignore[arg-type]
+                sparse=episode_sparse or [],
+                dense=episode_dense or [],
+                found=episodes,
+                filter_found=True,
+            ),
         ),
-        profile_recaller=_StubProfileRecaller(),
+        atomic_fact_recaller=AtomicFactRecaller(
+            deps,
+            ScriptedIndex(  # type: ignore[arg-type]
+                dense=atomic_fact_dense or [],
+                found=atomic_fact_dense or [],
+            ),
+        ),
+        agent_case_recaller=AgentCaseRecaller(
+            deps,
+            ScriptedIndex(sparse=case_sparse or [], dense=case_dense or []),  # type: ignore[arg-type]
+        ),
+        agent_skill_recaller=AgentSkillRecaller(
+            deps,
+            ScriptedIndex(  # type: ignore[arg-type]
+                sparse=skill_sparse or [],
+                dense=skill_dense or [],
+                found=skill_by_case or [],
+            ),
+        ),
+        profile_recaller=_StubProfileRecaller(),  # type: ignore[arg-type]
         session_buffer=_NO_SESSION_BUFFER,
         cluster_store=_NO_CLUSTERS,
         embedding=embedding,
@@ -365,15 +289,9 @@ async def test_user_keyword_leaves_atomic_facts_empty() -> None:
     the contract (mirrors enterprise where event_log is a separate
     memory_type, not auto-attached to episodic results).
     """
-    fact = FactCandidate(
-        id="f1",
-        parent_episode_id="ep_1",
-        score=0.0,
-        metadata={"fact": "Alice prefers oat milk"},
-    )
     mgr = _build_manager(
         episode_sparse=[_episode_row("ep_1")],
-        facts_map={"ep_1": [fact]},
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.9)],
     )
     resp = await mgr.search(_user_req())
     ep = resp.data.episodes[0]
@@ -387,13 +305,13 @@ async def test_user_keyword_no_results() -> None:
 
 async def test_user_keyword_filters_compile_pinned_owner() -> None:
     """``compile_filters`` should pin owner_id / owner_type on the where."""
-    recaller = _StubEpisodeRecaller([_episode_row("ep_1")], [])
+    index = ScriptedIndex(sparse=[_episode_row("ep_1")])
     mgr = SearchManager(
-        episode_recaller=recaller,
-        atomic_fact_recaller=_StubAtomicFactRecaller(),
-        agent_case_recaller=_StubAgentCaseRecaller([], []),
-        agent_skill_recaller=_StubAgentSkillRecaller([], []),
-        profile_recaller=_StubProfileRecaller(),
+        episode_recaller=EpisodeRecaller(RecallerDeps(tokenizer=_tokenizer()), index),  # type: ignore[arg-type]
+        atomic_fact_recaller=MagicMock(),
+        agent_case_recaller=MagicMock(),
+        agent_skill_recaller=MagicMock(),
+        profile_recaller=_StubProfileRecaller(),  # type: ignore[arg-type]
         session_buffer=_NO_SESSION_BUFFER,
         cluster_store=_NO_CLUSTERS,
         embedding=None,
@@ -401,30 +319,11 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
         llm_client=None,
     )
     await mgr.search(_user_req())
-    assert recaller.last_where is not None
     from everos.infra.persistence.lancedb import render_predicate
 
-    rendered = render_predicate(recaller.last_where)
+    rendered = render_predicate(index.calls[-1][2])
     assert "owner_id = 'alice'" in rendered
     assert "owner_type = 'user'" in rendered
-
-
-def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> Candidate:
-    """Atomic-fact candidate emitted by ``AtomicFactRecaller.dense_recall``."""
-    return Candidate(
-        id=fid,
-        score=score,
-        source="vector",
-        metadata={
-            "owner_id": "alice",
-            "owner_type": "user",
-            "session_id": "sess_a",
-            "timestamp": _ts(),
-            "sender_ids": ["alice"],
-            "parent_id": parent_id,
-            "fact": f"fact {fid}",
-        },
-    )
 
 
 # ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
@@ -639,16 +538,10 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
     """
     ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
     ep2 = _episode_row("ep_2", score=0.7, memcell_id="mc_2")
-    fact1 = FactCandidate(
-        id="f1",
-        parent_episode_id="ep_1",
-        score=0.95,
-        metadata={"fact": "Alice prefers oat milk"},
-    )
     mgr = _build_manager(
         episode_sparse=[ep1, ep2],
         episode_dense=[ep1, ep2],
-        facts_map={"ep_1": [fact1]},
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.95)],
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10))
@@ -881,70 +774,6 @@ async def test_agentic_agent_skills_delegates_to_search_agent_skills_agentic(
     assert resp.data.agent_skills == fake_skills
 
 
-# ── _merge_by_id_max / _case_bridged_skills helpers ──────────────────────
-
-
-def test_merge_by_id_max_keeps_higher_score_on_collision() -> None:
-    """Same-id collision → keep the higher score; non-colliding rows are
-    unioned. Used to fold bridge candidates into the direct dense pool.
-    """
-    from everos.memory.search.manager import _merge_by_id_max
-
-    primary = [
-        Candidate(id="s1", score=0.5, source="vector", metadata={"src": "primary"}),
-        Candidate(id="s2", score=0.7, source="vector", metadata={"src": "primary"}),
-    ]
-    extra = [
-        Candidate(id="s1", score=0.9, source="vector", metadata={"src": "bridge"}),
-        Candidate(id="s2", score=0.3, source="vector", metadata={"src": "bridge"}),
-        Candidate(id="s3", score=0.6, source="vector", metadata={"src": "bridge"}),
-    ]
-    merged = {c.id: c for c in _merge_by_id_max(primary, extra)}
-    # s1 collision → bridge wins (0.9 > 0.5); s2 collision → primary wins
-    # (0.7 > 0.3); s3 fresh-from-bridge is added.
-    assert merged["s1"].score == 0.9
-    assert merged["s1"].metadata["src"] == "bridge"
-    assert merged["s2"].score == 0.7
-    assert merged["s2"].metadata["src"] == "primary"
-    assert merged["s3"].score == 0.6
-
-
-async def test_case_bridged_skills_max_pools_score_across_source_cases() -> None:
-    """Each bridged skill inherits the highest score among its matched
-    source cases (mirrors the ``maxsim_atomic`` fact→episode pooling).
-    Source cases not present in the bridge pool are ignored.
-    """
-    skill_row = Candidate(
-        id="agent_a_skill_x",
-        score=0.0,  # bridge ignores the recaller-side score
-        source="vector",
-        metadata={"source_case_ids": ["c1", "c2", "c3"], "name": "x"},
-    )
-    mgr = _build_manager(skill_by_case=[skill_row])
-    bridge_cases = [
-        Candidate(id="c1", score=0.4, source="vector", metadata={}),
-        Candidate(id="c2", score=0.9, source="vector", metadata={}),  # max wins
-        Candidate(id="c_other", score=0.7, source="vector", metadata={}),
-    ]
-    bridged = await mgr._case_bridged_skills(bridge_cases, where="", top_k=5)
-    assert len(bridged) == 1
-    assert bridged[0].id == "agent_a_skill_x"
-    # c1=0.4 and c2=0.9 are in the bridge pool; c3 is not → max-pool == 0.9.
-    assert bridged[0].score == pytest.approx(0.9)
-    # Metadata (incl. ``source_case_ids``) rides through so downstream
-    # shaping doesn't need a second fetch.
-    assert bridged[0].metadata["source_case_ids"] == ["c1", "c2", "c3"]
-
-
-async def test_case_bridged_skills_returns_empty_for_none_or_empty_input() -> None:
-    """No bridge cases ⇒ no bridge recall (skip the reverse fetch entirely).
-    This is the cross-encoder lane / KEYWORD / VECTOR contract.
-    """
-    mgr = _build_manager(skill_by_case=[_skill_row("s1")])  # noise the stub
-    assert await mgr._case_bridged_skills(None, where="", top_k=5) == []
-    assert await mgr._case_bridged_skills([], where="", top_k=5) == []
-
-
 # ── Agent HYBRID lane selection ──────────────────────────────────────────
 
 
@@ -960,11 +789,11 @@ async def test_agent_hybrid_no_llm_rerank_runs_cross_encoder_lane(
     async def _fake_hybrid(
         query: str,
         *,
-        sparse: list[Candidate],
-        dense: list[Candidate],
+        sparse: Any,
+        dense: Any,
         reranker: Any,
         top_k: int,
-    ) -> list:
+    ) -> list[Any]:
         captured.update(
             query=query, sparse=sparse, dense=dense, reranker=reranker, top_k=top_k
         )
@@ -1024,31 +853,12 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     """
     from everalgo.types import RankOutput, ScoredItem
 
-    case_result = ScoredItem(
-        id="agent_a_c1",
-        score=0.85,
-        item_type="case",
-        # Shaper requires owner_type="agent" + timestamp + intent/approach;
-        # otherwise the case is dropped and bridge_cases comes back empty.
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "session_id": "sess_b",
-            "timestamp": _ts(),
-            "task_intent": "intent c1",
-            "approach": "approach c1",
-            "quality_score": 0.8,
-        },
-    )
+    case_hit = _case_row("agent_a_c1")
+    case_result = ScoredItem(id="agent_a_c1", score=0.85, item_type="case")
     skill_direct = _skill_row("s_direct")
-    skill_bridged = Candidate(
-        id="s_bridged",
-        score=0.0,
-        source="vector",
-        metadata={"source_case_ids": ["agent_a_c1"], "name": "s_bridged"},
-    )
+    skill_bridged = _skill_row("s_bridged", source_case_ids=["agent_a_c1"])
 
-    seen_skill_dense: dict[str, list[Candidate]] = {}
+    seen_skill_dense: dict[str, list[Any]] = {}
 
     async def _fake_arank(rank_input: Any, **_: Any) -> RankOutput:
         if rank_input.memory_type == "case":
@@ -1061,6 +871,7 @@ async def test_agent_hybrid_llm_rerank_merges_bridged_skills_into_dense_pool(
     mgr = _build_manager(
         embedding=_StubEmbedding(),
         llm_client=_StubLLM(),
+        case_dense=[case_hit],
         skill_sparse=[],
         skill_dense=[skill_direct],
         skill_by_case=[skill_bridged],

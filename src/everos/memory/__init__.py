@@ -6,8 +6,12 @@ prompt management capabilities.
 External usage:
     from everos.memory import (
         CanonicalMessage, IngestResult,
-        ToolCall, MemCell, Episode, AlgoMessage,
+        ToolCall, MemCell, Episode,
     )
+
+everalgo's own models are not re-exported: the domain converts to and
+from them in :mod:`everos.memory.mappers`, and code that calls an
+everalgo operator imports its types from ``everalgo`` directly.
 
 Storage is reached only through the protocols in :mod:`everos.memory.ports`;
 path resolution and addressing of markdown records live with the storage
@@ -16,11 +20,6 @@ business logic (extract / search / reflection / custom_instructions).
 """
 
 from .models import AgentCase as AgentCase
-from .models import AlgoAgentCase as AlgoAgentCase
-from .models import AlgoAtomicFact as AlgoAtomicFact
-from .models import AlgoEpisode as AlgoEpisode
-from .models import AlgoForesight as AlgoForesight
-from .models import AlgoMessage as AlgoMessage
 from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
 from .models import Episode as Episode
@@ -31,11 +30,6 @@ from .models import ToolCall as ToolCall
 
 __all__ = [
     "AgentCase",
-    "AlgoAgentCase",
-    "AlgoAtomicFact",
-    "AlgoEpisode",
-    "AlgoForesight",
-    "AlgoMessage",
     "AtomicFact",
     "CanonicalMessage",
     "Episode",

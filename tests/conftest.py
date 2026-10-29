@@ -16,6 +16,9 @@ Cross-suite fixtures:
 
 from __future__ import annotations
 
+# Hermetic guard, before anything can import pymilvus (see the module).
+import tests._dotenv_guard  # noqa: F401  isort: skip
+
 # First import in the test process, on purpose. everos/__init__.py registers
 # the MSVC runtime DLL directory with the Windows loader, and that only helps
 # extensions imported *after* it -- sqlalchemy imports greenlet the moment it

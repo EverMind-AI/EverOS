@@ -11,11 +11,11 @@ from everos.memory.ports import (
     All,
     Comparison,
     Filter,
-    IndexHit,
     MemoryRef,
     Page,
     PageResult,
     Scope,
+    SearchHit,
     SessionKey,
     Stored,
     all_of,
@@ -54,7 +54,14 @@ def test_scope_filter_composes_with_more_conditions() -> None:
         SessionKey(app_id="a", project_id="p", session_id="s"),
         Page(sort_by="timestamp"),
         MemoryRef(id="u1_ep_1", entry_id="ep_1", md_path="x.md"),
-        IndexHit(id="u1_ep_1", score=None, fields={}),
+        SearchHit(
+            stored=Stored(
+                ref=MemoryRef(id="u1_ep_1", entry_id="ep_1", md_path="x.md"),
+                scope=_scope(),
+                item="record",
+            ),
+            score=None,
+        ),
     ],
 )
 def test_value_objects_are_frozen(value: object) -> None:

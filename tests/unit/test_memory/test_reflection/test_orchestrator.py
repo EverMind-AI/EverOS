@@ -20,8 +20,8 @@ import pytest
 from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
-from everos.memory.models import Episode
-from everos.memory.ports import IndexHit, MemoryRef, Scope, Stored
+from everos.memory.models import AtomicFact, Episode
+from everos.memory.ports import MemoryRef, Scope, SearchHit, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
 from everos.memory.reflection.orchestrator import _MAX_CLUSTERS_PER_RUN
 
@@ -47,6 +47,23 @@ class _FakeAlgoResult:
     subject: str
     timestamp: int
     summary: str = "merged summary"
+
+
+def _fact_hit(entry_id: str, md_path: str) -> SearchHit[AtomicFact]:
+    """A filtered-scan match of one live atomic fact."""
+    return SearchHit(
+        stored=Stored(
+            ref=MemoryRef(id=f"u_alice_{entry_id}", entry_id=entry_id, md_path=md_path),
+            scope=_SCOPE,
+            item=AtomicFact(
+                owner_id="u_alice",
+                content="a fact",
+                timestamp=0,
+                parent_id="ep_20260601_0001",
+            ),
+        ),
+        score=None,
+    )
 
 
 def _stored_episode(
@@ -219,11 +236,7 @@ async def test_deprecate_facts_patches_fact_files_scoped_to_the_project(
     )
     ports.atomic_fact_index.find = AsyncMock(
         return_value=[
-            IndexHit(
-                id=f"u_alice_{eid}",
-                score=None,
-                fields={"entry_id": eid, "md_path": md_path},
-            )
+            _fact_hit(eid, md_path)
             for eid, md_path in (
                 ("af_1", "facts/a.md"),
                 ("af_2", "facts/a.md"),
@@ -453,15 +466,7 @@ async def test_deprecation_marks_markdown_and_never_writes_the_index(
         episodes=[ep1, ep2],
         merged_entry_id="ep_m",
     )
-    ports.atomic_fact_index.find = AsyncMock(
-        return_value=[
-            IndexHit(
-                id="u_alice_af_1",
-                score=None,
-                fields={"entry_id": "af_1", "md_path": "f.md"},
-            )
-        ]
-    )
+    ports.atomic_fact_index.find = AsyncMock(return_value=[_fact_hit("af_1", "f.md")])
 
     report = await ports.finisher().finish(
         scope=_SCOPE, merged_entry_id="ep_m", context=_context(ep1, ep2)

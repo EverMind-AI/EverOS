@@ -1,9 +1,10 @@
 """Read-side storage ports: the rebuildable derived indexes.
 
 Indexes are projections of the markdown truth maintained by the cascade;
-the domain only reads them. Search methods return :class:`IndexHit`
-because the search pipeline still consumes rows by column name; reads
-that serve domain logic return domain objects wrapped in :class:`Stored`.
+the domain only reads them. Every read returns domain objects: search
+methods as scored :class:`SearchHit` matches (owner-less knowledge topics
+as :class:`ScoredKnowledgeTopic`), other reads wrapped in :class:`Stored`.
+Column names, scoring columns and vector fields stay inside the adapters.
 """
 
 from __future__ import annotations
@@ -23,16 +24,18 @@ from typing import Protocol, runtime_checkable
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
+    AtomicFact,
     Episode,
     EpisodeParentType,
     Profile,
 )
 from everos.memory.ports.query import (
     Filter,
-    IndexHit,
     Page,
     PageResult,
     Scope,
+    ScoredKnowledgeTopic,
+    SearchHit,
     Stored,
 )
 
@@ -41,19 +44,21 @@ from everos.memory.ports.query import (
 class EpisodeIndex(Protocol):
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[Episode]]: ...
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[Episode]]: ...
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[Episode]]:
         """ANN over the subject embedding; episodes without one never match."""
         ...
 
-    async def find(self, where: Filter, *, limit: int | None = None) -> list[IndexHit]:
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[Episode]]:
         """Every match when ``limit`` is ``None``."""
         ...
 
@@ -85,26 +90,26 @@ class EpisodeIndex(Protocol):
 class AtomicFactIndex(Protocol):
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AtomicFact]]: ...
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AtomicFact]]: ...
 
     async def find(
         self, where: Filter, *, limit: int | None = None
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AtomicFact]]: ...
 
 
 @runtime_checkable
 class AgentCaseIndex(Protocol):
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AgentCase]]: ...
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AgentCase]]: ...
 
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
@@ -119,15 +124,15 @@ class AgentCaseIndex(Protocol):
 class AgentSkillIndex(Protocol):
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AgentSkill]]: ...
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AgentSkill]]: ...
 
     async def find(
         self, where: Filter, *, limit: int | None = None
-    ) -> list[IndexHit]: ...
+    ) -> list[SearchHit[AgentSkill]]: ...
 
     async def paginate(
         self, where: Filter, page: Page
@@ -153,8 +158,8 @@ class ProfileIndex(Protocol):
 class KnowledgeTopicIndex(Protocol):
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[ScoredKnowledgeTopic]: ...
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]: ...
+    ) -> list[ScoredKnowledgeTopic]: ...

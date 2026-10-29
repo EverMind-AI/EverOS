@@ -26,12 +26,11 @@ from everos.service import (
     DocumentDetail,
     DocumentListResult,
     DocumentNotFoundError,
-    KnowledgeService,
     TopicDetail,
     TopicNotFoundError,
     TopicOverview,
 )
-from tests.fakes import make_application
+from tests.fakes import make_application, make_knowledge_service
 from tests.fakes.storage import Storage
 
 # Route helpers are patched in the route module; use-case calls are patched on
@@ -59,13 +58,8 @@ async def client(
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    knowledge = KnowledgeService(
+    knowledge = make_knowledge_service(
         root=MemoryRoot(tmp_path),
-        extractor=None,
-        embedding=None,
-        reranker=None,
-        recaller=None,  # type: ignore[arg-type] - every search is mocked
-        search_config=load_settings().knowledge.search,
         parse_file=_parser_must_not_run,
         documents=storage.sqlite.knowledge_document,
         topics=storage.sqlite.knowledge_topic,

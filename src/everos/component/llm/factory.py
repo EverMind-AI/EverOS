@@ -30,14 +30,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from everos.config import Settings, missing_config_error
+from everos.core.errors import LLMNotConfiguredError
 
 from ._tracing_observer import TracingObserver
 from .observer import LLMCallObserver, NullObserver
 from .openai_provider import OpenAIProvider, ResponseFormatMode
-
-
-class LLMNotConfiguredError(RuntimeError):
-    """Raised when an LLM section is missing ``api_key`` or ``base_url``."""
 
 
 @dataclass(frozen=True)

@@ -313,3 +313,13 @@ class ProviderNotConfiguredError(ConfigurationError):
 # Renamed in v0.2 — old names kept for external consumers.
 DocumentAlreadyExistsError = DuplicateDocumentError
 ValidationError = InvalidInputError
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised when an LLM section is missing ``api_key`` or ``base_url``.
+
+    A ``RuntimeError`` rather than an ``AppError``: it is raised while the
+    application is assembled and by use cases that need a model, and the API
+    layer maps it on its own. It lives here so a use case can raise it
+    without depending on the LLM provider package.
+    """

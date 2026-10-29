@@ -34,12 +34,15 @@ from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
 from .llm import AGENT_TRACK_OPERATORS as AGENT_TRACK_OPERATORS
+from .llm import KNOWLEDGE_OPERATORS as KNOWLEDGE_OPERATORS
 from .llm import UNUSABLE_REPLY as UNUSABLE_REPLY
 from .llm import USER_TRACK_OPERATORS as USER_TRACK_OPERATORS
 from .llm import agent_track_llm as agent_track_llm
 from .llm import agent_track_script as agent_track_script
 from .llm import boundary_reply as boundary_reply
 from .llm import boundary_window as boundary_window
+from .llm import knowledge_llm as knowledge_llm
+from .llm import knowledge_script as knowledge_script
 from .llm import memorize_llm as memorize_llm
 from .llm import user_track_llm as user_track_llm
 from .llm import user_track_script as user_track_script
@@ -65,6 +68,7 @@ from .trajectories import agent_trajectory_messages as agent_trajectory_messages
 
 __all__ = [
     "AGENT_TRACK_OPERATORS",
+    "KNOWLEDGE_OPERATORS",
     "TRAJECTORY_START_MS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
@@ -97,6 +101,8 @@ __all__ = [
     "bundled_instructions",
     "handler_deps",
     "index_repositories",
+    "knowledge_llm",
+    "knowledge_script",
     "make_application",
     "make_backfill_context",
     "make_deps",

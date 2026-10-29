@@ -18,8 +18,8 @@ __all__ = [
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from everos.memory.models import AgentCase, AgentSkill, Episode, Profile
-from everos.memory.ports import Filter, IndexHit, Page, PageResult, Scope, Stored
+from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode, Profile
+from everos.memory.ports import Filter, Page, PageResult, Scope, SearchHit, Stored
 
 from ._filter import matches
 
@@ -31,12 +31,12 @@ def _same_space(a: Scope, b: Scope) -> bool:
 class _Unsearchable:
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[Any]]:
         raise NotImplementedError
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[Any]]:
         raise NotImplementedError
 
 
@@ -64,10 +64,12 @@ class InMemoryEpisodeIndex(_Unsearchable):
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[Episode]]:
         raise NotImplementedError
 
-    async def find(self, where: Filter, *, limit: int | None = None) -> list[IndexHit]:
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[Episode]]:
         raise NotImplementedError
 
     async def find_by_entry_ids(
@@ -112,19 +114,34 @@ class InMemoryEpisodeIndex(_Unsearchable):
 
 
 class InMemoryAtomicFactIndex(_Unsearchable):
-    """Seeded atomic-fact rows as column dicts."""
+    """Seeded atomic facts; ``deprecated_by`` is tracked per entry id."""
 
     def __init__(self) -> None:
-        self.rows: list[Mapping[str, Any]] = []
+        self.rows: list[Stored[AtomicFact]] = []
+        self.deprecated_by: dict[str, str] = {}
 
-    def seed(self, *rows: Mapping[str, Any]) -> None:
+    def seed(self, *rows: Stored[AtomicFact]) -> None:
         self.rows.extend(rows)
 
-    async def find(self, where: Filter, *, limit: int | None = None) -> list[IndexHit]:
+    def _fields(self, row: Stored[AtomicFact]) -> Mapping[str, Any]:
+        return {
+            **row.item.model_dump(),
+            "id": row.ref.id,
+            "entry_id": row.ref.entry_id,
+            "md_path": row.ref.md_path,
+            "app_id": row.scope.app_id,
+            "project_id": row.scope.project_id,
+            "owner_type": row.scope.owner_type,
+            "deprecated_by": self.deprecated_by.get(row.ref.entry_id),
+        }
+
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[AtomicFact]]:
         hits = [
-            IndexHit(id=row["id"], score=None, fields=row)
+            SearchHit(stored=row, score=None)
             for row in self.rows
-            if matches(where, row)
+            if matches(where, self._fields(row))
         ]
         return hits if limit is None else hits[:limit]
 
@@ -164,7 +181,9 @@ class InMemoryAgentSkillIndex(_Unsearchable):
     def seed(self, *rows: Stored[AgentSkill]) -> None:
         self.rows.extend(rows)
 
-    async def find(self, where: Filter, *, limit: int | None = None) -> list[IndexHit]:
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[AgentSkill]]:
         raise NotImplementedError
 
     async def paginate(

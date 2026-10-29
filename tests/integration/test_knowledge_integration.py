@@ -38,8 +38,10 @@ from everos.infra.persistence.factories import build_indexes
 from everos.infra.persistence.lancedb import (
     KnowledgeTopic,
 )
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore
 from everos.infra.persistence.sqlite import (
     DocumentUpsertPayload,
+    SqliteKnowledgeCatalog,
 )
 from everos.memory.search.recall import KnowledgeTopicRecaller, RecallerDeps
 from everos.service.knowledge import ExtractionEmptyError, KnowledgeService
@@ -212,9 +214,10 @@ def _knowledge(storage: Storage, extractor: Any = None) -> KnowledgeService:
     """
     settings = load_settings()
     return KnowledgeService(
-        documents=storage.sqlite.knowledge_document,
-        topics=storage.sqlite.knowledge_topic,
-        root=storage.root,
+        store=MarkdownKnowledgeStore(storage.root),
+        catalog=SqliteKnowledgeCatalog(
+            storage.sqlite.knowledge_document, storage.sqlite.knowledge_topic
+        ),
         extractor=extractor,
         embedding=_PROVIDERS["embedding"],
         reranker=_PROVIDERS["reranker"],

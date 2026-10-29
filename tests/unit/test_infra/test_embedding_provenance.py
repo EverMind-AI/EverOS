@@ -76,6 +76,10 @@ def _configured(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("EVEROS_EMBEDDING__MODEL", "fake-768")
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "key")
     monkeypatch.setenv("EVEROS_EMBEDDING__BASE_URL", "http://127.0.0.1:1/v1")
+    # pymilvus loads the working directory's ``.env`` when it is imported, so a
+    # developer's local ``EVEROS_EMBEDDING__DIMENSIONS`` would otherwise leak in
+    # and add a warning these cases do not expect.
+    monkeypatch.delenv("EVEROS_EMBEDDING__DIMENSIONS", raising=False)
     yield
 
 

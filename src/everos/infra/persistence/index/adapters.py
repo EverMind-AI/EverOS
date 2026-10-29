@@ -30,18 +30,21 @@ from everos.core.observability.logging import get_logger
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
+    AtomicFact,
     Episode,
     EpisodeParentType,
+    KnowledgeTopic,
     Profile,
 )
 from everos.memory.ports import (
     Filter,
-    IndexHit,
     MemoryRef,
     OwnerType,
     Page,
     PageResult,
     Scope,
+    ScoredKnowledgeTopic,
+    SearchHit,
     Stored,
     primary_key,
 )
@@ -59,39 +62,47 @@ _VECTOR_COLUMNS = frozenset({"vector", "subject_vector"})
 type Row = Mapping[str, Any]
 
 
-class _SearchableIndex:
-    """BM25 + ANN + filtered scan shared by every searchable kind.
+class _SearchableIndex[T]:
+    """BM25 + ANN + filtered scan shared by every owner-scoped searchable kind.
 
     Args:
         repo: The kind's derived-index repository.
+        to_stored: The kind's row -> domain conversion.
     """
 
-    def __init__(self, repo: IndexRepository[Any]) -> None:
+    def __init__(
+        self, repo: IndexRepository[Any], to_stored: Callable[[Row], Stored[T]]
+    ) -> None:
         self._repo = repo
+        self._to_stored = to_stored
 
     async def sparse_search(
         self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[T]]:
         rows = await self._repo.sparse_search(
             terms, where, columns=self._repo.schema.BM25_FIELDS, limit=limit
         )
-        return [_hit(row) for row in rows]
+        return [self._hit(row, _bm25_score(row)) for row in rows]
 
     async def dense_search(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[T]]:
         rows = await self._repo.dense_search(vector, where, limit=limit)
-        return [_hit(row) for row in rows]
+        return [self._hit(row, _cosine_similarity(row)) for row in rows]
 
-    async def find(self, where: Filter, *, limit: int | None = None) -> list[IndexHit]:
+    async def find(
+        self, where: Filter, *, limit: int | None = None
+    ) -> list[SearchHit[T]]:
         if limit is None:
-            records = await self._repo.scan(where)
-            return [_hit(record.model_dump(mode="python")) for record in records]
-        return [_hit(row) for row in await self._repo.search(where=where, limit=limit)]
+            rows: Sequence[BaseModel | Row] = await self._repo.scan(where)
+        else:
+            rows = await self._repo.search(where=where, limit=limit)
+        return [self._hit(row, None) for row in rows]
 
-    async def _paginate[T](
-        self, where: Filter, page: Page, to_stored: Callable[[Row], Stored[T]]
-    ) -> PageResult[Stored[T]]:
+    def _hit(self, row: BaseModel | Row, score: float | None) -> SearchHit[T]:
+        return SearchHit(stored=self._to_stored(_fields(row)), score=score)
+
+    async def _paginate(self, where: Filter, page: Page) -> PageResult[Stored[T]]:
         rows, total = await self._repo.find_where_paginated(
             where,
             sort_by=page.sort_by,
@@ -99,10 +110,12 @@ class _SearchableIndex:
             page=page.number,
             page_size=page.size,
         )
-        return PageResult(items=[to_stored(_fields(r)) for r in rows], total=total)
+        return PageResult(
+            items=[self._to_stored(_fields(r)) for r in rows], total=total
+        )
 
 
-class EpisodeIndexAdapter(_SearchableIndex):
+class EpisodeIndexAdapter(_SearchableIndex[Episode]):
     """Episode index reads.
 
     Args:
@@ -110,16 +123,16 @@ class EpisodeIndexAdapter(_SearchableIndex):
     """
 
     def __init__(self, repo: EpisodeIndexRepository[Any]) -> None:
-        super().__init__(repo)
+        super().__init__(repo, _stored_episode)
         self._episodes = repo
 
     async def dense_search_subject(
         self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[IndexHit]:
+    ) -> list[SearchHit[Episode]]:
         rows = await self._episodes.dense_search(
             vector, where, limit=limit, vector_field="subject_vector"
         )
-        return [_hit(row) for row in rows]
+        return [self._hit(row, _cosine_similarity(row)) for row in rows]
 
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
@@ -134,7 +147,7 @@ class EpisodeIndexAdapter(_SearchableIndex):
         return [_stored_episode(_fields(r)) for r in rows]
 
     async def paginate(self, where: Filter, page: Page) -> PageResult[Stored[Episode]]:
-        return await self._paginate(where, page, _stored_episode)
+        return await self._paginate(where, page)
 
     async def count(self, scope: Scope, *, parent_type: EpisodeParentType) -> int:
         return await self._episodes.count_by_owner(
@@ -168,20 +181,26 @@ class EpisodeIndexAdapter(_SearchableIndex):
         return [_stored_episode(_fields(r)) for r in rows]
 
 
-class AtomicFactIndexAdapter(_SearchableIndex):
+class AtomicFactIndexAdapter(_SearchableIndex[AtomicFact]):
     """Atomic-fact index reads.
 
     Args:
         repo: Atomic-fact derived-index repository.
     """
 
+    def __init__(self, repo: IndexRepository[Any]) -> None:
+        super().__init__(repo, _stored_atomic_fact)
 
-class AgentCaseIndexAdapter(_SearchableIndex):
+
+class AgentCaseIndexAdapter(_SearchableIndex[AgentCase]):
     """Agent-case index reads.
 
     Args:
         repo: Agent-case derived-index repository.
     """
+
+    def __init__(self, repo: IndexRepository[Any]) -> None:
+        super().__init__(repo, _stored_agent_case)
 
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
@@ -198,10 +217,10 @@ class AgentCaseIndexAdapter(_SearchableIndex):
     async def paginate(
         self, where: Filter, page: Page
     ) -> PageResult[Stored[AgentCase]]:
-        return await self._paginate(where, page, _stored_agent_case)
+        return await self._paginate(where, page)
 
 
-class AgentSkillIndexAdapter(_SearchableIndex):
+class AgentSkillIndexAdapter(_SearchableIndex[AgentSkill]):
     """Agent-skill index reads.
 
     Args:
@@ -209,13 +228,13 @@ class AgentSkillIndexAdapter(_SearchableIndex):
     """
 
     def __init__(self, repo: AgentSkillIndexRepository[Any]) -> None:
-        super().__init__(repo)
+        super().__init__(repo, _stored_agent_skill)
         self._skills = repo
 
     async def paginate(
         self, where: Filter, page: Page
     ) -> PageResult[Stored[AgentSkill]]:
-        return await self._paginate(where, page, _stored_agent_skill)
+        return await self._paginate(where, page)
 
     async def count(self) -> int:
         return await self._skills.count()
@@ -269,12 +288,32 @@ class ProfileIndexAdapter:
         )
 
 
-class KnowledgeTopicIndexAdapter(_SearchableIndex):
+class KnowledgeTopicIndexAdapter:
     """Knowledge-topic index search.
+
+    Topics have no owner, so matches come back as
+    :class:`ScoredKnowledgeTopic` rather than an owner-scoped ``Stored``.
 
     Args:
         repo: Knowledge-topic derived-index repository.
     """
+
+    def __init__(self, repo: IndexRepository[Any]) -> None:
+        self._repo = repo
+
+    async def sparse_search(
+        self, terms: Sequence[str], where: Filter, *, limit: int
+    ) -> list[ScoredKnowledgeTopic]:
+        rows = await self._repo.sparse_search(
+            terms, where, columns=self._repo.schema.BM25_FIELDS, limit=limit
+        )
+        return [_scored_topic(_fields(row), _bm25_score(row)) for row in rows]
+
+    async def dense_search(
+        self, vector: Sequence[float], where: Filter, *, limit: int
+    ) -> list[ScoredKnowledgeTopic]:
+        rows = await self._repo.dense_search(vector, where, limit=limit)
+        return [_scored_topic(_fields(row), _cosine_similarity(row)) for row in rows]
 
 
 # ── Row -> domain ────────────────────────────────────────────────────────
@@ -284,13 +323,17 @@ def _fields(row: BaseModel | Row) -> Row:
     return row.model_dump(mode="python") if isinstance(row, BaseModel) else row
 
 
-def _hit(row: Row) -> IndexHit:
+def _bm25_score(row: Row) -> float | None:
     score = row.get("_score")
-    return IndexHit(
-        id=row["id"],
-        score=None if score is None else float(score),
-        fields=row,
-    )
+    return None if score is None else float(score)
+
+
+def _cosine_similarity(row: Row) -> float:
+    """Both engines report ``_distance = 1 - cos``; a missing one scores 0."""
+    distance = row.get("_distance")
+    if distance is None:
+        return 0.0
+    return min(max(1.0 - float(distance), 0.0), 1.0)
 
 
 def _read_columns(schema: type[BaseModel]) -> list[str]:
@@ -337,6 +380,20 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
     )
 
 
+def _stored_atomic_fact(fields: Row) -> Stored[AtomicFact]:
+    return Stored(
+        ref=_daily_ref(fields),
+        scope=_scope(fields),
+        item=AtomicFact(
+            owner_id=fields["owner_id"],
+            content=fields["fact"],
+            timestamp=to_timestamp_ms(fields["timestamp"]),
+            session_id=fields.get("session_id"),
+            parent_id=fields["parent_id"],
+        ),
+    )
+
+
 def _stored_agent_case(fields: Row) -> Stored[AgentCase]:
     return Stored(
         ref=_daily_ref(fields),
@@ -370,6 +427,28 @@ def _stored_agent_skill(fields: Row) -> Stored[AgentSkill]:
             maturity_score=fields["maturity_score"],
             source_case_ids=list(fields.get("source_case_ids") or []),
         ),
+    )
+
+
+def _scored_topic(fields: Row, score: float | None) -> ScoredKnowledgeTopic:
+    return ScoredKnowledgeTopic(
+        topic=KnowledgeTopic(
+            topic_id=fields["id"],
+            doc_id=fields["doc_id"],
+            app_id=fields["app_id"],
+            project_id=fields["project_id"],
+            category_id=fields["category_id"],
+            topic_name=fields["topic_name"],
+            topic_path=fields["topic_path"],
+            depth=fields["depth"],
+            summary=fields["summary"],
+            parent_topic_id=fields.get("parent_node_id") or None,
+            content_labels=list(fields.get("content_labels") or []),
+            created_at=fields["created_at"],
+            updated_at=fields["updated_at"],
+        ),
+        md_path=fields["md_path"],
+        score=score,
     )
 
 

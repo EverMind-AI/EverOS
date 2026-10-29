@@ -48,7 +48,7 @@ domain, never the other way round (dependency inversion).
 | infra → any other memory module, service, entrypoints | ❌ |
 | infra.ome → memory.ports | ✅ (`infra.ome` imports only `everos.memory.ports` — the types the domain declares for it); any other memory module ❌ |
 | service.bootstrap → infra / component implementations | ✅ — the one module that builds adapters and providers and injects them (`service-usecases-forbidden`) |
-| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only. Two registered exceptions: `service.knowledge` (removed in stage 5) and `service.backfill` (removed in stage 6) |
+| service use cases (`memory` / `knowledge` / `ops` / …) → infra / component implementations | ❌ — they receive what they need; protocols are imported for annotations only. One registered exception: `service.backfill` (removed in stage 6) |
 | infra cross-subpackage (e.g. lancedb → markdown within persistence/) | ❌ (use service to orchestrate); one carve-out: every index backend reads the shared record declarations in `persistence/records/` (`lancedb → records` is whitelisted in import-linter) |
 | any → component / core / config | ✅ (cross-cutting) |
 | `infra/persistence/index → component.embedding` | ✅ — the only network-capable provider `infra` reaches for. Startup measures the embedding model's real output width before the index is opened for use; nothing else can answer that question, and asking it from a higher layer would mean every index user had to remember to ask. Elsewhere `infra` uses `component` only for `utils.datetime`. |
@@ -86,8 +86,8 @@ the scheduler runs:
 
 | Module | Contents |
 |---|---|
-| `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `IndexHit` |
-| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ForesightStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore` |
+| `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `SearchHit`, `ScoredKnowledgeTopic` |
+| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ForesightStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
 | `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AtomicFactIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
 | `ports/events.py` | `Event` (frozen, JSON round-trippable, identified by `topic()`) and the scheduler ticks `CronTick` / `IdleTick` / `ManualTick` |
 | `ports/strategy.py` | the triggers `Immediate` / `Cron` / `Idle`, the `Counter` gate, and `StrategySpec` — one strategy's name, function, trigger, `emits`, `applies_to`, gate, retries and enabled flag |

@@ -16,46 +16,32 @@ or network calls are made.
 
 from __future__ import annotations
 
-import datetime as _dt
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from everalgo.types import Candidate
-
+from everos.memory.ports import SearchHit
 from everos.memory.search.callbacks import _SKILL_RERANK_INSTRUCTION
 from everos.memory.search.dto import SearchAgentSkillItem
 from everos.memory.search.skill_hybrid import search_agent_skills_hybrid
 
+from ._records import hit, recalled, stored_skill
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
-def _ts() -> _dt.datetime:
-    return _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
-
-
-def _skill_candidate(
-    sid: str,
-    score: float = 0.8,
-    name: str | None = None,
-) -> Candidate:
-    label = name or f"skill_{sid}"
-    return Candidate(
-        id=sid,
-        score=score,
-        source="vector",
-        metadata={
-            "owner_id": "agent_a",
-            "owner_type": "agent",
-            "name": label,
-            "description": f"desc {sid}",
-            "content": f"content {sid}",
-            "confidence": 0.9,
-            "maturity_score": 0.6,
-            "source_case_ids": [],
-        },
+def _skill(sid: str, score: float = 0.8, name: str | None = None) -> SearchHit[Any]:
+    return hit(
+        stored_skill(
+            sid,
+            owner_id="agent_a",
+            name=name or f"skill_{sid}",
+            description=f"desc {sid}",
+        ),
+        score,
     )
 
 
-def _make_reranker(candidates: list[Candidate]) -> MagicMock:
+def _make_reranker(hits: list[SearchHit[Any]]) -> MagicMock:
     """Stub reranker that returns identity-reranked results in the same order."""
 
     class _FakeResult:
@@ -66,7 +52,7 @@ def _make_reranker(candidates: list[Candidate]) -> MagicMock:
     reranker = MagicMock()
     # provider.rerank returns a list of result objects with index + score
     reranker.rerank = AsyncMock(
-        return_value=[_FakeResult(i, c.score) for i, c in enumerate(candidates)]
+        return_value=[_FakeResult(i, h.score) for i, h in enumerate(hits)]
     )
     return reranker
 
@@ -79,16 +65,16 @@ class TestSearchAgentSkillsHybridRerank:
 
     async def test_returns_shaped_items_up_to_top_k(self) -> None:
         """rrf + rerank produces at most top_k SearchAgentSkillItem objects."""
-        c1 = _skill_candidate("s1", score=0.9)
-        c2 = _skill_candidate("s2", score=0.8)
-        c3 = _skill_candidate("s3", score=0.7)
+        c1 = _skill("s1", score=0.9)
+        c2 = _skill("s2", score=0.8)
+        c3 = _skill("s3", score=0.7)
 
         reranker = _make_reranker([c1, c2, c3])
 
         result = await search_agent_skills_hybrid(
             "what skill handles auth?",
-            sparse=[c1, c2, c3],
-            dense=[c1, c2, c3],
+            sparse=recalled(c1, c2, c3),
+            dense=recalled(c1, c2, c3),
             reranker=reranker,
             top_k=2,
         )
@@ -105,15 +91,15 @@ class TestSearchAgentSkillsHybridRerank:
         ``"Agent Skill: {name} - {description}"`` passage shape — matches
         the everosos-opensource contract for skill rerank.
         """
-        c1 = _skill_candidate("s1", name="auth_middleware_refactor")
-        c2 = _skill_candidate("s2", name="provider_lookup_split")
+        c1 = _skill("s1", name="auth_middleware_refactor")
+        c2 = _skill("s2", name="provider_lookup_split")
 
         reranker = _make_reranker([c1, c2])
 
         await search_agent_skills_hybrid(
             "how to split auth?",
-            sparse=[c1],
-            dense=[c1, c2],
+            sparse=recalled(c1),
+            dense=recalled(c1, c2),
             reranker=reranker,
             top_k=10,
         )
@@ -143,8 +129,8 @@ class TestSearchAgentSkillsHybridEmpty:
 
         result = await search_agent_skills_hybrid(
             "query",
-            sparse=[],
-            dense=[],
+            sparse=recalled(),
+            dense=recalled(),
             reranker=reranker,
             top_k=10,
         )

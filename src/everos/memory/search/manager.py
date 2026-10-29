@@ -28,12 +28,11 @@ The manager never writes to storage; it only reads LanceDB + markdown.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
 from everalgo.rank.fusion import rrf
-from everalgo.types import Candidate, RankInput
 
 from everos.component.utils.datetime import to_display_tz
 from everos.config import load_settings
@@ -68,16 +67,26 @@ from .dto import (
 from .filters import compile_filters
 from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import RoundDecider, search_episodes_llm_multiround
+from .recall import (
+    KindRecaller,
+    RecallResult,
+    maxsim_episode_recall,
+    merge_by_id_max,
+    merge_stored,
+    rank_input,
+)
 from .shaper import (
     reshape_hybrid_output,
-    shape_agent_case_from_candidate,
-    shape_agent_skill_from_candidate,
-    shape_episode_from_candidate,
+    shape_agent_cases,
+    shape_agent_cases_ranked,
+    shape_agent_skills,
+    shape_agent_skills_ranked,
+    shape_episodes,
 )
 from .skill_hybrid import search_agent_skills_hybrid
 
 if TYPE_CHECKING:
-    from everalgo.llm.protocols import LLMClient
+    from everalgo.llm import LLMClient
 
     from everos.component.embedding import EmbeddingProvider
     from everos.component.rerank import RerankProvider
@@ -312,12 +321,8 @@ class SearchManager:
         """
         if _effective_llm_rerank(req):
             cases = await self._search_agent_cases(req, where)
-            bridge_cases = [
-                Candidate(id=c.id, score=c.score, source="vector", metadata={})
-                for c in cases
-            ]
             skills = await self._search_agent_skills(
-                req, where, bridge_cases=bridge_cases
+                req, where, case_scores={c.id: c.score for c in cases}
             )
             return cases, skills
 
@@ -394,7 +399,6 @@ class SearchManager:
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
-        enable_rerank = _effective_llm_rerank(req)
         top_k = self._top_k(req.top_k)
 
         # ── KEYWORD / VECTOR: single-route recall ──
@@ -405,81 +409,48 @@ class SearchManager:
                 metadata={"phase": "single_route", "method": req.method.value},
             ):
                 if req.method == SearchMethod.KEYWORD:
-                    cands = await self._ep.sparse_recall(
+                    recalled = await self._ep.sparse_recall(
                         req.query, where, limit=self._recall_limit(req.top_k)
                     )
                 else:
-                    cands = await self._maxsim_atomic_recall(req, where, top_k)
+                    recalled = await self._maxsim_atomic_recall(req, where, top_k)
             # ``atomic_facts`` stays empty: facts come back only when the HYBRID
             # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
             # Single-route recall has no per-fact score against the query, so
             # we do not back-fill — that would emit ``score=0.0`` facts whose
             # semantics are ambiguous.
-            return [
-                ep
-                for ep in (shape_episode_from_candidate(c) for c in cands[:top_k])
-                if ep is not None
-            ]
+            return shape_episodes(recalled.candidates[:top_k], recalled.stored_by_id)
 
-        # ── HYBRID: parallel sparse + dense recall ──
+        # ── HYBRID: heap-expand hierarchy over parallel sparse + dense recall ──
         sparse, dense, query_vector = await self._recall_sparse_dense(
             self._ep, req, where, top_k
         )
-
-        if fusion_mode == "hierarchy":
-            with memory_span(
-                "everos.search.rank",
-                observation_type="span",
-                metadata={"phase": "hierarchy"},
-            ):
-                rrf_candidates = rrf(sparse, dense)
-                ep_to_parents = build_ep_to_fact_parents(rrf_candidates)
-                episode_to_facts = await self._fact.facts_for_episodes(
-                    ep_to_parents,
-                    where,
-                    per_episode=max(top_k * 2, 20),
-                    query_vector=query_vector,
-                )
-                scored = heap_expand(
-                    sparse=sparse,
-                    dense=dense,
-                    episode_to_facts=episode_to_facts,
-                    top_k=top_k,
-                )
-                episode_pool = {c.id: c for c in (*sparse, *dense)}
-                shaped = reshape_hybrid_output(scored, episode_pool=episode_pool)
-                if req.min_score is not None:
-                    shaped = [s for s in shaped if s.score >= req.min_score]
-                return shaped
-
-        # rrf / lr: standard everalgo fusion path (fallback).
         with memory_span(
             "everos.search.rank",
             observation_type="span",
             metadata={"phase": fusion_mode},
         ):
-            output = await arank(
-                RankInput(
-                    query=req.query,
-                    memory_type=self._ep.everalgo_memory_type,  # type: ignore[arg-type]
-                    sparse_candidates=sparse,
-                    dense_candidates=dense,
-                    top_k=top_k,
-                    radius=_effective_radius(req),
-                ),
-                config=RankConfig(fusion_mode=fusion_mode)
-                if fusion_mode != "rrf"
-                else DEFAULT_RANK_CONFIG,
-                llm=self._llm,
-                enable_rerank=enable_rerank,
-                rerank_top_k=top_k,
+            rrf_candidates = rrf(sparse.candidates, dense.candidates)
+            facts = await self._fact.facts_for_episodes(
+                build_ep_to_fact_parents(rrf_candidates),
+                where,
+                per_episode=max(top_k * 2, 20),
+                query_vector=query_vector,
             )
-        ep_candidates = (_scored_as_candidate(s) for s in output.items)
-        return [
-            ep
-            for ep in (shape_episode_from_candidate(c) for c in ep_candidates)
-            if ep is not None
-        ]
+            scored = heap_expand(
+                sparse=sparse.candidates,
+                dense=dense.candidates,
+                episode_to_facts=facts.buckets,
+                top_k=top_k,
+            )
+            shaped = reshape_hybrid_output(
+                scored,
+                episodes_by_id=merge_stored(sparse, dense),
+                facts_by_id=facts.stored_by_id,
+            )
+            if req.min_score is not None:
+                shaped = [s for s in shaped if s.score >= req.min_score]
+            return shaped
 
     # ── Agent cases ─────────────────────────────────────────────────
 
@@ -501,11 +472,10 @@ class SearchManager:
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
 
         if fusion_mode is None:
-            cands = await self._single_route_recall(
+            recalled = await self._single_route_recall(
                 self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
             )
-            shaped = (shape_agent_case_from_candidate(c) for c in cands[:top_k])
-            return [item for item in shaped if item is not None]
+            return shape_agent_cases(recalled.candidates[:top_k], recalled.stored_by_id)
 
         sparse, dense, _ = await self._recall_sparse_dense(
             self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
@@ -516,11 +486,11 @@ class SearchManager:
             metadata={"phase": fusion_mode, "kind": "agent_case"},
         ):
             output = await arank(
-                RankInput(
-                    query=req.query,
-                    memory_type=self._case.everalgo_memory_type,  # type: ignore[arg-type]
-                    sparse_candidates=sparse,
-                    dense_candidates=dense,
+                rank_input(
+                    req.query,
+                    memory_type=self._case.everalgo_memory_type,
+                    sparse=sparse,
+                    dense=dense,
                     top_k=top_k,
                     radius=_effective_radius(req),
                 ),
@@ -531,9 +501,7 @@ class SearchManager:
                 enable_rerank=enable_rerank,
                 rerank_top_k=top_k,
             )
-        case_candidates = (_scored_as_candidate(s) for s in output.items)
-        shaped = (shape_agent_case_from_candidate(c) for c in case_candidates)
-        return [item for item in shaped if item is not None]
+        return shape_agent_cases_ranked(output, merge_stored(sparse, dense))
 
     # ── Agent skills ────────────────────────────────────────────────
 
@@ -542,9 +510,9 @@ class SearchManager:
         req: SearchRequest,
         where: Filter,
         *,
-        bridge_cases: list[Candidate] | None = None,
+        case_scores: Mapping[str, float] | None = None,
     ) -> list[SearchAgentSkillItem]:
-        """Rank agent skills. ``bridge_cases`` (reranked case id+score) is
+        """Rank agent skills. ``case_scores`` (reranked case id -> score) is
         supplied only on HYBRID + LLM-rerank to feed the case→skill bridge;
         ``None`` everywhere else.
         """
@@ -562,11 +530,12 @@ class SearchManager:
         top_k = self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP)
 
         if fusion_mode is None:
-            cands = await self._single_route_recall(
+            recalled = await self._single_route_recall(
                 self._skill, req, where, top_k, cap=_AGENT_TOP_K_CAP
             )
-            shaped = (shape_agent_skill_from_candidate(c) for c in cands[:top_k])
-            return [item for item in shaped if item is not None]
+            return shape_agent_skills(
+                recalled.candidates[:top_k], recalled.stored_by_id
+            )
 
         sparse, dense, _ = await self._recall_sparse_dense(
             self._skill, req, where, top_k, cap=_AGENT_TOP_K_CAP
@@ -574,8 +543,11 @@ class SearchManager:
 
         # Case→skill bridge: union skills surfaced via lineage cases into
         # the dense pool with their max-pooled source-case score.
-        bridged = await self._case_bridged_skills(bridge_cases, where, top_k)
-        dense = _merge_by_id_max(dense, bridged)
+        if case_scores:
+            bridged = await self._skill.bridged_from_cases(
+                case_scores, where, top_k=top_k
+            )
+            dense = merge_by_id_max(dense, bridged)
 
         # Lane selection lives here so ``skill_hybrid`` stays single-purpose
         # (cross-encoder) and symmetry with the case path is preserved.
@@ -590,11 +562,11 @@ class SearchManager:
                 metadata={"phase": "skill_llm", "kind": "agent_skill"},
             ):
                 output = await arank(
-                    RankInput(
-                        query=req.query,
-                        memory_type=self._skill.everalgo_memory_type,  # type: ignore[arg-type]
-                        sparse_candidates=sparse,
-                        dense_candidates=dense,
+                    rank_input(
+                        req.query,
+                        memory_type=self._skill.everalgo_memory_type,
+                        sparse=sparse,
+                        dense=dense,
                         top_k=top_k,
                         radius=_effective_radius(req),
                     ),
@@ -603,9 +575,7 @@ class SearchManager:
                     enable_rerank=True,
                     rerank_top_k=top_k,
                 )
-            skill_candidates = (_scored_as_candidate(s) for s in output.items)
-            shaped = (shape_agent_skill_from_candidate(c) for c in skill_candidates)
-            return [item for item in shaped if item is not None]
+            return shape_agent_skills_ranked(output, merge_stored(sparse, dense))
 
         # Cross-encoder lane (default): rrf + skill-shaped cross-encoder rerank.
         # The rank span is emitted inside build_skill_rerank_fn (callbacks),
@@ -632,13 +602,13 @@ class SearchManager:
 
     async def _single_route_recall(
         self,
-        recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
+        recaller: KindRecaller,
         req: SearchRequest,
         where: Filter,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
-    ) -> list[Candidate]:
+    ) -> RecallResult[Any]:
         with memory_span(
             "everos.search.recall",
             observation_type="retriever",
@@ -649,27 +619,27 @@ class SearchManager:
                     req.query, where, limit=self._recall_limit(req.top_k, cap=cap)
                 )
             vector = await self._embed_query(req.query)
-            cands = await recaller.dense_recall(
+            recalled = await recaller.dense_recall(
                 vector, where, limit=self._recall_limit(req.top_k, cap=cap)
             )
-            return self._apply_radius(cands, _effective_radius(req))
+            return recalled.within_radius(_effective_radius(req))
 
     async def _recall_sparse_dense(
         self,
-        recaller: EpisodeRecaller | AgentCaseRecaller | AgentSkillRecaller,
+        recaller: KindRecaller,
         req: SearchRequest,
         where: Filter,
         top_k: int,
         *,
         cap: int = _DEFAULT_TOP_K_CAP,
-    ) -> tuple[list[Candidate], list[Candidate], list[float]]:
+    ) -> tuple[RecallResult[Any], RecallResult[Any], list[float]]:
         """Fan out keyword + vector recall in parallel.
 
         The third return is the query embedding itself — the HYBRID
         pipeline passes it into ``facts_for_episodes`` so per-fact
         cosine scoring reuses the same vector instead of re-embedding
-        the query. Returns
-        ``[]`` for ``vector`` when no embedding provider is configured.
+        the query. Dense recall is empty when no embedding provider is
+        configured.
         """
         with memory_span(
             "everos.search.recall",
@@ -682,100 +652,29 @@ class SearchManager:
                 recaller.sparse_recall(req.query, where, limit=limit),
                 recaller.dense_recall(vector, where, limit=limit)
                 if vector
-                else _empty_candidates(),
+                else _no_recall(),
             )
-            dense = self._apply_radius(dense, _effective_radius(req))
-            return sparse, dense, vector
+            return sparse, dense.within_radius(_effective_radius(req)), vector
 
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: Filter, top_k: int
-    ) -> list[Candidate]:
-        """MaxSim-style: ANN atomic_facts → max-pool by episode → batch fetch episodes.
+    ) -> RecallResult[Any]:
+        """MaxSim recall: atomic-fact ANN max-pooled onto parent episodes.
 
-        Trades one extra LanceDB ANN scan (over the ~28× denser
-        ``atomic_fact`` table) for finer-grained semantic match — long
-        episodes whose single mean-pooled vector dilutes a specific topic
-        recover via the matching atomic fact's own embedding. Mirrors
-        EverOS/EverAlgo's MaxSim retrieval pattern.
-
-        When fact recall yields no parent episode id — no facts in scope
-        because extraction is disabled, not caught up, or failing — falls
-        back to ANN over the episode's own vector instead of returning
-        nothing.
+        The fact pool is sized ``top_k * 20`` (facts are ~28x denser than
+        episodes), capped to keep the ANN bounded on large ``top_k``.
         """
-        vector = await self._embed_query(req.query)
-        if not vector:
-            return []
-        fact_limit = min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP)
-        fact_cands = await self._fact.dense_recall(vector, where, limit=fact_limit)
-        # Max-pool fact scores by parent episode entry_id.
-        ep_score: dict[str, float] = {}
-        for fc in fact_cands:
-            pid = fc.metadata.get("parent_id")
-            if not isinstance(pid, str) or not pid:
-                continue
-            if fc.score > ep_score.get(pid, -1.0):
-                ep_score[pid] = fc.score
-        if not ep_score:
-            cands = await self._ep.dense_recall(
-                vector, where, limit=self._recall_limit(req.top_k)
-            )
-            cands = self._apply_radius(cands, _effective_radius(req))
-            logger.info(
-                "vector_recall_fact_pool_empty",
-                owner_id=req.owner_id,
-                hits=len(cands),
-            )
-            return cands
-        ranked = sorted(ep_score.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
-        top_entry_ids = [eid for eid, _ in ranked]
-        score_by_entry = dict(ranked)
-        ep_cands = await self._ep.fetch_by_entry_ids(top_entry_ids, where)
-        rescored: list[Candidate] = []
-        for c in ep_cands:
-            eid = c.metadata.get("entry_id")
-            s = score_by_entry.get(eid, 0.0) if isinstance(eid, str) else 0.0
-            rescored.append(
-                Candidate(id=c.id, score=s, source="vector", metadata=c.metadata)
-            )
-        rescored.sort(key=lambda c: c.score, reverse=True)
-        return self._apply_radius(rescored, _effective_radius(req))
-
-    async def _case_bridged_skills(
-        self,
-        bridge_cases: list[Candidate] | None,
-        where: Filter,
-        top_k: int,
-    ) -> list[Candidate]:
-        """Reverse-resolve lineage skills and max-pool their source-case
-        scores.
-
-        Reuses ``bridge_cases`` (already-reranked id+score) so ``agent_case``
-        is never scanned twice. Scores must be LLM-rerank relevance in
-        ``[0, 1]`` to stay comparable with the direct dense pool — never
-        feed BM25 / fusion scores in here. Mirrors the ``maxsim_atomic``
-        fact→episode pooling. Empty input ⇒ no bridge.
-        """
-        if not bridge_cases:
-            return []
-        case_score = {c.id: c.score for c in bridge_cases}
-        # Bound the reverse fetch by the matched-case count; one case can map
-        # to several skills, so allow a small fan-out per case.
-        skill_cands = await self._skill.fetch_by_case_ids(
-            list(case_score), where, limit=max(top_k, len(case_score) * 4)
+        recalled = await maxsim_episode_recall(
+            await self._embed_query(req.query),
+            where,
+            facts=self._fact,
+            episodes=self._ep,
+            top_k=top_k,
+            fact_limit=min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP),
+            fallback_limit=self._recall_limit(req.top_k),
+            owner_id=req.owner_id,
         )
-        bridged: list[Candidate] = []
-        for sc in skill_cands:
-            raw_ids = sc.metadata.get("source_case_ids")
-            src_ids = raw_ids if isinstance(raw_ids, list) else []
-            best = max(
-                (case_score[cid] for cid in src_ids if cid in case_score),
-                default=0.0,
-            )
-            bridged.append(
-                Candidate(id=sc.id, score=best, source="vector", metadata=sc.metadata)
-            )
-        return bridged
+        return recalled.within_radius(_effective_radius(req))
 
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
@@ -831,12 +730,6 @@ class SearchManager:
         return max(
             top_k_request * _DEFAULT_RECALL_MULTIPLIER, _DEFAULT_RECALL_MULTIPLIER
         )
-
-    @staticmethod
-    def _apply_radius(cands: list[Candidate], radius: float | None) -> list[Candidate]:
-        if radius is None:
-            return cands
-        return [c for c in cands if c.score >= radius]
 
     # ── Component guards ────────────────────────────────────────────
 
@@ -921,20 +814,6 @@ class SearchManager:
             )
 
 
-def _scored_as_candidate(scored) -> Candidate:  # type: ignore[no-untyped-def]
-    """Adapt a single-type ``ScoredItem`` back to a ``Candidate``.
-
-    Adapts ``ScoredItem`` back to ``Candidate`` so the existing
-    Candidate-based shapers apply.
-    """
-    return Candidate(
-        id=scored.id,
-        score=scored.score,
-        source="other",
-        metadata=dict(scored.metadata),
-    )
-
-
 def _feature_name(method: SearchMethod, owner_type: str) -> str:
     """Map a search method (+ owner partition) to its 422 ``feature`` tag.
 
@@ -982,10 +861,6 @@ def _effective_radius(req: SearchRequest) -> float | None:
     if req.top_k == -1:
         return _DEFAULT_UNLIMITED_RADIUS
     return None
-
-
-async def _empty_candidates() -> list[Candidate]:
-    return []
 
 
 def _extract_top_level_session_id(filters: FilterNode | None) -> str | None:
@@ -1044,22 +919,5 @@ def _unprocessed_message_to_dto(
     )
 
 
-def _merge_by_id_max(
-    primary: list[Candidate], extra: list[Candidate]
-) -> list[Candidate]:
-    """Union by id, keep higher score. Folds bridged skills into the dense
-    pool so downstream fusion doesn't double-count overlap.
-
-    One pass over both lists, primary first, so a duplicate id inside
-    ``primary`` also keeps its higher score (a dict comprehension kept the
-    last one) and a tie keeps the primary candidate.
-    """
-    by_id: dict[str, Candidate] = {}
-    for c in (*primary, *extra):
-        existing = by_id.get(c.id)
-        if existing is None or c.score > existing.score:
-            by_id[c.id] = c
-    return list(by_id.values())
-
-
-_ = Sequence  # quiet unused-import for the typing-only annotation above
+async def _no_recall() -> RecallResult[Any]:
+    return RecallResult.empty()

@@ -135,9 +135,39 @@ both use the resulting `Application` through three facades:
   dropped. The case quality floor before skill clustering is everalgo's
   `should_extract_skill` instead of a copy of its threshold.
   `AgentCase.from_algo` moved to `everos.memory.mappers.agent_case`.
+- **The multi-round retrieval decider speaks the everalgo LLM contract.**
+  `method="llm_multiround"` asks its decider with
+  `achat(..., response_format=...)`, so a reply must be the
+  `{"core": [<int>...], "next_queries": [<str>...]}` object exactly (the
+  provider retries an invalid one); a reply with prose around the JSON or
+  string indices is no longer accepted, and fails the attempt instead. The
+  trace field `decider.tokens` is `null` for the prompted decider (token
+  usage is reported by the LLM call observer).
+- **Index searches return domain records.** `memory.ports.IndexHit` (a row
+  read by column name) is replaced by `SearchHit[T](stored, score)`, and
+  knowledge-topic searches return `ScoredKnowledgeTopic`. Recall hands the
+  rank algorithms everalgo `Candidate`s whose `metadata` holds only the
+  fields an algorithm reads, with the stored records alongside
+  (`RecallResult.stored_by_id`); responses are built from those records.
+  An LLM rerank (`enable_llm_rerank=true`) no longer sees index-only columns
+  such as `md_path`, `content_sha256` or the `*_tokens` columns in its
+  candidate JSON. `everos.memory` no longer re-exports the `Algo*` aliases
+  of everalgo's types.
+- **The knowledge service works through two ports.** `KnowledgeService`
+  takes a `KnowledgeStore` (markdown documents, taxonomy, uploaded
+  originals; `MarkdownKnowledgeStore`) and a `KnowledgeCatalog` (the
+  document / topic records; `SqliteKnowledgeCatalog`) instead of a memory
+  root and two repositories. Replacing a document now extracts its topics
+  before touching the old files. `LLMNotConfiguredError` lives in
+  `everos.core.errors` (still importable from `everos.component.llm`).
 
 ### Fixed
 
+- **The agentic episode search reranks on the episode text.** Its
+  cross-encoder read `metadata["episode"]`, which the bridge to everalgo's
+  prompt format had already turned into a `{"subject", "content"}` dict, so
+  every passage was that dict's Python repr; it now reads the plain body.
+  `method="agentic"` scores change accordingly (a fix, not a regression).
 - **Agent skill clustering failed on the 2026-10-13 everalgo line.**
   `trigger_skill_clustering` awaited `cluster_by_llm`, which is now a
   blocking bridge that refuses to run inside the event loop, so no case was

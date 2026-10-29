@@ -364,7 +364,9 @@ ignore_imports = [
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.writers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.readers",
     "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.stores",
+    "everos.infra.persistence.markdown -> everos.infra.persistence.markdown.knowledge_store",
     "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.stores",
+    "everos.infra.persistence.sqlite -> everos.infra.persistence.sqlite.knowledge_catalog",
     "everos.infra.persistence.index -> everos.infra.persistence.index.maintenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index._provenance",
     "everos.infra.persistence.index -> everos.infra.persistence.index.predicate",
@@ -463,9 +465,6 @@ allow_indirect_imports = true
 ignore_imports = [
     "everos.service.bootstrap -> everos.infra.**",
     "everos.service.bootstrap -> everos.component.**",
-    # removed in stage 5: knowledge moves behind memory ports.
-    "everos.service.knowledge -> everos.infra.**",
-    "everos.service.knowledge -> everos.component.llm",
     # removed in stage 6: backfill's phase runners move behind ops ports.
     "everos.service.backfill -> everos.infra.**",
 ]

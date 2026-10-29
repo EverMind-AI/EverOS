@@ -8,7 +8,7 @@
    ``scan_idle(now=...)`` called with a non-UTC aware datetime compared
    wrongly against UTC rows. The store now normalises to UTC before
    rendering, and the law holds for any aware input.
-2. ``cosine_score_from_distance`` maps a distance to a score in ``[0, 1]``,
+2. The index adapters' ``_cosine_similarity`` maps a distance to a score in ``[0, 1]``,
    never increasing with distance, and ``None`` to 0.
 """
 
@@ -25,7 +25,7 @@ from hypothesis import strategies as st
 
 from everos.infra.ome._stores.idle import IdleStore
 from everos.infra.ome._stores.storage import OMEStorage
-from everos.memory.search.recall.base import cosine_score_from_distance
+from everos.infra.persistence.index.adapters import _cosine_similarity
 
 _UTC = dt.UTC
 _instants = st.integers(0, 4_102_444_800).map(
@@ -89,10 +89,12 @@ def test_idle_store_orders_by_instant_whatever_the_zone(
     b=st.floats(-1, 3, allow_nan=False),
 )
 def test_cosine_score_is_bounded_and_monotone(a: float | None, b: float) -> None:
-    s = cosine_score_from_distance(a)
+    s = _cosine_similarity({"_distance": a})
     assert 0.0 <= s <= 1.0
     if a is None:
         assert s == 0.0
         return
     lo, hi = sorted((a, b))
-    assert cosine_score_from_distance(lo) >= cosine_score_from_distance(hi)
+    assert _cosine_similarity({"_distance": lo}) >= _cosine_similarity(
+        {"_distance": hi}
+    )

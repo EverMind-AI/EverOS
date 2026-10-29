@@ -5,9 +5,10 @@ A :class:`~everalgo.testing.FakeLLMClient` handler receives the
 by the reply model's name instead of by prompt text.
 
 Canned replies live in ``llm_scripts/<track>/*.json``, one file per reply
-(the JSON text the model returns), for the ``user_track`` and the
-``agent_track``. Each operator has a default script and an empty (or blank)
-one for its skip / failure path::
+(the JSON text the model returns), for the ``user_track``, the
+``agent_track`` and ``knowledge`` (document topic extraction). Each
+user / agent operator has a default script and an empty (or blank) one for
+its skip / failure path::
 
     llm = user_track_llm()                         # every default script
     llm = user_track_llm(boundary="boundary_empty")  # one operator overridden
@@ -18,12 +19,15 @@ from __future__ import annotations
 
 __all__ = [
     "AGENT_TRACK_OPERATORS",
+    "KNOWLEDGE_OPERATORS",
     "UNUSABLE_REPLY",
     "USER_TRACK_OPERATORS",
     "agent_track_llm",
     "agent_track_script",
     "boundary_reply",
     "boundary_window",
+    "knowledge_llm",
+    "knowledge_script",
     "memorize_llm",
     "user_track_llm",
     "user_track_script",
@@ -63,6 +67,17 @@ AGENT_TRACK_OPERATORS: Mapping[str, str] = {
 }
 """Operator name -> reply model, as :data:`USER_TRACK_OPERATORS`, for the agent
 track."""
+
+
+KNOWLEDGE_OPERATORS: Mapping[str, str] = {
+    "topic_tree": "TopicTreeReply",
+    "category": "CategoryReply",
+    "topic_split": "TopicSplitReply",
+    "uncovered_assign": "UncoveredAssignReply",
+}
+"""Operator name -> reply model for document topic extraction. The default
+``topic_tree`` script is one topic over the first block of a one-paragraph
+document, so the split / uncovered passes are not reached on it."""
 
 
 def boundary_reply(
@@ -113,14 +128,19 @@ def memorize_llm(
     Raises:
         KeyError: An override names an unknown user-track operator.
 
-    Other user-track operators answer from their canned scripts; anything
-    else gets an unusable reply (its background strategy logs and gives up).
+    Other user-track operators, and knowledge extraction, answer from their
+    canned scripts; anything else gets an unusable reply (its background
+    strategy logs and gives up).
     """
     queue = None if callable(boundaries) else [list(b) for b in boundaries]
     episode = json.dumps(
         {"content": episode_content, "summary": episode_content, "title": episode_title}
     )
-    canned = {**_canned("agent_track", AGENT_TRACK_OPERATORS, {}), **_user(scripts)}
+    canned = {
+        **_canned("agent_track", AGENT_TRACK_OPERATORS, {}),
+        **_canned("knowledge", KNOWLEDGE_OPERATORS, {}),
+        **_user(scripts),
+    }
 
     def _answer(messages: Any, *, response_format: type, **_kwargs: Any) -> str:
         name = response_format.__name__
@@ -146,6 +166,25 @@ def user_track_script(name: str) -> str:
 def agent_track_script(name: str) -> str:
     """The canned reply ``llm_scripts/agent_track/<name>.json``."""
     return _script("agent_track", name)
+
+
+def knowledge_script(name: str) -> str:
+    """The canned reply ``llm_scripts/knowledge/<name>.json``."""
+    return _script("knowledge", name)
+
+
+def knowledge_llm(**scripts: str) -> FakeLLMClient:
+    """A model answering every knowledge-extraction call from its canned script.
+
+    Args:
+        **scripts: ``operator=script`` overrides, as for :func:`user_track_llm`.
+
+    Raises:
+        KeyError: An override names an unknown operator.
+    """
+    return _scripted_llm(
+        "knowledge", _canned("knowledge", KNOWLEDGE_OPERATORS, scripts)
+    )
 
 
 def user_track_llm(**scripts: str) -> FakeLLMClient:

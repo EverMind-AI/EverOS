@@ -1,7 +1,8 @@
 """Integration-level tests for original file storage.
 
-Tests the full call chain: create_document → _write_document →
-_write_original_file → filesystem, and get_document → _resolve_original_file_path.
+Tests the full call chain: create_document → MarkdownKnowledgeStore
+(KnowledgeWriter + the ``_original/`` copy) → filesystem, and get_document →
+``MarkdownKnowledgeStore.original_file``.
 
 Only the LLM extractor is mocked; KnowledgeWriter and filesystem are real.
 This catches wiring bugs (wrong path passed between functions) that
@@ -19,16 +20,18 @@ from everalgo.types import CategorySpec, KnowledgeMemory, ParsedContent
 
 from everos.core.errors import PathTraversalError
 from everos.infra.persistence import MemoryRoot
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.memory.models import KnowledgeDocument
+from everos.memory.models import KnowledgeMemory as DomainKnowledgeMemory
 from everos.service.knowledge import (
     CategoryOverview,
     DocumentDetail,
     DocumentOverviewItem,
-    _resolve_original_file_path,
-    _write_original_file,
+    KnowledgeService,
 )
 from tests.fakes import make_knowledge_service
 
-_MOD = "everos.service.knowledge"
+_MOD = "everos.infra.persistence.markdown.knowledge_store"
 _ORIGINAL_DIR = "_original"
 
 
@@ -90,7 +93,7 @@ async def test_create_document_writes_original_file(
     mock_ext.aextract.return_value = memories
 
     with (
-        patch(f"{_MOD}._mint_doc_id", return_value=doc_id),
+        patch.object(KnowledgeService, "_mint_doc_id", return_value=doc_id),
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
@@ -133,7 +136,7 @@ async def test_create_document_without_file_content_no_original(
     mock_ext.aextract.return_value = memories
 
     with (
-        patch(f"{_MOD}._mint_doc_id", return_value=doc_id),
+        patch.object(KnowledgeService, "_mint_doc_id", return_value=doc_id),
     ):
         mock_repo.doc_id_exists = AsyncMock(return_value=False)
 
@@ -480,16 +483,25 @@ async def test_create_document_dotdot_filename_stays_in_original(
 # ── SEC-3: degenerate source_name is rejected, touches no filesystem ────────
 
 
-async def test_write_original_file_rejects_degenerate_name(tmp_path: Path) -> None:
+async def test_write_rejects_degenerate_name_before_writing(tmp_path: Path) -> None:
     """A source_name reducing to ``.``/``..``/empty raises before any write."""
-    doc_dir = tmp_path / "doc"
-    doc_dir.mkdir()
+    root = MemoryRoot(tmp_path)
+    memories = [
+        DomainKnowledgeMemory.model_validate(m.model_dump())
+        for m in _make_memories("d_x")
+    ]
 
     with pytest.raises(PathTraversalError):
-        await _write_original_file(doc_dir, "..", b"x")
+        await MarkdownKnowledgeStore(root).write_document(
+            "app",
+            "proj",
+            memories,
+            source_name="..",
+            source_type="file",
+            original=b"x",
+        )
 
-    # The guard runs before mkdir, so no _original/ directory was created.
-    assert not (doc_dir / _ORIGINAL_DIR).exists()
+    assert not root.knowledge_dir("app", "proj").exists()
 
 
 # ── SEC-4: read side never resolves a crafted label to an out-of-dir file ───
@@ -517,8 +529,16 @@ async def test_resolve_original_file_path_rejects_traversal(
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"top secret")
 
-    resolved = await _resolve_original_file_path(
-        str(doc_rel / "index.md"), str(secret), MemoryRoot(tmp_path)
+    resolved = await MarkdownKnowledgeStore(MemoryRoot(tmp_path)).original_file(
+        KnowledgeDocument(
+            doc_id="d_x",
+            app_id="app",
+            project_id="proj",
+            category_id="Sports",
+            title="T",
+            source_name=str(secret),
+            md_path=str(doc_rel / "index.md"),
+        )
     )
     assert resolved is None
 
