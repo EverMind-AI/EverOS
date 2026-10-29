@@ -10,20 +10,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query
 
 from everos.core.errors import NotFoundError
-from everos.entrypoints.api.dependencies import application, extract_request_id
+from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
+from everos.entrypoints.api.schemas import SuccessEnvelope
 from everos.service import TaskItem, TaskPage
-
-from .memorize import SuccessEnvelope
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.get("")
 async def task_list(
-    request: Request,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
     session_id: str | None = None,
     status: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -37,7 +37,7 @@ async def task_list(
     ``status=processing`` until both ``total`` are 0. ``page_size`` is capped
     at 100.
     """
-    page_data = await application(request).ops.list_tasks(
+    page_data = await app.ops.list_tasks(
         session_id=session_id,
         status=status,
         page=page,
@@ -45,17 +45,21 @@ async def task_list(
         app_id=app_id,
         project_id=project_id,
     )
-    return SuccessEnvelope(request_id=extract_request_id(request), data=page_data)
+    return SuccessEnvelope(request_id=request_id, data=page_data)
 
 
 @router.get("/{task_id}")
-async def task_status(task_id: str, request: Request) -> SuccessEnvelope[TaskItem]:
+async def task_status(
+    task_id: str,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
+) -> SuccessEnvelope[TaskItem]:
     """One accepted request's outcome.
 
     ``404`` once it has aged out of ``memorize.async_queue.row_retention_hours``
     (or never existed).
     """
-    item = await application(request).ops.get_task(task_id)
+    item = await app.ops.get_task(task_id)
     if item is None:
         raise NotFoundError(f"task {task_id} not found or expired")
-    return SuccessEnvelope(request_id=extract_request_id(request), data=item)
+    return SuccessEnvelope(request_id=request_id, data=item)

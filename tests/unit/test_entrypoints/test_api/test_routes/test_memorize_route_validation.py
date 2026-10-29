@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
-from everos.entrypoints.api.routes.memorize import (
+from everos.entrypoints.api.schemas import (
     MemorizeAddRequest,
     MessageItemDTO,
 )

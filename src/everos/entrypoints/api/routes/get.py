@@ -7,15 +7,15 @@ service layer; we trust the value on the way out.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
-from everos.entrypoints.api.dependencies import application
+from everos.entrypoints.api.dependencies import ApplicationDep
 from everos.service import GetRequest, GetResponse
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("/get", response_model=GetResponse)
-async def post_get(req: GetRequest, request: Request) -> GetResponse:
+async def post_get(req: GetRequest, app: ApplicationDep) -> GetResponse:
     """Paginated listing over the requested ``memory_type``."""
-    return await application(request).memory.get(req)
+    return await app.memory.get(req)

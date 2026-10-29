@@ -35,38 +35,16 @@ Quiesce is deliberately one-way. Restart the process to get the projection back.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
 
-from everos.entrypoints.api.dependencies import application
+from everos.entrypoints.api.dependencies import ApplicationDep
+from everos.entrypoints.api.schemas import QuiesceResponse
 
 router = APIRouter(prefix="/cascade", tags=["cascade"])
 
 
-class QuiesceResponse(BaseModel):
-    """What the final drain accomplished, and what it left behind.
-
-    ``pending_before`` is the queue depth on arrival: a caller that expected the
-    projection to be up to date can assert it was 0 and learn otherwise. Anything
-    above 0 in ``pending_after`` means the drain could not finish -- the index is
-    NOT a complete projection of the markdown, and searching it will silently
-    under-recall.
-    """
-
-    quiesced: bool
-    """False when the subsystem was already stopped or never started; the call
-    is idempotent, so this is information rather than an error."""
-    drained: int
-    """Rows the final scan + drain cycle processed."""
-    pending_before: int
-    pending_after: int
-    failed_permanent: int
-    """Files that need ``cascade fix``; a data-quality backlog, not a drain
-    failure. Reported so a caller can see that some markdown never made it."""
-
-
 @router.post("/quiesce", response_model=QuiesceResponse)
-async def quiesce(request: Request) -> QuiesceResponse:
+async def quiesce(app: ApplicationDep) -> QuiesceResponse:
     """Drain the projection queue, then stop watcher + scanner + worker.
 
     Returns when the index is a complete projection of the markdown on disk and
@@ -76,7 +54,7 @@ async def quiesce(request: Request) -> QuiesceResponse:
 
     Idempotent -- a second call reports ``quiesced=false`` rather than failing.
     """
-    result = await application(request).ops.cascade_quiesce()
+    result = await app.ops.cascade_quiesce()
     if result is None:
         raise HTTPException(
             status_code=503,

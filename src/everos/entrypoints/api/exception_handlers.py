@@ -1,95 +1,43 @@
-"""Per-type exception handlers for the EverOS FastAPI application.
+"""Exception handlers: every error leaves as the canonical error envelope.
 
-Each handler converts a specific exception class (or hierarchy root) into
-the canonical error envelope::
-
-    {
-      "request_id": "<32 lowercase hex chars>",
-      "error": {
-        "code": "<ErrorCode>",
-        "message": "<reason>",
-        "timestamp": "<ISO 8601 with tz>",
-        "path": "<request path>"
-      }
-    }
-
-Register all handlers at once with ``register_handlers(app)``.
+The envelope shape is :class:`~everos.entrypoints.api.schemas.ErrorResponse`.
+Application errors are mapped by one table, ``_ERROR_RULES``: exception
+class -> status code, ``ErrorCode``, optional fixed message and optional log
+line. Starlette dispatches on the exception's MRO, so a subclass with its own
+row overrides its parent's; mapping a new exception type is one new row.
+``LLMNotConfiguredError`` is a ``RuntimeError``, not an ``AppError``, and has
+a row in the same table all the same.
+FastAPI's own exceptions and the catch-all keep dedicated handlers, because
+their message is derived rather than ``str(exc)``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from typing import Literal, cast
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from starlette.status import (
-    HTTP_400_BAD_REQUEST,
-    HTTP_404_NOT_FOUND,
-    HTTP_409_CONFLICT,
-    HTTP_413_CONTENT_TOO_LARGE,
-    HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-    HTTP_422_UNPROCESSABLE_CONTENT,
-    HTTP_429_TOO_MANY_REQUESTS,
-    HTTP_500_INTERNAL_SERVER_ERROR,
-    HTTP_503_SERVICE_UNAVAILABLE,
-)
 
-from everos.core.errors import (
-    CapabilityError,
-    ConfigurationError,
-    ConflictError,
-    ErrorCode,
-    ExtractionEmptyError,
-    InfrastructureError,
-    InvalidInputError,
-    NotFoundError,
-    PathTraversalError,
-    PayloadTooLargeError,
-    ProviderNotConfiguredError,
-    QueueSaturatedError,
-    UnsupportedModalityError,
-)
+from everos.core import errors
+from everos.core.errors import ErrorCode, ProviderNotConfiguredError
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_now_with_timezone, to_iso_format
 
 from .dependencies import extract_request_id
+from .schemas import ErrorDetail, ErrorResponse
 
 logger = get_logger(__name__)
 
 _INTERNAL_ERROR_MESSAGE = "Internal server error"
 
-
-# ---------------------------------------------------------------------------
-# Response model (visible in OpenAPI docs)
-# ---------------------------------------------------------------------------
-
-
-class ErrorDetail(BaseModel):
-    """Inner ``error`` object in the canonical error envelope."""
-
-    code: ErrorCode
-    message: str
-    timestamp: str
-    path: str
-
-
-class ErrorResponse(BaseModel):
-    """Canonical error envelope returned by all error handlers."""
-
-    request_id: str
-    error: ErrorDetail
-
-
-# ---------------------------------------------------------------------------
-# Envelope builder
-# ---------------------------------------------------------------------------
+type _Handler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
 def _error_response(
-    request: Request,
-    status_code: int,
-    code: ErrorCode,
-    message: str,
+    request: Request, status_code: int, code: ErrorCode, message: str
 ) -> JSONResponse:
     """Build a JSONResponse with the canonical error envelope."""
     body = ErrorResponse(
@@ -101,205 +49,85 @@ def _error_response(
             path=str(request.url.path),
         ),
     )
-    return JSONResponse(
-        status_code=status_code,
-        content=body.model_dump(),
-    )
+    return JSONResponse(status_code=status_code, content=body.model_dump())
 
 
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
+def _exception_fields(exc: Exception) -> Mapping[str, object]:
+    return {"exception_type": type(exc).__name__, "message": str(exc)}
 
 
-async def not_found_handler(
-    request: Request,
-    exc: NotFoundError,
-) -> JSONResponse:
-    """NotFoundError (and subclasses) -> 404."""
-    return _error_response(
-        request,
-        HTTP_404_NOT_FOUND,
-        ErrorCode.NOT_FOUND,
-        str(exc),
-    )
+def _provider_fields(exc: Exception) -> Mapping[str, object]:
+    provider_exc = cast(ProviderNotConfiguredError, exc)
+    return {"provider": provider_exc.provider, "feature": provider_exc.feature}
 
 
-async def conflict_handler(
-    request: Request,
-    exc: ConflictError,
-) -> JSONResponse:
-    """ConflictError (and subclasses) -> 409."""
-    return _error_response(
-        request,
-        HTTP_409_CONFLICT,
-        ErrorCode.CONFLICT,
-        str(exc),
-    )
+@dataclass(frozen=True, slots=True)
+class _Rule:
+    """How one exception class becomes an error response."""
+
+    status_code: int
+    code: ErrorCode
+    message: str | None = None
+    """Fixed client-facing message; ``None`` sends ``str(exc)``."""
+    log: tuple[Literal["warning", "error"], str] | None = None
+    """``(level, event)`` of the log line, or ``None`` for no log line."""
+    log_fields: Callable[[Exception], Mapping[str, object]] = _exception_fields
 
 
-async def extraction_empty_handler(
-    request: Request,
-    exc: ExtractionEmptyError,
-) -> JSONResponse:
-    """ExtractionEmptyError -> 422 with dedicated code."""
-    return _error_response(
-        request,
-        HTTP_422_UNPROCESSABLE_CONTENT,
-        ErrorCode.EXTRACTION_EMPTY,
-        str(exc),
-    )
-
-
-async def invalid_input_handler(
-    request: Request,
-    exc: InvalidInputError,
-) -> JSONResponse:
-    """InvalidInputError (and subclasses) -> 422."""
-    return _error_response(
-        request,
-        HTTP_422_UNPROCESSABLE_CONTENT,
-        ErrorCode.INVALID_INPUT,
-        str(exc),
-    )
-
-
-async def path_traversal_handler(
-    request: Request,
-    exc: PathTraversalError,
-) -> JSONResponse:
-    """PathTraversalError -> 400."""
-    return _error_response(
-        request,
-        HTTP_400_BAD_REQUEST,
+_ERROR_RULES: Mapping[type[Exception], _Rule] = {
+    errors.PathTraversalError: _Rule(
+        400,
         ErrorCode.BAD_REQUEST,
-        "Invalid input: path contains illegal characters.",
-    )
-
-
-async def unsupported_modality_handler(
-    request: Request,
-    exc: UnsupportedModalityError,
-) -> JSONResponse:
-    """UnsupportedModalityError -> 415."""
-    return _error_response(
-        request,
-        HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-        ErrorCode.UNSUPPORTED_FORMAT,
-        str(exc),
-    )
-
-
-async def payload_too_large_handler(
-    request: Request,
-    exc: PayloadTooLargeError,
-) -> JSONResponse:
-    """PayloadTooLargeError -> 413 (batch not accepted; split or go sync)."""
-    return _error_response(
-        request,
-        HTTP_413_CONTENT_TOO_LARGE,
-        ErrorCode.PAYLOAD_TOO_LARGE,
-        str(exc),
-    )
-
-
-async def queue_saturated_handler(
-    request: Request,
-    exc: QueueSaturatedError,
-) -> JSONResponse:
-    """QueueSaturatedError -> 429 (batch not accepted; retry or buffer)."""
-    return _error_response(
-        request,
-        HTTP_429_TOO_MANY_REQUESTS,
-        ErrorCode.QUEUE_SATURATED,
-        str(exc),
-    )
-
-
-async def infrastructure_handler(
-    request: Request,
-    exc: InfrastructureError,
-) -> JSONResponse:
-    """InfrastructureError (and subclasses) -> 503."""
-    logger.warning(
-        "infrastructure_error",
-        path=str(request.url.path),
-        exception_type=type(exc).__name__,
-        message=str(exc),
-    )
-    return _error_response(
-        request,
-        HTTP_503_SERVICE_UNAVAILABLE,
+        message="Invalid input: path contains illegal characters.",
+    ),
+    errors.UnsupportedModalityError: _Rule(415, ErrorCode.UNSUPPORTED_FORMAT),
+    # 413 / 429: the batch was not accepted; split it, go sync, or retry later.
+    errors.PayloadTooLargeError: _Rule(413, ErrorCode.PAYLOAD_TOO_LARGE),
+    errors.QueueSaturatedError: _Rule(429, ErrorCode.QUEUE_SATURATED),
+    errors.NotFoundError: _Rule(404, ErrorCode.NOT_FOUND),
+    errors.ConflictError: _Rule(409, ErrorCode.CONFLICT),
+    errors.ExtractionEmptyError: _Rule(422, ErrorCode.EXTRACTION_EMPTY),
+    errors.InvalidInputError: _Rule(422, ErrorCode.INVALID_INPUT),
+    # Transient, retryable.
+    errors.InfrastructureError: _Rule(
+        503,
         ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE,
-        str(exc),
-    )
-
-
-async def capability_handler(
-    request: Request,
-    exc: CapabilityError,
-) -> JSONResponse:
-    """CapabilityError (and subclasses) -> 503 (not retryable)."""
-    logger.warning(
-        "capability_error",
-        path=str(request.url.path),
-        exception_type=type(exc).__name__,
-        message=str(exc),
-    )
-    return _error_response(
-        request,
-        HTTP_503_SERVICE_UNAVAILABLE,
-        ErrorCode.CAPABILITY_UNAVAILABLE,
-        str(exc),
-    )
-
-
-async def configuration_handler(
-    request: Request,
-    exc: ConfigurationError,
-) -> JSONResponse:
-    """ConfigurationError -> 500."""
-    logger.error(
-        "configuration_error",
-        path=str(request.url.path),
-        message=str(exc),
-    )
-    return _error_response(
-        request,
-        HTTP_500_INTERNAL_SERVER_ERROR,
-        ErrorCode.CONFIGURATION_ERROR,
-        str(exc),
-    )
-
-
-async def provider_not_configured_handler(
-    request: Request,
-    exc: ProviderNotConfiguredError,
-) -> JSONResponse:
-    """ProviderNotConfiguredError -> 422 (client-actionable, unlike its parent).
-
-    Unlike a generic ``ConfigurationError`` (500 -- an operator bug), a
-    missing provider is something the caller can fix by editing
-    ``everos.toml``, so this more-specific subclass gets its own 422
-    mapping instead of falling through to ``configuration_handler``.
-    """
-    logger.warning(
-        "provider_not_configured_error",
-        path=str(request.url.path),
-        provider=exc.provider,
-        feature=exc.feature,
-    )
-    return _error_response(
-        request,
-        HTTP_422_UNPROCESSABLE_CONTENT,
+        log=("warning", "infrastructure_error"),
+    ),
+    # Permanent, not retryable.
+    errors.CapabilityError: _Rule(
+        503, ErrorCode.CAPABILITY_UNAVAILABLE, log=("warning", "capability_error")
+    ),
+    # A missing provider is fixed by the caller editing everos.toml, so it is a
+    # 422; any other ConfigurationError is an operator bug, a 500.
+    errors.ProviderNotConfiguredError: _Rule(
+        422,
         ErrorCode.PROVIDER_NOT_CONFIGURED,
-        str(exc),
-    )
+        log=("warning", "provider_not_configured_error"),
+        log_fields=_provider_fields,
+    ),
+    errors.ConfigurationError: _Rule(
+        500, ErrorCode.CONFIGURATION_ERROR, log=("error", "configuration_error")
+    ),
+    # Same meaning as ProviderNotConfiguredError: the [llm] (or [multimodal])
+    # section in everos.toml is incomplete; the message says what to edit.
+    errors.LLMNotConfiguredError: _Rule(
+        422, ErrorCode.PROVIDER_NOT_CONFIGURED, log=("warning", "llm_not_configured")
+    ),
+}
 
 
-# ---------------------------------------------------------------------------
-# Pydantic / FastAPI built-in exceptions
-# ---------------------------------------------------------------------------
+def _rule_handler(rule: _Rule) -> _Handler:
+    async def handle(request: Request, exc: Exception) -> JSONResponse:
+        if rule.log is not None:
+            level, event = rule.log
+            fields = rule.log_fields(exc)
+            getattr(logger, level)(event, path=str(request.url.path), **fields)
+        message = str(exc) if rule.message is None else rule.message
+        return _error_response(request, rule.status_code, rule.code, message)
+
+    return handle
+
 
 _FIELD_HINTS: dict[str, str] = {
     "doc_id": (
@@ -314,61 +142,43 @@ _FIELD_HINTS: dict[str, str] = {
 }
 
 
+def _validation_message(exc: RequestValidationError) -> str:
+    """First field error, as a hint for known fields or ``"<msg>: <loc>"``."""
+    field_errors = exc.errors()
+    if not field_errors:
+        return "Request validation error"
+    first = field_errors[0]
+    loc_parts = [str(p) for p in first.get("loc", []) if p != "body"]
+    field = loc_parts[-1] if loc_parts else ""
+    if field in _FIELD_HINTS:
+        return _FIELD_HINTS[field]
+    loc = ".".join(loc_parts)
+    msg = first.get("msg", "Validation error")
+    return f"{msg}: {loc}" if loc else msg
+
+
 async def request_validation_handler(
-    request: Request,
-    exc: RequestValidationError,
+    request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """FastAPI RequestValidationError -> 422."""
-    errors = exc.errors()
-    if errors:
-        first = errors[0]
-        loc_parts = [str(p) for p in first.get("loc", []) if p != "body"]
-        field = loc_parts[-1] if loc_parts else ""
-        if field in _FIELD_HINTS:
-            message = _FIELD_HINTS[field]
-        else:
-            loc = ".".join(loc_parts)
-            msg = first.get("msg", "Validation error")
-            message = f"{msg}: {loc}" if loc else msg
-    else:
-        message = "Request validation error"
-    return _error_response(
-        request,
-        HTTP_422_UNPROCESSABLE_CONTENT,
-        ErrorCode.INVALID_INPUT,
-        message,
-    )
+    message = _validation_message(exc)
+    return _error_response(request, 422, ErrorCode.INVALID_INPUT, message)
 
 
-async def http_exception_handler(
-    request: Request,
-    exc: HTTPException,
-) -> JSONResponse:
-    """FastAPI HTTPException -> envelope with original status code."""
-    if exc.status_code >= 500:
-        logger.error(
-            "http_exception_5xx",
-            path=str(request.url.path),
-            status_code=exc.status_code,
-        )
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """FastAPI HTTPException -> its own status code; a 5xx hides ``detail``."""
+    if exc.status_code < 500:
         return _error_response(
-            request,
-            exc.status_code,
-            ErrorCode.INTERNAL_ERROR,
-            _INTERNAL_ERROR_MESSAGE,
+            request, exc.status_code, ErrorCode.BAD_REQUEST, str(exc.detail)
         )
+    path = str(request.url.path)
+    logger.error("http_exception_5xx", path=path, status_code=exc.status_code)
     return _error_response(
-        request,
-        exc.status_code,
-        ErrorCode.BAD_REQUEST,
-        str(exc.detail),
+        request, exc.status_code, ErrorCode.INTERNAL_ERROR, _INTERNAL_ERROR_MESSAGE
     )
 
 
-async def unexpected_handler(
-    request: Request,
-    exc: Exception,
-) -> JSONResponse:
+async def unexpected_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for unhandled exceptions -> 500 (no detail leak)."""
     logger.error(
         "unhandled_exception",
@@ -377,47 +187,19 @@ async def unexpected_handler(
         exc_info=True,
     )
     return _error_response(
-        request,
-        HTTP_500_INTERNAL_SERVER_ERROR,
-        ErrorCode.INTERNAL_ERROR,
-        _INTERNAL_ERROR_MESSAGE,
+        request, 500, ErrorCode.INTERNAL_ERROR, _INTERNAL_ERROR_MESSAGE
     )
-
-
-# ---------------------------------------------------------------------------
-# Registration
-# ---------------------------------------------------------------------------
 
 
 def register_handlers(app: FastAPI) -> None:
-    """Register all per-type exception handlers on ``app``.
+    """Register every exception handler on ``app``.
 
-    Starlette walks the exception MRO and picks the first matching
-    handler, so more-specific types are registered before their parents.
+    Starlette resolves a handler by walking the raised exception's MRO, so
+    registration order does not decide which row wins: the most specific
+    registered class does.
     """
-    # Domain errors (specific before parent)
-    app.add_exception_handler(PathTraversalError, path_traversal_handler)
-    app.add_exception_handler(UnsupportedModalityError, unsupported_modality_handler)
-    app.add_exception_handler(PayloadTooLargeError, payload_too_large_handler)
-    app.add_exception_handler(QueueSaturatedError, queue_saturated_handler)
-    app.add_exception_handler(NotFoundError, not_found_handler)
-    app.add_exception_handler(ConflictError, conflict_handler)
-    app.add_exception_handler(ExtractionEmptyError, extraction_empty_handler)
-    app.add_exception_handler(InvalidInputError, invalid_input_handler)
-    # Infrastructure errors (transient, retryable)
-    app.add_exception_handler(InfrastructureError, infrastructure_handler)
-    # Capability errors (permanent, not retryable)
-    app.add_exception_handler(CapabilityError, capability_handler)
-    # Configuration errors (specific before parent)
-    app.add_exception_handler(
-        ProviderNotConfiguredError, provider_not_configured_handler
-    )
-    app.add_exception_handler(ConfigurationError, configuration_handler)
-    # FastAPI built-in exceptions
+    for exc_type, rule in _ERROR_RULES.items():
+        app.add_exception_handler(exc_type, _rule_handler(rule))
     app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(
-        RequestValidationError,
-        request_validation_handler,
-    )
-    # Catch-all
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(Exception, unexpected_handler)

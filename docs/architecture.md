@@ -509,17 +509,20 @@ AppError
 │   │   ├── ExtractionEmptyError   → 422 EXTRACTION_EMPTY
 │   │   └── FilterError
 │   ├── PathTraversalError         → 400 BAD_REQUEST
-│   └── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
-├── InfrastructureError            (infrastructure failure)  → 503
+│   ├── UnsupportedModalityError   → 415 UNSUPPORTED_FORMAT
+│   ├── PayloadTooLargeError       → 413 PAYLOAD_TOO_LARGE
+│   └── QueueSaturatedError        → 429 QUEUE_SATURATED
+├── InfrastructureError            (infrastructure failure)  → 503 EXTERNAL_SERVICE_UNAVAILABLE
 │   ├── StorageError
 │   ├── VectorStoreError
 │   └── ExternalServiceError
 │       ├── LLMServiceError
 │       ├── EmbeddingServiceError
 │       └── RerankServiceError
-├── CapabilityError                (capability unavailable)  → 503
+├── CapabilityError                (capability unavailable)  → 503 CAPABILITY_UNAVAILABLE
 │   └── MultimodalNotEnabledError
-└── ConfigurationError             (misconfiguration)         → 500
+└── ConfigurationError             (misconfiguration)         → 500 CONFIGURATION_ERROR
+    └── ProviderNotConfiguredError → 422 PROVIDER_NOT_CONFIGURED
 ```
 
 ### Error propagation strategy
@@ -528,10 +531,14 @@ Exceptions are raised at the layer where the error is detected and
 normally propagate to the boundary that can interpret them. Catching an error
 to coordinate cleanup, partial results, or a documented fallback is legitimate;
 avoid indiscriminate wrapping that loses its classification.
-The entrypoints layer registers per-type exception handlers
-(`entrypoints/api/exception_handlers.py`) via Starlette's MRO dispatch.
-Each handler converts the exception into a canonical error envelope with
-an `ErrorCode` enum value and the appropriate HTTP status code.
+The entrypoints layer maps exceptions in
+`entrypoints/api/exception_handlers.py`: one table from `AppError` subclass
+to HTTP status, `ErrorCode`, optional fixed message and optional log line,
+served by one generic handler and resolved through Starlette's MRO dispatch
+(the most specific registered class wins). FastAPI's `HTTPException`,
+`RequestValidationError` and the catch-all keep dedicated handlers. Every
+response is the canonical error envelope (`schemas.ErrorResponse`); an
+unmapped exception becomes a 500 `INTERNAL_ERROR` without its message.
 
 ### Boundary translation
 

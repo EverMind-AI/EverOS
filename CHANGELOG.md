@@ -286,6 +286,9 @@ both use the resulting `Application` through three facades:
   also carries `md_path`, the document's `index.md` relative to the memory
   root), and `KnowledgeCatalog.record_document` takes that `md_path` as a
   keyword. API responses are unchanged.
+- **A request that needs a model while `[llm]` (or `[multimodal]`) is not
+  configured answers 422 `PROVIDER_NOT_CONFIGURED`** instead of 500
+  `INTERNAL_ERROR`.
 
 ### Fixed
 

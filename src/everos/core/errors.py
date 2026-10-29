@@ -327,7 +327,8 @@ class LLMNotConfiguredError(RuntimeError):
     """Raised when an LLM section is missing ``api_key`` or ``base_url``.
 
     A ``RuntimeError`` rather than an ``AppError``: it is raised while the
-    application is assembled and by use cases that need a model, and the API
-    layer maps it on its own. It lives here so a use case can raise it
-    without depending on the LLM provider package.
+    application is assembled and by use cases that need a model. The HTTP
+    API answers it with 422 ``PROVIDER_NOT_CONFIGURED``, like
+    :class:`ProviderNotConfiguredError`. It lives here so a use case can
+    raise it without depending on the LLM provider package.
     """

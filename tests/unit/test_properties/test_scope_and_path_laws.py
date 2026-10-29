@@ -35,7 +35,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from everos.entrypoints.api.routes.memorize import (
+from everos.entrypoints.api.schemas.ids import (
     _reject_path_traversal,
     _reject_reserved_scope_dir,
 )

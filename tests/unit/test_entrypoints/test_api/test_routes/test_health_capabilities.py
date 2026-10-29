@@ -37,13 +37,7 @@ async def _embed_from_the_route(*, probed: bool, embedding: bool = True) -> bool
     )
     application.ops.probed = probed
 
-    class _App:
-        state = type("S", (), {"application": application})()
-
-    class _Request:
-        app = _App()
-
-    response: Any = await health_route.health(_Request())  # type: ignore[arg-type]
+    response: Any = await health_route.health(application)
     return response.capabilities.embed
 
 
