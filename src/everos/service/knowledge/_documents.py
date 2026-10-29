@@ -20,7 +20,6 @@ from everos.core.errors import (
     DuplicateDocumentError,
     ExtractionEmptyError,
     InvalidInputError,
-    LLMNotConfiguredError,
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import get_utc_now
@@ -56,7 +55,7 @@ class DocumentManager:
     Args:
         store: The markdown truth of documents, topics and the taxonomy.
         catalog: The document / topic records the cascade keeps.
-        extractor: Topic extractor; ``None`` when no LLM is configured.
+        extractor: Topic extractor.
         parse_file: Parses an uploaded non-text file.
         parser_available: Whether the optional parser is installed.
         max_upload_bytes: The largest upload accepted.
@@ -67,7 +66,7 @@ class DocumentManager:
         *,
         store: KnowledgeStore,
         catalog: KnowledgeCatalog,
-        extractor: KnowledgeExtractor | None,
+        extractor: KnowledgeExtractor,
         parse_file: Callable[[RawFile], Awaitable[ParsedContent]],
         parser_available: bool,
         max_upload_bytes: int,
@@ -116,14 +115,13 @@ class DocumentManager:
         file_content: bytes | None,
     ) -> CreateDocumentResult:
         """Extract ``parsed`` into a new document and write it."""
-        extractor = self._require_extractor()
         doc_id = doc_id or await self._mint_doc_id()
         if await self._catalog.document_exists(doc_id):
             raise DuplicateDocumentError(
                 f"Document {doc_id!r} already exists; use PUT to replace"
             )
         memories = await self._extract(
-            extractor, parsed, doc_id, title, app_id, project_id, category_id
+            parsed, doc_id, title, app_id, project_id, category_id
         )
         written = await self._store.write_document(
             app_id,
@@ -153,12 +151,11 @@ class DocumentManager:
         Catalog rows are upserted by the cascade, so nothing is deleted from
         it here.
         """
-        extractor = self._require_extractor()
         previous = await self._catalog.get_document(doc_id)
         if previous is None:
             raise DocumentNotFoundError(f"Document {doc_id!r} not found")
         memories = await self._extract(
-            extractor, parsed, doc_id, title, app_id, project_id, category_id
+            parsed, doc_id, title, app_id, project_id, category_id
         )
         written = await self._store.replace_document(
             previous,
@@ -236,7 +233,6 @@ class DocumentManager:
 
     async def _extract(
         self,
-        extractor: KnowledgeExtractor,
         parsed: ParsedContent,
         doc_id: str,
         title: str,
@@ -250,7 +246,7 @@ class DocumentManager:
             ExtractionEmptyError: When the extractor produces no memories.
         """
         categories = await self._store.categories(app_id, project_id)
-        extracted = await extractor.aextract(
+        extracted = await self._extractor.aextract(
             parsed,
             doc_id=doc_id,
             title=title,
@@ -274,13 +270,6 @@ class DocumentManager:
             if not await self._catalog.document_exists(candidate):
                 return candidate
         return f"{_DOC_ID_PREFIX}{uuid4().hex}"
-
-    def _require_extractor(self) -> KnowledgeExtractor:
-        if self._extractor is None:
-            raise LLMNotConfiguredError(
-                "knowledge uploads need an LLM; set [llm] api_key and base_url"
-            )
-        return self._extractor
 
 
 def _with_category(memory: KnowledgeMemory) -> KnowledgeMemory:

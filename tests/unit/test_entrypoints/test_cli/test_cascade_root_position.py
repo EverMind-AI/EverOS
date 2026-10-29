@@ -41,7 +41,7 @@ def _hermetic_env() -> dict[str, str]:
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("EVEROS_")
     }
-    env["EVEROS_LLM__API_KEY"] = ""
+    env["EVEROS_LLM__API_KEY"] = "test-key"  # required to build; never called
     env["EVEROS_EMBEDDING__API_KEY"] = ""
     env["EVEROS_RERANK__API_KEY"] = ""
     return env

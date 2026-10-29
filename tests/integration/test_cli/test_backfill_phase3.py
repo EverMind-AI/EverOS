@@ -27,7 +27,6 @@ capability (exit 2, mirroring Phase 1 / Phase 2's own guard).
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import importlib
 from collections.abc import AsyncIterator, Iterator
@@ -49,7 +48,8 @@ from everos.infra.persistence.lancedb import (
     AgentCase,
 )
 from everos.memory.models import mint_cluster_id
-from everos.service import OpsService, build_application, build_providers
+from everos.service import OpsService, build_application
+from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
 
 _DIM = 1024
@@ -133,8 +133,7 @@ def _ops() -> OpsService:
     whatever that holds when the phase runs.
     """
     settings = load_settings()
-    providers = dataclasses.replace(
-        build_providers(settings),
+    providers = make_providers(
         embedding=_PROVIDERS["embedding"],
         # The backfill engine binds its LLM when it builds the strategy
         # deps; a configured-looking client is what lets skills run at all.

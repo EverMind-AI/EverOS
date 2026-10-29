@@ -7,7 +7,8 @@ with the right ``provider`` / ``feature`` / ``alternative_hint`` payload.
 
 The gate reads the providers this manager was built with: a ``None``
 provider fails the guard, so dispatch never reaches an
-``AttributeError('NoneType')`` deep in recall.
+``AttributeError('NoneType')`` deep in recall. The LLM is not gated: the
+manager cannot be built without one.
 
 Agent HYBRID has two rerank lanes selected by ``enable_llm_rerank``: the
 LLM lane (``True``) reranks via the LLM and needs no rerank provider; the
@@ -25,7 +26,7 @@ from tests.fakes import static_trace_path, static_tuning
 
 
 class _StubLLM:
-    """Marker instance -- ``_validate_components`` only checks it for None-ness."""
+    """Marker instance -- ``_validate_components`` never reads it."""
 
 
 class _StubEmbedding:
@@ -38,13 +39,12 @@ class _StubReranker:
 
 def _build_manager(
     *,
-    llm_present: bool = True,
     embedding_present: bool = False,
     reranker_present: bool = False,
 ) -> SearchManager:
     """A manager whose recallers are never touched -- ``_validate_components``
-    runs before any recall dispatch, so only ``llm_client`` / ``embedding``
-    / ``reranker`` presence matters here.
+    runs before any recall dispatch, so only ``embedding`` / ``reranker``
+    presence matters here.
     """
     return SearchManager(
         episode_recaller=None,  # type: ignore[arg-type]
@@ -56,7 +56,8 @@ def _build_manager(
         cluster_store=None,  # type: ignore[arg-type]
         embedding=_StubEmbedding() if embedding_present else None,  # type: ignore[arg-type]
         reranker=_StubReranker() if reranker_present else None,  # type: ignore[arg-type]
-        llm_client=_StubLLM() if llm_present else None,
+        llm_client=_StubLLM(),  # type: ignore[arg-type]
+        decider_client=_StubLLM(),  # type: ignore[arg-type]
         tuning_source=static_tuning(),
         trace_path_source=static_trace_path(),
     )
@@ -64,9 +65,8 @@ def _build_manager(
 
 @pytest.fixture
 def manager() -> SearchManager:
-    """LLM is always wired -- it's a Tier-1 hard requirement enforced at
-    server startup, so every case here assumes it's present and only
-    varies embedding / rerank availability.
+    """LLM is always wired -- the application is not built without one --
+    so every case here only varies embedding / rerank availability.
 
     ``embedding`` and ``reranker`` default to ``None`` here so tests
     exercising the "provider unavailable" branch don't need to opt out;
@@ -142,57 +142,6 @@ def test_agent_hybrid_llm_lane_without_rerank_passes() -> None:
         agent_id="a1", query="q", method=SearchMethod.HYBRID, enable_llm_rerank=True
     )
     manager._validate_components(req)  # must not raise
-
-
-def test_agent_hybrid_llm_lane_without_llm_raises() -> None:
-    """LLM absence is defensive-only (a running server can't start without
-    one) but the gate must still refuse rather than dispatch into a
-    rerank call with no LLM client wired. Uniform with the embedding /
-    rerank branches: 422 via :class:`ProviderNotConfiguredError`."""
-    manager = _build_manager(llm_present=False, embedding_present=True)
-    req = SearchRequest(
-        agent_id="a1", query="q", method=SearchMethod.HYBRID, enable_llm_rerank=True
-    )
-    with pytest.raises(ProviderNotConfiguredError) as excinfo:
-        manager._validate_components(req)
-    assert excinfo.value.provider == "llm"
-    assert excinfo.value.feature == "agent_hybrid"
-    assert excinfo.value.alternative_hint is not None
-    assert "enable_llm_rerank" in excinfo.value.alternative_hint
-
-
-# ── LLM branches: hybrid+enable_llm_rerank and AGENTIC both 422 ─────────
-
-
-def test_hybrid_llm_lane_missing_client_raises_provider_not_configured() -> None:
-    """User HYBRID + ``enable_llm_rerank=True`` routes through the LLM
-    rerank lane; a manager built without an LLM client must fail with a
-    422 that points at ``[llm]`` and offers the cross-encoder fallback."""
-    manager = _build_manager(llm_present=False, embedding_present=True)
-    req = SearchRequest(
-        user_id="u1", query="q", method=SearchMethod.HYBRID, enable_llm_rerank=True
-    )
-    with pytest.raises(ProviderNotConfiguredError) as excinfo:
-        manager._validate_components(req)
-    assert excinfo.value.provider == "llm"
-    assert excinfo.value.feature == "user_hybrid"
-    assert "[llm]" in str(excinfo.value)
-    assert excinfo.value.alternative_hint is not None
-    assert "enable_llm_rerank" in excinfo.value.alternative_hint
-
-
-def test_agentic_missing_llm_client_raises_provider_not_configured() -> None:
-    """AGENTIC needs an LLM to drive the agentic loop; without one the
-    gate must fail with 422 and point at ``[llm]``."""
-    manager = _build_manager(
-        llm_present=False, embedding_present=True, reranker_present=True
-    )
-    req = SearchRequest(user_id="u1", query="q", method=SearchMethod.AGENTIC)
-    with pytest.raises(ProviderNotConfiguredError) as excinfo:
-        manager._validate_components(req)
-    assert excinfo.value.provider == "llm"
-    assert excinfo.value.feature == "agentic_search"
-    assert "[llm]" in str(excinfo.value)
 
 
 def test_gate_passes_when_every_provider_is_injected() -> None:

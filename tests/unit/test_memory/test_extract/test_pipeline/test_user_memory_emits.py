@@ -59,7 +59,7 @@ def _pipeline(llm: object, episode_store: object | None = None) -> UserMemoryPip
     return UserMemoryPipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
         instructions=bundled_instructions(),
-        llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient or None
+        llm_client=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
 
 
@@ -79,7 +79,6 @@ async def test_pipeline_started_leads_the_cell_events() -> None:
         ingested, PreparedCell(cell=cell, memcell_id="mc_a")
     )
 
-    assert outcome.status == "extracted"
     assert outcome.message_count == 1
     (started,) = outcome.events
     assert isinstance(started, UserPipelineStarted)
@@ -87,13 +86,6 @@ async def test_pipeline_started_leads_the_cell_events() -> None:
     assert (started.app_id, started.project_id) == ("claude_code", "oss")
     assert started.memcell is cell
     assert llm.call_count == 0
-
-
-async def test_no_llm_skips_the_cell_without_events() -> None:
-    outcome = await _pipeline(None).run_cell(_INGESTED, _prepared("u1"))
-
-    assert outcome.status == "skipped"
-    assert outcome.events == ()
 
 
 async def test_emit_episode_extracted_after_md_write() -> None:
@@ -105,7 +97,6 @@ async def test_emit_episode_extracted_after_md_write() -> None:
         _INGESTED, _prepared("u1")
     )
 
-    assert outcome.status == "extracted"
     assert outcome.md_paths == [_REF.md_path]
     assert isinstance(outcome.events[0], UserPipelineStarted)
     (extracted,) = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]

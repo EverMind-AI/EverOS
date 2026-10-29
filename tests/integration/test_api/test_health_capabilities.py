@@ -13,7 +13,6 @@ class TestComputeDisabledFeatures:
     def test_all_capabilities_available(self) -> None:
         """When all capabilities are available, no features are disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": True,
@@ -27,7 +26,6 @@ class TestComputeDisabledFeatures:
     ) -> None:
         """When embedding unavailable, vector/hybrid/reflection/skill disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": True,
             "multimodal_llm": True,
@@ -46,7 +44,6 @@ class TestComputeDisabledFeatures:
     def test_rerank_unavailable_disables_agentic_search(self) -> None:
         """When rerank is unavailable, agentic_search is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": False,
             "multimodal_llm": True,
@@ -58,7 +55,6 @@ class TestComputeDisabledFeatures:
     def test_both_embed_and_rerank_missing_disables_knowledge(self) -> None:
         """When both embed and rerank are missing, knowledge is disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": False,
             "multimodal_llm": True,
@@ -70,7 +66,6 @@ class TestComputeDisabledFeatures:
     def test_multimodal_and_parser_missing_disables_multimodal_upload(self) -> None:
         """When multimodal_llm is unavailable, multimodal_upload is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": False,
@@ -82,7 +77,6 @@ class TestComputeDisabledFeatures:
     def test_parser_missing_disables_multimodal_upload(self) -> None:
         """When parser is unavailable, multimodal_upload is disabled."""
         caps = {
-            "llm": True,
             "embed": True,
             "rerank": True,
             "multimodal_llm": True,
@@ -94,7 +88,6 @@ class TestComputeDisabledFeatures:
     def test_tier1_only_llm(self) -> None:
         """Tier 1 (LLM only): many features are disabled."""
         caps = {
-            "llm": True,
             "embed": False,
             "rerank": False,
             "multimodal_llm": False,
@@ -118,7 +111,6 @@ class TestComputeDisabledFeatures:
         [
             param(
                 {
-                    "llm": True,
                     "embed": True,
                     "rerank": True,
                     "multimodal_llm": True,
@@ -129,7 +121,6 @@ class TestComputeDisabledFeatures:
             ),
             param(
                 {
-                    "llm": True,
                     "embed": False,
                     "rerank": True,
                     "multimodal_llm": True,
@@ -146,7 +137,6 @@ class TestComputeDisabledFeatures:
             ),
             param(
                 {
-                    "llm": True,
                     "embed": True,
                     "rerank": False,
                     "multimodal_llm": True,
@@ -169,14 +159,17 @@ class TestComputeDisabledFeatures:
 
 @mark.asyncio
 async def test_health_endpoint_includes_capabilities() -> None:
-    """GET /health returns capabilities dict with all 5 provider fields."""
+    """GET /health returns the four provider flags; there is no llm flag."""
     from httpx import ASGITransport, AsyncClient
 
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
     from everos.service import build_application
+    from tests.fakes import make_providers
 
-    app = create_app(application=build_application(load_settings()))
+    app = create_app(
+        application=build_application(load_settings(), providers=make_providers())
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport) as client:
         response = await client.get("http://testserver/health")
@@ -191,7 +184,7 @@ async def test_health_endpoint_includes_capabilities() -> None:
 
     caps = data["capabilities"]
     assert isinstance(caps, dict)
-    assert "llm" in caps
+    assert "llm" not in caps
     assert "embed" in caps
     assert "rerank" in caps
     assert "multimodal_llm" in caps
@@ -285,8 +278,6 @@ async def test_health_endpoint_disabled_features_matches_hardcoded_expectation(
 
     application = make_application(
         capabilities=Capabilities(
-            llm=True,
-            decider=True,
             embedding=embed,
             rerank=rerank,
             multimodal_llm=multimodal_llm,

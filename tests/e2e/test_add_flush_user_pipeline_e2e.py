@@ -26,7 +26,6 @@ Real LLM + real embedder (creds via ``.env``). Marked ``slow`` —
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import os
 import shutil
@@ -41,7 +40,7 @@ from everos.infra.persistence.markdown import (
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
 )
-from tests.fakes import user_track_llm, user_track_script
+from tests.fakes import make_providers, user_track_llm, user_track_script
 from tests.fakes.storage import StorageView
 
 # Directory names live on the frontmatter schemas (single source of truth);
@@ -347,12 +346,10 @@ async def test_async_client_starts_and_health_responds(
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.service import build_application, build_providers
+    from everos.service import build_application
 
     settings = load_settings()
-    providers = dataclasses.replace(
-        build_providers(settings), llm=user_track_llm(), embedding=None, rerank=None
-    )
+    providers = make_providers(llm=user_track_llm(), embedding=None, rerank=None)
     app = create_app(application=build_application(settings, providers=providers))
     async with (
         app.router.lifespan_context(app),
@@ -401,16 +398,14 @@ async def test_add_flush_search_get_on_canned_user_track(
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.service import build_application, build_providers
+    from everos.service import build_application
 
     monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
     monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
     load_settings.cache_clear()
     settings = load_settings()
     llm = user_track_llm(boundary="boundary_empty")
-    providers = dataclasses.replace(
-        build_providers(settings), llm=llm, embedding=None, rerank=None
-    )
+    providers = make_providers(llm=llm, embedding=None, rerank=None)
     app = create_app(application=build_application(settings, providers=providers))
     episode = json.loads(user_track_script("episode"))
     profile = json.loads(user_track_script("profile_init"))

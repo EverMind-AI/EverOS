@@ -47,7 +47,6 @@ White-box assertions (audit trail of internal surfaces touched):
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -64,6 +63,7 @@ from tests.fakes import (
     FakeEmbeddingProvider,
     agent_track_script,
     agent_trajectory_messages,
+    make_providers,
     memorize_llm,
 )
 from tests.fakes.storage import StorageView
@@ -346,15 +346,14 @@ async def test_add_flush_search_get_on_canned_agent_track(
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.service import build_application, build_providers
+    from everos.service import build_application
 
     monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "agent")
     monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
     load_settings.cache_clear()
     settings = load_settings()
     calls: list[str] = []
-    providers = dataclasses.replace(
-        build_providers(settings),
+    providers = make_providers(
         llm=memorize_llm(calls=calls),
         embedding=FakeEmbeddingProvider(dim=1024),
         rerank=None,

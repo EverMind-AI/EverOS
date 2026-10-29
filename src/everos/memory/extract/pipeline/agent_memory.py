@@ -25,7 +25,6 @@ class AgentMemoryPipeline:
     ) -> CellOutcome:
         """Return the cell's ``AgentPipelineStarted``."""
         return CellOutcome(
-            status="extracted",
             message_count=len(prepared.cell.items),
             events=[
                 AgentPipelineStarted(

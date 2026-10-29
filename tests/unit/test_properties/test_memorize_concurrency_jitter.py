@@ -155,7 +155,7 @@ class _Run:
             self.pipelines_active -= 1
         self.pipeline_log.append((ingested.session_id, (prepared.memcell_id,)))
         self.note(f"  pipeline: {ingested.session_id} {prepared.memcell_id}")
-        return CellOutcome(status="extracted", message_count=1)
+        return CellOutcome(message_count=1)
 
 
 class _NullBus:

@@ -353,13 +353,17 @@ passed explicitly; deliberate live configuration needs an explicit source and
 compatibility rules for existing environment overrides.
 
 A factory raises when its section is missing or wrong
-(`LLMNotConfiguredError` / `ValueError`); the bootstrap's `build_providers`
-turns that into `None` with a warning, and the `None` is the whole
-"not configured" signal: search refuses with a 422, cascade writes rows
-without vectors, knowledge uploads refuse, and the server's `start()` refuses
-to run without an extraction LLM. Why the bootstrap decides and the factory
-does not: "absent" is an application decision, while "misconfigured" must
-stay visible to whoever builds the provider.
+(`LLMNotConfiguredError` / `ValueError`). The extraction LLM is required:
+`build_providers` lets its `LLMNotConfiguredError` propagate, so neither the
+server nor a CLI command that builds the application gets past assembly
+without `[llm]`, and nothing downstream of the bootstrap types the LLM (or
+the decider, which falls back to `[llm]`) as optional. For embedding, rerank
+and multimodal the bootstrap turns the error into `None` with a warning, and
+the `None` is the whole "not configured" signal: search refuses with a 422,
+cascade writes rows without vectors, knowledge uploads refuse, and parsing a
+non-text upload refuses without a multimodal LLM. Why the bootstrap decides
+and the factory does not: "absent" is an application decision, while
+"misconfigured" must stay visible to whoever builds the provider.
 
 ### `memory/extract/`
 

@@ -35,7 +35,6 @@ LLM stubbing notes:
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -50,7 +49,7 @@ from everalgo.testing import FakeLLMClient
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.rerank import RerankResult
-from tests.fakes import StorageView, memorize_llm, open_storage_view
+from tests.fakes import StorageView, make_providers, memorize_llm, open_storage_view
 
 if TYPE_CHECKING:
     from everos.service import Application
@@ -221,11 +220,10 @@ async def _tier_client(
     monkeypatch.setattr(EmbeddingProvenance, "probe_dimension", _stub_probe)
 
     from everos.entrypoints.api.app import create_app
-    from everos.service import build_application, build_providers
+    from everos.service import build_application
 
     settings = load_settings()
-    providers = dataclasses.replace(
-        build_providers(settings),
+    providers = make_providers(
         llm=make_fake_llm(),
         embedding=stub_embedder,
         rerank=stub_reranker,

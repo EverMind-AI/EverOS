@@ -24,7 +24,6 @@ none of them ever touch a developer's real ``~/.everos``.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import hashlib
 import re
 from collections.abc import Iterator
@@ -48,9 +47,8 @@ from everos.service import (
     Application,
     OpsService,
     build_application,
-    build_providers,
 )
-from tests.fakes import FakeEmbeddingProvider
+from tests.fakes import FakeEmbeddingProvider, make_providers
 from tests.fakes.storage import Storage
 
 # rich (via typer) injects ANSI escapes into help output when it thinks
@@ -91,9 +89,7 @@ def _build_with_embedding(settings: Settings) -> Application:
     real embed batch -- the phase bodies scan an empty backlog and return
     before touching the provider.
     """
-    providers = dataclasses.replace(
-        build_providers(settings), embedding=FakeEmbeddingProvider()
-    )
+    providers = make_providers(embedding=FakeEmbeddingProvider())
     return build_application(settings, providers=providers)
 
 

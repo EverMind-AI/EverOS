@@ -109,8 +109,9 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     errors.ConfigurationError: _Rule(
         500, ErrorCode.CONFIGURATION_ERROR, log=("error", "configuration_error")
     ),
-    # Same meaning as ProviderNotConfiguredError: the [llm] (or [multimodal])
-    # section in everos.toml is incomplete; the message says what to edit.
+    # Same meaning as ProviderNotConfiguredError: an LLM section in everos.toml
+    # is incomplete; the message says what to edit. The app is not built
+    # without [llm], so in a request this is [multimodal] (parsing an upload).
     errors.LLMNotConfiguredError: _Rule(
         422, ErrorCode.PROVIDER_NOT_CONFIGURED, log=("warning", "llm_not_configured")
     ),

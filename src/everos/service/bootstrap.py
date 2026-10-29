@@ -130,12 +130,14 @@ _TRUE_VALUES = ("1", "true", "yes")
 class Providers:
     """The swappable providers an application is built over; ``None`` = absent.
 
+    The extraction ``llm`` (and the ``decider``, which falls back to it) is
+    always present: :func:`build_providers` refuses settings without one.
     Built from settings by :func:`build_providers`; a test that needs a fake
-    passes its own (``dataclasses.replace(build_providers(s), llm=fake)``).
+    constructs its own.
     """
 
-    llm: LLMClient | None
-    decider: LLMClient | None
+    llm: LLMClient
+    decider: LLMClient
     multimodal_llm: LLMClient | None
     embedding: EmbeddingProvider | None
     rerank: RerankProvider | None
@@ -189,15 +191,7 @@ class Application:
         worker (the worker's deliveries publish into the engine), and the
         stack unwinds in reverse, so the worker stops -- and running
         extractions are waited for -- before the engine they publish to.
-
-        Raises:
-            LLMNotConfiguredError: No extraction LLM is configured; memory
-                extraction is the server's purpose, so this fails startup
-                rather than every request.
         """
-        if not self.capabilities.llm:
-            resolve_llm_config(self._settings)  # raises with the toml hint
-            raise LLMNotConfiguredError("no extraction LLM was provided")
         scores = await init_score_sink(self._settings.observability)
         self._stack.push_async_callback(_shielded("score_sink", shutdown_score_sink))
         logger.info("tracing_score_sink_ready", enabled=scores)
@@ -251,10 +245,19 @@ def configure_process(settings: Settings) -> None:
 
 
 def build_providers(settings: Settings) -> Providers:
-    """Build every optional provider ``settings`` configures; ``None`` otherwise."""
+    """Build the providers ``settings`` configures.
+
+    The extraction LLM is required -- memory extraction is what the
+    application is for -- so its absence fails the build. Every other
+    provider is optional and ``None`` when not configured.
+
+    Raises:
+        LLMNotConfiguredError: ``[llm]`` lacks ``api_key`` or ``base_url``;
+            the message names the toml section to edit.
+    """
     return Providers(
-        llm=_llm_or_none(settings, "llm", resolve_llm_config),
-        decider=_llm_or_none(settings, "decider", resolve_decider_config),
+        llm=_build_llm(settings, resolve_llm_config),
+        decider=_build_llm(settings, resolve_decider_config),
         multimodal_llm=_llm_or_none(
             settings, "multimodal_llm", resolve_multimodal_config
         ),
@@ -272,6 +275,10 @@ def build_application(
         settings: Application settings.
         providers: Providers to build over; ``None`` builds them from
             ``settings``.
+
+    Raises:
+        LLMNotConfiguredError: ``providers`` is ``None`` and ``settings``
+            configures no extraction LLM.
     """
     configure_process(settings)
     providers = providers or build_providers(settings)
@@ -358,11 +365,17 @@ def build_application(
 # ── providers ──────────────────────────────────────────────────────────────
 
 
-def _case_judge(settings: Settings, llm: LLMClient | None) -> LLMCaseJudge | None:
-    """The agent-case gate's judge, when the gate is on and an LLM exists."""
-    if not settings.agent_memory.case_gate_enabled or llm is None:
+def _case_judge(settings: Settings, llm: LLMClient) -> LLMCaseJudge | None:
+    """The agent-case gate's judge, when the gate is on."""
+    if not settings.agent_memory.case_gate_enabled:
         return None
     return LLMCaseJudge(llm)
+
+
+def _build_llm(
+    settings: Settings, resolve: Callable[[Settings], LLMClientConfig]
+) -> LLMClient:
+    return build_llm_provider(resolve(settings), observer=observer_for(settings))
 
 
 def _llm_or_none(
@@ -396,8 +409,6 @@ def _rerank_or_none(settings: Settings) -> RerankProvider | None:
 
 def _capabilities(settings: Settings, providers: Providers) -> Capabilities:
     return Capabilities(
-        llm=providers.llm is not None,
-        decider=providers.decider is not None,
         embedding=providers.embedding is not None,
         rerank=providers.rerank is not None,
         multimodal_llm=providers.multimodal_llm is not None,
@@ -528,9 +539,7 @@ def _build_knowledge_service(
     )
 
 
-def _knowledge_extractor(llm: LLMClient | None) -> KnowledgeExtractor | None:
-    if llm is None:
-        return None
+def _knowledge_extractor(llm: LLMClient) -> KnowledgeExtractor:
     # Deferred: everalgo.knowledge is heavy and only knowledge uploads need it.
     from everalgo.knowledge import KnowledgeExtractor as AlgoKnowledgeExtractor
 

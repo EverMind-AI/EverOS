@@ -20,6 +20,7 @@ from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.service import MemorizeResult, MemoryService, build_application
 from everos.service.memory import _queue as mq
+from tests.fakes import make_providers
 from tests.fakes.storage import Storage
 
 
@@ -56,7 +57,7 @@ async def setup(
     # reach the fake.
     monkeypatch.setattr(MemoryService, "_memorize", fake)
 
-    application = build_application(load_settings())
+    application = build_application(load_settings(), providers=make_providers())
     worker = application.memory._queue
     app = create_app(application=application)
     async with AsyncClient(

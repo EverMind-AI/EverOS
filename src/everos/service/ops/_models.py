@@ -27,11 +27,10 @@ class Capabilities:
     """Which optional providers the application was assembled with.
 
     A snapshot taken by :func:`everos.service.build_application`; a provider
-    configured later needs a restart, as before.
+    configured later needs a restart, as before. The extraction LLM and the
+    decider have no flag: the application is not built without them.
     """
 
-    llm: bool
-    decider: bool
     embedding: bool
     rerank: bool
     multimodal_llm: bool
@@ -41,14 +40,13 @@ class Capabilities:
 
 @dataclasses.dataclass(frozen=True)
 class ProviderStatus:
-    """The five provider flags ``GET /health`` reports.
+    """The four provider flags ``GET /health`` reports.
 
     ``embed`` is the startup dimension probe's verdict, not whether a
-    provider was built; ``llm`` is always true, because the server refuses
-    to start without an extraction LLM.
+    provider was built. There is no ``llm`` flag: the server does not start
+    without an extraction LLM.
     """
 
-    llm: bool
     embed: bool
     rerank: bool
     multimodal_llm: bool

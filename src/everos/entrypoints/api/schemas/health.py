@@ -8,13 +8,12 @@ from pydantic import BaseModel, Field
 
 
 class HealthCapabilities(BaseModel):
-    """Availability flags for the five capability probes.
+    """Availability flags for the four capability probes.
 
     Field order matches the health-endpoint payload contract; clients
     key off these names to decide whether to expose optional features.
     """
 
-    llm: bool
     embed: bool = Field(
         description=(
             "Whether the embedding service answered the startup dimension "

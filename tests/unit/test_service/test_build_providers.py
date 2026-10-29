@@ -1,9 +1,10 @@
-"""``build_providers``: one provider per configured role, ``None`` otherwise.
+"""``build_providers``: the LLM is required, every other provider optional.
 
-The bootstrap is the one place that decides what an unconfigured optional
-provider means. Unconfigured and misconfigured both become ``None`` -- they
-surface as the same 422 later -- so the warning logged here is the only
-place an operator can tell the two apart.
+Without ``[llm]`` the build raises -- the application exists to extract
+memory. The bootstrap is the one place that decides what an unconfigured
+optional provider means. Unconfigured and misconfigured both become ``None``
+-- they surface as the same 422 later -- so the warning logged here is the
+only place an operator can tell the two apart.
 """
 
 from __future__ import annotations
@@ -13,9 +14,11 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from everos.component.llm import LLMNotConfiguredError
 from everos.config import Settings
 from everos.config.settings import (
     EmbeddingSettings,
+    LLMSettings,
     MultimodalSettings,
     RerankSettings,
 )
@@ -45,8 +48,13 @@ def logs(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
     return recorder
 
 
+_LLM = LLMSettings(api_key=SecretStr("sk-test"), base_url="https://l.test")
+
+
 def _unconfigured() -> Settings:
+    """Only the required LLM is configured."""
     return Settings(
+        llm=_LLM,
         embedding=EmbeddingSettings(model=None, api_key=None, base_url=None),
         rerank=RerankSettings(model=None, api_key=None, base_url=None),
         multimodal=MultimodalSettings(api_key=None, base_url=None),
@@ -61,8 +69,33 @@ def test_unconfigured_optional_providers_are_none() -> None:
     assert providers.multimodal_llm is None
 
 
+@pytest.mark.parametrize(
+    "llm",
+    [
+        LLMSettings(api_key=None, base_url="https://l.test"),
+        LLMSettings(api_key=SecretStr(""), base_url="https://l.test"),
+        LLMSettings(api_key=SecretStr("sk-test"), base_url=None),
+    ],
+    ids=["no-key", "blank-key", "no-base-url"],
+)
+def test_an_unconfigured_llm_fails_the_build(llm: LLMSettings) -> None:
+    settings = _unconfigured().model_copy(update={"llm": llm})
+
+    with pytest.raises(LLMNotConfiguredError, match=r"everos\.toml.*\[llm\]"):
+        build_providers(settings)
+
+
+def test_the_llm_and_decider_are_built_from_llm_alone() -> None:
+    providers = build_providers(_unconfigured())
+
+    assert providers.llm is not None
+    assert providers.decider is not None
+    assert providers.decider is not providers.llm
+
+
 def test_configured_optional_providers_are_built() -> None:
     settings = Settings(
+        llm=_LLM,
         embedding=EmbeddingSettings(
             model="m", api_key=SecretStr("sk-test"), base_url="https://e.test"
         ),
@@ -105,10 +138,12 @@ def test_a_factory_failure_is_logged_with_its_reason(
     assert [log["reason"] for log in failures] == ["cohere provider not supported"]
 
 
-def test_an_unconfigured_llm_role_is_logged_by_role(logs: _RecordingLogger) -> None:
+def test_only_the_optional_multimodal_llm_is_logged_as_not_configured(
+    logs: _RecordingLogger,
+) -> None:
     build_providers(_unconfigured())
 
-    roles = {
+    roles = [
         log["role"] for log in logs.warnings if log["event"] == "llm_not_configured"
-    }
-    assert "multimodal_llm" in roles
+    ]
+    assert roles == ["multimodal_llm"]

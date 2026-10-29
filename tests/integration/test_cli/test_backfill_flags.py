@@ -35,7 +35,6 @@ phase behaviour of its own.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import hashlib
 import os
 import signal
@@ -58,8 +57,8 @@ from everos.service import (
     Application,
     OpsService,
     build_application,
-    build_providers,
 )
+from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
 
 _DIM = 1024
@@ -97,7 +96,7 @@ async def backfill_runtime(
     load_settings.cache_clear()
 
     def _build_with_stub_embedder(settings: Settings) -> Application:
-        providers = dataclasses.replace(build_providers(settings), embedding=embedder)
+        providers = make_providers(embedding=embedder)
         return build_application(settings, providers=providers)
 
     monkeypatch.setattr(cascade_mod, "build_application", _build_with_stub_embedder)

@@ -60,7 +60,8 @@ stops the watcher; calling it twice is safe, and it returns a bare status body
 `/health`: `capabilities.embed` reports whether the embedding service
 answered a dimension probe **when the process started**, not whether it is
 reachable now -- a service that recovers later keeps reading `false` until
-the next restart.
+the next restart. There is no `capabilities.llm`: the server does not start
+without an extraction LLM, so a running server always has one.
 
 `/api/v2` is the canonical prefix, aligned with the EverOS Cloud API. Every
 business endpoint is **also** served under `/api/v1`, kept as a legacy

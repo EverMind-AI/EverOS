@@ -8,13 +8,12 @@ a tier change needs a restart. Building opens nothing and writes nothing.
 Lifecycle: the server's ``start`` brings storage, index, cascade, OME and the
 memorize queue up in that order (the queue publishes into OME, so it comes
 last) and ``aclose`` unwinds exactly what was started, in reverse, without
-one failing stop skipping the rest. A server without an extraction LLM
-refuses to start; building the same application for a CLI command does not.
+one failing stop skipping the rest. Without an extraction LLM nothing is
+built at all, so neither a server nor a CLI command gets past assembly.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from pathlib import Path
 
@@ -30,28 +29,33 @@ from everos.service import (
     MemoryService,
     OpsService,
     build_application,
-    build_providers,
     configure_process,
 )
 from everos.service.bootstrap import _case_judge
-from tests.fakes import FakeEmbeddingProvider, make_application, unscripted_llm
-from tests.fakes.application import _ALL_CAPABILITIES
+from tests.fakes import (
+    FakeEmbeddingProvider,
+    make_application,
+    make_providers,
+    unscripted_llm,
+)
 
 _STARTED = ["sqlite.create", "index.start", "ops.start", "ome.start", "memory.start"]
 
 
-_PROVIDER_SECTIONS = ("LLM", "DECIDER", "MULTIMODAL", "EMBEDDING", "RERANK")
+_OPTIONAL_SECTIONS = ("DECIDER", "MULTIMODAL", "EMBEDDING", "RERANK")
 
 
 @pytest.fixture
 def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    """Unconfigured settings over a fresh root, whatever the host carries.
+    """Settings with only the required LLM over a fresh root.
 
     A developer's ``.env`` can reach the test process with real keys, so
-    every provider key is blanked explicitly rather than assumed absent.
+    every optional provider key is blanked explicitly rather than assumed
+    absent. The LLM key is a placeholder: building a client never calls it.
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path / "root"))
-    for section in _PROVIDER_SECTIONS:
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", "test-key")
+    for section in _OPTIONAL_SECTIONS:
         monkeypatch.setenv(f"EVEROS_{section}__API_KEY", "")
     load_settings.cache_clear()
     yield load_settings()
@@ -61,14 +65,14 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
 def _build(settings: Settings, **providers: object) -> Application:
     return build_application(
         settings,
-        providers=dataclasses.replace(build_providers(settings), **providers),
+        providers=make_providers(**providers),
     )
 
 
 # ── assembly ───────────────────────────────────────────────────────────────
 
 
-def test_unconfigured_settings_build_three_facades_without_touching_disk(
+def test_settings_without_optional_providers_build_three_facades_without_disk(
     settings: Settings, tmp_path: Path
 ) -> None:
     application = build_application(settings)
@@ -77,12 +81,7 @@ def test_unconfigured_settings_build_three_facades_without_touching_disk(
     assert isinstance(application.knowledge, KnowledgeService)
     assert isinstance(application.ops, OpsService)
     snapshot = application.capabilities
-    assert (snapshot.llm, snapshot.decider, snapshot.embedding, snapshot.rerank) == (
-        False,
-        False,
-        False,
-        False,
-    )
+    assert (snapshot.embedding, snapshot.rerank) == (False, False)
     assert snapshot.index_backend == settings.index.backend
     assert not (tmp_path / "root").exists(), "building must not write anything"
 
@@ -91,6 +90,18 @@ def _with_level(settings: Settings, level: str) -> Settings:
     return settings.model_copy(
         update={"logging": settings.logging.model_copy(update={"level": level})}
     )
+
+
+def test_building_without_an_llm_raises_before_touching_disk(
+    settings: Settings, tmp_path: Path
+) -> None:
+    no_llm = settings.model_copy(
+        update={"llm": settings.llm.model_copy(update={"api_key": None})}
+    )
+
+    with pytest.raises(LLMNotConfiguredError, match=r"\[llm\]"):
+        build_application(no_llm)
+    assert not (tmp_path / "root").exists()
 
 
 def test_building_configures_logging_from_the_logging_section(
@@ -139,17 +150,14 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     assert memorizer._extractions is memory._extractions
 
 
-@pytest.mark.parametrize(
-    ("enabled", "has_llm", "judged"),
-    [(True, True, True), (False, True, False), (True, False, False)],
-)
-def test_the_case_judge_exists_only_with_the_gate_on_and_an_llm(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, has_llm: bool, judged: bool
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_case_judge_exists_only_with_the_gate_on(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     monkeypatch.setenv("EVEROS_AGENT_MEMORY__CASE_GATE_ENABLED", str(enabled))
     load_settings.cache_clear()
-    judge = _case_judge(load_settings(), unscripted_llm() if has_llm else None)
-    assert isinstance(judge, LLMCaseJudge) is judged
+    judge = _case_judge(load_settings(), unscripted_llm())
+    assert isinstance(judge, LLMCaseJudge) is enabled
     load_settings.cache_clear()
 
 
@@ -233,19 +241,3 @@ async def test_a_failing_stop_does_not_skip_the_rest(tmp_path: Path) -> None:
     await application.aclose()
 
     assert events == ["memory.aclose", "ops.aclose", "index.close", "sqlite.dispose"]
-
-
-async def test_a_server_without_an_extraction_llm_refuses_to_start(
-    tmp_path: Path,
-) -> None:
-    events: list[str] = []
-    application = make_application(
-        root=tmp_path,
-        lifecycle=events,
-        capabilities=dataclasses.replace(_ALL_CAPABILITIES, llm=False),
-    )
-
-    with pytest.raises(LLMNotConfiguredError):
-        await application.start()
-    assert events == [], "nothing is brought up before the check"
-    await application.aclose()

@@ -34,6 +34,7 @@ import uuid
 from pathlib import Path
 
 from everos.config import load_settings
+from everos.core.errors import LLMNotConfiguredError
 from everos.infra.persistence import MemoryRoot
 from everos.service import build_application, build_providers
 
@@ -42,16 +43,12 @@ def _chunks(items: list[dict], n: int) -> list[list[dict]]:
     return [items[i : i + n] for i in range(0, len(items), n)]
 
 
-def _print_header(
-    mode: str, fixture_path: Path, session_id: str, *, llm_configured: bool
-) -> None:
+def _print_header(mode: str, fixture_path: Path, session_id: str) -> None:
     print("=" * 72)
     print(f"  everos e2e memorize  ·  mode={mode}")
     print(f"  fixture     : {fixture_path.name}")
     print(f"  session_id  : {session_id}")
     print(f"  memory root : {MemoryRoot.resolve().root}")
-    llm_state = "<configured>" if llm_configured else "<None — pipeline will skip>"
-    print(f"  llm_client  : {llm_state}")
     print("=" * 72)
 
 
@@ -91,12 +88,13 @@ async def _run(args: argparse.Namespace) -> None:
     messages: list[dict] = fixture["messages"]
     session_id = f"{fixture.get('session_id_hint', 'e2e')}_{uuid.uuid4().hex[:8]}"
 
-    _print_header(
-        mode,
-        fixture_path,
-        session_id,
-        llm_configured=build_providers(settings).llm is not None,
-    )
+    try:
+        providers = build_providers(settings)
+    except LLMNotConfiguredError as exc:
+        print(f"!! {exc}")
+        sys.exit(2)
+
+    _print_header(mode, fixture_path, session_id)
 
     if args.dry_run:
         for i, batch in enumerate(_chunks(messages, args.batch_size), start=1):
@@ -107,7 +105,7 @@ async def _run(args: argparse.Namespace) -> None:
         print("[dry] would flush at the end")
         return
 
-    application = build_application(settings)
+    application = build_application(settings, providers=providers)
     await application.start()
     memory = application.memory
     try:
@@ -126,9 +124,7 @@ async def _run(args: argparse.Namespace) -> None:
 
         print()
         print("flushing residual tail...")
-        flush_result = await memory.flush(
-            session_id=session_id, request_id="e2e-flush"
-        )
+        flush_result = await memory.flush(session_id=session_id, request_id="e2e-flush")
         print(f"flush  →  status={flush_result.status}")
 
         # OME strategies are fire-and-forget; each cell fires 2 strategies

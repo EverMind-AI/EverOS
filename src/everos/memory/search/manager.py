@@ -172,9 +172,9 @@ class SearchManager:
         cluster_store: ClusterStore,
         embedding: EmbeddingProvider | None,
         reranker: RerankProvider | None,
-        llm_client: LLMClient | None,
+        llm_client: LLMClient,
+        decider_client: LLMClient,
         search_tokenizer: Tokenizer | None = None,
-        decider_client: LLMClient | None = None,
         tuning_source: Callable[[], DeciderSettings],
         trace_path_source: Callable[[], str | None],
     ) -> None:
@@ -190,10 +190,9 @@ class SearchManager:
         self._embedding = embedding
         self._reranker = reranker
         self._llm = llm_client
-        # Multi-round retrieval runs its own model when [decider] configures one; the
-        # caller passes None to mean "same as extraction", which is the historical
-        # behaviour and what every store built before [decider] existed was scored with.
-        self._decider_llm = decider_client or llm_client
+        # Multi-round retrieval runs its own client: [decider] falls back to [llm]
+        # field by field, but never shares the extraction client's SDK retries.
+        self._decider_llm = decider_client
         self._search_tokenizer = search_tokenizer
 
     # ── Public entry ────────────────────────────────────────────────
@@ -743,9 +742,10 @@ class SearchManager:
     def _validate_components(self, req: SearchRequest) -> None:
         """Fail fast when the chosen method needs a provider that is missing.
 
-        Every provider branch (embedding, rerank, LLM) raises the same
+        Every provider branch (embedding, rerank) raises the same
         :class:`ProviderNotConfiguredError` -> HTTP 422 with a toml-pointing
-        message; vocabulary is uniform across the three.
+        message; vocabulary is uniform across both. The LLM is never
+        checked: the application is not built without one.
 
         Each check reads the provider this manager was built with: a
         ``None`` provider is an unconfigured tier, and refusing it here gives
@@ -771,17 +771,11 @@ class SearchManager:
                 feature=_feature_name(method, req.owner_type),
             )
 
-        if method == SearchMethod.LLM_MULTIROUND:
-            if req.owner_type == "agent":
-                raise RuntimeError(
-                    "method='llm_multiround' is only supported for user memory; "
-                    "provide user_id instead of agent_id"
-                )
-            if self._llm is None:
-                raise ProviderNotConfiguredError(
-                    provider="llm",
-                    feature=_feature_name(method, req.owner_type),
-                )
+        if method == SearchMethod.LLM_MULTIROUND and req.owner_type == "agent":
+            raise RuntimeError(
+                "method='llm_multiround' is only supported for user memory; "
+                "provide user_id instead of agent_id"
+            )
 
         # agent HYBRID cross-encoder lane (enable_llm_rerank=False, the
         # default) reaches ``search_agent_skills_hybrid``, which needs a
@@ -801,23 +795,6 @@ class SearchManager:
         if method == SearchMethod.AGENTIC and self._reranker is None:
             raise ProviderNotConfiguredError(
                 provider="rerank", feature="agentic_search"
-            )
-
-        # Same 422 vocabulary as the embedding / rerank branches above.
-        is_hybrid_llm_lane = method == SearchMethod.HYBRID and req.enable_llm_rerank
-        if is_hybrid_llm_lane and self._llm is None:
-            raise ProviderNotConfiguredError(
-                provider="llm",
-                feature=_feature_name(method, req.owner_type),
-                alternative_hint=(
-                    "drop the enable_llm_rerank flag to use the cross-encoder "
-                    "rerank lane (needs a configured [rerank] provider)"
-                ),
-            )
-        if method == SearchMethod.AGENTIC and self._llm is None:
-            raise ProviderNotConfiguredError(
-                provider="llm",
-                feature=_feature_name(method, req.owner_type),
             )
 
 

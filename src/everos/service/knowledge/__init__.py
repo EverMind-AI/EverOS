@@ -67,7 +67,7 @@ class KnowledgeService:
     Args:
         store: The markdown truth of documents, topics and the taxonomy.
         catalog: The document / topic records the cascade keeps.
-        extractor: Topic extractor; ``None`` (no LLM) makes create / replace raise.
+        extractor: Topic extractor.
         embedding: Query embedder for search; ``None`` when not configured.
         reranker: Reranker for search; ``None`` when not configured.
         recaller: Recall over the knowledge-topic index.
@@ -82,7 +82,7 @@ class KnowledgeService:
         *,
         store: KnowledgeStore,
         catalog: KnowledgeCatalog,
-        extractor: KnowledgeExtractor | None,
+        extractor: KnowledgeExtractor,
         embedding: EmbeddingProvider | None,
         reranker: RerankProvider | None,
         recaller: KnowledgeTopicRecaller,
@@ -133,7 +133,8 @@ class KnowledgeService:
         Raises:
             InvalidInputError: The upload is too large or has no content.
             UnsupportedModalityError: The file cannot be parsed.
-            LLMNotConfiguredError: No LLM is configured to extract topics.
+            LLMNotConfiguredError: The file needs the multimodal parser and
+                no ``[multimodal]`` LLM is configured.
             ExtractionEmptyError: When the extractor produces no memories.
         """
         parsed, raw = await self._documents.read_upload(upload)
@@ -193,7 +194,6 @@ class KnowledgeService:
         """Create a knowledge document from parsed content.
 
         Raises:
-            LLMNotConfiguredError: No LLM is configured to extract topics.
             DuplicateDocumentError: When ``doc_id`` already exists.
             ExtractionEmptyError: When the extractor produces no memories.
         """
@@ -225,7 +225,6 @@ class KnowledgeService:
         """Replace a document atomically -- the old files come back on failure.
 
         Raises:
-            LLMNotConfiguredError: No LLM is configured to extract topics.
             DocumentNotFoundError: When ``doc_id`` does not exist.
             ExtractionEmptyError: When extraction produces no memories.
         """

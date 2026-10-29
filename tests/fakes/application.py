@@ -63,6 +63,7 @@ from everos.service import (
     MemorizeResult,
     MemoryService,
     OpsService,
+    Providers,
     Queued,
     QueueHealth,
     TaskItem,
@@ -70,7 +71,7 @@ from everos.service import (
 )
 from everos.service.bootstrap import build_replay_engine
 
-from .deps import bundled_instructions, make_stores
+from .deps import bundled_instructions, make_stores, unscripted_llm
 from .sources import unused_raw_file_builder
 from .storage import make_storage
 from .stores import UnusedPort
@@ -85,8 +86,6 @@ _VECTOR_TABLES = (
 )
 
 _ALL_CAPABILITIES = Capabilities(
-    llm=True,
-    decider=True,
     embedding=True,
     rerank=True,
     multimodal_llm=True,
@@ -388,6 +387,8 @@ def make_knowledge_service(
 ) -> KnowledgeService:
     """A real :class:`KnowledgeService`; unset providers read as unconfigured.
 
+    An unset ``extractor`` fails the test if anything extracts with it.
+
     The service runs over the production adapters: a markdown knowledge
     store under ``root`` and a SQLite catalog over ``documents`` / ``topics``
     (the repositories, often mocks). ``root`` defaults to the configured
@@ -404,7 +405,7 @@ def make_knowledge_service(
             documents or UnusedPort("knowledge documents"),
             topics or UnusedPort("knowledge topics"),
         ),
-        extractor=extractor,
+        extractor=extractor or UnusedPort("knowledge extractor"),
         embedding=embedding,
         reranker=reranker,
         recaller=recaller,
@@ -413,6 +414,24 @@ def make_knowledge_service(
         parser_available=parser_available,
         max_upload_bytes=max_upload_bytes or load_settings().knowledge.max_upload_bytes,
     )
+
+
+def make_providers(**overrides: Any) -> Providers:
+    """Providers for ``build_application`` without touching settings.
+
+    ``llm`` defaults to one that fails the test if called, and ``decider``
+    to ``llm`` (as ``[decider]`` falls back to ``[llm]``); every optional
+    provider is unconfigured. Keyword arguments replace single providers.
+    """
+    llm = overrides.pop("llm", None) or unscripted_llm()
+    fields: dict[str, Any] = {
+        "llm": llm,
+        "decider": llm,
+        "multimodal_llm": None,
+        "embedding": None,
+        "rerank": None,
+    }
+    return Providers(**{**fields, **overrides})
 
 
 def make_backfill_deps(
@@ -425,13 +444,14 @@ def make_backfill_deps(
     """The production backfill wiring over ``root`` (default: the configured one).
 
     Real storage, stores, indexes and replay engines, as the bootstrap builds
-    them; ``embedding`` / ``llm`` default to unconfigured. Keyword overrides
+    them; ``embedding`` defaults to unconfigured and ``llm`` to one that
+    fails the test if called. Keyword overrides
     replace single fields (``ome_lock``, ``engine_for``, ``vector_tables``,
     ``cascade``, ...).
     """
     storage = make_storage(root if root is not None else MemoryRoot.resolve())
     deps = MemoryDeps(
-        llm=llm,
+        llm=llm or unscripted_llm(),
         embedding=embedding,
         stores=build_stores(storage.root, storage.sqlite),
         indexes=build_indexes(storage.index),

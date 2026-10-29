@@ -119,7 +119,6 @@ the important fields look like this:
 {
   "status": "ok",
   "capabilities": {
-    "llm": true,
     "embed": false,
     "rerank": false
   },

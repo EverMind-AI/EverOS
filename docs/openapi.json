@@ -3250,10 +3250,6 @@
       },
       "HealthCapabilities": {
         "properties": {
-          "llm": {
-            "type": "boolean",
-            "title": "Llm"
-          },
           "embed": {
             "type": "boolean",
             "title": "Embed",
@@ -3274,14 +3270,13 @@
         },
         "type": "object",
         "required": [
-          "llm",
           "embed",
           "rerank",
           "multimodal_llm",
           "parser"
         ],
         "title": "HealthCapabilities",
-        "description": "Availability flags for the five capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
+        "description": "Availability flags for the four capability probes.\n\nField order matches the health-endpoint payload contract; clients\nkey off these names to decide whether to expose optional features."
       },
       "HealthResponse": {
         "properties": {

@@ -188,7 +188,7 @@ async def extract_agent_skill(
         # 5. Run the LLM extractor. Emits add / update ops; a retire op comes
         #    back as an ordinary skill with confidence < retire_confidence and
         #    is NOT honoured here — see the module docstring.
-        extractor = AgentSkillExtractor(llm=deps.require_llm())
+        extractor = AgentSkillExtractor(llm=deps.llm)
         result = await extractor.aextract_with_reason(
             target,
             existing_relevant_skills=[

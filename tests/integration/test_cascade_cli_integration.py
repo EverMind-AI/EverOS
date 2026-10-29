@@ -44,6 +44,8 @@ def cli_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pat
     # deployment is what these commands ran against while the root conftest
     # pinned the (now removed) embedding accessor to unavailable.
     monkeypatch.setenv("EVEROS_EMBEDDING__API_KEY", "")
+    # Building the application requires an LLM; nothing here calls it.
+    monkeypatch.setenv("EVEROS_LLM__API_KEY", "test-key")
     load_settings.cache_clear()
     (tmp_path / "ome.toml").write_text("# test\n")
     yield tmp_path

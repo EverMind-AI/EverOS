@@ -174,8 +174,8 @@ Keep the server running, then open a second terminal and check it:
 curl http://127.0.0.1:8000/health
 ```
 
-Look for `"status":"ok"`. With this one-key setup, `capabilities.llm` is
-`true`; embedding and rerank remain `false` until you configure them.
+Look for `"status":"ok"`. With this one-key setup, `capabilities.embed` and
+`capabilities.rerank` remain `false` until you configure them.
 
 ### 5. Add and retrieve your first memory
 

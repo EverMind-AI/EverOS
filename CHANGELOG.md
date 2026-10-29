@@ -48,6 +48,19 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **Building the application requires `[llm]`.** `build_providers` (and so
+  `build_application`) raises `LLMNotConfiguredError` when `[llm]` has no
+  `api_key` or `base_url`, instead of building without an extraction LLM
+  and leaving the server's start to refuse. The server still refuses to
+  start, now at assembly; every `everos cascade …` command builds the same
+  application, so those commands also need a configured `[llm]` and exit
+  with code 3 and the toml section to edit when it is missing. Python
+  callers that passed `Providers(llm=None, …)` must pass a client.
+- **`GET /health` no longer reports `capabilities.llm`.** It was always
+  `true` -- a server without an extraction LLM does not start -- so it is
+  removed; clients that read it should drop the check. `Capabilities.llm` /
+  `.decider` and `ProviderStatus.llm` are removed from `everos.service` for
+  the same reason.
 - **`everos.component.config` is renamed to `everos.component.yaml_loader`.**
   The package name no longer collides with `everos.config`. Update imports to
   `from everos.component.yaml_loader import YamlConfigLoader`; the class name

@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from .conftest import hermetic_env
+
 _LIFECYCLE_EVENTS = (
     "sqlite_engine_built",
     "lancedb_connection_opened",
@@ -67,6 +69,7 @@ def _run_cascade_status(root: Path, *extra: str) -> subprocess.CompletedProcess[
         capture_output=True,
         text=True,
         check=False,
+        env=hermetic_env(),
     )
 
 

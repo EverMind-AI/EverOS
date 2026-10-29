@@ -112,9 +112,7 @@ async def trigger_skill_clustering(
             )
 
             # 5. Ask the LLM to merge it into an existing cluster (or keep as-is).
-            merged = await acluster_by_llm(
-                new_cluster, existing, llm=deps.require_llm()
-            )
+            merged = await acluster_by_llm(new_cluster, existing, llm=deps.llm)
             to_save = merged if merged is not None else new_cluster
 
             # 6. Persist the (possibly-merged) cluster.

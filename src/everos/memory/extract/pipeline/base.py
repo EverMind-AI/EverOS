@@ -42,14 +42,11 @@ class CellOutcome:
     """What one pipeline produced for one cell.
 
     Args:
-        status: ``"extracted"`` when the pipeline did its work on the cell,
-            ``"skipped"`` when it could not (e.g. no LLM configured).
-        message_count: Messages the cell contributed (0 when skipped).
+        message_count: Messages the cell contributed.
         events: Events to publish for the cell, in order.
         md_paths: Markdown files written for the cell.
     """
 
-    status: Literal["extracted", "skipped"]
     message_count: int = 0
     events: Sequence[Event] = ()
     md_paths: Sequence[str] = ()
@@ -61,14 +58,14 @@ class PipelineOutcome:
 
     Args:
         track: Which pipeline.
-        status: ``"extracted"`` if any cell was extracted, ``"skipped"`` if
-            cells arrived but none was, ``"accumulated"`` if none arrived.
+        status: ``"extracted"`` if any cell arrived, ``"accumulated"`` if
+            none did.
         message_count: Messages across the extracted cells.
         extracted_md_paths: Markdown files written across the cells.
     """
 
     track: Track
-    status: Literal["accumulated", "extracted", "skipped"]
+    status: Literal["accumulated", "extracted"]
     message_count: int
     extracted_md_paths: Sequence[str] = ()
 
@@ -77,15 +74,9 @@ class PipelineOutcome:
         cls, track: Track, outcomes: Sequence[CellOutcome]
     ) -> PipelineOutcome:
         """Summarise the per-cell outcomes of one pipeline."""
-        if not outcomes:
-            status: Literal["accumulated", "extracted", "skipped"] = "accumulated"
-        elif any(o.status == "extracted" for o in outcomes):
-            status = "extracted"
-        else:
-            status = "skipped"
         return cls(
             track=track,
-            status=status,
+            status="extracted" if outcomes else "accumulated",
             message_count=sum(o.message_count for o in outcomes),
             extracted_md_paths=[p for o in outcomes for p in o.md_paths],
         )

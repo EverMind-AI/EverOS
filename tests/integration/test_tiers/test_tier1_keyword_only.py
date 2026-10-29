@@ -113,7 +113,7 @@ async def test_health_reports_tier1_capabilities(tier1_runtime: AsyncClient) -> 
     body = resp.json()
 
     caps = body["capabilities"]
-    assert caps["llm"] is True
+    assert "llm" not in caps
     assert caps["embed"] is False
     assert caps["rerank"] is False
 

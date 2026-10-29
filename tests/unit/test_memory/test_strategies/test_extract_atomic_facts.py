@@ -6,7 +6,6 @@ import pytest
 import structlog.testing
 from everalgo.types import AtomicFact
 
-from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.events import (
     AtomicFactsExtracted,
     EpisodeExtracted,
@@ -129,11 +128,6 @@ async def test_reflection_context_is_carried_through() -> None:
 
     assert done.source == "reflection"
     assert done.reflection == context
-
-
-async def test_unconfigured_llm_fails_the_run() -> None:
-    with pytest.raises(ProviderNotConfiguredError):
-        await extract_atomic_facts(_event(), make_deps(llm=None))
 
 
 @pytest.mark.parametrize("language", ["Chinese", None])

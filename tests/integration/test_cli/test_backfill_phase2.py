@@ -30,7 +30,6 @@ cluster into existence.
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -47,8 +46,13 @@ from everos.infra.persistence.lancedb import (
     Episode,
 )
 from everos.memory.events import AgentCaseExtracted, EpisodeExtracted
-from everos.service import OpsService, build_application, build_providers
-from tests.fakes import ScriptedReplayEngine, make_backfill_deps, make_ops
+from everos.service import OpsService, build_application
+from tests.fakes import (
+    ScriptedReplayEngine,
+    make_backfill_deps,
+    make_ops,
+    make_providers,
+)
 from tests.fakes.storage import StorageView
 
 _DIM = 1024
@@ -112,8 +116,7 @@ def _ops() -> OpsService:
         )
         return make_ops(backfill=deps)
     settings = load_settings()
-    providers = dataclasses.replace(
-        build_providers(settings),
+    providers = make_providers(
         embedding=_PROVIDERS["embedding"],
     )
     return build_application(settings, providers=providers).ops

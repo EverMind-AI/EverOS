@@ -39,7 +39,7 @@ from everos.memory.search.recall import (
     EpisodeRecaller,
 )
 from everos.memory.search.recall.base import RecallerDeps
-from tests.fakes import static_trace_path, static_tuning
+from tests.fakes import static_trace_path, static_tuning, unscripted_llm
 
 from ._records import (
     ScriptedIndex,
@@ -162,6 +162,9 @@ def _build_manager(
 ) -> SearchManager:
     """A manager over the real recallers, each reading a scripted index.
 
+    ``llm_client`` (also the decider) defaults to one that fails the test if
+    called.
+
     ``find`` on the episode index evaluates its filter (the MaxSim parent
     fetch narrows by entry id); the fact index answers both the fact ANN and
     the HYBRID fact expansion from ``atomic_fact_dense``.
@@ -202,7 +205,8 @@ def _build_manager(
         cluster_store=_NO_CLUSTERS,
         embedding=embedding,
         reranker=reranker,
-        llm_client=llm_client,
+        llm_client=llm_client or unscripted_llm(),
+        decider_client=llm_client or unscripted_llm(),
         tuning_source=static_tuning(),
         trace_path_source=static_trace_path(),
     )
@@ -319,7 +323,8 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
         cluster_store=_NO_CLUSTERS,
         embedding=None,
         reranker=None,
-        llm_client=None,
+        llm_client=unscripted_llm(),
+        decider_client=unscripted_llm(),
         tuning_source=static_tuning(),
         trace_path_source=static_trace_path(),
     )
@@ -513,26 +518,13 @@ async def test_hybrid_requires_embedding(monkeypatch: pytest.MonkeyPatch) -> Non
     assert excinfo.value.feature == "user_hybrid"
 
 
-async def test_hybrid_does_not_require_llm_by_default() -> None:
+async def test_hybrid_does_not_call_the_llm_by_default() -> None:
     """HYBRID no longer auto-pulls LLM. With enable_llm_rerank=False the
-    fusion-only path (RRF / LR) should run without an LLM client."""
+    fusion-only path (RRF / LR) runs without an LLM call."""
     mgr = _build_manager(embedding=_StubEmbedding())
-    # Should not raise: no LLM needed when caller opts out of Phase-5 rerank.
+    # The default LLM fails the test if called.
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID))
     assert resp.data.episodes == []  # empty stub recallers → empty result
-
-
-async def test_hybrid_requires_llm_when_enable_llm_rerank_true() -> None:
-    """Setting ``enable_llm_rerank=True`` makes the LLM mandatory. The
-    guard raises the same :class:`ProviderNotConfiguredError` -> 422 as
-    the embedding / rerank branches (unified provider-missing vocabulary)."""
-    mgr = _build_manager(embedding=_StubEmbedding())
-    with pytest.raises(ProviderNotConfiguredError) as excinfo:
-        await mgr.search(_user_req(method=SearchMethod.HYBRID, enable_llm_rerank=True))
-    assert excinfo.value.provider == "llm"
-    assert excinfo.value.feature == "user_hybrid"
-    assert excinfo.value.alternative_hint is not None
-    assert "enable_llm_rerank" in excinfo.value.alternative_hint
 
 
 async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
@@ -558,7 +550,7 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
     assert ep1_result.atomic_facts[0].id == "f1"
 
 
-async def test_agentic_requires_reranker_and_llm(
+async def test_agentic_requires_reranker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mgr = _build_manager(embedding=_StubEmbedding())

@@ -23,6 +23,7 @@ from .application import make_backfill_deps as make_backfill_deps
 from .application import make_knowledge_service as make_knowledge_service
 from .application import make_memory_service as make_memory_service
 from .application import make_ops as make_ops
+from .application import make_providers as make_providers
 from .application import unused_backfill_deps as unused_backfill_deps
 from .backfill import InMemorySkillFiles as InMemorySkillFiles
 from .backfill import InMemoryVectorTable as InMemoryVectorTable
@@ -128,6 +129,7 @@ __all__ = [
     "make_knowledge_service",
     "make_memory_service",
     "make_ops",
+    "make_providers",
     "make_storage",
     "make_stores",
     "memorize_llm",

@@ -17,7 +17,6 @@ strategy dispatch correctness already has its own coverage in
 
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import json
 import sqlite3
@@ -35,9 +34,8 @@ from everos.service import (
     MemorizeResult,
     MemoryService,
     build_application,
-    build_providers,
 )
-from tests.fakes import memorize_llm
+from tests.fakes import make_providers, memorize_llm
 from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
@@ -125,7 +123,7 @@ async def memorize_env(
         settings = load_settings()
         application = build_application(
             settings,
-            providers=dataclasses.replace(build_providers(settings), llm=fake_llm),
+            providers=make_providers(llm=fake_llm),
         )
         _under_test["memory"] = application.memory
         engine = application._engine

@@ -45,13 +45,14 @@ from everos.config import Settings, load_settings
 from everos.core.errors import (
     EmbeddingProvenanceError,
     IndexSchemaMismatchError,
+    LLMNotConfiguredError,
     MemoryRootLockedError,
 )
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import to_display_tz
 from everos.entrypoints.cli._process import configure_interactive
 from everos.entrypoints.cli.commands._backfill import run_backfill
-from everos.service import OpsService, build_application
+from everos.service import Application, OpsService, build_application
 
 logger = get_logger(__name__)
 
@@ -150,7 +151,7 @@ async def _runtime(
     """
     try:
         async with (
-            build_application(settings) as application,
+            _build_application(settings) as application,
             application.ops.index_session(
                 verify=verify, ensure=ensure, exclusive=exclusive
             ),
@@ -556,9 +557,29 @@ def rebuild(
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
+def _build_application(settings: Settings) -> Application:
+    """Build the application, or exit 3 when ``[llm]`` is not configured.
+
+    The CLI builds the same application as the server, and that refuses to
+    assemble without an extraction LLM. The error already names the toml
+    section to edit; a traceback would bury it.
+    """
+    try:
+        return build_application(settings)
+    except LLMNotConfiguredError as exc:
+        typer.echo(
+            f"error: {exc}\n"
+            "  every cascade command builds the same application as the "
+            "server, which needs an\n"
+            "  extraction LLM; configure it, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=3) from None
+
+
 async def _root_is_free(settings: Settings) -> bool:
     """Whether no server (or exclusive CLI phase) holds this memory root."""
-    async with build_application(settings) as application:
+    async with _build_application(settings) as application:
         return application.ops.ome_lock_is_free()
 
 

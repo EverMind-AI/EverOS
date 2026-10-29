@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from everos.config import load_settings
+from tests.fakes import make_providers
 from tests.fakes.storage import StorageView
 
 _URI = os.environ.get("EVEROS_TEST_MILVUS_URI", "")
@@ -382,7 +383,9 @@ async def test_episode_only_probe_covers_metadata_search_and_http(
     assert sparse[0]["id"] == "probe_ep1"
     assert sparse[0]["_score"] > 0
 
-    app = create_app(application=build_application(load_settings()))
+    app = create_app(
+        application=build_application(load_settings(), providers=make_providers())
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         response = await http.post(

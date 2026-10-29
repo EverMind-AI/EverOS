@@ -19,7 +19,6 @@ from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
 from everalgo.user_memory import EpisodeExtractor
 
-from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
@@ -32,8 +31,6 @@ from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
-logger = get_logger(__name__)
-
 
 class UserMemoryPipeline:
     """Per-sender Episode extraction, one pre-cut MemCell at a time.
@@ -41,21 +38,16 @@ class UserMemoryPipeline:
     Args:
         episode_store: Where extracted episodes are written.
         instructions: Custom instructions for the episode operator.
-        llm_client: LLM for extraction; ``None`` skips extraction.
+        llm_client: LLM for extraction.
     """
 
     def __init__(
         self,
         episode_store: EpisodeStore,
         instructions: CustomInstructions,
-        llm_client: LLMClient | None,
+        llm_client: LLMClient,
     ) -> None:
-        # EpisodeExtractor requires `llm` at construction. Skip-with-warning
-        # when no LLM is configured — the boundary stage will have skipped
-        # the run already; this is just a defensive null check.
-        self._ep_ext = (
-            EpisodeExtractor(llm=llm_client) if llm_client is not None else None
-        )
+        self._ep_ext = EpisodeExtractor(llm=llm_client)
         self._episode_store = episode_store
         self._instructions = instructions
 
@@ -69,14 +61,6 @@ class UserMemoryPipeline:
         foresight / clustering) are published first, followed by one
         ``EpisodeExtracted`` per written episode.
         """
-        if self._ep_ext is None:
-            logger.warning(
-                "user_memory_pipeline_no_llm_client",
-                session_id=ingested.session_id,
-                memcell_id=prepared.memcell_id,
-            )
-            return CellOutcome(status="skipped")
-
         cell, memcell_id = prepared.cell, prepared.memcell_id
         events: list[Event] = [
             UserPipelineStarted(
@@ -120,7 +104,6 @@ class UserMemoryPipeline:
                     )
                 )
         return CellOutcome(
-            status="extracted",
             message_count=len(cell.items),
             events=events,
             md_paths=md_paths,
@@ -135,7 +118,6 @@ class UserMemoryPipeline:
         copy per sender happens in markdown only, so a cell costs one call.
         An unusable reply is tried again by :func:`retry_llm_output`.
         """
-        assert self._ep_ext is not None  # run_cell returns before without one
         extractor = self._ep_ext
         custom_instructions = self._instructions.load("episode_extract")
 

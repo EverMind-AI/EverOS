@@ -72,7 +72,6 @@ async def health_report(
     restarted, which fixes neither.
     """
     providers = ProviderStatus(
-        llm=True,
         embed=admin.embedding_probed(),
         rerank=capabilities.rerank,
         multimodal_llm=capabilities.multimodal_llm,
@@ -116,10 +115,8 @@ def compute_disabled_features(caps: Mapping[str, bool]) -> list[str]:
     """Derive the features the configured providers leave disabled.
 
     Args:
-        caps: Availability of ``"llm"``, ``"embed"``, ``"rerank"``,
-            ``"multimodal_llm"`` and ``"parser"``. ``caps["llm"]`` is
-            accepted for shape symmetry but not read: the server refuses to
-            start without an extraction LLM, so any process asking has one.
+        caps: Availability of ``"embed"``, ``"rerank"``, ``"multimodal_llm"``
+            and ``"parser"``.
 
     Returns:
         A subset of ``"vector_search"``, ``"hybrid_search"``,

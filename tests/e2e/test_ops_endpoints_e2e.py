@@ -11,7 +11,6 @@ is configured.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.fakes import user_track_llm
+from tests.fakes import make_providers, user_track_llm
 
 _TS = 1_775_116_800_000  # 2026-04-02 08:00 UTC
 
@@ -29,14 +28,12 @@ async def _client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncC
     """A started application over the test's memory root, with a canned LLM."""
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app
-    from everos.service import build_application, build_providers
+    from everos.service import build_application
 
     monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
     load_settings.cache_clear()
     settings = load_settings()
-    providers = dataclasses.replace(
-        build_providers(settings), llm=user_track_llm(), embedding=None, rerank=None
-    )
+    providers = make_providers(llm=user_track_llm(), embedding=None, rerank=None)
     app = create_app(application=build_application(settings, providers=providers))
     async with (
         app.router.lifespan_context(app),

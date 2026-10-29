@@ -98,7 +98,7 @@ class BoundaryDetection:
     def __init__(
         self,
         *,
-        llm: LLMClient | None,
+        llm: LLMClient,
         instructions: CustomInstructions,
         session_buffer: SessionBufferStore,
         memcells: MemcellStore,
@@ -160,15 +160,6 @@ class BoundaryDetection:
             # Episode extraction needs a user message; wait for one.
             await self._keep_buffered(session, merged)
             return _empty_outcome("accumulated", message_count=len(fresh))
-        if self._llm is None:
-            await self._session_buffer.replace(session, merged)
-            logger.warning(
-                "memorize_no_llm_client",
-                session_id=session.session_id,
-                buffered=len(merged),
-            )
-            return _empty_outcome("skipped", message_count=len(fresh))
-
         result = await self._segment_or_quarantine(
             session, merged, buffered=buffered, mode=mode, is_final=is_final
         )
@@ -229,7 +220,6 @@ class BoundaryDetection:
         self, merged: list[CanonicalMessage], *, mode: Mode, is_final: bool
     ) -> DetectionResult:
         """One bounded-retry boundary call; each attempt has its own deadline."""
-        assert self._llm is not None  # detect returns before without one
         llm = self._llm
         items = [to_conversation_item(m) for m in merged]
         custom_instructions = self._instructions.load("boundary_detection")

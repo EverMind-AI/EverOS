@@ -29,7 +29,7 @@ async def extract_atomic_facts(
 ) -> list[Event]:
     """Extract atomic facts from an episode and persist them under its owner."""
     # 1. Run LLM extractor on episode text.
-    extractor = AtomicFactExtractor(llm=deps.require_llm())
+    extractor = AtomicFactExtractor(llm=deps.llm)
     algo_facts = await extractor.aextract_from_text(
         event.episode_text,
         timestamp=event.episode_timestamp_ms,

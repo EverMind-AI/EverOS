@@ -8,7 +8,6 @@ from everos.memory import IngestResult
 from everos.memory.events import AgentPipelineStarted
 from everos.memory.extract.pipeline import (
     AgentMemoryPipeline,
-    CellOutcome,
     PipelineOutcome,
     PreparedCell,
 )
@@ -39,7 +38,6 @@ async def test_returns_one_event_per_cell() -> None:
 
     outcomes = [await pipeline.run_cell(ingested, c) for c in cells]
 
-    assert [o.status for o in outcomes] == ["extracted", "extracted"]
     assert [o.message_count for o in outcomes] == [2, 3]
     events = [e for o in outcomes for e in o.events]
     assert all(isinstance(e, AgentPipelineStarted) for e in events)
@@ -57,10 +55,3 @@ async def test_returns_one_event_per_cell() -> None:
 def test_summary_of_no_cells_is_accumulated() -> None:
     summary = PipelineOutcome.from_cells("agent_memory", [])
     assert (summary.status, summary.message_count) == ("accumulated", 0)
-
-
-def test_summary_of_only_skipped_cells_is_skipped() -> None:
-    summary = PipelineOutcome.from_cells(
-        "user_memory", [CellOutcome(status="skipped"), CellOutcome(status="skipped")]
-    )
-    assert (summary.status, summary.message_count) == ("skipped", 0)

@@ -6,12 +6,12 @@ the LLM contract comes from everalgo and the embedding contract from
 ``component`` — so a strategy can be exercised against in-memory doubles
 and the service layer decides which adapters stand behind it.
 
-``llm`` / ``embedding`` are ``None`` when the provider is not configured;
-``case_judge`` is ``None`` unless the agent-case gate is switched on.
-Embedding is optional by design (Tier 1 runs without it, and the strategies
-that need it return no events); the LLM is not, so :meth:`MemoryDeps.require_llm`
-raises the same configuration error a missing provider raises elsewhere.
-Neither changes while the process runs: a tier change needs a restart.
+``llm`` is always present: the bootstrap refuses to build without one.
+``embedding`` is ``None`` when the provider is not configured -- optional by
+design (Tier 1 runs without it, and the strategies that need it return no
+events) -- and ``case_judge`` is ``None`` unless the agent-case gate is
+switched on. Neither changes while the process runs: a tier change needs a
+restart.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from everalgo.agent_memory import CaseJudge
 from everalgo.llm import LLMClient
 
 from everos.component.embedding import EmbeddingProvider
-from everos.core.errors import ProviderNotConfiguredError
 from everos.memory.ports import (
     AgentCaseIndex,
     AgentCaseStore,
@@ -84,7 +83,7 @@ class MemoryDeps:
     """What a strategy may use.
 
     Args:
-        llm: Extraction LLM; ``None`` when not configured.
+        llm: Extraction LLM.
         embedding: Embedding provider; ``None`` when not configured.
         stores: Write-side stores.
         indexes: Read-side indexes.
@@ -93,19 +92,9 @@ class MemoryDeps:
             agent-case extraction without the gate.
     """
 
-    llm: LLMClient | None
+    llm: LLMClient
     embedding: EmbeddingProvider | None
     stores: Stores
     indexes: Indexes
     instructions: CustomInstructions
     case_judge: CaseJudge | None = None
-
-    def require_llm(self) -> LLMClient:
-        """Return the LLM, or raise when none is configured.
-
-        Raises:
-            ProviderNotConfiguredError: No LLM is configured.
-        """
-        if self.llm is None:
-            raise ProviderNotConfiguredError(provider="llm")
-        return self.llm

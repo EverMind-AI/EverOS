@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from everos.config import load_settings
 from everos.entrypoints.api.app import create_app
 from everos.service import build_application
+from tests.fakes import make_providers
 from tests.fakes.storage import Storage
 
 
@@ -28,7 +29,9 @@ async def client(
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
     load_settings.cache_clear()
 
-    app = create_app(application=build_application(load_settings()))
+    app = create_app(
+        application=build_application(load_settings(), providers=make_providers())
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
