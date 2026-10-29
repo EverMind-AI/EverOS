@@ -64,8 +64,10 @@ class ProfileRecaller:
                 project_id=stored.scope.project_id,
                 profile_data={
                     "summary": profile.summary,
-                    "explicit_info": profile.explicit_info,
-                    "implicit_traits": profile.implicit_traits,
+                    "explicit_info": [i.model_dump() for i in profile.explicit_info],
+                    "implicit_traits": [
+                        i.model_dump() for i in profile.implicit_traits
+                    ],
                     "profile_timestamp_ms": profile.timestamp,
                 },
                 score=None,

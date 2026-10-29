@@ -32,6 +32,7 @@ from tests.fakes import (
     InMemoryEpisodeIndex,
     InMemoryMemcellStore,
     InMemoryProfileStore,
+    bundled_instructions,
     make_indexes,
     unscripted_llm,
 )
@@ -93,6 +94,7 @@ def _install_deps(
             if indexes is not None
             else build_indexes(storage.index)
         ),
+        instructions=bundled_instructions(),
     )
     _installed["deps"] = deps
     return deps
@@ -517,7 +519,7 @@ async def test_profile_chain_e2e(
             "owner_id": "u_alice",
             "summary": "Alice is a hiker.",
             "timestamp": 1_700_000_001_000,
-            "explicit_info": ["lives in tokyo"],
+            "explicit_info": [{"description": "lives in tokyo"}],
             "implicit_traits": [],
         }
     )
@@ -537,6 +539,7 @@ async def test_profile_chain_e2e(
             item=Episode(
                 owner_id="u_alice",
                 episode="alice likes hiking",
+                summary="",
                 timestamp=1_700_000_001_000,
                 parent_id="mc_aaaaaaaaaaa1",
             ),

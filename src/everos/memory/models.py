@@ -11,7 +11,9 @@ the ``from everos.memory import MemCell, Episode`` convenience.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from everalgo.types import AgentCase as AlgoAgentCase
@@ -20,7 +22,11 @@ from everalgo.types import ChatMessage as AlgoMessage
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Foresight as AlgoForesight
 from everalgo.types import MemCell as MemCell
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from everos.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 _Role = Literal["user", "assistant", "tool"]
 EpisodeParentType = Literal["memcell", "cluster"]
@@ -94,6 +100,10 @@ class Episode(BaseModel):
     ``<scope_id>_<entry_id_in_md>`` — algo no longer mints an id of its
     own.
 
+    ``summary`` is a short display preview of ``episode`` and is required,
+    as everalgo makes it; an episode stored before it existed reads back
+    with ``""``. ``subject`` is the episode's title.
+
     ``parent_id`` is the source memcell id. The new everalgo types no
     longer carry ``parent_id`` on Episode / Foresight / AtomicFact, so
     everos fills it from the memcell currently being processed (the
@@ -104,9 +114,9 @@ class Episode(BaseModel):
 
     owner_id: str
     episode: str
+    summary: str
     timestamp: int
-    subject: str | None = None
-    summary: str | None = None
+    subject: str = ""
 
     # everos engineering metadata.
     session_id: str | None = None
@@ -154,7 +164,7 @@ class AtomicFact(BaseModel):
 
     Composed (not inherited) from :class:`everalgo.types.AtomicFact`. Mirrors
     :class:`Episode`: everos keeps the *semantic* fields algo emits
-    (``owner_id`` / ``fact`` / ``timestamp``) and adds engineering context
+    (``owner_id`` / ``content`` / ``timestamp``) and adds engineering context
     (``session_id`` / ``parent_id``) so md writer + cascade can audit-link
     back to the source episode.
 
@@ -168,7 +178,7 @@ class AtomicFact(BaseModel):
     """
 
     owner_id: str
-    fact: str
+    content: str
     timestamp: int
 
     # everos engineering metadata.
@@ -195,14 +205,8 @@ class AtomicFact(BaseModel):
         rationale for ``parent_id``: algo no longer carries the source
         episode entry_id; caller injects the authoritative value (any
         ``extra='allow'`` smuggled values are dropped).
-
-        The algo type exposes the fact sentence as ``content``; everos's
-        domain field is ``fact``. This boundary is where that rename is
-        bridged (mirrors how :meth:`Episode.from_algo` adapts algo fields
-        into everos's vocabulary).
         """
         data = algo_fact.model_dump(exclude={"parent_id", "owner_id"})
-        data["fact"] = data.pop("content")
         data["owner_id"] = owner_id
         data["session_id"] = session_id
         data["parent_id"] = parent_id
@@ -321,20 +325,128 @@ class AgentCase(BaseModel):
         return cls.model_validate(data)
 
 
+class ExplicitInfoItem(BaseModel):
+    """One fact a source states about the profile's owner.
+
+    Same shape as everalgo's ``ExplicitInfoItem``; extra keys a host attaches
+    ride along.
+
+    Attributes:
+        description: The fact as one short sentence.
+        category: The dimension the fact is filed under.
+        evidence: The source excerpt that grounds it.
+        observed_at: Epoch ms of the source that last established it.
+    """
+
+    description: str
+    category: str | None = None
+    evidence: str | None = None
+    observed_at: int | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ImplicitTraitItem(BaseModel):
+    """One stable pattern inferred about the profile's owner.
+
+    Same shape as everalgo's ``ImplicitTraitItem``; extra keys ride along.
+
+    Attributes:
+        description: The pattern as one short sentence.
+        trait: The trait label it is filed under.
+        basis: The signals the inference rests on.
+        observed_at: Epoch ms of the source that last established it.
+    """
+
+    description: str
+    trait: str | None = None
+    basis: str | None = None
+    observed_at: int | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class Profile(BaseModel):
     """Domain user profile — one per owner, rewritten on every synthesis.
 
-    Mirrors the fields of everalgo-core 0.6 ``Profile`` without its item
-    validators; stage 3/4 converges the two. ``explicit_info`` /
-    ``implicit_traits`` stay loosely typed because stored profiles carry
-    plain strings as well as item dicts.
+    An item given as a bare sentence (how early profiles were stored) is the
+    item with only its ``description``. Constructing a profile is strict;
+    reading one back from storage goes through :meth:`from_stored`.
     """
 
     owner_id: str
     summary: str
     timestamp: int
-    explicit_info: list[Any] = Field(default_factory=list)
-    implicit_traits: list[Any] = Field(default_factory=list)
+    explicit_info: list[ExplicitInfoItem] = Field(default_factory=list)
+    implicit_traits: list[ImplicitTraitItem] = Field(default_factory=list)
+
+    @field_validator("explicit_info", "implicit_traits", mode="before")
+    @classmethod
+    def _sentences_are_items(cls, items: object) -> object:
+        if not isinstance(items, list):
+            return items
+        return [_item_data(i) for i in items]
+
+    @classmethod
+    def from_stored(
+        cls,
+        *,
+        owner_id: str,
+        summary: str,
+        timestamp: int,
+        explicit_info: Sequence[object],
+        implicit_traits: Sequence[object],
+    ) -> Profile:
+        """A stored profile, without the items that are no longer items.
+
+        Early profiles could hold an item with no ``description``; one bad
+        item must not fail every read of its profile, nor reach everalgo on
+        the next update. Each such item is dropped with a
+        ``profile_entry_dropped`` warning.
+        """
+        return cls(
+            owner_id=owner_id,
+            summary=summary,
+            timestamp=timestamp,
+            explicit_info=_readable_items(ExplicitInfoItem, explicit_info, owner_id),
+            implicit_traits=_readable_items(
+                ImplicitTraitItem, implicit_traits, owner_id
+            ),
+        )
+
+
+_DROPPED_PREVIEW_CHARS = 80
+
+
+def _item_data(item: object) -> object:
+    """A bare sentence is the item with only its description."""
+    return {"description": item} if isinstance(item, str) else item
+
+
+def _readable_items[ItemT: BaseModel](
+    model: type[ItemT], items: Sequence[object], owner_id: str
+) -> list[ItemT]:
+    kept: list[ItemT] = []
+    for item in items:
+        try:
+            kept.append(model.model_validate(_item_data(item)))
+        except ValidationError:
+            logger.warning(
+                "profile_entry_dropped",
+                owner_id=owner_id,
+                bucket=model.__name__,
+                entry=_preview(item),
+            )
+    return kept
+
+
+def _preview(item: object) -> str:
+    text = (
+        item
+        if isinstance(item, str)
+        else json.dumps(item, ensure_ascii=False, default=str)
+    )
+    return text[:_DROPPED_PREVIEW_CHARS]
 
 
 class AgentSkill(BaseModel):
@@ -469,7 +581,9 @@ __all__ = [
     "ClusterMemberType",
     "Episode",
     "EpisodeParentType",
+    "ExplicitInfoItem",
     "Foresight",
+    "ImplicitTraitItem",
     "IngestResult",
     "MemCell",
     "MemcellRecord",

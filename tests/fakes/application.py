@@ -39,7 +39,6 @@ from everos.core.errors import QueueSaturatedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores
 from everos.memory.deps import MemoryDeps
-from everos.memory.prompt_slots import PromptLoader
 from everos.service import (
     Application,
     Capabilities,
@@ -53,7 +52,7 @@ from everos.service import (
 )
 from everos.service.backfill import BackfillContext
 
-from .deps import make_stores
+from .deps import bundled_instructions, make_stores
 from .storage import make_storage
 from .stores import UnusedPort
 
@@ -244,21 +243,17 @@ class StubEngine:
         self.lifecycle.append("ome.stop")
 
 
-_CONFIG_ROOT = Path(__file__).resolve().parents[2] / "src" / "everos" / "config"
-
-
 def make_memory_service(**overrides: Any) -> MemoryService:
     """A real :class:`MemoryService` over in-memory stores and unused ports.
 
     Keyword arguments replace single constructor arguments (``settings``,
-    ``llm``, ``stores``, ``user_pipeline``, ``bus``, ...); anything not
+    ``boundary``, ``stores``, ``user_pipeline``, ``bus``, ...); anything not
     replaced fails loudly if the code under test reaches it.
     """
     fields: dict[str, Any] = {
         "settings": Settings(),
-        "llm": None,
+        "boundary": UnusedPort("boundary"),
         "multimodal_llm": None,
-        "prompt_loader": PromptLoader(_CONFIG_ROOT),
         "stores": make_stores(),
         "user_pipeline": UnusedPort("user_pipeline"),
         "agent_pipeline": UnusedPort("agent_pipeline"),
@@ -323,6 +318,7 @@ def make_backfill_context(
             embedding=embedding,
             stores=build_stores(storage.root, storage.sqlite),
             indexes=build_indexes(storage.index),
+            instructions=bundled_instructions(),
         ),
         index=storage.index,
         database=storage.database,

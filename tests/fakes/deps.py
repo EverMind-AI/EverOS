@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-__all__ = ["make_deps", "make_indexes", "make_stores", "unscripted_llm"]
+__all__ = [
+    "bundled_instructions",
+    "make_deps",
+    "make_indexes",
+    "make_stores",
+    "unscripted_llm",
+]
 
+from pathlib import Path
 from typing import Any
 
 from everalgo.testing import FakeLLMClient
 
+from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.deps import Indexes, MemoryDeps, Stores
 
 from .embedding import FakeEmbeddingProvider
@@ -32,6 +40,12 @@ from .stores import (
 )
 
 _DEFAULT: Any = object()
+_CONFIG_ROOT = Path(__file__).resolve().parents[2] / "src" / "everos" / "config"
+
+
+def bundled_instructions() -> CustomInstructions:
+    """The custom instructions the package ships (every operator disabled)."""
+    return CustomInstructions(_CONFIG_ROOT)
 
 
 def unscripted_llm() -> FakeLLMClient:
@@ -80,6 +94,7 @@ def make_deps(
     embedding: Any = _DEFAULT,
     stores: Stores | None = None,
     indexes: Indexes | None = None,
+    instructions: CustomInstructions | None = None,
 ) -> MemoryDeps:
     """Dependencies backed by in-memory doubles.
 
@@ -92,4 +107,5 @@ def make_deps(
         embedding=FakeEmbeddingProvider() if embedding is _DEFAULT else embedding,
         stores=stores if stores is not None else make_stores(),
         indexes=indexes if indexes is not None else make_indexes(),
+        instructions=instructions or bundled_instructions(),
     )

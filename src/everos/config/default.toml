@@ -176,14 +176,15 @@ batch_size      = 10
 max_concurrent  = 5
 
 [boundary_detection]
-# Passed through to ``everalgo.BoundaryDetector.adetect``.
+# Passed through to ``everalgo.boundary.adetect_boundaries``: leading cells
+# are cut without the model until the rest fits under both limits.
 hard_token_limit = 65536
 hard_msg_limit = 500
 
 [memorize]
-# Conversation mode. Selects the boundary detector and which pipelines run:
-#   "chat"  -> BoundaryDetector       + user_memory only
-#   "agent" -> AgentBoundaryDetector  + user_memory + agent_memory
+# Conversation mode. Selects what boundary detection sees and which pipelines run:
+#   "chat"  -> tool rows dropped               + user_memory only
+#   "agent" -> tool rows kept in the cells     + user_memory + agent_memory
 # A single service process serves one mode at a time; switching mode
 # requires a restart. Override via EVEROS_MEMORIZE__MODE.
 mode = "agent"

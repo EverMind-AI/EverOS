@@ -258,7 +258,9 @@ async def test_get_profile_returns_seeded_row(
                 project_id="default",
                 summary="u1 loves climbing in Yosemite",
                 explicit_info_json='[{"category": "Hobby", "description": "climbing"}]',
-                implicit_traits_json='[{"trait": "Outdoorsy"}]',
+                implicit_traits_json=(
+                    '[{"trait": "Outdoorsy", "description": "outdoorsy"}]'
+                ),
                 profile_timestamp_ms=1780304400000,
                 md_path="users/u1/user.md",
                 content_sha256="abc",
@@ -279,10 +281,23 @@ async def test_get_profile_returns_seeded_row(
     assert prof["id"] == "u1"
     assert prof["user_id"] == "u1"
     assert prof["profile_data"]["summary"] == "u1 loves climbing in Yosemite"
+    # Every item comes back with all of its fields.
     assert prof["profile_data"]["explicit_info"] == [
-        {"category": "Hobby", "description": "climbing"}
+        {
+            "category": "Hobby",
+            "description": "climbing",
+            "evidence": None,
+            "observed_at": None,
+        }
     ]
-    assert prof["profile_data"]["implicit_traits"] == [{"trait": "Outdoorsy"}]
+    assert prof["profile_data"]["implicit_traits"] == [
+        {
+            "trait": "Outdoorsy",
+            "description": "outdoorsy",
+            "basis": None,
+            "observed_at": None,
+        }
+    ]
 
 
 # ── Pagination + sort ───────────────────────────────────────────────────

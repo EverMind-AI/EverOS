@@ -14,7 +14,7 @@ per-path lock window.
 **Disabled by default** (``enabled=False``). Not because it is broken —
 the crash it used to have is fixed below — but because it is one LLM
 call per sender per memcell whose output nothing in EverOS reads today:
-no search route surfaces foresights, no prompt slot consumes them. Until
+no search route surfaces foresights, no operator consumes them. Until
 something does, running it by default spends tokens on write-only data.
 Re-enable per install in ``ome.toml`` (hot-reloaded, ~2s):
 

@@ -1,6 +1,6 @@
 """Agent memory pipeline — 5A in the add_v1 flow.
 
-Consumes pre-cut cells from :mod:`everos.service._boundary` and returns
+Consumes pre-cut cells from :mod:`everos.memory.extract.boundary` and returns
 one :class:`AgentPipelineStarted` per cell so the OME
 ``extract_agent_case`` strategy picks it up.
 

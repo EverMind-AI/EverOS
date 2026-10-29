@@ -20,7 +20,7 @@ def test_algo_profile_round_trips_through_the_domain() -> None:
     assert profile.to_algo(profile.from_algo(algo)) == algo
 
 
-def test_domain_profile_items_are_plain_dicts() -> None:
+def test_domain_profile_items_keep_host_extras() -> None:
     algo = AlgoProfile(
         owner_id="u1",
         summary="s",
@@ -31,4 +31,5 @@ def test_domain_profile_items_are_plain_dicts() -> None:
     domain = profile.from_algo(algo)
 
     assert isinstance(domain, Profile)
-    assert domain.explicit_info[0]["extra_key"] == 3
+    assert domain.explicit_info[0].model_extra == {"extra_key": 3}
+    assert profile.to_algo(domain).explicit_info[0].model_extra == {"extra_key": 3}

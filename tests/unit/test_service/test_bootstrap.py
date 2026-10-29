@@ -108,7 +108,9 @@ def test_memory_is_wired_over_one_engine_and_one_set_of_stores(
     assert memory._bus._engine is application._engine
     assert memory._user_pipeline._episode_store is memory._stores.episode
     assert memory._search_manager._llm is llm
-    assert memory._llm is llm
+    assert memory._boundary._llm is llm
+    assert memory._boundary._session_buffer is memory._stores.session_buffer
+    assert memory._boundary._memcells is memory._stores.memcell
 
 
 @pytest.mark.parametrize(

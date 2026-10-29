@@ -1,0 +1,21 @@
+{
+  "explicit_info": [
+    {
+      "evidence": "Alice: I'm planning a trip to Kyoto at the end of April.",
+      "description": "Plans a trip to Kyoto in late April 2026.",
+      "category": "travel"
+    },
+    {
+      "evidence": "Alice: I'd rather stay in a ryokan than a hotel.",
+      "description": "Prefers a traditional ryokan over a hotel.",
+      "category": "travel"
+    }
+  ],
+  "implicit_traits": [
+    {
+      "basis": "Asks for quiet areas and traditional lodging.",
+      "description": "Values quiet, traditional settings when travelling.",
+      "trait": "travel style"
+    }
+  ]
+}

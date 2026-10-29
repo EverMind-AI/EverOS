@@ -59,6 +59,7 @@ async def reflect_episodes(event: CronTick, deps: MemoryDeps) -> list[Event]:
         episode_index=deps.indexes.episode,
         report_store=deps.stores.reflection_report,
         reflector=EpisodeReflector(llm=deps.require_llm()),
+        custom_instructions=deps.instructions.load("reflect"),
     )
     owners = await deps.stores.cluster.list_distinct_owners()
     merged = await asyncio.gather(*(orchestrator.run(scope=scope) for scope in owners))

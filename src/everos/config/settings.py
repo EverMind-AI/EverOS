@@ -476,7 +476,7 @@ class RerankSettings(BaseModel):
 
 
 class BoundaryDetectionSettings(BaseModel):
-    """Hard limits passed through to ``everalgo`` BoundaryDetector."""
+    """Hard limits passed through to ``everalgo.boundary.adetect_boundaries``."""
 
     hard_token_limit: int = Field(default=65536, ge=1)
     hard_msg_limit: int = Field(default=500, ge=1)
@@ -541,14 +541,14 @@ class AsyncQueueSettings(BaseModel):
 class MemorizeSettings(BaseModel):
     """Memorize use-case configuration.
 
-    ``mode`` selects which boundary detector runs and which pipelines are
+    ``mode`` selects what boundary detection sees and which pipelines are
     dispatched. A service process serves one mode at a time; toggling
     requires a restart.
 
-        - ``"chat"``  -> ``everalgo.user_memory.BoundaryDetector`` and only the
-          user-memory pipeline runs.
-        - ``"agent"`` -> ``everalgo.agent_memory.AgentBoundaryDetector`` and
-          both user-memory + agent-memory pipelines run.
+        - ``"chat"``  -> tool rows are dropped before boundary detection and
+          only the user-memory pipeline runs.
+        - ``"agent"`` -> tool rows stay in the cells (the model sees only the
+          chat messages) and both user-memory + agent-memory pipelines run.
 
     ``session_lock_timeout_seconds`` caps how long one ``memorize()``
     invocation can hold the per-session lock. Covers boundary LLM call +

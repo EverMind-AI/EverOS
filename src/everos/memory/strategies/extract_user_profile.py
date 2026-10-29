@@ -254,7 +254,10 @@ async def extract_user_profile(
         old_profile = profile_mapper.to_algo(existing) if existing else None
         extractor = ProfileExtractor(llm=deps.require_llm())
         new_profile = await extractor.aextract(
-            memcells, sender_id=event.owner_id, old_profile=old_profile
+            memcells,
+            sender_id=event.owner_id,
+            old_profile=old_profile,
+            custom_instructions=deps.instructions.load("profile_extract"),
         )
 
         # Write the fresh profile back to the owner's profile document.

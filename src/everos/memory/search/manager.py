@@ -123,7 +123,7 @@ _DEFAULT_UNLIMITED_RADIUS = 0.5
 _MAXSIM_FACT_MULTIPLIER = 20
 _MAXSIM_FACT_POOL_CAP = 2000
 
-# Mirror of ``service._boundary._TRACK``. The unprocessed buffer is a single
+# The unprocessed buffer (``memorize`` track) is a single
 # shared track because boundary detection is single-pass — switching mode
 # requires a fresh process. Hard-coded here (instead of importing) to keep
 # the memory layer free of service-layer imports per the DDD direction rule.

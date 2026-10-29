@@ -1,7 +1,7 @@
 """User memory pipeline — per-sender Episode fan-out on pre-cut cells.
 
 Cells / memcell_ids / message_id-mapping / sender lists are produced by
-:mod:`everos.service._boundary` (which also writes the single
+:mod:`everos.memory.extract.boundary` (which also writes the single
 ``memcell`` sqlite row per cell). This pipeline only handles the
 user-perspective output of one cell: Episode md, plus the
 ``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
@@ -13,7 +13,6 @@ publishes each cell's events as soon as the cell is done.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
@@ -22,20 +21,17 @@ from everalgo.user_memory import EpisodeExtractor
 
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
+from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
+from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
 from everos.memory.ports import EpisodeStore, Event, MemoryRef, Scope
-from everos.memory.prompt_slots import PromptLoader
 
 if TYPE_CHECKING:
     from everalgo.llm.protocols import LLMClient
 
 logger = get_logger(__name__)
-
-_TRACK = "user_memory"
-_EXTRACT_MAX_RETRIES = 2
-_EXTRACT_RETRY_BACKOFF = 1.0
 
 
 class UserMemoryPipeline:
@@ -43,14 +39,14 @@ class UserMemoryPipeline:
 
     Args:
         episode_store: Where extracted episodes are written.
-        prompt_loader: Source of the episode-extraction prompt slot.
+        instructions: Custom instructions for the episode operator.
         llm_client: LLM for extraction; ``None`` skips extraction.
     """
 
     def __init__(
         self,
         episode_store: EpisodeStore,
-        prompt_loader: PromptLoader,
+        instructions: CustomInstructions,
         llm_client: LLMClient | None,
     ) -> None:
         # EpisodeExtractor requires `llm` at construction. Skip-with-warning
@@ -60,7 +56,7 @@ class UserMemoryPipeline:
             EpisodeExtractor(llm=llm_client) if llm_client is not None else None
         )
         self._episode_store = episode_store
-        self._prompt_loader = prompt_loader
+        self._instructions = instructions
 
     async def run_cell(
         self, ingested: IngestResult, prepared: PreparedCell
@@ -127,15 +123,23 @@ class UserMemoryPipeline:
     async def _extract(
         self, ingested: IngestResult, prepared: PreparedCell
     ) -> AlgoEpisode:
-        """One generic LLM call for the whole cell.
+        """One whole-cell episode, shared by every user sender of the cell.
 
-        ``sender_id=None`` drives the algo's whole-memcell
-        EPISODE_GENERATION_PROMPT — explicitly cheaper than the per-user
-        fan-out per the algo's docstring. Fan-out is then md-only: every
-        user sender owns a copy of the same narrative under its own owner_id
-        path.
+        ``sender_id=None`` binds the episode to no user; the fan-out to one
+        copy per sender happens in markdown only, so a cell costs one call.
+        An unusable reply is tried again by :func:`retry_llm_output`.
         """
         assert self._ep_ext is not None  # run_cell returns before without one
+        extractor = self._ep_ext
+        custom_instructions = self._instructions.load("episode_extract")
+
+        async def attempt() -> AlgoEpisode:
+            return await extractor.aextract(
+                prepared.cell,
+                sender_id=None,
+                custom_instructions=custom_instructions,
+            )
+
         with memory_span(
             "everos.extract",
             observation_type="generation",
@@ -146,21 +150,10 @@ class UserMemoryPipeline:
                 "memcell_id": prepared.memcell_id,
             },
         ) as extract_span:
-            # Token usage is recorded onto this span by the LLM client
-            # wrapper when the extractor issues its chat() call.
-            #
-            # Retry on ValueError: everalgo raises ValueError when the
-            # LLM returns malformed JSON (e.g. OpenRouter partial
-            # response with finish_reason=stop). Transient — same input
-            # typically succeeds on retry. TODO: catch a typed
-            # ExtractionError once everalgo introduces one.
-            algo_ep = await _extract_with_retry(
-                self._ep_ext,
-                prepared.cell,
-                self._prompt_loader.load("episode_extract"),
-                prepared.memcell_id,
+            # The LLM client records token usage onto this span.
+            algo_ep = await retry_llm_output(
+                attempt, operator="episode", memcell_id=prepared.memcell_id
             )
-            # Extracted memory text (only when capture_content is on).
             capture_output(extract_span, algo_ep.episode)
         return algo_ep
 
@@ -209,27 +202,3 @@ def _unique_user_senders(cell: AlgoMemCell) -> list[str]:
         if sid and sid not in senders:
             senders.append(sid)
     return senders
-
-
-async def _extract_with_retry(
-    extractor: EpisodeExtractor,
-    cell: AlgoMemCell,
-    prompt: str | None,
-    memcell_id: str,
-) -> AlgoEpisode:
-    """Call everalgo episode extraction with retry on malformed LLM output."""
-    for attempt in range(_EXTRACT_MAX_RETRIES):
-        try:
-            return await extractor.aextract(cell, sender_id=None, prompt=prompt)
-        except ValueError as exc:
-            wait = _EXTRACT_RETRY_BACKOFF * (attempt + 1)
-            logger.warning(
-                "episode_extract_retry",
-                memcell_id=memcell_id,
-                attempt=attempt,
-                error=str(exc)[:200],
-                backoff_s=wait,
-            )
-            await asyncio.sleep(wait)
-    # Final attempt — a ValueError here propagates to the caller.
-    return await extractor.aextract(cell, sender_id=None, prompt=prompt)

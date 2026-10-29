@@ -8,13 +8,13 @@ can hand a request to instead of running it inline.
 Memorize, end to end::
 
     payload { session_id, messages[] }
-        -> ingest -> boundary stage (buffer / merge / boundary / tail)
+        -> ingest -> BoundaryDetection (buffer / merge / boundary / tail)
         -> for each cell: UserMemoryPipeline.run_cell
                           (+ AgentMemoryPipeline.run_cell in agent mode)
                           -> publish that cell's events on the EventBus
         -> merge the pipelines' statuses -> MemorizeResult
 
-The boundary stage owns buffer / merge / boundary / tail, so the same cells
+Boundary detection owns buffer / merge / boundary / tail, so the same cells
 feed both pipelines in agent mode. Publishing is this service's job:
 pipelines and strategies return events, and each cell's are published as
 soon as the cell is done, so a failing cell never takes an earlier cell's
@@ -40,7 +40,6 @@ from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.memory.extract.ingest import process as ingest_process
 from everos.memory.extract.pipeline import PipelineOutcome, PreparedCell
-from everos.service._boundary import BoundaryOutcome, buffer_messages, prepare_cells
 from everos.service._session_lock import get_session_lock
 from everos.service.memorize_queue import MemorizeQueueWorker, QueueHealth
 
@@ -52,10 +51,10 @@ if TYPE_CHECKING:
     from everos.config import Settings
     from everos.memory import IngestResult
     from everos.memory.deps import Stores
+    from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
     from everos.memory.extract.pipeline import CellOutcome, Pipeline
     from everos.memory.get import GetManager, GetRequest, GetResponse
     from everos.memory.ports import EventBus
-    from everos.memory.prompt_slots import PromptLoader
     from everos.memory.search import SearchRequest, SearchResponse
     from everos.memory.search.manager import SearchManager
 
@@ -138,11 +137,10 @@ class MemoryService:
     """Memorize, flush, search and get, over injected domain objects and ports.
 
     Args:
-        settings: Application settings (``[memorize]``, ``[boundary_detection]``).
-        llm: Boundary-detection LLM; ``None`` leaves messages buffered.
+        settings: Application settings (``[memorize]``).
+        boundary: Cuts each session's buffered messages into memcells.
         multimodal_llm: Parses non-text content; ``None`` when
             ``[multimodal]`` is not configured.
-        prompt_loader: Source of the boundary-detection prompt.
         stores: Write-side stores (session buffer, memcells, memorize inbox).
         user_pipeline: The user-memory track, run on every cell.
         agent_pipeline: The agent-memory track, run on every cell in agent mode.
@@ -155,9 +153,8 @@ class MemoryService:
         self,
         *,
         settings: Settings,
-        llm: LLMClient | None,
+        boundary: BoundaryDetection,
         multimodal_llm: LLMClient | None,
-        prompt_loader: PromptLoader,
         stores: Stores,
         user_pipeline: Pipeline,
         agent_pipeline: Pipeline,
@@ -166,9 +163,8 @@ class MemoryService:
         get_manager: GetManager,
     ) -> None:
         self._settings = settings
-        self._llm = llm
+        self._boundary = boundary
         self._multimodal_llm = multimodal_llm
-        self._prompt_loader = prompt_loader
         self._stores = stores
         self._user_pipeline = user_pipeline
         self._agent_pipeline = agent_pipeline
@@ -354,7 +350,6 @@ class MemoryService:
                     mode=mode,
                     is_final=is_final,
                     defer_extraction=defer_extraction,
-                    boundary_timeout=timeout_s,
                 )
             finally:
                 lock.release()
@@ -387,7 +382,6 @@ class MemoryService:
         mode: Mode,
         is_final: bool,
         defer_extraction: bool,
-        boundary_timeout: float | None = None,
     ) -> MemorizeResult | tuple[IngestResult, BoundaryOutcome]:
         """Inner critical section — runs under the per-session lock.
 
@@ -397,32 +391,13 @@ class MemoryService:
         """
         ingested = await ingest_process(payload, multimodal_llm=self._multimodal_llm)
         if defer_extraction and not is_final:
-            buffered = await buffer_messages(
-                ingested, mode=mode, session_buffer=self._stores.session_buffer
-            )
+            buffered = await self._boundary.buffer(ingested, mode=mode)
             return MemorizeResult(
                 message_count=len(payload.get("messages", [])),
                 status=_merge_status(buffered.status, "skipped"),
             )
 
-        # Boundary detection runs an LLM (everalgo detect_boundaries). Wrap it
-        # in a generation span so its token usage lands on a GENERATION
-        # observation (costed by Langfuse) instead of the SPAN-typed request
-        # root (dropped).
-        boundary_cfg = self._settings.boundary_detection
-        with memory_span("everos.memcell.boundary", observation_type="generation"):
-            boundary = await prepare_cells(
-                ingested,
-                mode=mode,
-                is_final=is_final,
-                llm_client=self._llm,
-                prompt_loader=self._prompt_loader,
-                hard_token_limit=boundary_cfg.hard_token_limit,
-                hard_msg_limit=boundary_cfg.hard_msg_limit,
-                session_buffer=self._stores.session_buffer,
-                memcell_store=self._stores.memcell,
-                timeout_seconds=boundary_timeout,
-            )
+        boundary = await self._boundary.detect(ingested, mode=mode, is_final=is_final)
 
         if not boundary.cells:
             # Nothing went past the boundary stage — no pipelines to dispatch.

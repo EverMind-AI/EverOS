@@ -40,9 +40,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 from sqlalchemy import text
 
 from everos.infra.persistence import MemoryRoot
@@ -52,6 +50,7 @@ from everos.service import (
     build_application,
     build_providers,
 )
+from tests.fakes import memorize_llm
 from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
@@ -67,37 +66,9 @@ async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
     return await _under_test["memory"].memorize(payload, **kwargs)
 
 
-def _boundary_response(boundaries: list[int]) -> str:
-    return json.dumps(
-        {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    )
-
-
-def _episode_response(title: str = "T", content: str = "B") -> str:
-    return json.dumps({"title": title, "content": content})
-
-
-def _make_extract_all_llm() -> FakeLLMClient:
-    """Boundary returns single boundary at end → entire merged → 1 cell, tail=[]."""
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            # Always cut: the boundary indices are relative to merged input;
-            # an empty list means "no cut, hold". A single [N] means "cut
-            # after index N", i.e. everything before goes into one cell.
-            # We use a sentinel large index to force boundary to take all.
-            return ChatResponse(content=_boundary_response([999]), model="fake")
-        return ChatResponse(content=_episode_response(), model="fake")
-
-    return FakeLLMClient(handler=handler)
-
-
-# ---------------------------------------------------------------------------
-# Fixture — mirrors test_memorize_integration's pattern but without OME / strategies
-# (the lock bug lives at the boundary stage; downstream strategies are
-# irrelevant to this race).
-# ---------------------------------------------------------------------------
+def _cut_before_last(window: int) -> list[int]:
+    """Close everything but the last message; a non-final call keeps a tail."""
+    return [window - 1] if window > 1 else []
 
 
 @pytest_asyncio.fixture
@@ -210,7 +181,7 @@ async def test_concurrent_adds_same_session_no_message_loss(
 ) -> None:
     """Two concurrent /add on one session: every input message must end up
     either in a memcell's message_ids OR in the surviving buffer."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     session_id = "s_concurrent"
 
@@ -245,7 +216,7 @@ async def test_concurrent_adds_serial_when_locked(
     memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Same as above but explicitly stress with 4 concurrent batches."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     session_id = "s_stress"
 
@@ -279,7 +250,7 @@ async def test_different_sessions_run_in_parallel(
     memorize_env_locked: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """Cross-session calls share no lock — must not serialise."""
-    await memorize_env_locked(fake_llm=_make_extract_all_llm())
+    await memorize_env_locked(fake_llm=memorize_llm(_cut_before_last))
 
     def _msgs(sid: str) -> list[dict[str, Any]]:
         return [_msg(i, sid, 1_700_000_000_000 + i * 1000) for i in range(3)]

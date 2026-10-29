@@ -46,6 +46,7 @@ class _FakeAlgoResult:
     episode: str
     subject: str
     timestamp: int
+    summary: str = "merged summary"
 
 
 def _stored_episode(
@@ -61,6 +62,7 @@ def _stored_episode(
         item=Episode(
             owner_id="u_alice",
             episode=episode,
+            summary="",
             timestamp=1_780_272_000_000,
             subject="test subject",
             session_id="s_test",
@@ -282,6 +284,7 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
     assert merged == Episode(
         owner_id="u_alice",
         episode="merged text",
+        summary="merged summary",
         timestamp=1_780_272_000_000,
         subject="topic",
         parent_id="cl_abc",

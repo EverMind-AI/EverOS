@@ -2,15 +2,15 @@
 
 Covers the agent branches that ``test_memorize_integration.py`` skips:
 
-- :mod:`service.memorize` agent dispatch (asyncio.gather of user + agent
-  pipelines)
-- :mod:`service._boundary` agent-mode detection via
-  :class:`everalgo.agent_memory.AgentBoundaryDetector`
+- :class:`everos.service.MemoryService` agent dispatch (user + agent
+  pipelines per cell)
+- :class:`everos.memory.extract.boundary.BoundaryDetection` in agent mode
+  (tool rows kept in the cells, hidden from the model)
 - :mod:`memory.extract.pipeline.agent_memory.AgentMemoryPipeline` end-to-end
 
 Self-contained: the chat-baseline file keeps its fixture local, so we
 copy the minimum scaffolding rather than refactor it into a shared
-conftest.
+conftest. The model is :func:`tests.fakes.memorize_llm`.
 """
 
 from __future__ import annotations
@@ -26,9 +26,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence import MemoryRoot
 from everos.service import (
@@ -37,6 +35,7 @@ from everos.service import (
     build_application,
     build_providers,
 )
+from tests.fakes import memorize_llm
 from tests.fakes.storage import Storage
 
 _under_test: dict[str, MemoryService] = {}
@@ -46,27 +45,6 @@ _under_test: dict[str, MemoryService] = {}
 async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
     """``MemoryService.memorize`` of the application under test."""
     return await _under_test["memory"].memorize(payload, **kwargs)
-
-
-def _boundary_response(boundaries: list[int]) -> str:
-    return json.dumps(
-        {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    )
-
-
-def _make_fake_llm(boundary_responses: list[list[int]] | None = None) -> FakeLLMClient:
-    queue: list[list[int]] = list(boundary_responses or [])
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = queue.pop(0) if queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        return ChatResponse(
-            content=json.dumps({"title": "T", "content": "B"}), model="fake"
-        )
-
-    return FakeLLMClient(handler=handler)
 
 
 def _msg(
@@ -177,7 +155,7 @@ async def test_agent_mode_two_user_assistant_msgs(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Agent mode happy path: one cell, both user + agent pipelines fire."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     result = await memorize(
@@ -202,7 +180,7 @@ async def test_agent_mode_preserves_tool_items(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Agent mode keeps ``role=tool`` rows inside the cell (chat mode drops them)."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     payload = {
@@ -245,7 +223,7 @@ async def test_agent_mode_dispatch_no_double_insert(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Dual pipeline dispatch must not double-insert the memcell row."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="agent", fake_llm=fake)
 
     await memorize(

@@ -12,7 +12,7 @@ External usage:
 Storage is reached only through the protocols in :mod:`everos.memory.ports`;
 path resolution and addressing of markdown records live with the storage
 adapters that implement them. The domain layer here is reserved for actual
-business logic (extract / search / reflection / prompt_slots).
+business logic (extract / search / reflection / custom_instructions).
 """
 
 from .models import AgentCase as AgentCase

@@ -1,6 +1,6 @@
 """Laws of the merge, rank and parse helpers on the memorize and search paths.
 
-1. ``_merge_dedupe_sort`` (boundary stage): the result is sorted by
+1. ``merge_dedupe_sort`` (boundary stage): the result is sorted by
    ``(timestamp, message_id)``, holds each id once, its id set is the union
    of both inputs, a buffered message wins over a new one with the same id,
    and merging again changes nothing. ``buffered`` comes from a table keyed
@@ -36,10 +36,10 @@ from hypothesis import strategies as st
 
 from everos.infra.cascade.models import ScanInput
 from everos.infra.cascade.reconciler import PriorState, reconcile
+from everos.memory.extract.boundary.messages import merge_dedupe_sort
 from everos.memory.models import CanonicalMessage
 from everos.memory.search.llm_multiround import _coerce_core_indices, _parse_decision
 from everos.memory.search.manager import _merge_by_id_max
-from everos.service._boundary import _merge_dedupe_sort
 from everos.service.memory import _merge_status
 
 _UTC = dt.UTC
@@ -83,7 +83,7 @@ _buffered = st.lists(
 def test_merge_dedupe_sort_laws(
     buffered: list[CanonicalMessage], new: list[CanonicalMessage]
 ) -> None:
-    merged = _merge_dedupe_sort(buffered, new)
+    merged = merge_dedupe_sort(buffered, new)
     keys = [(m.timestamp, m.message_id) for m in merged]
     assert keys == sorted(keys)
     ids = [m.message_id for m in merged]
@@ -93,8 +93,8 @@ def test_merge_dedupe_sort_laws(
     for m in merged:
         if m.message_id in by_id:
             assert m is by_id[m.message_id], "the buffered message wins"
-    assert _merge_dedupe_sort(merged, []) == merged
-    assert _merge_dedupe_sort(merged, new) == merged
+    assert merge_dedupe_sort(merged, []) == merged
+    assert merge_dedupe_sort(merged, new) == merged
 
 
 _cands = st.lists(

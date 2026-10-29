@@ -18,6 +18,7 @@ from __future__ import annotations
 __all__ = ["Indexes", "MemoryDeps", "Stores"]
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from everalgo.llm import LLMClient
 
@@ -42,6 +43,9 @@ from everos.memory.ports import (
     ReflectionReportStore,
     SessionBufferStore,
 )
+
+if TYPE_CHECKING:
+    from everos.memory.custom_instructions import CustomInstructions
 
 
 @dataclass(frozen=True)
@@ -82,12 +86,14 @@ class MemoryDeps:
         embedding: Embedding provider; ``None`` when not configured.
         stores: Write-side stores.
         indexes: Read-side indexes.
+        instructions: Custom instructions appended to the operators' rules.
     """
 
     llm: LLMClient | None
     embedding: EmbeddingProvider | None
     stores: Stores
     indexes: Indexes
+    instructions: CustomInstructions
 
     def require_llm(self) -> LLMClient:
         """Return the LLM, or raise when none is configured.

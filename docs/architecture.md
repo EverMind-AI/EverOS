@@ -13,7 +13,7 @@
 │    bootstrap + MemoryService / KnowledgeService / Ops │
 ├──────────────────────────────────────────────────────┤
 │  memory/       (Domain — Business core)               │
-│    models + extract + search + cascade + prompt_slots │
+│    models + extract + search + custom_instructions    │
 │    + reflection + strategies + get + events            │
 ├──────────────────────────────────────────────────────┤
 │  infra/persistence  (Storage adapters; infra/ may host other adapter types)    │
@@ -250,11 +250,22 @@ stay visible to whoever builds the provider.
 
 ```
 extract/
-├── ingest/      Standardized message intake + multi-modal parser dispatch
-├── parser/      Input parsing (format normalization, message preprocessing)
-├── pipeline/    Main extraction pipeline (calls everalgo + dual-track split + writes store)
-└── evolution/   Async memory evolution (event/counter/cron triggers)
+├── ingest/       Standardized message intake + multi-modal parser dispatch
+├── parser/       Input parsing (format normalization, message preprocessing)
+├── boundary/     BoundaryDetection: session buffer -> memcells (+ ledger, quarantine)
+├── pipeline/     Per-cell extraction (Episode md + the events that announce it)
+├── llm_retry.py  The one host-side retry of everalgo's LLMOutputError
+└── evolution/    Async memory evolution (event/counter/cron triggers)
 ```
+
+`BoundaryDetection` is built by the bootstrap and injected into
+`MemoryService`; it owns the session buffer, the `memcell` ledger and the
+quarantine of a session the model keeps failing to segment. Why in the
+domain: deciding where an episode ends is a memory rule, and keeping it out
+of the service lets it be tested against in-memory stores and a scripted
+model. Why one retry module: everalgo operators never retry (an unusable
+reply raises `LLMOutputError`), so the host owns the policy, and one place
+keeps the attempt count from multiplying across layers.
 
 ### `infra/cascade/`
 
@@ -269,19 +280,14 @@ index backend:
 - Handlers for all eight business kinds: episode, atomic_fact, foresight,
   user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
 
-### `memory/prompt_slots/`
+### `memory/custom_instructions/`
 
-Three-layer prompt overlay:
-
-```
-config/prompt_slots/*.yaml          (Layer 1: defaults, ships with package)
-       ↓
-~/.everos/prompt_slots/*.yaml       (Layer 2: app-level override)
-       ↓
-runtime override                    (Layer 3: per-call override)
-```
-
-Extractors may accept a prompt-override parameter; EverOS supplies overrides for episode and boundary-detection prompts, and falls back to the algo-bundled default elsewhere — no hardcoded prompts in algorithm code.
+Per-operator requirements appended to everalgo's bundled rules
+(`config/custom_instructions/<operator>.yaml`, all disabled by default).
+`CustomInstructions.load(operator)` returns the text or `None`; the operator
+receives it as `custom_instructions=` and can neither lose a rule nor change
+its output shape. Operators: boundary detection, episode extraction, profile
+extraction, reflection. See [custom_instructions.md](custom_instructions.md).
 
 ### `memory/reflection/`
 
@@ -364,14 +370,16 @@ holding **only memory extraction algorithms**:
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
 - `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
-- `everalgo.rank` — boundary detection / fusion + rerank
+- `everalgo.boundary` — boundary detection (conversation -> MemCells)
+- `everalgo.rank` — fusion + rerank
 - `everalgo.knowledge` — KnowledgeExtractor (document parse + topic extraction)
 
 everalgo is:
 
 - **Stateless** — pure functions, no class hierarchy
 - **No I/O** — does not touch md files, derived indexes, or SQLite
-- **No prompts inline** — extractors that accept a prompt-override parameter use the project-supplied value; others use their algo-bundled defaults
+- **Owns its prompts** — every operator ships its rules and its strict reply schema together; EverOS can only append requirements (`custom_instructions=`), never replace a prompt
+- **Never retries** — an unusable reply raises `LLMOutputError`; the host decides (`memory/extract/llm_retry.py`)
 
 This boundary lets everalgo be reused across product forms (this open-source build, EverOS Cloud, OpenClaw plugins, etc.).
 

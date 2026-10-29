@@ -24,12 +24,12 @@ batching by 6 messages per `/add` call and then `/flush` at the end.
 ## Run
 
 ```bash
-# Chat mode — boundary uses everalgo.boundary.detect_boundaries
+# Chat mode — boundary uses everalgo.boundary.adetect_boundaries
 EVEROS_MEMORIZE__MODE=chat uv run python scripts/e2e_memorize/run.py \
     --fixture scripts/e2e_memorize/fixtures/chat_session.json \
     --expected-mode chat
 
-# Agent mode — boundary uses everalgo.agent_memory.AgentBoundaryDetector
+# Agent mode — the same operator over the full item list (tool rows kept)
 # (filter→detect→remap; tool items preserved in cells)
 EVEROS_MEMORIZE__MODE=agent uv run python scripts/e2e_memorize/run.py \
     --fixture scripts/e2e_memorize/fixtures/agent_session.json \

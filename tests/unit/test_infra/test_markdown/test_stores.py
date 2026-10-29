@@ -108,6 +108,7 @@ async def test_merged_episode_has_cluster_parent_and_no_session(
     merged = Episode(
         owner_id="u1",
         episode="merged story",
+        summary="",
         timestamp=_TS,
         subject="Topic",
         parent_id="cl_1",
@@ -127,7 +128,10 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
 ) -> None:
     store = MarkdownEpisodeStore(root)
     ref = await store.append(
-        _user(), Episode(owner_id="u1", episode="x", timestamp=_TS, parent_id="mc_1")
+        _user(),
+        Episode(
+            owner_id="u1", summary="", episode="x", timestamp=_TS, parent_id="mc_1"
+        ),
     )
 
     await store.deprecate(
@@ -141,7 +145,7 @@ async def test_episode_deprecate_patches_the_file_frontmatter(
 async def test_atomic_facts_append_and_deprecate(root: MemoryRoot) -> None:
     store = MarkdownAtomicFactStore(root)
     facts = [
-        AtomicFact(owner_id="u1", fact=f"fact {i}", timestamp=_TS, parent_id="ep_1")
+        AtomicFact(owner_id="u1", content=f"fact {i}", timestamp=_TS, parent_id="ep_1")
         for i in range(2)
     ]
 
@@ -210,6 +214,29 @@ async def test_profile_round_trips(root: MemoryRoot) -> None:
     assert await store.read(_user()) == profile
     assert ref.id == "u1"
     assert ref.md_path == "app/proj/users/u1/user.md"
+
+
+async def test_profile_read_drops_an_item_with_no_description(
+    root: MemoryRoot,
+) -> None:
+    """A legacy item without a description is dropped on read, not fatal."""
+    store = MarkdownProfileStore(root)
+    ref = await store.write(
+        _user(),
+        Profile(
+            owner_id="u1",
+            summary="likes tea",
+            timestamp=_TS,
+            implicit_traits=["calm", "patient"],
+        ),
+    )
+    md = root.root / ref.md_path
+    md.write_text(md.read_text().replace("- description: calm\n", "- basis: calm\n"))
+
+    profile = await store.read(_user())
+
+    assert profile is not None
+    assert [i.description for i in profile.implicit_traits] == ["patient"]
 
 
 async def test_agent_skill_round_trips_and_is_deleted_by_name(

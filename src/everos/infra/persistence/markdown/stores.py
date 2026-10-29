@@ -196,7 +196,7 @@ class MarkdownProfileStore:
         if found is None:
             return None
         frontmatter, _body = found
-        return Profile(
+        return Profile.from_stored(
             owner_id=frontmatter.user_id,
             summary=frontmatter.summary,
             timestamp=frontmatter.profile_timestamp_ms,
@@ -209,8 +209,8 @@ class MarkdownProfileStore:
             id=f"profile_{scope.owner_id}",
             user_id=scope.owner_id,
             summary=profile.summary,
-            explicit_info=list(profile.explicit_info),
-            implicit_traits=list(profile.implicit_traits),
+            explicit_info=[i.model_dump() for i in profile.explicit_info],
+            implicit_traits=[i.model_dump() for i in profile.implicit_traits],
             profile_timestamp_ms=profile.timestamp,
         )
         path = await self._writer.write(
@@ -344,7 +344,7 @@ def _atomic_fact_entry(fact: AtomicFact) -> EntryBody:
     }
     if fact.session_id is not None:
         inline["session_id"] = fact.session_id
-    return inline, {"Fact": fact.fact}
+    return inline, {"Fact": fact.content}
 
 
 def _foresight_entry(foresight: Foresight) -> EntryBody:

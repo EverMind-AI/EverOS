@@ -28,9 +28,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 
 from everos.infra.persistence import MemoryRoot
 from everos.service import (
@@ -39,6 +37,7 @@ from everos.service import (
     build_application,
     build_providers,
 )
+from tests.fakes import memorize_llm
 from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
@@ -54,55 +53,6 @@ async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
     return await _under_test["memory"].memorize(payload, **kwargs)
 
 
-def _boundary_response(boundaries: list[int]) -> str:
-    """Build a ``detect_boundaries`` JSON response (algo schema)."""
-    payload = {
-        "reasoning": "test",
-        "boundaries": boundaries,
-        "should_wait": False,
-    }
-    return json.dumps(payload)
-
-
-def _episode_response(title: str = "Test Subject", content: str = "Test body") -> str:
-    """Build an ``EpisodeExtractor`` JSON response (algo schema)."""
-    return json.dumps({"title": title, "content": content})
-
-
-def _make_fake_llm(
-    boundary_responses: list[list[int]] | None = None,
-    *,
-    episode_title: str = "Test Subject",
-    episode_content: str = "Test body",
-) -> FakeLLMClient:
-    """Build a ``FakeLLMClient`` that dispatches by prompt fingerprint.
-
-    Pops one ``boundaries=...`` from ``boundary_responses`` per boundary
-    prompt seen; every episode prompt returns the same canned
-    ``{title, content}``.
-    """
-    boundary_queue: list[list[int]] = list(boundary_responses or [])
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = boundary_queue.pop(0) if boundary_queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        # Fall through to episode (also catches atomic/foresight prompts —
-        # they'll return success-but-empty in their mocked extractor below).
-        return ChatResponse(
-            content=_episode_response(episode_title, episode_content),
-            model="fake",
-        )
-
-    return FakeLLMClient(handler=handler)
-
-
-# ---------------------------------------------------------------------------
-# Shared setup fixture
-# ---------------------------------------------------------------------------
-
-
 @pytest_asyncio.fixture
 async def memorize_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage: Storage
@@ -112,7 +62,7 @@ async def memorize_env(
     Usage::
 
         async def test_x(memorize_env):
-            await memorize_env(mode="chat", fake_llm=_make_fake_llm([...]))
+            await memorize_env(mode="chat", fake_llm=memorize_llm([...]))
             outcome = await memorize({"session_id": "s", "messages": [...]})
 
     The builder must be called exactly once per test (it primes singletons
@@ -262,7 +212,7 @@ async def test_chat_baseline_two_msgs_one_cell(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """2 messages → flush forces them into 1 cell + 1 Episode + 1 memcell row."""
-    fake = _make_fake_llm(boundary_responses=[[]])  # no internal cuts
+    fake = memorize_llm([[]])  # no internal cuts
     await memorize_env(mode="chat", fake_llm=fake)
 
     payload = {
@@ -303,7 +253,7 @@ async def test_empty_batch_non_final_is_skipped(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """``messages=[]`` + ``is_final=False`` → skipped, no side effects."""
-    await memorize_env(mode="chat", fake_llm=_make_fake_llm())
+    await memorize_env(mode="chat", fake_llm=memorize_llm())
 
     result = await memorize(
         {"session_id": "test_empty_nonfinal", "messages": []}, is_final=False
@@ -318,7 +268,7 @@ async def test_empty_batch_final_drains_empty_buffer(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """``messages=[]`` + ``is_final=True`` on virgin session → no cells, no md."""
-    await memorize_env(mode="chat", fake_llm=_make_fake_llm())
+    await memorize_env(mode="chat", fake_llm=memorize_llm())
 
     result = await memorize(
         {"session_id": "test_empty_final", "messages": []}, is_final=True
@@ -332,7 +282,7 @@ async def test_assistant_only_batch_accumulates(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """No role=user message → boundary stage parks everything in buffer."""
-    fake = _make_fake_llm(boundary_responses=[])  # no LLM call expected
+    fake = memorize_llm([])  # no LLM call expected
     await memorize_env(mode="chat", fake_llm=fake)
 
     result = await memorize(
@@ -354,7 +304,7 @@ async def test_single_user_message_accumulates(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Single user msg → boundary returns no cells (need conversation) → buffer it."""
-    fake = _make_fake_llm(boundary_responses=[[]])  # boundary called, no cuts
+    fake = memorize_llm([[]])  # boundary called, no cuts
     await memorize_env(mode="chat", fake_llm=fake)
 
     result = await memorize(
@@ -374,15 +324,7 @@ async def test_deferred_add_persists_without_llm_then_flushes(
 ) -> None:
     """Deferred add is durable and cheap; flush performs the LLM extraction."""
     calls: list[str] = []
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        calls.append(prompt)
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            return ChatResponse(content=_boundary_response([]), model="fake")
-        return ChatResponse(content=_episode_response(), model="fake")
-
-    await memorize_env(mode="chat", fake_llm=FakeLLMClient(handler=handler))
+    await memorize_env(mode="chat", fake_llm=memorize_llm(calls=calls))
     payload = {
         "session_id": "test_deferred",
         "messages": [
@@ -413,7 +355,7 @@ async def test_chat_mode_filters_tool_messages(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Chat mode drops ``role=tool`` + assistant-with-tool_calls pre-boundary."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="chat", fake_llm=fake)
 
     result = await memorize(
@@ -457,7 +399,7 @@ async def test_duplicate_message_id_dedup_across_adds(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Same message replayed across two ``/add`` calls is deduped by message_id."""
-    fake = _make_fake_llm(boundary_responses=[[], []])  # 2 boundary calls, both empty
+    fake = memorize_llm([[], []])  # 2 boundary calls, both empty
     await memorize_env(mode="chat", fake_llm=fake)
 
     # message_id is derived from (session_id, ts_ms, idx); same payload twice
@@ -489,10 +431,10 @@ async def test_hard_msg_limit_force_split(
     tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
 ) -> None:
     """Exceeding ``hard_msg_limit`` triggers a force-split before the LLM call."""
-    fake = _make_fake_llm(boundary_responses=[[]])  # LLM call after force-split
+    fake = memorize_llm([[]])  # LLM call after force-split
     # hard_msg_limit=3 → batch of 5 msgs forces ~1 split before LLM.
     await memorize_env(
-        storage, mode="chat", fake_llm=fake, hard_msg_limit=3, hard_token_limit=10_000
+        mode="chat", fake_llm=fake, hard_msg_limit=3, hard_token_limit=10_000
     )
 
     msgs = [
@@ -514,10 +456,10 @@ async def test_hard_token_limit_force_split(
     tmp_path: Path, memorize_env: Callable[..., Any], storage: Storage
 ) -> None:
     """Exceeding ``hard_token_limit`` triggers a force-split (token-based)."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     # Very small token budget → even tiny content triggers force-split.
     await memorize_env(
-        storage, mode="chat", fake_llm=fake, hard_msg_limit=500, hard_token_limit=20
+        mode="chat", fake_llm=fake, hard_msg_limit=500, hard_token_limit=20
     )
 
     msgs = [
@@ -542,7 +484,7 @@ async def test_flush_on_virgin_session_is_noop(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Flush a session that never received ``/add`` — should not crash."""
-    await memorize_env(mode="chat", fake_llm=_make_fake_llm())
+    await memorize_env(mode="chat", fake_llm=memorize_llm())
 
     result = await memorize(
         {"session_id": "test_virgin_flush", "messages": []}, is_final=True
@@ -555,7 +497,7 @@ async def test_add_then_flush_then_add(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """After flush drains the buffer, a follow-up ``/add`` still works."""
-    fake = _make_fake_llm(boundary_responses=[[], []])
+    fake = memorize_llm([[], []])
     await memorize_env(mode="chat", fake_llm=fake)
 
     sid = "test_add_flush_add"
@@ -592,7 +534,7 @@ async def test_consecutive_flushes_second_is_noop(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Flush twice in a row — second call finds empty buffer, no-ops."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="chat", fake_llm=fake)
 
     sid = "test_double_flush"
@@ -618,7 +560,7 @@ async def test_flush_drains_assistant_only_buffer(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Buffer with only assistant messages: flush still forces them into a cell."""
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="chat", fake_llm=fake)
 
     sid = "test_asst_then_flush"
@@ -660,7 +602,7 @@ async def test_two_sessions_are_isolated(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Two session_ids share the engine but their buffers / cells stay separate."""
-    fake = _make_fake_llm(boundary_responses=[[], []])  # 1 per session
+    fake = memorize_llm([[], []])  # 1 per session
     await memorize_env(mode="chat", fake_llm=fake)
 
     await memorize(
@@ -698,7 +640,7 @@ async def test_same_session_multi_add_concatenates(
     tmp_path: Path, memorize_env: Callable[..., Any]
 ) -> None:
     """Multiple adds on the same session accumulate in one buffer until flushed."""
-    fake = _make_fake_llm(boundary_responses=[[], [], []])
+    fake = memorize_llm([[], [], []])
     await memorize_env(mode="chat", fake_llm=fake)
 
     sid = "test_multi_add"
@@ -746,7 +688,7 @@ async def test_flush_produces_nested_trace(
         shutdown_tracing,
     )
 
-    fake = _make_fake_llm(boundary_responses=[[]])
+    fake = memorize_llm([[]])
     await memorize_env(mode="chat", fake_llm=fake)
 
     exporter = InMemorySpanExporter()

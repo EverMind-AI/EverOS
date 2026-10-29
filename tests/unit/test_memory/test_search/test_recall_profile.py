@@ -56,8 +56,8 @@ async def test_fetch_returns_dto_when_row_exists(storage: Storage) -> None:
             _profile_row(
                 owner_id="u_alice",
                 summary="Alice likes long hikes.",
-                explicit_info=[{"fact": "lives in tokyo"}],
-                implicit_traits=[{"trait": "introverted"}],
+                explicit_info=[{"description": "lives in tokyo"}],
+                implicit_traits=["introverted"],
                 profile_timestamp_ms=1_700_000_001_000,
             )
         ]
@@ -73,8 +73,18 @@ async def test_fetch_returns_dto_when_row_exists(storage: Storage) -> None:
     assert item.score is None
     # JSON columns are decoded back to live Python on the way out.
     assert item.profile_data["summary"] == "Alice likes long hikes."
-    assert item.profile_data["explicit_info"] == [{"fact": "lives in tokyo"}]
-    assert item.profile_data["implicit_traits"] == [{"trait": "introverted"}]
+    assert [i["description"] for i in item.profile_data["explicit_info"]] == [
+        "lives in tokyo"
+    ]
+    # A bare sentence stored by an early profile reads back as an item.
+    assert item.profile_data["implicit_traits"] == [
+        {
+            "description": "introverted",
+            "trait": None,
+            "basis": None,
+            "observed_at": None,
+        }
+    ]
     assert item.profile_data["profile_timestamp_ms"] == 1_700_000_001_000
 
 

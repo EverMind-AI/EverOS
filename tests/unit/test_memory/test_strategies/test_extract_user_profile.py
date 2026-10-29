@@ -69,6 +69,7 @@ def _indexed_episode(scope: Scope, entry_id: str, memcell_id: str) -> Stored[Epi
         item=Episode(
             owner_id=scope.owner_id,
             episode="...",
+            summary="",
             timestamp=1_700_000_000_000,
             parent_id=memcell_id,
             parent_type="memcell",
@@ -136,8 +137,8 @@ async def test_init_mode_writes_profile_when_no_existing() -> None:
             "owner_id": "u_alice",
             "summary": "Alice is a hiker.",
             "timestamp": 1_700_000_001_000,
-            "explicit_info": ["lives in tokyo"],
-            "implicit_traits": ["adventurous"],
+            "explicit_info": [{"description": "lives in tokyo"}],
+            "implicit_traits": [{"description": "adventurous"}],
         }
     )
     with patch(_EXTRACTOR) as extractor_cls:
@@ -155,8 +156,8 @@ async def test_init_mode_writes_profile_when_no_existing() -> None:
     stored = deps.stores.profile.profiles[_scope()]
     assert stored.summary == "Alice is a hiker."
     assert stored.timestamp == 1_700_000_001_000
-    assert stored.explicit_info == ["lives in tokyo"]
-    assert stored.implicit_traits == ["adventurous"]
+    assert [i.description for i in stored.explicit_info] == ["lives in tokyo"]
+    assert [i.description for i in stored.implicit_traits] == ["adventurous"]
 
 
 async def test_update_mode_rehydrates_old_profile() -> None:
@@ -182,8 +183,11 @@ async def test_update_mode_rehydrates_old_profile() -> None:
             "owner_id": "u_alice",
             "summary": "updated summary",
             "timestamp": 1_700_000_002_000,
-            "explicit_info": ["prior fact", "new fact"],
-            "implicit_traits": ["prior trait"],
+            "explicit_info": [
+                {"description": "prior fact"},
+                {"description": "new fact"},
+            ],
+            "implicit_traits": [{"description": "prior trait"}],
         }
     )
     with patch(_EXTRACTOR) as extractor_cls:
@@ -195,7 +199,7 @@ async def test_update_mode_rehydrates_old_profile() -> None:
     assert isinstance(old, AlgoProfile)
     assert old.summary == "prior summary"
     assert old.timestamp == 1_700_000_000_000
-    assert old.model_dump()["explicit_info"] == ["prior fact"]
+    assert [i.description for i in old.explicit_info] == ["prior fact"]
     assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
 
 

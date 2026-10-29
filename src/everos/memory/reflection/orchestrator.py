@@ -75,6 +75,7 @@ class ReflectionOrchestrator:
         episode_index: Episode reads (members, orphans).
         report_store: Reflection audit trail (which clusters were merged).
         reflector: Algorithm-side EpisodeReflector (areflect).
+        custom_instructions: Appended to the reflector's rules; ``None`` for none.
     """
 
     def __init__(
@@ -85,12 +86,14 @@ class ReflectionOrchestrator:
         episode_index: EpisodeIndex,
         report_store: ReflectionReportStore,
         reflector: EpisodeReflector,
+        custom_instructions: str | None = None,
     ) -> None:
         self._cluster_store = cluster_store
         self._episode_store = episode_store
         self._episode_index = episode_index
         self._report_store = report_store
         self._reflector = reflector
+        self._custom_instructions = custom_instructions
 
     async def run(
         self,
@@ -297,8 +300,9 @@ class ReflectionOrchestrator:
         merged = Episode(
             owner_id=scope.owner_id,
             episode=algo_result.episode,
+            summary=algo_result.summary,
             timestamp=last_ts,
-            subject=algo_result.subject or "",
+            subject=algo_result.subject,
             parent_id=cluster_id,
             parent_type="cluster",
         )
@@ -364,7 +368,9 @@ class ReflectionOrchestrator:
                         episodes=episodes,
                         merged_entry_ids=merged_entry_ids,
                     )
-                return await self._reflector.areflect(algo_episodes)
+                return await self._reflector.areflect(
+                    algo_episodes, custom_instructions=self._custom_instructions
+                )
         except AppError:
             logger.warning(
                 "reflection_reflector_failed",
@@ -398,7 +404,11 @@ class ReflectionOrchestrator:
         new_algo_eps = [ae for ae, e in pairs if e.ref.entry_id not in merged_set]
         if not old_algo_eps:
             return None
-        return await self._reflector.areflect(new_algo_eps, old_episode=old_algo_eps[0])
+        return await self._reflector.areflect(
+            new_algo_eps,
+            old_episode=old_algo_eps[0],
+            custom_instructions=self._custom_instructions,
+        )
 
 
 class ReflectionFinisher:
@@ -635,7 +645,8 @@ def _to_algo_episodes(episodes: list[StoredEpisode]) -> list[AlgoEpisode]:
         AlgoEpisode(
             owner_id=e.item.owner_id,
             episode=e.item.episode,
-            subject=e.item.subject or "",
+            subject=e.item.subject,
+            summary=e.item.summary,
             timestamp=e.item.timestamp,
         )
         for e in episodes

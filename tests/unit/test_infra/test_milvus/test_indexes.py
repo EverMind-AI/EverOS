@@ -97,6 +97,7 @@ async def test_rows_come_back_as_domain_episodes(
     assert stored.item == Episode(
         owner_id="u1",
         episode="text",
+        summary="",
         timestamp=1_747_216_800_000,
         sender_ids=["u1"],
         parent_id="mc_1",

@@ -149,8 +149,8 @@ class GetManager:
             session_id=episode.session_id,
             timestamp=to_display_tz(from_timestamp_ms(episode.timestamp)),
             sender_ids=episode.sender_ids,
-            summary=episode.summary or "",
-            subject=episode.subject or "",
+            summary=episode.summary,
+            subject=episode.subject,
             episode=episode.episode,
             type="Conversation",
         )
@@ -215,8 +215,8 @@ class GetManager:
         profile = stored.item
         profile_data: dict[str, object] = {
             "summary": profile.summary,
-            "explicit_info": profile.explicit_info,
-            "implicit_traits": profile.implicit_traits,
+            "explicit_info": [i.model_dump() for i in profile.explicit_info],
+            "implicit_traits": [i.model_dump() for i in profile.implicit_traits],
             "profile_timestamp_ms": profile.timestamp,
         }
         return [

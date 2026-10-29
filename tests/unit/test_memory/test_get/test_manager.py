@@ -176,7 +176,7 @@ def _user_profile_row(owner: str = "u1") -> UserProfile:
         project_id="default",
         summary=f"{owner} loves climbing in Yosemite",
         explicit_info_json='[{"category": "Hobby", "description": "climbing"}]',
-        implicit_traits_json='[{"trait": "Outdoorsy"}]',
+        implicit_traits_json='[{"trait": "Outdoorsy", "description": "outdoorsy"}]',
         profile_timestamp_ms=1780304400000,
         md_path=f"users/{owner}/user.md",
         content_sha256="abc",
@@ -321,10 +321,39 @@ async def test_profile_hit_shapes_row_into_item(
     # json buckets are decoded back into structured profile_data.
     assert item.profile_data["summary"] == "u1 loves climbing in Yosemite"
     assert item.profile_data["explicit_info"] == [
-        {"category": "Hobby", "description": "climbing"}
+        {
+            "category": "Hobby",
+            "description": "climbing",
+            "evidence": None,
+            "observed_at": None,
+        }
     ]
-    assert item.profile_data["implicit_traits"] == [{"trait": "Outdoorsy"}]
+    assert item.profile_data["implicit_traits"] == [
+        {
+            "trait": "Outdoorsy",
+            "description": "outdoorsy",
+            "basis": None,
+            "observed_at": None,
+        }
+    ]
     assert item.profile_data["profile_timestamp_ms"] == 1780304400000
+
+
+async def test_profile_item_without_description_is_dropped_not_fatal(
+    manager: tuple[GetManager, _StubRepo, _StubRepo, _StubRepo],
+    profile_repo: _ProfileStubRepo,
+) -> None:
+    mgr, *_ = manager
+    row = _user_profile_row("u1")
+    row.implicit_traits_json = '[{"trait": "Outdoorsy"}, "patient"]'
+    profile_repo.row = row
+
+    resp = await mgr.get(GetRequest(user_id="u1", memory_type=GetMemoryType.PROFILE))
+
+    (item,) = resp.data.profiles
+    assert [i["description"] for i in item.profile_data["implicit_traits"]] == [
+        "patient"
+    ]
 
 
 # ── Agent case dispatch ─────────────────────────────────────────────────

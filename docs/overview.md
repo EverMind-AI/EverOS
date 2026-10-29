@@ -46,7 +46,7 @@ User trust comes from physical visibility — the user can `cat` / `vim` / `grep
 
 ### 3. Algorithm-orchestration separation
 
-`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-agent-memory` / `-rank` / `-knowledge`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for a couple of extractors (episode and boundary detection) it can override the bundled prompt via the PromptSlot mechanism. everalgo knows nothing about storage.
+`everalgo` (a set of separate PyPI packages — `everalgo-user-memory` / `-agent-memory` / `-rank` / `-knowledge`, plus the optional `-parser` extra) holds the extraction algorithms (memory-cell extraction, episode generation, profile evolution). EverOS calls everalgo's extractor functions directly — passing storage-free data in, getting structured results out; for boundary detection, episode, profile and reflection it can append requirements to the operator's bundled rules via custom instructions. everalgo knows nothing about storage.
 
 This boundary lets the same algorithm power both this open-source lightweight version and other product forms.
 

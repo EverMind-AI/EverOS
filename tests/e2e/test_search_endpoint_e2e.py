@@ -1467,7 +1467,7 @@ async def test_search_include_profile_independent_of_method(
 # White-box: the helpers below write directly into the
 # ``unprocessed_buffer`` SQLite table via the public repo (no /add
 # round-trip, so the boundary detector never runs and the rows stay
-# unprocessed). The track string mirrors ``service._boundary._TRACK``
+# unprocessed). The track string is boundary detection's ``memorize`` track
 # (the shared single-pass detector track).
 
 

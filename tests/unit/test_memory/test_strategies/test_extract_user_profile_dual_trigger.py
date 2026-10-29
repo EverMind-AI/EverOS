@@ -83,6 +83,7 @@ def _indexed_episode(
         item=Episode(
             owner_id="u_alice",
             episode="...",
+            summary="",
             timestamp=timestamp,
             parent_id=parent_id,
             parent_type=parent_type,
@@ -194,8 +195,8 @@ async def test_direct_path_fetches_via_timestamp_and_writes_profile() -> None:
             "owner_id": "u_alice",
             "summary": "Alice is a hiker.",
             "timestamp": 1_700_000_001_000,
-            "explicit_info": ["lives in tokyo"],
-            "implicit_traits": ["adventurous"],
+            "explicit_info": [{"description": "lives in tokyo"}],
+            "implicit_traits": [{"description": "adventurous"}],
         }
     )
     with patch(_EXTRACTOR) as extractor_cls:

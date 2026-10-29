@@ -70,7 +70,9 @@ def test_page_defaults_to_first_page_descending() -> None:
 
 
 def test_stored_carries_identity_beside_the_domain_object() -> None:
-    episode = Episode(owner_id="u1", episode="text", timestamp=1, parent_id="mc_1")
+    episode = Episode(
+        owner_id="u1", summary="", episode="text", timestamp=1, parent_id="mc_1"
+    )
     ref = MemoryRef(id="u1_ep_1", entry_id="ep_1", md_path="users/u1/e.md")
 
     stored = Stored(ref=ref, scope=_scope(), item=episode)

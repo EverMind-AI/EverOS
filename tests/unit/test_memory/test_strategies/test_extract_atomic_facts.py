@@ -80,7 +80,7 @@ async def test_extracts_from_episode_text_and_writes_under_event_owner() -> None
     }
     assert all(s.item.session_id == "s1" for s in stored)
     assert all(s.item.parent_id == "ep_20260517_0001" for s in stored)
-    assert sorted(s.item.fact for s in stored) == [
+    assert sorted(s.item.content for s in stored) == [
         "alice mentioned a weekend trip to tokyo",
         "alice said she needs hiking gear",
     ]

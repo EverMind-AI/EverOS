@@ -267,7 +267,7 @@ source_modules = ["everos.infra"]
 forbidden_modules = [
     "everos.memory.extract",
     "everos.memory.get",
-    "everos.memory.prompt_slots",
+    "everos.memory.custom_instructions",
     "everos.memory.reflection",
     "everos.memory.search",
     "everos.memory.strategies",
@@ -434,7 +434,7 @@ forbidden_modules = [
     "everos.memory.get",
     "everos.memory.mappers",
     "everos.memory.models",
-    "everos.memory.prompt_slots",
+    "everos.memory.custom_instructions",
     "everos.memory.reflection",
     "everos.memory.search",
     "everos.memory.strategies",

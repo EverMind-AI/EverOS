@@ -1,853 +1,306 @@
-"""End-to-end Reflection INIT cycle integration test.
+"""Reflection end to end over markdown truth and the cascade-built index.
 
-Drives ``ReflectionOrchestrator.run()`` with real SQLite (cluster +
-report repos), real LanceDB (episode + atomic_fact stores), real
-EpisodeWriter (md files), a ``FakeLLMClient``-backed
-``EpisodeReflector``, and a stub embedder. Verifies the full flow:
+Drives both Reflection steps the way the two strategies chain them --
+``ReflectionOrchestrator.run`` (merge, write the merged episode) then
+``ReflectionFinisher.finish`` (deprecate what the merge replaced) -- over
+real markdown stores, the real SQLite cluster / report tables and a real
+LanceDB index that only the cascade handlers write, with the reflector
+answered by a ``FakeLLMClient``.
 
-    select candidates → merge episodes (FakeLLM) → write merged md →
-    return EpisodeExtracted (the fact extraction it triggers is not run
-    here) → finish: deprecate originals → update cluster membership →
-    write report
-
-White-box surfaces: sqlite cluster_member / reflection_report tables,
-LanceDB episode.deprecated_by column, md file existence + frontmatter.
+Reflection marks deprecation in markdown only; the cascade carries the
+marks into the index. So every assertion on the index follows a cascade
+pass, and the last test drops the index and rebuilds it from markdown to
+show the marks survive (the index is rebuildable, the md is the truth).
 """
 
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
 import numpy as np
 import pytest
 from everalgo.clustering import Cluster as AlgoCluster
-from everalgo.testing.fake_llm import FakeLLMClient
-from everalgo.user_memory.reflect import EpisodeReflector
+from everalgo.testing import FakeLLMClient
+from everalgo.user_memory import EpisodeReflector
 
-from everos.config import LanceDBSettings, load_settings
+from everos.infra.cascade.projections import AtomicFactHandler, EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import (
     AtomicFactIndexAdapter,
     EpisodeIndexAdapter,
 )
-from everos.infra.persistence.lancedb import (
-    LanceIndexContract,
-    LanceRepoBase,
-    open_lancedb_connection,
-)
-from everos.infra.persistence.lancedb.base import LanceDailyLogRepoBase
 from everos.infra.persistence.markdown import (
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
 )
-from everos.infra.persistence.records.atomic_fact import AtomicFact
-from everos.infra.persistence.records.episode import Episode as LanceEpisode
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
     SqliteReflectionReportStore,
 )
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted
-from everos.memory.models import ReflectionReport
-from everos.memory.ports import Scope
+from everos.memory.models import AtomicFact, Episode, ReflectionReport
+from everos.memory.ports import MemoryRef, Scope, all_of, eq, is_null
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
-from tests.fakes.storage import Storage
+from tests.fakes import user_track_script
+from tests.fakes.storage import Storage, handler_deps
 
-# ---------------------------------------------------------------------------
-# Stub embedder
-# ---------------------------------------------------------------------------
+OWNER = "u_test"
+CLUSTER = "cl_test_reflect"
+SCOPE = Scope(app_id="default", project_id="default", owner_id=OWNER, owner_type="user")
+_HOUR = 3_600_000
+_T0 = 1_781_085_600_000  # 2026-06-10 10:00 UTC
 
 
 class _StubEmbedder:
-    """Return deterministic 1024-dim vectors seeded by input text."""
+    """Deterministic unit vectors seeded by the text; no network."""
 
     dim: int = 1024
 
     async def embed(self, text: str) -> list[float]:
-        digest = hashlib.sha256(text.encode("utf-8")).digest()
-        seed = int.from_bytes(digest[:8], "little")
-        rng = np.random.default_rng(seed)
-        vec = rng.standard_normal(self.dim).astype(np.float32)
-        norm = float(np.linalg.norm(vec)) or 1.0
-        vec /= norm
-        return vec.tolist()
+        seed = int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "little")
+        vec = np.random.default_rng(seed).standard_normal(self.dim).astype(np.float32)
+        return (vec / (float(np.linalg.norm(vec)) or 1.0)).tolist()
+
+    async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        return [await self.embed(t) for t in texts]
 
 
-type _Reflect = Callable[
-    [Scope], Awaitable[tuple[list[EpisodeExtracted], list[ReflectionReport]]]
-]
+class _StubTokenizer:
+    def tokenize(self, text: str) -> list[str]:
+        return text.lower().split()
+
+    def tokenize_batch(self, texts: Sequence[str]) -> list[list[str]]:
+        return [self.tokenize(t) for t in texts]
 
 
-def _reflection(
-    storage: Storage,
-    memory_root: MemoryRoot,
-    ep_repo: object,
-    af_repo: object,
-    reflector: object,
-) -> _Reflect:
-    """Run both Reflection steps the way the two strategies chain them.
+def _reply(content: str, title: str) -> str:
+    return json.dumps({"content": content, "summary": title, "title": title})
 
-    ``reflect_episodes`` merges and returns ``EpisodeExtracted``; after the
-    merged episode's facts are extracted (not run here), ``finish_reflection``
-    retires the members. Returns the merge events and the finish reports.
-    """
-    clusters = SqliteClusterStore(storage.sqlite.cluster)
-    episodes = MarkdownEpisodeStore(memory_root)
-    reports_store = SqliteReflectionReportStore(storage.sqlite.reflection_report)
-    orchestrator = ReflectionOrchestrator(
-        cluster_store=clusters,
-        episode_store=episodes,
-        episode_index=EpisodeIndexAdapter(ep_repo),
-        report_store=reports_store,
-        reflector=reflector,
-    )
-    finisher = ReflectionFinisher(
-        cluster_store=clusters,
-        episode_store=episodes,
-        atomic_fact_store=MarkdownAtomicFactStore(memory_root),
-        atomic_fact_index=AtomicFactIndexAdapter(af_repo),
-        report_store=reports_store,
-        embedder=_StubEmbedder(),
-    )
 
-    async def run(
-        scope: Scope,
-    ) -> tuple[list[EpisodeExtracted], list[ReflectionReport]]:
-        merged = await orchestrator.run(scope=scope)
+class _World:
+    """Markdown stores, the index, the cascade handlers and both Reflection steps."""
+
+    def __init__(
+        self, storage: Storage, root: MemoryRoot, reflector_llm: FakeLLMClient
+    ) -> None:
+        self.storage = storage
+        self.root = root
+        self.episodes = MarkdownEpisodeStore(root)
+        self.facts = MarkdownAtomicFactStore(root)
+        self.index = storage.repos
+        deps = handler_deps(
+            memory_root=root,
+            tokenizer=_StubTokenizer(),
+            index=storage.repos,
+            embedding=_StubEmbedder(),
+        )
+        self._handlers = {
+            "episodes": EpisodeHandler(deps),
+            ".atomic_facts": AtomicFactHandler(deps),
+        }
+        clusters = SqliteClusterStore(storage.sqlite.cluster)
+        reports = SqliteReflectionReportStore(storage.sqlite.reflection_report)
+        self.orchestrator = ReflectionOrchestrator(
+            cluster_store=clusters,
+            episode_store=self.episodes,
+            episode_index=EpisodeIndexAdapter(storage.repos.episode),
+            report_store=reports,
+            reflector=EpisodeReflector(llm=reflector_llm),
+        )
+        self.finisher = ReflectionFinisher(
+            cluster_store=clusters,
+            episode_store=self.episodes,
+            atomic_fact_store=self.facts,
+            atomic_fact_index=AtomicFactIndexAdapter(storage.repos.atomic_fact),
+            report_store=reports,
+            embedder=_StubEmbedder(),
+        )
+
+    async def cascade(self) -> None:
+        """Project every episode and atomic-fact md into the index."""
+        for folder, handler in self._handlers.items():
+            for md in sorted(self.root.root.rglob(f"{folder}/*.md")):
+                await handler.handle_added_or_modified(
+                    str(md.relative_to(self.root.root))
+                )
+
+    async def rebuild_index(self) -> None:
+        """Drop every business table and rebuild it from markdown alone."""
+        await self.storage.index.drop_business_tables()
+        await self.storage.index.ensure_business_indexes()
+        await self.cascade()
+
+    async def seed(self, n: int, *, start: int = 0) -> list[MemoryRef]:
+        """``n`` memcell episodes (one atomic fact each), indexed, in the cluster."""
+        episodes = [
+            Episode(
+                owner_id=OWNER,
+                episode=f"Andrew pet event {start + i}",
+                summary=f"pet event {start + i}",
+                timestamp=_T0 + (start + i) * _HOUR,
+                session_id="s_test",
+                parent_id=f"mc_{start + i:03d}",
+            )
+            for i in range(n)
+        ]
+        refs = await self.episodes.append_many(SCOPE, episodes)
+        await self.facts.append_many(
+            SCOPE,
+            [
+                AtomicFact(
+                    owner_id=OWNER,
+                    content=f"fact of {ep.episode}",
+                    timestamp=ep.timestamp,
+                    session_id="s_test",
+                    parent_id=ref.entry_id,
+                )
+                for ep, ref in zip(episodes, refs, strict=True)
+            ],
+        )
+        await self.cascade()
+        return refs
+
+    async def reflect(self) -> tuple[list[EpisodeExtracted], list[ReflectionReport]]:
+        """Both steps, then a cascade pass so the index sees the marks."""
+        merged = await self.orchestrator.run(scope=SCOPE)
         reports = []
         for event in merged:
             assert event.reflection is not None
-            report = await finisher.finish(
-                scope=scope,
+            report = await self.finisher.finish(
+                scope=SCOPE,
                 merged_entry_id=event.episode_entry_id,
                 context=event.reflection,
             )
             if report is not None:
                 reports.append(report)
+        await self.cascade()
         return merged, reports
 
-    return run
+    async def deprecated_by(self, repo_name: str, entry_id: str) -> str | None:
+        repo = getattr(self.index, repo_name)
+        (row,) = await repo.find_where(
+            all_of(eq("owner_id", OWNER), eq("entry_id", entry_id))
+        )
+        return row.deprecated_by
+
+    async def live_episodes(self) -> list[str]:
+        rows = await self.index.episode.find_where(
+            all_of(eq("owner_id", OWNER), is_null("deprecated_by"))
+        )
+        return sorted(row.entry_id for row in rows)
 
 
-# ---------------------------------------------------------------------------
-# LanceDB repo wrappers (inject table directly)
-# ---------------------------------------------------------------------------
-
-
-class _EpisodeRepo(
-    LanceIndexContract[LanceEpisode], LanceDailyLogRepoBase[LanceEpisode]
-):
-    schema = LanceEpisode
-
-
-class _AtomicFactRepo(
-    LanceIndexContract[AtomicFact], LanceDailyLogRepoBase[AtomicFact]
-):
-    schema = AtomicFact
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+async def _cluster_of(storage: Storage, members: list[str]) -> None:
+    await storage.sqlite.cluster.upsert_with_members(
+        AlgoCluster(
+            id=CLUSTER,
+            centroid=np.zeros(1024, dtype=np.float32),
+            count=len(members),
+            last_ts=_T0,
+            preview=[],
+            members=members,
+        ),
+        owner_id=OWNER,
+        owner_type="user",
+        kind="user_memory",
+        member_type="episode",
+    )
 
 
 @pytest.fixture(autouse=True)
-def _reset_locks() -> None:
-    """Drop per-table write locks + partition locks between tests."""
-    LanceRepoBase._reset_locks_for_tests()
+def _reset_partition_locks() -> None:
     _reset_for_tests()
 
 
 @pytest.fixture
-def memory_root(tmp_path: Path) -> MemoryRoot:
-    mr = MemoryRoot(tmp_path)
-    mr.ensure()
-    (tmp_path / ".index" / "sqlite").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "ome.toml").write_text("# test\n")
-    return mr
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _user_scope(owner_id: str) -> Scope:
-    return Scope(
-        app_id="default", project_id="default", owner_id=owner_id, owner_type="user"
-    )
-
-
-def _make_lance_episode(
-    *,
-    entry_id: str,
-    owner_id: str,
-    episode: str,
-    timestamp: _dt.datetime,
-    parent_type: str = "memcell",
-    parent_id: str,
-    session_id: str | None = "s_test",
-    md_path: str = "",
-) -> LanceEpisode:
-    """Build a LanceDB Episode row with required fields."""
-    digest = hashlib.sha256(episode.encode("utf-8")).digest()
-    seed = int.from_bytes(digest[:8], "little")
-    rng = np.random.default_rng(seed)
-    vec = rng.standard_normal(1024).astype(np.float32)
-    vec /= float(np.linalg.norm(vec)) or 1.0
-
-    return LanceEpisode(
-        id=f"{owner_id}_{entry_id}",
-        entry_id=entry_id,
-        owner_id=owner_id,
-        owner_type="user",
-        app_id="default",
-        project_id="default",
-        session_id=session_id,
-        timestamp=timestamp,
-        parent_type=parent_type,
-        parent_id=parent_id,
-        sender_ids=[owner_id],
-        subject="test",
-        summary=None,
-        episode=episode,
-        episode_tokens=episode.lower(),
-        md_path=md_path,
-        content_sha256=hashlib.sha256(episode.encode()).hexdigest(),
-        deprecated_by=None,
-        vector=vec.tolist(),
-    )
-
-
-def _make_lance_fact(
-    *,
-    entry_id: str,
-    owner_id: str,
-    fact: str,
-    parent_id: str,
-    parent_type: str = "memcell",
-    timestamp: _dt.datetime,
-) -> AtomicFact:
-    """Build a LanceDB AtomicFact row."""
-    digest = hashlib.sha256(fact.encode("utf-8")).digest()
-    seed = int.from_bytes(digest[:8], "little")
-    rng = np.random.default_rng(seed)
-    vec = rng.standard_normal(1024).astype(np.float32)
-    vec /= float(np.linalg.norm(vec)) or 1.0
-
-    return AtomicFact(
-        id=f"{owner_id}_{entry_id}",
-        entry_id=entry_id,
-        owner_id=owner_id,
-        owner_type="user",
-        app_id="default",
-        project_id="default",
-        session_id="s_test",
-        timestamp=timestamp,
-        parent_type=parent_type,
-        parent_id=parent_id,
-        sender_ids=[owner_id],
-        fact=fact,
-        fact_tokens=fact.lower(),
-        md_path="",
-        content_sha256=hashlib.sha256(fact.encode()).hexdigest(),
-        deprecated_by=None,
-        vector=vec.tolist(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Test
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_reflection_init_merges_cluster_episodes(
-    tmp_path: Path,
-    memory_root: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
-    storage: Storage,
-) -> None:
-    """Full INIT Reflection cycle: 3 episodes in a cluster -> merge -> verify.
-
-    Verifies:
-        - ReflectionReport created with mode="init", source_count=3
-        - Source episodes deprecated in LanceDB (deprecated_by is set)
-        - Merged episode written to md with parent_type="cluster"
-        - Cluster members updated: old 3 removed, 1 new episode member
-        - Report.merged_entry_id matches the new cluster member's member_id
-        - Atomic facts for source episodes are deprecated
-    """
-    # -- Redirect MemoryRoot.resolve() to tmp_path.
-    monkeypatch.setattr(
-        MemoryRoot,
-        "resolve",
-        classmethod(lambda cls: MemoryRoot(root=tmp_path)),
-    )
-    monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
-    monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
-
-    load_settings.cache_clear()
-
+async def world_factory(
+    tmp_path: Path, storage: Storage
+) -> AsyncIterator[Callable[..., _World]]:
+    root = MemoryRoot(tmp_path)
+    root.ensure()
     await storage.create_schema()
+    await storage.index.ensure_business_indexes()
 
-    try:
-        # -- LanceDB setup: create tables + insert test episodes.
-        conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
-        ep_table = await conn.create_table("episode", schema=LanceEpisode)
-        af_table = await conn.create_table("atomic_fact", schema=AtomicFact)
+    def build(*replies: str) -> _World:
+        return _World(storage, root, FakeLLMClient(responses=list(replies)))
 
-        ep_repo = _EpisodeRepo(table=ep_table)
-        af_repo = _AtomicFactRepo(table=af_table)
-
-        owner_id = "u_test"
-        cluster_id = "cl_test_reflect"
-
-        ts1 = _dt.datetime(2026, 6, 10, 10, 0, 0, tzinfo=_dt.UTC)
-        ts2 = _dt.datetime(2026, 6, 10, 11, 0, 0, tzinfo=_dt.UTC)
-        ts3 = _dt.datetime(2026, 6, 10, 12, 0, 0, tzinfo=_dt.UTC)
-
-        ep1 = _make_lance_episode(
-            entry_id="ep_20260610_0001",
-            owner_id=owner_id,
-            episode="Andrew has no pets",
-            timestamp=ts1,
-            parent_id="mc_001",
-        )
-        ep2 = _make_lance_episode(
-            entry_id="ep_20260610_0002",
-            owner_id=owner_id,
-            episode="Andrew adopted Toby",
-            timestamp=ts2,
-            parent_id="mc_002",
-        )
-        ep3 = _make_lance_episode(
-            entry_id="ep_20260610_0003",
-            owner_id=owner_id,
-            episode="Andrew adopted Buddy",
-            timestamp=ts3,
-            parent_id="mc_003",
-        )
-
-        await ep_repo.add([ep1, ep2, ep3])
-
-        # Insert atomic facts linked to the source memcells.
-        fact1 = _make_lance_fact(
-            entry_id="af_20260610_0001",
-            owner_id=owner_id,
-            fact="Andrew has no pets",
-            parent_id="ep_20260610_0001",
-            timestamp=ts1,
-        )
-        fact2 = _make_lance_fact(
-            entry_id="af_20260610_0002",
-            owner_id=owner_id,
-            fact="Andrew adopted Toby",
-            parent_id="ep_20260610_0002",
-            timestamp=ts2,
-        )
-        fact3 = _make_lance_fact(
-            entry_id="af_20260610_0003",
-            owner_id=owner_id,
-            fact="Andrew adopted Buddy",
-            parent_id="ep_20260610_0003",
-            timestamp=ts3,
-        )
-        await af_repo.add([fact1, fact2, fact3])
-
-        # -- SQLite: create cluster + cluster_members.
-        centroid = np.zeros(1024, dtype=np.float32)
-        algo_cluster = AlgoCluster(
-            id=cluster_id,
-            centroid=centroid,
-            count=3,
-            last_ts=int(ts3.timestamp() * 1000),
-            preview=["Andrew has no pets", "Andrew adopted Toby"],
-            members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
-        )
-        await storage.sqlite.cluster.upsert_with_members(
-            algo_cluster,
-            owner_id=owner_id,
-            owner_type="user",
-            kind="user_memory",
-            member_type="episode",
-        )
-
-        # Verify cluster members are created.
-        members_before = await storage.sqlite.cluster.get_members_with_type(cluster_id)
-        assert len(members_before) == 3
-
-        # -- Build the EpisodeReflector with FakeLLM.
-        merged_content = (
-            "Andrew initially had no pets. He later adopted a dog named Toby, "
-            "and then adopted another dog named Buddy."
-        )
-        merged_title = "Andrew's pet adoption journey"
-        reflect_response = json.dumps(
-            {"content": merged_content, "title": merged_title}
-        )
-        fake_llm = FakeLLMClient(responses=[reflect_response])
-        reflector = EpisodeReflector(llm=fake_llm)
-
-        # -- Build the orchestrator with real repos.
-        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
-
-        # -- Run the orchestrator.
-        emitted, reports = await orchestrator(_user_scope(owner_id))
-
-        # -- Verify: exactly one report created.
-        assert len(reports) == 1
-        report = reports[0]
-        assert report.mode == "init"
-        assert report.source_count == 3
-        assert report.status == "completed"
-        assert report.cluster_id == cluster_id
-
-        merged_entry_id = report.merged_entry_id
-
-        # -- Verify: source episodes deprecated in LanceDB.
-        for ep in [ep1, ep2, ep3]:
-            rows = await ep_repo.find_where(
-                f"entry_id = '{ep.entry_id}' AND owner_id = '{owner_id}'"
-            )
-            assert len(rows) == 1, f"expected 1 row for {ep.entry_id}"
-            assert rows[0].deprecated_by == merged_entry_id, (
-                f"{ep.entry_id} should be deprecated by {merged_entry_id}"
-            )
-
-        # -- Verify: atomic facts deprecated in LanceDB.
-        for fact in [fact1, fact2, fact3]:
-            rows = await af_repo.find_where(
-                f"entry_id = '{fact.entry_id}' AND owner_id = '{owner_id}'"
-            )
-            assert len(rows) == 1, f"expected 1 row for {fact.entry_id}"
-            assert rows[0].deprecated_by == merged_entry_id, (
-                f"{fact.entry_id} should be deprecated by {merged_entry_id}"
-            )
-
-        # -- Verify: cluster membership updated.
-        members_after = await storage.sqlite.cluster.get_members_with_type(cluster_id)
-        assert len(members_after) == 1, (
-            f"expected 1 member after merge, got {len(members_after)}"
-        )
-        new_member_id, new_member_type = members_after[0]
-        assert new_member_type == "episode"
-        assert new_member_id == merged_entry_id
-
-        # -- Verify: merged episode written to md.
-        users_dir = memory_root.users_dir("default", "default")
-        episode_files = sorted(
-            (users_dir / owner_id / "episodes").rglob("episode-*.md")
-        )
-        assert len(episode_files) == 1
-        md_text = episode_files[0].read_text()
-        assert merged_content in md_text
-        assert "parent_type" in md_text
-        assert "cluster" in md_text
-
-        # -- Verify: the merge returned its EpisodeExtracted event.
-        assert len(emitted) == 1
-        emitted_event = emitted[0]
-        assert emitted_event.episode_entry_id == merged_entry_id
-        assert emitted_event.owner_id == owner_id
-        assert emitted_event.source == "reflection"
-
-        # -- Verify: report in sqlite matches.
-        db_report = await storage.sqlite.reflection_report.get_latest_for_cluster(
-            cluster_id
-        )
-        assert db_report is not None
-        assert db_report.merged_entry_id == merged_entry_id
-        assert db_report.mode == "init"
-
-    finally:
-        conn.close()
-        await storage.database.dispose()
+    yield build
 
 
-@pytest.mark.asyncio
-async def test_reflection_update_merges_new_episodes_with_existing_merged(
-    tmp_path: Path,
-    memory_root: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
-    storage: Storage,
+async def test_init_merge_deprecates_members_and_their_facts(
+    world_factory: Callable[..., _World],
 ) -> None:
-    """INIT -> add 4th episode -> UPDATE cycle: verify incremental merge.
+    world = world_factory(user_track_script("reflect"))
+    refs = await world.seed(3)
+    await _cluster_of(world.storage, [r.entry_id for r in refs])
 
-    Verifies:
-        - Second report has mode="update", source_count=2 (old merged + mc_004)
-        - Old merged episode (v1) deprecated in LanceDB
-        - New merged episode (v2) exists with updated content
-        - mc_004's episode deprecated in LanceDB
-        - Cluster members: exactly 1, member_type="episode", member_id = v2
-        - Old atomic facts from v1's sources remain deprecated
-    """
-    monkeypatch.setattr(
-        MemoryRoot,
-        "resolve",
-        classmethod(lambda cls: MemoryRoot(root=tmp_path)),
-    )
-    monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
-    monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
+    emitted, (report,) = await world.reflect()
 
-    load_settings.cache_clear()
-
-    await storage.create_schema()
-
-    try:
-        # -- LanceDB setup.
-        conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
-        ep_table = await conn.create_table("episode", schema=LanceEpisode)
-        af_table = await conn.create_table("atomic_fact", schema=AtomicFact)
-
-        ep_repo = _EpisodeRepo(table=ep_table)
-        af_repo = _AtomicFactRepo(table=af_table)
-
-        owner_id = "u_test"
-        cluster_id = "cl_test_update"
-
-        ts1 = _dt.datetime(2026, 6, 10, 10, 0, 0, tzinfo=_dt.UTC)
-        ts2 = _dt.datetime(2026, 6, 10, 11, 0, 0, tzinfo=_dt.UTC)
-        ts3 = _dt.datetime(2026, 6, 10, 12, 0, 0, tzinfo=_dt.UTC)
-
-        ep1 = _make_lance_episode(
-            entry_id="ep_20260610_0001",
-            owner_id=owner_id,
-            episode="Andrew has no pets",
-            timestamp=ts1,
-            parent_id="mc_001",
-        )
-        ep2 = _make_lance_episode(
-            entry_id="ep_20260610_0002",
-            owner_id=owner_id,
-            episode="Andrew adopted Toby",
-            timestamp=ts2,
-            parent_id="mc_002",
-        )
-        ep3 = _make_lance_episode(
-            entry_id="ep_20260610_0003",
-            owner_id=owner_id,
-            episode="Andrew adopted Buddy",
-            timestamp=ts3,
-            parent_id="mc_003",
-        )
-        await ep_repo.add([ep1, ep2, ep3])
-
-        # Atomic facts for source episodes.
-        fact1 = _make_lance_fact(
-            entry_id="af_20260610_0001",
-            owner_id=owner_id,
-            fact="Andrew has no pets",
-            parent_id="ep_20260610_0001",
-            timestamp=ts1,
-        )
-        fact2 = _make_lance_fact(
-            entry_id="af_20260610_0002",
-            owner_id=owner_id,
-            fact="Andrew adopted Toby",
-            parent_id="ep_20260610_0002",
-            timestamp=ts2,
-        )
-        fact3 = _make_lance_fact(
-            entry_id="af_20260610_0003",
-            owner_id=owner_id,
-            fact="Andrew adopted Buddy",
-            parent_id="ep_20260610_0003",
-            timestamp=ts3,
-        )
-        await af_repo.add([fact1, fact2, fact3])
-
-        # -- SQLite: cluster with 3 memcell members.
-        centroid = np.zeros(1024, dtype=np.float32)
-        algo_cluster = AlgoCluster(
-            id=cluster_id,
-            centroid=centroid,
-            count=3,
-            last_ts=int(ts3.timestamp() * 1000),
-            preview=["Andrew has no pets", "Andrew adopted Toby"],
-            members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
-        )
-        await storage.sqlite.cluster.upsert_with_members(
-            algo_cluster,
-            owner_id=owner_id,
-            owner_type="user",
-            kind="user_memory",
-            member_type="episode",
-        )
-
-        # -- Phase 1: INIT merge.
-        init_response = json.dumps(
-            {"content": "Andrew adopted Toby and Buddy.", "title": "Andrew pets v1"}
-        )
-        update_response = json.dumps(
-            {
-                "content": "Andrew adopted Toby, Buddy, and Scout.",
-                "title": "Andrew pets v2",
-            }
-        )
-        fake_llm = FakeLLMClient(responses=[init_response, update_response])
-        reflector = EpisodeReflector(llm=fake_llm)
-
-        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
-
-        _, reports_init = await orchestrator(_user_scope(owner_id))
-
-        assert len(reports_init) == 1
-        report_init = reports_init[0]
-        assert report_init.mode == "init"
-        merged_v1_entry_id = report_init.merged_entry_id
-
-        # The extraction the merge triggers is not run here, so the merged
-        # episode is not inserted into LanceDB.  Simulate the
-        # real pipeline by inserting the merged v1 episode manually.
-        merged_v1_ep = _make_lance_episode(
-            entry_id=merged_v1_entry_id,
-            owner_id=owner_id,
-            episode="Andrew adopted Toby and Buddy.",
-            timestamp=ts3,
-            parent_type="cluster",
-            parent_id=cluster_id,
-            session_id=None,
-        )
-        await ep_repo.add([merged_v1_ep])
-
-        # -- Phase 2: add a 4th episode + cluster member, then run UPDATE.
-        ts4 = _dt.datetime(2026, 6, 10, 13, 0, 0, tzinfo=_dt.UTC)
-        ep4 = _make_lance_episode(
-            entry_id="ep_20260610_0004",
-            owner_id=owner_id,
-            episode="Andrew adopted Scout",
-            timestamp=ts4,
-            parent_id="mc_004",
-        )
-        await ep_repo.add([ep4])
-
-        await storage.sqlite.cluster.add_member(
-            cluster_id, "ep_20260610_0004", "episode"
-        )
-
-        # Fresh orchestrator, same FakeLLM (next pop = update_response).
-        orchestrator2 = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
-        _, reports_update = await orchestrator2(_user_scope(owner_id))
-
-        # -- Verify: second report is UPDATE with source_count=2.
-        assert len(reports_update) == 1
-        report_update = reports_update[0]
-        assert report_update.mode == "update"
-        assert report_update.source_count == 2
-        merged_v2_entry_id = report_update.merged_entry_id
-
-        # -- Verify: old merged episode (v1) deprecated.
-        v1_rows = await ep_repo.find_where(
-            f"entry_id = '{merged_v1_entry_id}' AND owner_id = '{owner_id}'"
-        )
-        assert len(v1_rows) == 1
-        assert v1_rows[0].deprecated_by == merged_v2_entry_id
-
-        # -- Verify: mc_004's episode deprecated.
-        mc4_rows = await ep_repo.find_where(
-            f"parent_type = 'memcell' AND parent_id = 'mc_004' "
-            f"AND owner_id = '{owner_id}'"
-        )
-        assert len(mc4_rows) == 1
-        assert mc4_rows[0].deprecated_by == merged_v2_entry_id
-
-        # -- Verify: new merged episode (v2) written to markdown.
-        #    (the extraction the merge triggers is not run here, so v2
-        #    is not yet in LanceDB — verify via the md file instead.)
-        users_dir = memory_root.users_dir("default", "default")
-        episode_files = sorted(
-            (users_dir / owner_id / "episodes").rglob("episode-*.md")
-        )
-        assert len(episode_files) >= 1
-        # Both v1 and v2 land in the same daily-log file; check full text.
-        all_md = "\n".join(f.read_text() for f in episode_files)
-        assert "Andrew adopted Toby, Buddy, and Scout." in all_md
-        assert "parent_type" in all_md and "cluster" in all_md
-
-        # -- Verify: cluster members = exactly 1, type=episode, id=v2.
-        members_final = await storage.sqlite.cluster.get_members_with_type(cluster_id)
-        assert len(members_final) == 1
-        final_mid, final_mtype = members_final[0]
-        assert final_mtype == "episode"
-        assert final_mid == merged_v2_entry_id
-
-        # -- Verify: original atomic facts still deprecated by v1
-        #    (they were deprecated in the INIT phase; UPDATE does not touch them).
-        for fact in [fact1, fact2, fact3]:
-            rows = await af_repo.find_where(
-                f"entry_id = '{fact.entry_id}' AND owner_id = '{owner_id}'"
-            )
-            assert len(rows) == 1
-            assert rows[0].deprecated_by == merged_v1_entry_id, (
-                f"{fact.entry_id} should still be deprecated by v1"
-            )
-
-    finally:
-        conn.close()
-        await storage.database.dispose()
+    merged_id = report.merged_entry_id
+    assert (report.mode, report.source_count, report.cluster_id) == ("init", 3, CLUSTER)
+    (event,) = emitted
+    assert (event.episode_entry_id, event.source) == (merged_id, "reflection")
+    for ref in refs:
+        assert await world.deprecated_by("episode", ref.entry_id) == merged_id
+    facts = await world.index.atomic_fact.find_where(eq("owner_id", OWNER))
+    assert len(facts) == 3
+    assert {f.deprecated_by for f in facts} == {merged_id}
+    assert await world.live_episodes() == [merged_id]
+    merged = await world.index.episode.find_where(eq("entry_id", merged_id))
+    assert merged[0].parent_type == "cluster"
+    assert merged[0].summary == json.loads(user_track_script("reflect"))["summary"]
+    members = await world.storage.sqlite.cluster.get_members_with_type(CLUSTER)
+    assert members == [(merged_id, "episode")]
 
 
-@pytest.mark.asyncio
-async def test_reflected_episodes_visible_in_search_deprecated_excluded(
-    tmp_path: Path,
-    memory_root: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
-    storage: Storage,
+async def test_update_merge_replaces_the_previous_merge(
+    world_factory: Callable[..., _World],
 ) -> None:
-    """After INIT Reflection, search filters correctly include/exclude episodes.
-
-    Verifies:
-        - ``deprecated_by IS NULL`` returns only the merged episode
-        - Merged episode has parent_type="cluster" and session_id=None
-        - Adding session_id filter excludes the merged episode (session_id IS NULL)
-    """
-    monkeypatch.setattr(
-        MemoryRoot,
-        "resolve",
-        classmethod(lambda cls: MemoryRoot(root=tmp_path)),
+    world = world_factory(
+        _reply("Andrew adopted Toby and Buddy.", "Andrew pets v1"),
+        _reply("Andrew adopted Toby, Buddy, and Scout.", "Andrew pets v2"),
     )
-    monkeypatch.setenv("EVEROS_LLM__API_KEY", "fake-key")
-    monkeypatch.setenv("EVEROS_LLM__BASE_URL", "https://fake.example.com")
+    refs = await world.seed(3)
+    await _cluster_of(world.storage, [r.entry_id for r in refs])
+    _, (first,) = await world.reflect()
 
-    load_settings.cache_clear()
+    (fourth,) = await world.seed(1, start=3)
+    await world.storage.sqlite.cluster.add_member(CLUSTER, fourth.entry_id, "episode")
+    _, (second,) = await world.reflect()
 
-    await storage.create_schema()
+    assert (second.mode, second.source_count) == ("update", 2)
+    v1, v2 = first.merged_entry_id, second.merged_entry_id
+    assert await world.deprecated_by("episode", v1) == v2
+    assert await world.deprecated_by("episode", fourth.entry_id) == v2
+    for ref in refs:  # the first merge's members stay retired by it
+        assert await world.deprecated_by("episode", ref.entry_id) == v1
+    assert await world.live_episodes() == [v2]
 
-    try:
-        # -- LanceDB setup.
-        conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
-        ep_table = await conn.create_table("episode", schema=LanceEpisode)
-        af_table = await conn.create_table("atomic_fact", schema=AtomicFact)
 
-        ep_repo = _EpisodeRepo(table=ep_table)
-        af_repo = _AtomicFactRepo(table=af_table)
+async def test_deprecation_survives_an_index_rebuild(
+    world_factory: Callable[..., _World],
+) -> None:
+    """Drop the index, rebuild it from markdown: the marks are still there."""
+    world = world_factory(user_track_script("reflect"))
+    refs = await world.seed(3)
+    await _cluster_of(world.storage, [r.entry_id for r in refs])
+    _, (report,) = await world.reflect()
 
-        owner_id = "u_test"
-        cluster_id = "cl_test_search"
+    await world.rebuild_index()
 
-        ts1 = _dt.datetime(2026, 6, 10, 10, 0, 0, tzinfo=_dt.UTC)
-        ts2 = _dt.datetime(2026, 6, 10, 11, 0, 0, tzinfo=_dt.UTC)
-        ts3 = _dt.datetime(2026, 6, 10, 12, 0, 0, tzinfo=_dt.UTC)
-
-        ep1 = _make_lance_episode(
-            entry_id="ep_20260610_0001",
-            owner_id=owner_id,
-            episode="Andrew has no pets",
-            timestamp=ts1,
-            parent_id="mc_001",
+    merged_id = report.merged_entry_id
+    assert await world.live_episodes() == [merged_id]
+    for ref in refs:
+        assert await world.deprecated_by("episode", ref.entry_id) == merged_id
+    facts = await world.index.atomic_fact.find_where(eq("owner_id", OWNER))
+    assert {f.deprecated_by for f in facts} == {merged_id}
+    session_rows = await world.index.episode.find_where(
+        all_of(
+            eq("owner_id", OWNER), is_null("deprecated_by"), eq("session_id", "s_test")
         )
-        ep2 = _make_lance_episode(
-            entry_id="ep_20260610_0002",
-            owner_id=owner_id,
-            episode="Andrew adopted Toby",
-            timestamp=ts2,
-            parent_id="mc_002",
-        )
-        ep3 = _make_lance_episode(
-            entry_id="ep_20260610_0003",
-            owner_id=owner_id,
-            episode="Andrew adopted Buddy",
-            timestamp=ts3,
-            parent_id="mc_003",
-        )
-        await ep_repo.add([ep1, ep2, ep3])
-
-        # Atomic facts (needed for the orchestrator to complete).
-        fact1 = _make_lance_fact(
-            entry_id="af_20260610_0001",
-            owner_id=owner_id,
-            fact="Andrew has no pets",
-            parent_id="ep_20260610_0001",
-            timestamp=ts1,
-        )
-        fact2 = _make_lance_fact(
-            entry_id="af_20260610_0002",
-            owner_id=owner_id,
-            fact="Andrew adopted Toby",
-            parent_id="ep_20260610_0002",
-            timestamp=ts2,
-        )
-        fact3 = _make_lance_fact(
-            entry_id="af_20260610_0003",
-            owner_id=owner_id,
-            fact="Andrew adopted Buddy",
-            parent_id="ep_20260610_0003",
-            timestamp=ts3,
-        )
-        await af_repo.add([fact1, fact2, fact3])
-
-        # -- SQLite: cluster with 3 memcell members.
-        centroid = np.zeros(1024, dtype=np.float32)
-        algo_cluster = AlgoCluster(
-            id=cluster_id,
-            centroid=centroid,
-            count=3,
-            last_ts=int(ts3.timestamp() * 1000),
-            preview=["Andrew has no pets", "Andrew adopted Toby"],
-            members=["ep_20260610_0001", "ep_20260610_0002", "ep_20260610_0003"],
-        )
-        await storage.sqlite.cluster.upsert_with_members(
-            algo_cluster,
-            owner_id=owner_id,
-            owner_type="user",
-            kind="user_memory",
-            member_type="episode",
-        )
-
-        # -- Run INIT Reflection.
-        merged_content = (
-            "Andrew initially had no pets. He later adopted a dog named Toby, "
-            "and then adopted another dog named Buddy."
-        )
-        merged_title = "Andrew's pet adoption journey"
-        reflect_response = json.dumps(
-            {"content": merged_content, "title": merged_title}
-        )
-        fake_llm = FakeLLMClient(responses=[reflect_response])
-        reflector = EpisodeReflector(llm=fake_llm)
-
-        orchestrator = _reflection(storage, memory_root, ep_repo, af_repo, reflector)
-
-        _, reports = await orchestrator(_user_scope(owner_id))
-        assert len(reports) == 1
-        merged_entry_id = reports[0].merged_entry_id
-
-        # The extraction the merge triggers is not run here, so the merged
-        # episode is not inserted into LanceDB.  Simulate the
-        # real pipeline by inserting the merged episode manually.
-        merged_ep = _make_lance_episode(
-            entry_id=merged_entry_id,
-            owner_id=owner_id,
-            episode=merged_content,
-            timestamp=ts3,
-            parent_type="cluster",
-            parent_id=cluster_id,
-            session_id=None,
-        )
-        await ep_repo.add([merged_ep])
-
-        # -- Verify: non-deprecated episodes = only the merged one.
-        active_rows = await ep_repo.find_where(
-            f"owner_id = '{owner_id}' AND deprecated_by IS NULL"
-        )
-        assert len(active_rows) == 1
-        merged_row = active_rows[0]
-        assert merged_row.entry_id == merged_entry_id
-        assert merged_row.parent_type == "cluster"
-        assert merged_row.session_id is None
-
-        # -- Verify: session_id filter excludes the merged episode.
-        session_rows = await ep_repo.find_where(
-            f"owner_id = '{owner_id}' AND deprecated_by IS NULL "
-            f"AND session_id = 's_test'"
-        )
-        assert len(session_rows) == 0
-
-    finally:
-        conn.close()
-        await storage.database.dispose()
+    )
+    assert session_rows == [], "the merged episode belongs to no session"

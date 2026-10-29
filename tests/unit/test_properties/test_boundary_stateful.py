@@ -1,18 +1,19 @@
 """Model-based test of the boundary stage: every message lands in exactly one place.
 
-The boundary stage (``everos.service._boundary``) owns the session buffer
+Boundary detection (``everos.memory.extract.boundary``) owns the session buffer
 (``unprocessed_buffer``), the boundary call that cuts the buffer into cells,
 and the ``memcell`` ledger that records which messages each cell took. The
 property that matters is conservation: a message the service accepted is in
 the buffer or in exactly one memcell, never both and never nowhere.
 
-What is real: ``ingest.process`` (ids, canonical rows), ``buffer_messages``
-and ``prepare_cells``, and the three repositories on a temp SQLite file.
-What is scripted: ``everalgo.boundary.detect_boundaries`` (the LLM call),
-which the machine tells how many of the merged messages to cut into how
-many cells, and whether to fail first (the stage retries a ``ValueError``
-three times); the prompt loader; the LLM client, which is only checked for
-``None``.
+What is real: ``ingest.process`` (ids, canonical rows),
+:class:`BoundaryDetection` (``buffer`` and ``detect``), everalgo's boundary
+operator, and the three repositories on a temp SQLite file. What is
+scripted: the model's reply, which the machine tells how many of the merged
+messages to cut into how many cells, and whether to be unusable first (the
+stage tries an unusable reply three times). The operator, as everalgo
+documents, never closes the trailing segment unless the call is final, so
+a cut at the very end of a non-final call leaves that run in the tail.
 
 Rules: ``add`` (one ``/add`` on a session, deferred or not, with the
 boundary's reply scripted), ``flush`` (``is_final``: the boundary must cut
@@ -55,13 +56,14 @@ import os
 import shutil
 import tempfile
 from collections import defaultdict
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
 import pytest
-from everalgo.boundary import DetectionResult
-from everalgo.types import ChatMessage, MemCell
+from everalgo.llm import LLMOutputError
+from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
@@ -69,7 +71,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from sqlalchemy import select
 from sqlmodel import SQLModel
 
-from everos.config import SqliteSettings
+from everos.config import BoundaryDetectionSettings, SqliteSettings
 from everos.core.errors import SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
@@ -90,8 +92,12 @@ from everos.infra.persistence.sqlite.tables import (
     Memcell,
     UnprocessedBuffer,
 )
+from everos.memory.extract.boundary import BoundaryDetection
+from everos.memory.extract.boundary import detection as detection_mod
+from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.ingest import service as ingest
-from everos.service import _boundary as boundary_mod
+from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
+from tests.fakes import UNUSABLE_REPLY, boundary_reply, bundled_instructions
 
 settings.register_profile(
     "ci",
@@ -111,18 +117,14 @@ settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 SESSIONS = ("s1", "s2")
 BASE_TS = 1_700_000_000_000  # above the seconds/ms threshold
-ATTEMPTS = boundary_mod._BOUNDARY_MAX_ATTEMPTS
-POISON_CALLS = boundary_mod._POISON_CALLS
+ATTEMPTS = OUTPUT_ATTEMPTS
+# Far above anything a run accumulates: no cut is forced past the model.
+NO_FORCED_CUTS = BoundaryDetectionSettings(hard_token_limit=10**9, hard_msg_limit=10**6)
 
 
 def event(label: str) -> None:
     if currently_in_test_context():
         _hypothesis_event(label)
-
-
-class _Prompts:
-    def load(self, name: str) -> str | None:
-        return "boundary prompt"
 
 
 class BoundaryMachine(RuleBasedStateMachine):
@@ -141,13 +143,13 @@ class BoundaryMachine(RuleBasedStateMachine):
         self.session_buffer = SqliteSessionBufferStore(
             self.buffer_repo, self.status_repo
         )
-        self.memcell = SqliteMemcellStore(self.memcell_repo)
-        self._patches = [
-            mock.patch.object(boundary_mod, "detect_boundaries", self._detect),
-        ]
-        for p in self._patches:
-            p.start()
-        boundary_mod._unusable_replies.clear()
+        self.boundary = BoundaryDetection(
+            llm=FakeLLMClient(handler=self._reply),
+            instructions=bundled_instructions(),
+            session_buffer=self.session_buffer,
+            memcells=SqliteMemcellStore(self.memcell_repo),
+            limits=NO_FORCED_CUTS,
+        )
         # the model
         self.accepted: dict[str, dict[str, Any]] = {}  # id -> message
         self.buffer: dict[str, list[str]] = defaultdict(list)  # session -> ids
@@ -159,8 +161,9 @@ class BoundaryMachine(RuleBasedStateMachine):
         self.next_ts = 0
         self.detect_calls = 0
         self.expected_detect_calls = 0
-        # the script for the next boundary call
+        # the script for the next boundary call, and the cuts it answers with
         self.script: tuple[float, int, int] = (1.0, 1, 0)
+        self.boundaries: list[int] = []
         self.trace: list[str] = []
 
     async def _create_tables(self) -> None:
@@ -171,38 +174,20 @@ class BoundaryMachine(RuleBasedStateMachine):
         return self.loop.run_until_complete(coro)
 
     def teardown(self) -> None:
-        for p in self._patches:
-            p.stop()
         self.run(self.engine.dispose())
         self.loop.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    # ── the scripted boundary ───────────────────────────────────────────────
+    # ── the scripted model ────────────────────────────────────────────────
 
-    async def _detect(
-        self,
-        messages: list[ChatMessage],
-        *,
-        llm: Any,
-        prompt: str | None = None,
-        is_final: bool = False,
-        hard_token_limit: int = 0,
-        hard_msg_limit: int = 0,
-    ) -> DetectionResult:
+    def _reply(self, _messages: Any, **_kwargs: Any) -> str:
         self.detect_calls += 1
         cut, n_cells, fails = self.script
         if fails > 0:
             self.script = (cut, n_cells, fails - 1)
-            raise ValueError("boundary reply was not JSON")
-        k = len(messages) if is_final else round(cut * len(messages))
-        cells = [
-            MemCell(items=list(chunk), timestamp=chunk[-1].timestamp)
-            for chunk in _chunks(messages[:k], n_cells)
-        ]
-        self.trace.append(
-            f"  detect L={len(messages)} final={is_final} -> k={k} cells={len(cells)}"
-        )
-        return DetectionResult(cells=cells, tail=list(messages[k:]))
+            return UNUSABLE_REPLY
+        self.trace.append(f"  reply boundaries={self.boundaries}")
+        return boundary_reply(self.boundaries)
 
     # ── the model ──────────────────────────────────────────────────────────
 
@@ -251,13 +236,16 @@ class BoundaryMachine(RuleBasedStateMachine):
         self.unusable_calls[session] = 0
         self.expected_detect_calls += fails + 1
         k = len(merged) if final else round(cut * len(merged))
-        if k == 0:
+        ends = list(_chunk_ends(k, n_cells))
+        self.boundaries = [e for e in ends if e < len(merged)]
+        cuts = self.boundaries + ([len(merged)] if final else [])
+        if not cuts:
             self.buffer[session] = merged
             self.last_message_ts[session] = max(self.accepted[i]["ts"] for i in merged)
             return "accumulated", False
-        cells = [list(c) for c in _chunks(merged[:k], n_cells)]
+        cells = [merged[a:b] for a, b in pairwise([0, *cuts])]
         self.cells[session].extend(cells)
-        self.buffer[session] = merged[k:]
+        self.buffer[session] = merged[cuts[-1] :]
         self.last_memcell_ts[session] = max(self.accepted[c[-1]]["ts"] for c in cells)
         return "extracted", False
 
@@ -295,21 +283,9 @@ class BoundaryMachine(RuleBasedStateMachine):
         ingested = await ingest.process(payload, multimodal_llm=None)
         assert [m.message_id for m in ingested.messages] == [m["id"] for m in fresh]
         if defer:
-            outcome = await boundary_mod.buffer_messages(
-                ingested, mode="chat", session_buffer=self.session_buffer
-            )
+            outcome = await self.boundary.buffer(ingested, mode="chat")
         else:
-            outcome = await boundary_mod.prepare_cells(
-                ingested,
-                mode="chat",
-                is_final=final,
-                llm_client=object(),
-                prompt_loader=_Prompts(),  # type: ignore[arg-type]
-                hard_token_limit=10_000,
-                hard_msg_limit=100,
-                session_buffer=self.session_buffer,
-                memcell_store=self.memcell,
-            )
+            outcome = await self.boundary.detect(ingested, mode="chat", is_final=final)
         return outcome.status
 
     # ── rules ──────────────────────────────────────────────────────────────
@@ -347,7 +323,7 @@ class BoundaryMachine(RuleBasedStateMachine):
             assert raises == "quarantined", "quarantined before the third failing call"
             event("add: session buffer quarantined")
             return
-        except ValueError:
+        except LLMOutputError:
             assert raises is True, (
                 "boundary raised but the script did not exhaust its retries"
             )
@@ -373,7 +349,7 @@ class BoundaryMachine(RuleBasedStateMachine):
                 assert raises == "quarantined", "quarantined before the third call"
                 event("add: session buffer quarantined")
                 return
-            except ValueError:
+            except LLMOutputError:
                 assert raises is True
                 continue
             raise AssertionError("an unusable reply must raise")
@@ -393,7 +369,7 @@ class BoundaryMachine(RuleBasedStateMachine):
             assert raises == "quarantined"
             event("flush: session buffer quarantined")
             return
-        except ValueError:
+        except LLMOutputError:
             assert raises is True
             event("flush: boundary kept failing, nothing kept")
             return
@@ -461,7 +437,7 @@ class BoundaryMachine(RuleBasedStateMachine):
                 )
                 for r in by_session[session]
             )
-            raw_type = boundary_mod._RAW_TYPE_BY_MODE["chat"]
+            raw_type = "Conversation"
             want = sorted(
                 (cell, _senders(cell, self.accepted), raw_type)
                 for cell in self.cells[session]
@@ -492,18 +468,17 @@ class BoundaryMachine(RuleBasedStateMachine):
         assert self.detect_calls == self.expected_detect_calls
 
 
-def _chunks(items: list[Any], n: int) -> list[list[Any]]:
-    """Split ``items`` into at most ``n`` non-empty runs."""
-    if not items:
+def _chunk_ends(k: int, n: int) -> list[int]:
+    """Where ``k`` items split into at most ``n`` non-empty runs end (1-based)."""
+    if not k:
         return []
-    n = max(1, min(n, len(items)))
-    size, extra = divmod(len(items), n)
-    out, pos = [], 0
+    n = max(1, min(n, k))
+    size, extra = divmod(k, n)
+    ends, pos = [], 0
     for i in range(n):
-        end = pos + size + (1 if i < extra else 0)
-        out.append(items[pos:end])
-        pos = end
-    return out
+        pos += size + (1 if i < extra else 0)
+        ends.append(pos)
+    return ends
 
 
 def _senders(cell: list[str], accepted: dict[str, dict[str, Any]]) -> list[str]:
@@ -529,12 +504,12 @@ def test_machine_catches_a_lost_tail_message() -> None:
     the conservation invariant must trip."""
     machine = BoundaryMachine()
     try:
-        real = boundary_mod._slice_tail
+        real = detection_mod.slice_tail
 
         def lossy(merged: Any, tail: Any) -> Any:
             return real(merged, tail)[:-1]
 
-        with mock.patch.object(boundary_mod, "_slice_tail", lossy):
+        with mock.patch.object(detection_mod, "slice_tail", lossy):
             machine.add("s1", [("user", "a"), ("user", "b")], False, (0.5, 1, 0))
         with pytest.raises(AssertionError):
             machine.buffer_table_matches_model()

@@ -259,7 +259,7 @@ class ProfileIndexAdapter:
                 id=fields["id"], entry_id=fields["id"], md_path=fields["md_path"]
             ),
             scope=_scope(fields),
-            item=Profile(
+            item=Profile.from_stored(
                 owner_id=fields["owner_id"],
                 summary=fields["summary"],
                 timestamp=fields["profile_timestamp_ms"],
@@ -326,8 +326,9 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
             owner_id=fields["owner_id"],
             episode=fields["episode"],
             timestamp=to_timestamp_ms(fields["timestamp"]),
-            subject=fields.get("subject"),
-            summary=fields.get("summary"),
+            # Rows written before either column existed hold ``None``.
+            subject=fields.get("subject") or "",
+            summary=fields.get("summary") or "",
             session_id=fields.get("session_id"),
             sender_ids=list(fields.get("sender_ids") or []),
             parent_id=fields["parent_id"],

@@ -1,0 +1,17 @@
+# Custom instructions for profile extraction (``ProfileExtractor.aextract``).
+#
+# What it does
+#   When enabled, ``instructions`` is appended verbatim after the
+#   operator's bundled rules as its ``custom_instructions`` block. It adds
+#   requirements; it cannot replace a bundled rule or change the output shape.
+#   The text is never rendered as a template, so braces stay literal.
+#
+# To use it
+#   1. Write the requirement below, e.g.
+#        instructions: "Record the user's preferred programming languages under the category 'tools'."
+#   2. Flip ``enabled`` to ``true``.
+#
+# Disabled, or with blank ``instructions``, the operator runs on its own rules.
+
+enabled: false
+instructions: ""

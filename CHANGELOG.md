@@ -77,12 +77,57 @@ both use the resulting `Application` through three facades:
 - **`UserPipelineStarted` is published after its cell's episode is extracted**
   (it used to be published before any cell ran). Its only subscriber,
   `extract_foresight`, ships disabled.
+- **Prompt slots are replaced by custom instructions.**
+  `config/prompt_slots/*.yaml` (`enabled` + `template`, a whole replacement
+  prompt) and `everos.memory.prompt_slots.PromptLoader` are removed. The
+  user-memory operators now take `custom_instructions=`, appended after
+  their bundled rules: configure them in
+  `config/custom_instructions/<operator>.yaml` (`enabled` + `instructions`)
+  for `boundary_detection`, `episode_extract`, `profile_extract` and
+  `reflect`, read by `everos.memory.custom_instructions.CustomInstructions`.
+  See [docs/custom_instructions.md](docs/custom_instructions.md).
+- **Boundary detection is a domain object.** `everos.service._boundary` is
+  replaced by `everos.memory.extract.boundary.BoundaryDetection`, which
+  `MemoryService` receives instead of `llm` / `prompt_loader`. Both modes now
+  run `everalgo.boundary.adetect_boundaries` (agent mode keeps tool rows in
+  the cells and now honours `[boundary_detection]` hard limits too). The
+  model never closes the trailing segment of a non-final call, so an `/add`
+  whose whole window is one open topic returns `accumulated`; `/flush`
+  closes it.
+- **An unusable model reply is `everalgo.llm.LLMOutputError`**, no longer a
+  `ValueError`. Boundary detection and episode extraction try it three times
+  (`everos.memory.extract.llm_retry`, the one host-side retry), with no
+  backoff (episode extraction used to sleep 1 s and 2 s between attempts).
+  The session quarantine counts calls that end in `LLMOutputError` (after
+  its retries) or in a `ValueError` -- a message everalgo refuses
+  (`InvalidInputError`) or a row that maps to no conversation item, such as
+  an orphan tool result -- which is never retried; other errors propagate
+  uncounted.
+- **`Episode.summary` is required** (everalgo 0.9 writes one for every
+  episode and every merge) and `Episode.subject` defaults to `""`; episodes
+  indexed before either existed read back as `""`. `AtomicFact.fact` is
+  renamed `AtomicFact.content`. `Profile.explicit_info` /
+  `implicit_traits` hold `ExplicitInfoItem` / `ImplicitTraitItem` (same
+  shape as everalgo's); a profile item stored as a bare sentence reads back
+  as an item with only its `description`. A stored item with no
+  `description` is dropped when the profile is read (`/get`, `/search`'s
+  profile, the next profile update), with a `profile_entry_dropped`
+  warning; writing a profile stays strict. `/get` and `/search` return every
+  profile item with all four keys (`description`, `category` / `trait`,
+  `evidence` / `basis`, `observed_at`), the ones a stored item lacks as
+  `null` -- an additive change.
 
 ### Upgrade
 
 Code that imports `everos.service.memorize` / `search` / `get` or calls
 `create_app(lifespan_providers=...)` must switch to `build_application` and
 the facades. Nothing on disk changes.
+
+A deployment that customised a prompt slot must move it: keep only the
+requirements the custom template added on top of the default prompt and put
+them in `config/custom_instructions/<operator>.yaml` as `instructions:`
+(the bundled prompt itself can no longer be replaced). Markdown, the
+SQLite tables and the index schema are unchanged.
 
 ## [1.5.1] - 2026-10-22
 

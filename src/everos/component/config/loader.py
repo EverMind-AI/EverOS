@@ -1,8 +1,8 @@
 """YAML config loader for category-organised file trees.
 
 Concept: a project keeps several *categories* of YAML config files under
-their own subdirectories — for example PromptSlot templates under
-``config/prompt_slots/<name>.yaml``. The loader:
+their own subdirectories — for example operator instructions under
+``config/custom_instructions/<name>.yaml``. The loader:
 
     1. registers a category → subdirectory mapping
     2. resolves ``find(category, name)`` to ``<root>/<subdir>/<name>.yaml``
@@ -26,10 +26,10 @@ class YamlConfigLoader:
 
     Usage:
         loader = YamlConfigLoader(root=Path("src/everos/config"))
-        loader.register_category("prompt_slots")
-        # → reads <root>/prompt_slots/episode.yaml
-        meta = loader.find("prompt_slots", "episode")
-        names = loader.list("prompt_slots")
+        loader.register_category("custom_instructions")
+        # → reads <root>/custom_instructions/reflect.yaml
+        meta = loader.find("custom_instructions", "reflect")
+        names = loader.list("custom_instructions")
         loader.refresh()  # next find() re-reads from disk
 
     Cache semantics:

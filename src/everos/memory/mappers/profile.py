@@ -10,15 +10,11 @@ from everos.memory.models import Profile
 
 
 def from_algo(algo: AlgoProfile) -> Profile:
-    """Domain profile carrying the algo profile's items as plain dicts."""
-    data = algo.model_dump(include={"explicit_info", "implicit_traits"})
-    return Profile(
-        owner_id=algo.owner_id,
-        summary=algo.summary,
-        timestamp=algo.timestamp,
-        explicit_info=data["explicit_info"],
-        implicit_traits=data["implicit_traits"],
-    )
+    """Domain profile with the algo profile's fields; item extras ride along.
+
+    Top-level extras the algo profile carries are dropped.
+    """
+    return Profile.model_validate(algo.model_dump(include=set(Profile.model_fields)))
 
 
 def to_algo(profile: Profile) -> AlgoProfile:

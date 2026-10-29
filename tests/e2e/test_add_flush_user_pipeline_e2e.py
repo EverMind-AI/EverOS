@@ -1,4 +1,9 @@
-"""Add + Flush core pipeline smoke — long real-conversation drive.
+"""Add + Flush user pipeline — a hermetic canned run and a long real-LLM drive.
+
+``test_add_flush_search_get_on_canned_user_track`` runs anywhere: every
+model call is answered from the canned user-track scripts.
+
+The rest is the long real-conversation smoke:
 
 Goal: prove the user-side add/flush chain is end-to-end live. Feeds
 **419 real LoCoMo messages** through ``POST /api/v1/memory/add`` (in 19
@@ -20,6 +25,9 @@ Real LLM + real embedder (creds via ``.env``). Marked ``slow`` —
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import json
 import os
 import shutil
 from collections.abc import Awaitable, Callable
@@ -33,6 +41,7 @@ from everos.infra.persistence.markdown import (
     EpisodeDailyFrontmatter,
     ForesightDailyFrontmatter,
 )
+from tests.fakes import user_track_llm, user_track_script
 from tests.fakes.storage import StorageView
 
 # Directory names live on the frontmatter schemas (single source of truth);
@@ -334,3 +343,134 @@ async def test_async_client_starts_and_health_responds(
     """Tiny smoke — proves the conftest fixture brings the app up."""
     resp = await async_client.get("/health")
     assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Hermetic user track: canned model, no credentials
+# ---------------------------------------------------------------------------
+
+
+_ALICE_TS = 1_775_116_800_000  # 2026-04-02 08:00 UTC
+
+_CONVERSATION = [
+    ("u_alice", "user", "I'm planning a trip to Kyoto at the end of April."),
+    ("assistant", "assistant", "Lovely! Do you prefer a hotel or a ryokan?"),
+    ("u_alice", "user", "I'd rather stay in a ryokan, somewhere quiet."),
+]
+
+
+async def _poll_until(
+    condition: Callable[[], Awaitable[bool]], *, deadline_seconds: float = 40.0
+) -> None:
+    async with asyncio.timeout(deadline_seconds):
+        while True:
+            if await condition():
+                return
+            await asyncio.sleep(0.2)
+
+
+async def test_add_flush_search_get_on_canned_user_track(
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/add`` -> ``/flush`` -> ``/search`` -> ``/get`` on the canned user track.
+
+    Real application (boundary, episode pipeline, OME strategies, cascade,
+    LanceDB), Tier 1 (no embedding), every model call answered from
+    ``tests/fakes/llm_scripts/user_track``. The add buffers (the operator
+    never closes a non-final tail), the flush cuts one cell, and the canned
+    episode, atomic facts and profile all become readable through the API.
+    """
+    from everos.config import load_settings
+    from everos.entrypoints.api.app import create_app
+    from everos.service import build_application, build_providers
+
+    monkeypatch.setenv("EVEROS_MEMORIZE__MODE", "chat")
+    monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
+    load_settings.cache_clear()
+    settings = load_settings()
+    llm = user_track_llm()
+    providers = dataclasses.replace(
+        build_providers(settings), llm=llm, embedding=None, rerank=None
+    )
+    app = create_app(application=build_application(settings, providers=providers))
+    episode = json.loads(user_track_script("episode"))
+    profile = json.loads(user_track_script("profile_init"))
+
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        add = await client.post(
+            "/api/v1/memory/add",
+            json={
+                "session_id": "s_kyoto",
+                "messages": [
+                    {
+                        "sender_id": sender,
+                        "role": role,
+                        "timestamp": _ALICE_TS + i * 60_000,
+                        "content": text,
+                    }
+                    for i, (sender, role, text) in enumerate(_CONVERSATION)
+                ],
+            },
+        )
+        assert add.status_code == 200, add.text
+        assert add.json()["data"]["status"] == "accumulated"
+
+        flush = await client.post(
+            "/api/v1/memory/flush", json={"session_id": "s_kyoto"}
+        )
+        assert flush.status_code == 200, flush.text
+        assert flush.json()["data"]["status"] == "extracted"
+
+        async def _get(memory_type: str) -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/get",
+                json={"user_id": "u_alice", "memory_type": memory_type},
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()["data"]
+            return data["episodes" if memory_type == "episode" else "profiles"]
+
+        async def _search() -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/search",
+                json={
+                    "user_id": "u_alice",
+                    "query": "Kyoto ryokan",
+                    "method": "keyword",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()["data"]["episodes"]
+
+        async def _indexed() -> bool:
+            return bool(await _get("episode")) and bool(await _get("profile"))
+
+        await _poll_until(_indexed)
+        (got_episode,) = await _get("episode")
+        assert got_episode["episode"] == episode["content"]
+        assert got_episode["summary"] == episode["summary"]
+        assert got_episode["subject"] == episode["title"]
+        assert got_episode["session_id"] == "s_kyoto"
+
+        (got_profile,) = await _get("profile")
+        assert [
+            i["description"] for i in got_profile["profile_data"]["explicit_info"]
+        ] == [i["description"] for i in profile["explicit_info"]]
+
+        async def _found() -> bool:
+            return bool(await _search())
+
+        await _poll_until(_found)
+        (hit,) = await _search()
+        assert hit["episode"] == episode["content"]
+
+    replies = [call.response_format.__name__ for call in llm.calls]
+    assert replies.count("_BatchReply") == 2  # the add and the flush
+    assert replies.count("_EpisodeReply") == 1
+    assert "_AtomicFactsReply" in replies
+    assert "_ProfileItems" in replies

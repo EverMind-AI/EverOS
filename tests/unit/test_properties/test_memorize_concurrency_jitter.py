@@ -3,7 +3,7 @@
 ``memorize()`` serialises one session's calls on an asyncio lock and wraps
 lock plus work in ``asyncio.timeout(session_lock_timeout_seconds)``; the
 ``_session_lock`` module docstring says why: two concurrent ``/add`` calls
-on one session would otherwise lose a tail. ``_boundary`` promises that every
+on one session would otherwise lose a tail. Boundary detection promises that every
 cell gets exactly one memcell row, and the memorize docs that the pipelines
 run for every cell. This test does not script what should happen; it lands
 random calls -- adds, deferred adds, flushes, on two sessions, in overlapping
@@ -20,17 +20,18 @@ once everything has settled:
    once, and the pipeline never saw an id that is not in the table;
 4. a poison message -- one the boundary stand-in can never segment, drawn
    as "the k-th message created" -- costs a session at most
-   ``_POISON_CALLS`` consecutive failed calls before its buffer is set
+   ``POISON_CALLS`` consecutive failed calls before its buffer is set
    aside on the ``quarantine`` track (bounded cost), after which the
    session's later healthy messages are extracted again (exit), and other
    sessions never notice (isolation). The quarantine track counts as a
    place in law 1.
 
-What is real: ``memorize()`` end to end (ingest, lock, timeout, boundary
-stage, the three SQLite repositories on a temp file). What is replaced: the
-boundary LLM call, the extraction pipeline (records what it was handed),
-the LLM client sentinel, the prompt loader, and the settings (chat mode, the
-drawn timeout).
+What is real: ``memorize()`` end to end (ingest, lock, timeout,
+:class:`BoundaryDetection` and everalgo's boundary operator, the three SQLite
+repositories on a temp file). What is replaced: the model's replies (random
+delay, random cuts, unusable on poison or at random), the extraction pipeline
+(records what it was handed), and the settings (chat mode, the drawn
+timeout).
 """
 
 from __future__ import annotations
@@ -39,16 +40,16 @@ import asyncio
 import json
 import os
 import random
+import re
 import shutil
 import tempfile
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest import mock
 
-from everalgo.boundary import DetectionResult
-from everalgo.types import ChatMessage, MemCell
+from everalgo.llm import LLMOutputError
+from everalgo.testing import FakeLLMClient
 from hypothesis import HealthCheck, currently_in_test_context, given, settings
 from hypothesis import event as _hypothesis_event
 from hypothesis import strategies as st
@@ -72,10 +73,16 @@ from everos.infra.persistence.sqlite.repos.unprocessed_buffer import (
     UnprocessedBufferRepo,
 )
 from everos.infra.persistence.sqlite.tables import Memcell
+from everos.memory.extract.boundary import BoundaryDetection
+from everos.memory.extract.boundary.quarantine import POISON_CALLS
 from everos.memory.extract.pipeline import CellOutcome
-from everos.service import _boundary as boundary_mod
 from everos.service import _session_lock as session_lock_mod
-from tests.fakes import make_memory_service
+from tests.fakes import (
+    UNUSABLE_REPLY,
+    boundary_reply,
+    bundled_instructions,
+    make_memory_service,
+)
 from tests.fakes.deps import make_stores
 
 settings.register_profile(
@@ -92,6 +99,8 @@ settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 _DEEP = os.environ.get("HYPOTHESIS_PROFILE") == "deep"
 SESSIONS = ("s1", "s2")
 BASE_TS = 1_700_000_000_000
+# One numbered line per message in the boundary prompt: ``[N] [time] u: m7``.
+_PROMPT_LINE = re.compile(r"^\[\d+\] \[[^\]]*\] [^:]*: (m\d+)$", re.MULTILINE)
 
 
 def event(label: str) -> None:
@@ -107,7 +116,7 @@ class _Run:
         self.slow_max = slow_max
         self.fail_rate = fail_rate
         self.poison_positions = poison  # the k-th message created is poison
-        self.poison_ids: set[str] = set()
+        self.poison_texts: set[str] = set()
         self.consecutive_failures: dict[str, int] = defaultdict(int)
         self.worst_streak = 0
         self.pipeline_log: list[tuple[str, tuple[str, ...]]] = []
@@ -121,40 +130,23 @@ class _Run:
             f"{(asyncio.get_event_loop().time() - self.t0) * 1000:7.1f}ms {what}"
         )
 
-    async def detect(
-        self,
-        messages: list[ChatMessage],
-        *,
-        llm: Any,
-        prompt: Any = None,
-        is_final: bool = False,
-        hard_token_limit: int = 0,
-        hard_msg_limit: int = 0,
-    ) -> DetectionResult:
+    async def reply(self, messages: Any, **_kwargs: Any) -> str:
+        """The model: a random delay, then unusable or a random set of cuts."""
         await asyncio.sleep(self.rng.random() * self.slow_max)
-        if any(m.id in self.poison_ids for m in messages):
-            self.note("  boundary: ValueError (poison in the input)")
-            raise ValueError("cannot segment this")
+        window = _PROMPT_LINE.findall(messages[-1].content)
+        if self.poison_texts.intersection(window):
+            self.note("  boundary: unusable (poison in the input)")
+            return UNUSABLE_REPLY
         if self.rng.random() < self.fail_rate:
-            self.note("  boundary: ValueError")
-            raise ValueError("bad reply")
-        k = len(messages) if is_final else self.rng.randint(0, len(messages))
-        n_cells = self.rng.randint(1, 2) if k else 0
-        cells = []
-        if k:
-            # The algo contract: the cells and the tail partition the input.
-            # (A first version let the last chunk run past ``k`` into the
-            # tail, and the deep run promptly reported a message in a cell
-            # and in the buffer -- the harness's bug, not the stage's.)
-            cut = k // n_cells or 1
-            chunks = [messages[i : min(i + cut, k)] for i in range(0, k, cut)]
-            cells = [
-                MemCell(items=list(c), timestamp=c[-1].timestamp) for c in chunks if c
-            ]
-        self.note(
-            f"  boundary: L={len(messages)} final={is_final} k={k} cells={len(cells)}"
-        )
-        return DetectionResult(cells=cells, tail=list(messages[k:]))
+            self.note("  boundary: unusable")
+            return UNUSABLE_REPLY
+        # The operator closes the trailing run itself on a final call; any
+        # cut it is given falls strictly inside the window.
+        candidates = range(1, len(window))
+        cuts = sorted(self.rng.sample(candidates, min(len(candidates), 2)))
+        cuts = cuts[: self.rng.randint(0, len(cuts))]
+        self.note(f"  boundary: L={len(window)} cuts={cuts}")
+        return boundary_reply(cuts)
 
     async def pipeline_run_cell(self, ingested: Any, prepared: Any) -> Any:
         self.pipelines_active += 1
@@ -182,7 +174,6 @@ async def _jittered(
 ) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="memorize_jitter_"))
     run = _Run(seed, slow_max, fail_rate, poison)
-    boundary_mod._unusable_replies.clear()
     # The per-session locks are process-wide and bound to the loop that
     # first used them; every example runs on a fresh loop.
     session_lock_mod._session_locks.clear()
@@ -204,22 +195,24 @@ async def _jittered(
         }
     )
     pipeline = SimpleNamespace(run_cell=run.pipeline_run_cell)
+    stores = make_stores(
+        session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo),
+        memcell=SqliteMemcellStore(memcell_repo),
+    )
     memorize_mod = make_memory_service(
         settings=cfg,
-        llm=object(),
-        prompt_loader=SimpleNamespace(load=lambda name: "p"),
-        stores=make_stores(
-            session_buffer=SqliteSessionBufferStore(buffer_repo, status_repo),
-            memcell=SqliteMemcellStore(memcell_repo),
+        boundary=BoundaryDetection(
+            llm=FakeLLMClient(handler=run.reply),
+            instructions=bundled_instructions(),
+            session_buffer=stores.session_buffer,
+            memcells=stores.memcell,
+            limits=cfg.boundary_detection,
+            attempt_timeout=lock_timeout,
         ),
+        stores=stores,
         user_pipeline=pipeline,
         bus=_NullBus(),
     )
-    patches = [
-        mock.patch.object(boundary_mod, "detect_boundaries", run.detect),
-    ]
-    for p in patches:
-        p.start()
     next_ts = [0]
     accepted: dict[str, set[str]] = defaultdict(
         set
@@ -247,7 +240,7 @@ async def _jittered(
                 mid = f"m_{session}_{ts}_{idx:03d}"
                 ids.append(mid)
                 if next_ts[0] in run.poison_positions:
-                    run.poison_ids.add(mid)
+                    run.poison_texts.add(f"m{next_ts[0]}")
             payload = {"session_id": session, "messages": msgs}
             run.note(f"call#{k} {kind} {session} n={len(msgs)}")
             try:
@@ -267,7 +260,7 @@ async def _jittered(
                 run.consecutive_failures[session] = 0
                 event("call: session buffer quarantined")
                 return
-            except ValueError:
+            except LLMOutputError:
                 run.note(f"call#{k} -> boundary failed")
                 unknown[session].update(ids)
                 run.consecutive_failures[session] += 1
@@ -303,9 +296,9 @@ async def _jittered(
 
         async with factory() as s:
             memcells = list((await s.execute(select(Memcell))).scalars().all())
-        # Bounded cost: no session fails more than _POISON_CALLS calls in a row
+        # Bounded cost: no session fails more than POISON_CALLS calls in a row
         # (the next one is the quarantine, which the model does not count).
-        assert run.worst_streak < boundary_mod._POISON_CALLS + 1, (
+        assert run.worst_streak < POISON_CALLS + 1, (
             run.worst_streak,
             "\n".join(run.trace),
         )
@@ -377,8 +370,6 @@ async def _jittered(
             "\n".join(run.trace),
         )
     finally:
-        for p in patches:
-            p.stop()
         await engine.dispose()
         shutil.rmtree(tmp, ignore_errors=True)
 

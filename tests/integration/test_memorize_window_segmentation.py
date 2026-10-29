@@ -42,9 +42,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 from sqlalchemy import text
 
 from everos.infra.persistence import MemoryRoot
@@ -54,6 +52,7 @@ from everos.service import (
     build_application,
     build_providers,
 )
+from tests.fakes import memorize_llm
 from tests.fakes.storage import Storage
 
 # ---------------------------------------------------------------------------
@@ -67,40 +66,6 @@ _under_test: dict[str, MemoryService] = {}
 async def memorize(payload: dict[str, Any], **kwargs: Any) -> MemorizeResult:
     """``MemoryService.memorize`` of the application under test."""
     return await _under_test["memory"].memorize(payload, **kwargs)
-
-
-def _boundary_response(boundaries: list[int]) -> str:
-    return json.dumps(
-        {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    )
-
-
-def _episode_response(title: str = "T", content: str = "B") -> str:
-    return json.dumps({"title": title, "content": content})
-
-
-def _make_scripted_llm(
-    boundary_responses: list[list[int]],
-) -> FakeLLMClient:
-    """Boundary calls FIFO-pop from ``boundary_responses``.
-
-    Episode calls (for downstream pipeline) get a canned response.
-    """
-    queue: list[list[int]] = list(boundary_responses)
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = queue.pop(0) if queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        return ChatResponse(content=_episode_response(), model="fake")
-
-    return FakeLLMClient(handler=handler)
-
-
-# ---------------------------------------------------------------------------
-# Fixture — mirrors the locked-env fixture in the concurrent test
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -227,7 +192,7 @@ async def test_single_add_no_cut_accumulates_full_batch_in_buffer(
     memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """boundaries=[] → no memcell, entire batch sits in buffer."""
-    await memorize_env_scripted(fake_llm=_make_scripted_llm([[]]))
+    await memorize_env_scripted(fake_llm=memorize_llm([[]]))
 
     session = "s_no_cut"
     inputs = [_msg(i) for i in range(3)]
@@ -247,7 +212,7 @@ async def test_single_add_with_cut_splits_prefix_to_cell_suffix_to_buffer(
     memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:
     """boundaries=[2] on a 3-msg batch → cell=[m0,m1], buffer=[m2]."""
-    await memorize_env_scripted(fake_llm=_make_scripted_llm([[2]]))
+    await memorize_env_scripted(fake_llm=memorize_llm([[2]]))
 
     session = "s_cut"
     inputs = [_msg(i) for i in range(3)]
@@ -291,8 +256,7 @@ async def test_second_add_consumes_prior_buffer_and_replaces_tail(
     # Round 2: merged input = [m2,m3,m4,m5]; cut after 3 → cell=[m2,m3,m4],
     #          buffer=[m5]
     await memorize_env_scripted(
-        storage,
-        fake_llm=_make_scripted_llm([[2], [3]]),
+        fake_llm=memorize_llm([[2], [3]]),
     )
 
     session = "s_replace"
@@ -366,8 +330,7 @@ async def test_flush_after_accumulation_drains_buffer_into_memcell(
     # Round 1 add: boundaries=[] → no cut, all into buffer.
     # Flush: is_final=True passes empty boundaries → algo closes tail into cell.
     await memorize_env_scripted(
-        storage,
-        fake_llm=_make_scripted_llm([[], []]),
+        fake_llm=memorize_llm([[], []]),
     )
 
     session = "s_flush"
@@ -404,8 +367,7 @@ async def test_three_sequential_adds_conservation_no_loss(
     # add 2: 3 msgs, cut after 4 of merged [m0..m5] → cell=[m0..m3], buffer=[m4,m5]
     # add 3: 3 msgs, cut after 3 of merged [m4..m8] → cell=[m4,m5,m6], buffer=[m7,m8]
     await memorize_env_scripted(
-        storage,
-        fake_llm=_make_scripted_llm([[], [4], [3]]),
+        fake_llm=memorize_llm([[], [4], [3]]),
     )
 
     session = "s_seq"

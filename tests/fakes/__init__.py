@@ -22,6 +22,7 @@ from .application import make_backfill_context as make_backfill_context
 from .application import make_knowledge_service as make_knowledge_service
 from .application import make_memory_service as make_memory_service
 from .application import make_ops as make_ops
+from .deps import bundled_instructions as bundled_instructions
 from .deps import make_deps as make_deps
 from .deps import make_indexes as make_indexes
 from .deps import make_stores as make_stores
@@ -32,6 +33,13 @@ from .indexes import InMemoryAgentSkillIndex as InMemoryAgentSkillIndex
 from .indexes import InMemoryAtomicFactIndex as InMemoryAtomicFactIndex
 from .indexes import InMemoryEpisodeIndex as InMemoryEpisodeIndex
 from .indexes import InMemoryProfileIndex as InMemoryProfileIndex
+from .llm import UNUSABLE_REPLY as UNUSABLE_REPLY
+from .llm import USER_TRACK_OPERATORS as USER_TRACK_OPERATORS
+from .llm import boundary_reply as boundary_reply
+from .llm import boundary_window as boundary_window
+from .llm import memorize_llm as memorize_llm
+from .llm import user_track_llm as user_track_llm
+from .llm import user_track_script as user_track_script
 from .storage import Storage as Storage
 from .storage import StorageView as StorageView
 from .storage import handler_deps as handler_deps
@@ -50,6 +58,8 @@ from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportSto
 from .stores import UnusedPort as UnusedPort
 
 __all__ = [
+    "UNUSABLE_REPLY",
+    "USER_TRACK_OPERATORS",
     "FakeEmbeddingProvider",
     "InMemoryAgentCaseIndex",
     "InMemoryAgentCaseStore",
@@ -70,6 +80,9 @@ __all__ = [
     "StubMemoryService",
     "StubOpsService",
     "UnusedPort",
+    "boundary_reply",
+    "boundary_window",
+    "bundled_instructions",
     "handler_deps",
     "index_repositories",
     "make_application",
@@ -81,6 +94,9 @@ __all__ = [
     "make_ops",
     "make_storage",
     "make_stores",
+    "memorize_llm",
     "open_storage_view",
     "unscripted_llm",
+    "user_track_llm",
+    "user_track_script",
 ]

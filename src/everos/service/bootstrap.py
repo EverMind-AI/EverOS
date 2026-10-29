@@ -67,11 +67,12 @@ from everos.infra.persistence.factories import (
 )
 from everos.infra.persistence.index import EmbeddingProvenance
 from everos.infra.persistence.sqlite import SqliteDatabase, SqliteRepos
-from everos.memory.deps import Indexes, MemoryDeps, Stores
+from everos.memory.custom_instructions import CustomInstructions
+from everos.memory.deps import Indexes, MemoryDeps
+from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.pipeline import AgentMemoryPipeline, UserMemoryPipeline
 from everos.memory.get import GetManager
 from everos.memory.ports import EventBus
-from everos.memory.prompt_slots import PromptLoader
 from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
@@ -91,7 +92,7 @@ from everos.service.ops import Capabilities, OpsService
 logger = get_logger(__name__)
 
 _CONFIG_ROOT = Path(__file__).resolve().parent.parent / "config"
-"""Bundled prompt slots (``src/everos/config/``), shipped in the wheel."""
+"""Bundled custom instructions (``src/everos/config/``), shipped in the wheel."""
 
 _TRUE_VALUES = ("1", "true", "yes")
 
@@ -221,6 +222,7 @@ def build_application(
         embedding=providers.embedding,
         stores=stores,
         indexes=indexes,
+        instructions=CustomInstructions(_CONFIG_ROOT),
     )
     engine = _build_engine(root, deps)
     capabilities = _capabilities(settings, providers)
@@ -234,7 +236,7 @@ def build_application(
     )
     return Application(
         memory=_build_memory_service(
-            settings, providers, stores, indexes, tokenizer, OmeEventBus(engine)
+            settings, providers, deps, tokenizer, OmeEventBus(engine)
         ),
         knowledge=_build_knowledge_service(
             settings, root, providers, indexes, sqlite, tokenizer
@@ -339,22 +341,27 @@ def _build_engine(root: MemoryRoot, deps: MemoryDeps) -> OfflineEngine:
 def _build_memory_service(
     settings: Settings,
     providers: Providers,
-    stores: Stores,
-    indexes: Indexes,
+    deps: MemoryDeps,
     tokenizer: Tokenizer,
     bus: EventBus,
 ) -> MemoryService:
-    prompt_loader = PromptLoader(_CONFIG_ROOT)
+    stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         settings=settings,
-        llm=providers.llm,
+        boundary=BoundaryDetection(
+            llm=providers.llm,
+            instructions=deps.instructions,
+            session_buffer=stores.session_buffer,
+            memcells=stores.memcell,
+            limits=settings.boundary_detection,
+            attempt_timeout=settings.memorize.session_lock_timeout_seconds,
+        ),
         multimodal_llm=providers.multimodal_llm,
-        prompt_loader=prompt_loader,
         stores=stores,
         user_pipeline=UserMemoryPipeline(
             episode_store=stores.episode,
-            prompt_loader=prompt_loader,
+            instructions=deps.instructions,
             llm_client=providers.llm,
         ),
         agent_pipeline=AgentMemoryPipeline(),

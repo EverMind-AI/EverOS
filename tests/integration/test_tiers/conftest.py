@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -47,13 +46,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 import pytest_asyncio
-from everalgo.llm.types import ChatMessage as LLMChatMessage
-from everalgo.llm.types import ChatResponse
-from everalgo.testing.fake_llm import FakeLLMClient
+from everalgo.testing import FakeLLMClient
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.rerank import RerankResult
-from tests.fakes import StorageView, open_storage_view
+from tests.fakes import StorageView, memorize_llm, open_storage_view
 
 if TYPE_CHECKING:
     from everos.service import Application
@@ -97,45 +94,15 @@ class StubReranker:
 # ---------------------------------------------------------------------------
 
 
-def _boundary_response(boundaries: list[int]) -> str:
-    payload = {"reasoning": "test", "boundaries": boundaries, "should_wait": False}
-    return json.dumps(payload)
-
-
-def _episode_response(title: str = "Test Subject", content: str = "Test body") -> str:
-    return json.dumps({"title": title, "content": content})
-
-
-def make_fake_llm(
-    boundary_responses: list[list[int]] | None = None,
-    *,
-    episode_title: str = "Hiking",
-    episode_content: str = "Alice loves hiking in the mountains every weekend.",
-) -> FakeLLMClient:
-    """Build a ``FakeLLMClient`` that dispatches by prompt fingerprint.
-
-    Mirrors ``tests/integration/test_memorize_integration.py``'s
-    ``_make_fake_llm``: pops one ``boundaries=...`` entry per boundary
-    prompt seen, every episode prompt gets the same canned
-    ``{title, content}``. Any other prompt (atomic facts / foresight /
-    profile / agent case background strategies) also falls through to
-    the episode-shaped response; those strategies run as OME background
-    jobs that log-and-continue on a parse failure, so they never affect
-    the HTTP response under test.
-    """
-    boundary_queue: list[list[int]] = list(boundary_responses or [])
-
-    def handler(messages: list[LLMChatMessage], **_: Any) -> ChatResponse:
-        prompt = messages[0].content
-        if "boundaries" in prompt.lower() or "memcell" in prompt.lower():
-            cuts = boundary_queue.pop(0) if boundary_queue else []
-            return ChatResponse(content=_boundary_response(cuts), model="fake")
-        return ChatResponse(
-            content=_episode_response(episode_title, episode_content),
-            model="fake",
-        )
-
-    return FakeLLMClient(handler=handler)
+def make_fake_llm() -> FakeLLMClient:
+    """The memorize-path model: no boundary cut before a flush, a "Hiking"
+    episode, no atomic facts (the suites seed the facts they count), and
+    canned replies for the other user-track operators."""
+    return memorize_llm(
+        episode_title="Hiking",
+        episode_content="Alice loves hiking in the mountains every weekend.",
+        atomic_facts="atomic_facts_empty",
+    )
 
 
 # ---------------------------------------------------------------------------

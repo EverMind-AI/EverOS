@@ -138,6 +138,17 @@ index catches up asynchronously.
   on this call). See [api.md](api.md).
 - **`/flush`** forces the boundary now (one extraction LLM call), used at
   the end of a chat/agent run.
+- **Boundary detection** (`memory/extract/boundary/BoundaryDetection`)
+  asks the model, in one call over the buffered window, where finished
+  episodes end. It never closes the trailing segment of a non-final call
+  (the conversation may go on), so a window that is one open topic stays
+  buffered until a later `/add` cuts it or `/flush` closes it. An unusable
+  reply is tried three times; a session whose calls keep failing three
+  times in a row has its buffer moved to a `quarantine` track so the
+  session can continue.
+- Deployments can append requirements to the boundary, episode, profile
+  and reflection prompts with
+  [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
   `extracted`, the episode file is already on disk.
 - Everything else (atomic facts, foresight, profile, agent cases/skills)
