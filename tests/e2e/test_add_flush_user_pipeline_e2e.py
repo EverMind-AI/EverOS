@@ -395,8 +395,8 @@ async def test_add_flush_search_get_on_canned_user_track(
 
     Real application (boundary, episode pipeline, OME strategies, cascade,
     LanceDB), Tier 1 (no embedding), every model call answered from
-    ``tests/fakes/llm_scripts/user_track``. The add buffers (the operator
-    never closes a non-final tail), the flush cuts one cell, and the canned
+    ``tests/fakes/llm_scripts/user_track``. The add buffers (the boundary
+    reply judges the tail still open), the flush cuts one cell, and the canned
     episode, atomic facts and profile all become readable through the API.
     """
     from everos.config import load_settings
@@ -407,7 +407,7 @@ async def test_add_flush_search_get_on_canned_user_track(
     monkeypatch.setenv("EVEROS_LANCEDB__READ_CONSISTENCY_SECONDS", "0")
     load_settings.cache_clear()
     settings = load_settings()
-    llm = user_track_llm()
+    llm = user_track_llm(boundary="boundary_empty")
     providers = dataclasses.replace(
         build_providers(settings), llm=llm, embedding=None, rerank=None
     )

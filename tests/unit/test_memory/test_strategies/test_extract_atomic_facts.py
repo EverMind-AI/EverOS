@@ -134,3 +134,18 @@ async def test_reflection_context_is_carried_through() -> None:
 async def test_unconfigured_llm_fails_the_run() -> None:
     with pytest.raises(ProviderNotConfiguredError):
         await extract_atomic_facts(_event(), make_deps(llm=None))
+
+
+@pytest.mark.parametrize("language", ["Chinese", None])
+async def test_facts_are_written_in_the_episode_language(
+    language: str | None,
+) -> None:
+    """The event's language is the extractor's output language; ``None`` lets
+    the extractor infer its own."""
+    deps = make_deps()
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract_from_text = AsyncMock(return_value=[])
+        await extract_atomic_facts(_event(language=language), deps)
+
+    call = extractor_cls.return_value.aextract_from_text.call_args
+    assert call.kwargs["output_language"] == language

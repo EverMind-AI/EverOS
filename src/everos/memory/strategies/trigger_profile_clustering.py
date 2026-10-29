@@ -122,6 +122,7 @@ async def trigger_profile_clustering(
             owner_id=event.owner_id,
             app_id=event.app_id,
             project_id=event.project_id,
+            language=event.language,
         )
     ]
 

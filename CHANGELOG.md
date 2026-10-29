@@ -31,6 +31,20 @@ both use the resulting `Application` through three facades:
   longer configures logging itself. `server start --log-level` and
   `EVEROS_LOG_LEVEL` still override the level for the server, and
   interactive commands still log `WARNING` (`INFO` with `--verbose`).
+- **One language decision per cell, pinned downstream.** The episode is
+  still written in whatever language the model picks from the conversation;
+  that language is then detected from the episode text by Unicode script
+  (`everos.core.utils.language.detect_output_language`, one of everalgo's
+  `OutputLanguage` values) and carried on the episode and its
+  `EpisodeExtracted` / `ProfileClusterUpdated` events. Atomic facts are
+  extracted in it, and a profile is written in it and then frozen: the
+  first profile extraction that knows the language stores it as
+  `primary_language` in `user.md`, and later extractions keep that value
+  even when an episode arrives in another language (changing it is a manual
+  edit). Episode entries gain an inline `language` field. Both are left out
+  while unknown, so episode logs and `user.md` written before this release
+  read back with no language and extraction falls back to everalgo's own
+  inference. The search index, the API and `/get` are unchanged.
 
 ### Changed
 
@@ -216,10 +230,11 @@ both use the resulting `Application` through three facades:
   replaced by `everos.memory.extract.boundary.BoundaryDetection`, which
   `MemoryService` receives instead of `llm` / `prompt_loader`. Both modes now
   run `everalgo.boundary.adetect_boundaries` (agent mode keeps tool rows in
-  the cells and now honours `[boundary_detection]` hard limits too). The
-  model never closes the trailing segment of a non-final call, so an `/add`
-  whose whole window is one open topic returns `accumulated`; `/flush`
-  closes it.
+  the cells and now honours `[boundary_detection]` hard limits too). When
+  the model judges the trailing segment of a non-final call complete
+  (`tail_complete`), that segment is closed into a last cell and extracted
+  at once; a segment it judges open, or one no model judged, waits in the
+  buffer for the next batch or `/flush`.
 - **An unusable model reply is `everalgo.llm.LLMOutputError`**, no longer a
   `ValueError`. Boundary detection and episode extraction try it three times
   (`everos.memory.extract.llm_retry`, the one host-side retry), with no

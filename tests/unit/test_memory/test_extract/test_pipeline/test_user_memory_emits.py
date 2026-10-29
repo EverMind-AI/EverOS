@@ -18,7 +18,12 @@ from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
 from everos.memory.ports import MemoryRef
-from tests.fakes import bundled_instructions, user_track_llm, user_track_script
+from tests.fakes import (
+    bundled_instructions,
+    memorize_llm,
+    user_track_llm,
+    user_track_script,
+)
 
 _EPISODE = json.loads(user_track_script("episode"))
 
@@ -114,6 +119,31 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     assert written.summary == _EPISODE["summary"]
     assert written.subject == _EPISODE["title"]
     assert written.parent_id == "mc_a"
+
+
+@pytest.mark.parametrize(
+    ("content", "language"),
+    [
+        ("The user booked a trip to Lisbon for the spring.", "English"),
+        ("用户预订了春天去里斯本的行程。", "Chinese"),
+        ("2026-05-17 12:00", None),
+    ],
+)
+async def test_episode_and_event_carry_the_detected_language(
+    content: str, language: str | None
+) -> None:
+    """The episode's language is detected once and pinned on every copy."""
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
+
+    outcome = await _pipeline(
+        memorize_llm(episode_content=content), episode_store
+    ).run_cell(_INGESTED, _prepared("u1", "u2"))
+
+    events = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    written = [call.args[1] for call in episode_store.append.await_args_list]
+    assert [e.language for e in events] == [language, language]
+    assert [ep.language for ep in written] == [language, language]
 
 
 async def test_one_call_fans_out_to_every_user_sender() -> None:

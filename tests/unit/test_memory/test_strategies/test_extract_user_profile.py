@@ -42,11 +42,13 @@ def _event(
     owner_id: str = "u_alice",
     memcell_id: str = "mc_aaaaaaaaaaa1",
     cluster_id: str = "cl_user00000001",
+    language: str | None = None,
 ) -> ProfileClusterUpdated:
     return ProfileClusterUpdated(
         memcell_id=memcell_id,
         cluster_id=cluster_id,
         owner_id=owner_id,
+        language=language,
     )
 
 
@@ -201,6 +203,78 @@ async def test_update_mode_rehydrates_old_profile() -> None:
     assert old.timestamp == 1_700_000_000_000
     assert [i.description for i in old.explicit_info] == ["prior fact"]
     assert deps.stores.profile.profiles[_scope()].summary == "updated summary"
+
+
+# ── primary language (frozen once known) ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("stored", "event_language", "expected"),
+    [
+        pytest.param(None, "Chinese", "Chinese", id="no-profile-init-freezes"),
+        pytest.param("English", "Chinese", "English", id="frozen-wins-unchanged"),
+        pytest.param("", "Chinese", "Chinese", id="unfrozen-takes-event"),
+        pytest.param("", None, None, id="unknown-stays-unknown"),
+    ],
+)
+async def test_profile_language_is_frozen_once_known(
+    stored: str | None, event_language: str | None, expected: str | None
+) -> None:
+    """``stored``: ``None`` = no profile yet, ``""`` = one with no language."""
+    deps = make_deps()
+    _seed(
+        deps,
+        _scope(),
+        cluster_id="cl_user00000001",
+        entry_id="ep_20260101_0001",
+        memcell_id="mc_aaaaaaaaaaa1",
+        last_ts=1_700_000_002_000,
+    )
+    if stored is not None:
+        deps.stores.profile.profiles[_scope()] = Profile(
+            owner_id="u_alice",
+            summary="prior",
+            timestamp=1_700_000_000_000,
+            primary_language=stored or None,
+        )
+    new_profile = AlgoProfile.model_validate(
+        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
+    )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        await extract_user_profile(_event(language=event_language), deps)
+
+    call = extractor_cls.return_value.aextract.call_args
+    assert call.kwargs["output_language"] == expected
+    assert deps.stores.profile.profiles[_scope()].primary_language == expected
+
+
+async def test_primary_language_does_not_reach_the_algo_profile() -> None:
+    """The frozen language is passed as ``output_language``, not as profile data."""
+    deps = make_deps()
+    _seed(
+        deps,
+        _scope(),
+        cluster_id="cl_user00000001",
+        entry_id="ep_20260101_0001",
+        memcell_id="mc_aaaaaaaaaaa1",
+        last_ts=1_700_000_002_000,
+    )
+    deps.stores.profile.profiles[_scope()] = Profile(
+        owner_id="u_alice",
+        summary="prior",
+        timestamp=1_700_000_000_000,
+        primary_language="English",
+    )
+    new_profile = AlgoProfile.model_validate(
+        {"owner_id": "u_alice", "summary": "next", "timestamp": 1_700_000_002_000}
+    )
+    with patch(_EXTRACTOR) as extractor_cls:
+        extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
+        await extract_user_profile(_event(), deps)
+
+    old = extractor_cls.return_value.aextract.call_args.kwargs["old_profile"]
+    assert "primary_language" not in old.model_dump()
 
 
 async def test_skips_when_no_members() -> None:

@@ -54,6 +54,7 @@ def _episode_event(
     owner_id: str = "u_alice",
     source: str = "pipeline",
     memcell_id: str = "mc_aaaaaaaaaaa1",
+    language: str | None = None,
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
@@ -63,6 +64,7 @@ def _episode_event(
         owner_id=owner_id,
         session_id="s_test",
         source=source,
+        language=language,
     )
 
 
@@ -201,13 +203,16 @@ async def test_direct_path_fetches_via_timestamp_and_writes_profile() -> None:
     )
     with patch(_EXTRACTOR) as extractor_cls:
         extractor_cls.return_value.aextract = AsyncMock(return_value=new_profile)
-        await extract_user_profile(_episode_event(), deps)
+        await extract_user_profile(_episode_event(language="Japanese"), deps)
 
     extractor_call = extractor_cls.return_value.aextract.call_args
     assert [len(mc.items) for mc in extractor_call.args[0]] == [1]
     assert extractor_call.kwargs["old_profile"] is None
     assert extractor_call.kwargs["sender_id"] == "u_alice"
-    assert deps.stores.profile.profiles[_ALICE].summary == "Alice is a hiker."
+    assert extractor_call.kwargs["output_language"] == "Japanese"
+    stored = deps.stores.profile.profiles[_ALICE]
+    assert stored.summary == "Alice is a hiker."
+    assert stored.primary_language == "Japanese"
 
 
 async def test_cluster_path_unaffected_by_dual_trigger_refactor() -> None:

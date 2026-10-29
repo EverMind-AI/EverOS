@@ -35,6 +35,7 @@ from everos.memory.ports import MemcellStore, SessionBufferStore, SessionKey
 
 from .messages import (
     Mode,
+    close_complete_tail,
     filter_for_mode,
     merge_dedupe_sort,
     slice_tail,
@@ -67,8 +68,8 @@ class BoundaryOutcome(NamedTuple):
             to do or no model to ask.
         message_count: Fresh rows this call contributed (after the mode filter).
         tail_complete: The model's verdict that the uncut tail is already a
-            complete episode; ``None`` when no model judged it. Recorded, not
-            acted on.
+            complete episode; ``None`` when no model judged it. ``True`` on a
+            non-final call has already closed the tail into the last cell.
     """
 
     cells: list[MemCell]
@@ -130,6 +131,9 @@ class BoundaryDetection:
     ) -> BoundaryOutcome:
         """Cut the buffer plus fresh messages into cells and keep the tail.
 
+        A tail the model judges complete is closed into a last cell at once;
+        one it does not waits for the next batch or the flush.
+
         Args:
             ingested: This call's messages.
             mode: ``chat`` or ``agent``.
@@ -168,6 +172,7 @@ class BoundaryDetection:
         result = await self._segment_or_quarantine(
             session, merged, buffered=buffered, mode=mode, is_final=is_final
         )
+        result = self._close_complete_tail(session, result, is_final=is_final)
         if not result.cells:
             await self._keep_buffered(session, merged)
             return _empty_outcome(
@@ -178,6 +183,19 @@ class BoundaryDetection:
         return await self._commit_cells(
             session, merged, result, mode=mode, message_count=len(fresh)
         )
+
+    @staticmethod
+    def _close_complete_tail(
+        session: SessionKey, result: DetectionResult, *, is_final: bool
+    ) -> DetectionResult:
+        closed = close_complete_tail(result, is_final=is_final)
+        if closed is not result:
+            logger.info(
+                "boundary_tail_closed",
+                session_id=session.session_id,
+                items=len(result.tail),
+            )
+        return closed
 
     async def _segment_or_quarantine(
         self,

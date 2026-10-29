@@ -240,6 +240,23 @@ async def test_single_add_with_cut_splits_prefix_to_cell_suffix_to_buffer(
     )
 
 
+async def test_single_add_closes_a_tail_the_model_judges_complete(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """boundaries=[] + tail_complete → the whole batch is one cell, buffer empty."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[]], tail_complete=True))
+
+    session = "s_tail_complete"
+    inputs = [_msg(i) for i in range(3)]
+    result = await memorize({"session_id": session, "messages": inputs})
+
+    cells = await _memcell_rows(storage, session)
+    assert result.status == "extracted"
+    assert len(cells) == 1, cells
+    assert len(cells[0][1]) == 3
+    assert await _buffer_rows(storage, session) == []
+
+
 # ---------------------------------------------------------------------------
 # I3: successive add — prior buffer feeds into next memcell, then is REPLACED
 # ---------------------------------------------------------------------------

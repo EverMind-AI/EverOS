@@ -52,7 +52,7 @@ from everos.memory._partition_locks import get_partition_lock
 from everos.memory.deps import MemoryDeps
 from everos.memory.events import EpisodeExtracted, ProfileClusterUpdated
 from everos.memory.mappers import profile as profile_mapper
-from everos.memory.models import Cluster
+from everos.memory.models import Cluster, Profile
 from everos.memory.ports import Event, Immediate, Scope, StrategySpec
 
 logger = get_logger(__name__)
@@ -160,6 +160,20 @@ async def _select_via_timestamp(
     return list(memcell_ids)
 
 
+def _profile_language(
+    existing: Profile | None, event: ProfileClusterUpdated | EpisodeExtracted
+) -> str | None:
+    """The language to write the profile in, frozen once known.
+
+    A stored profile's ``primary_language`` wins and is never changed
+    automatically; changing it is a manual edit. Until one is stored, the
+    triggering episode's language is used and then frozen.
+    """
+    if existing is not None and existing.primary_language:
+        return existing.primary_language
+    return event.language
+
+
 async def extract_user_profile(
     event: ProfileClusterUpdated | EpisodeExtracted, deps: MemoryDeps
 ) -> list[Event]:
@@ -252,16 +266,20 @@ async def extract_user_profile(
 
         # Run the LLM extractor — INIT (no prior) or UPDATE (existing).
         old_profile = profile_mapper.to_algo(existing) if existing else None
+        language = _profile_language(existing, event)
         extractor = ProfileExtractor(llm=deps.require_llm())
         new_profile = await extractor.aextract(
             memcells,
             sender_id=event.owner_id,
             old_profile=old_profile,
             custom_instructions=deps.instructions.load("profile_extract"),
+            output_language=language,
         )
 
         # Write the fresh profile back to the owner's profile document.
-        await deps.stores.profile.write(scope, profile_mapper.from_algo(new_profile))
+        await deps.stores.profile.write(
+            scope, profile_mapper.from_algo(new_profile, primary_language=language)
+        )
     logger.info(
         "user_profile_extracted",
         owner_id=event.owner_id,

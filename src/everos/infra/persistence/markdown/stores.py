@@ -22,6 +22,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import anyio
+from everalgo.user_memory import OutputLanguage
 
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp, to_iso_format
@@ -214,6 +215,9 @@ class MarkdownProfileStore:
             timestamp=frontmatter.profile_timestamp_ms,
             explicit_info=list(frontmatter.explicit_info),
             implicit_traits=list(frontmatter.implicit_traits),
+            primary_language=_known_language(
+                frontmatter.primary_language, owner_id=frontmatter.user_id
+            ),
         )
 
     async def write(self, scope: Scope, profile: Profile) -> MemoryRef:
@@ -224,6 +228,7 @@ class MarkdownProfileStore:
             explicit_info=[i.model_dump() for i in profile.explicit_info],
             implicit_traits=[i.model_dump() for i in profile.implicit_traits],
             profile_timestamp_ms=profile.timestamp,
+            primary_language=profile.primary_language,
         )
         path = await self._writer.write(
             scope.owner_id,
@@ -353,6 +358,23 @@ class MarkdownAgentSkillStore:
         )
 
 
+# ── Markdown -> domain ───────────────────────────────────────────────────
+
+_OUTPUT_LANGUAGES = frozenset(language.value for language in OutputLanguage)
+
+
+def _known_language(value: str | None, *, owner_id: str) -> str | None:
+    """A stored profile language everalgo accepts, else ``None``.
+
+    ``user.md`` is hand-editable; a value outside ``OutputLanguage`` (case
+    included) would make every later extraction fail, so it is ignored.
+    """
+    if value is None or value in _OUTPUT_LANGUAGES:
+        return value
+    logger.warning("profile_language_ignored", owner_id=owner_id, value=value)
+    return None
+
+
 # ── Domain -> markdown entry ─────────────────────────────────────────────
 
 
@@ -367,6 +389,7 @@ def _episode_entry(episode: Episode) -> EntryBody:
 
     ``session_id`` is omitted for an episode without one (a Reflection
     merge has no session); the cascade reads its absence as ``None``.
+    ``language`` is omitted when unknown, as in entries written before it.
     """
     inline: dict[str, object] = {"owner_id": episode.owner_id}
     if episode.session_id is not None:
@@ -376,6 +399,8 @@ def _episode_entry(episode: Episode) -> EntryBody:
     inline["parent_id"] = episode.parent_id
     if episode.sender_ids:
         inline["sender_ids"] = list(episode.sender_ids)
+    if episode.language:
+        inline["language"] = episode.language
     sections: dict[str, str] = {}
     if episode.subject:
         sections["Subject"] = episode.subject

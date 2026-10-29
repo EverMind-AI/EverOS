@@ -2,4 +2,5 @@
 
 Modules:
     datetime: the two-zone (UTC storage / display-timezone) datetime helpers.
+    language: the output language extracted text is written in.
 """

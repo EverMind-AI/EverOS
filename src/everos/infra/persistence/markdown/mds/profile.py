@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
+from pydantic import Field
+
 from everos.infra.persistence.markdown.base.frontmatter import (
     ProfilePathMixin,
     UserScopedFrontmatter,
@@ -41,3 +43,9 @@ class UserProfileFrontmatter(ProfilePathMixin, UserScopedFrontmatter):
     the most recent MemCell that fed into the synthesis. Compared with
     :attr:`everos.infra.persistence.sqlite.Cluster.last_ts_ms` to decide
     whether a cluster is fresh enough to drive a profile re-extraction."""
+
+    primary_language: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """The ``OutputLanguage`` value the profile is frozen to; left out of the
+    file while unknown, and absent from profiles written before it."""

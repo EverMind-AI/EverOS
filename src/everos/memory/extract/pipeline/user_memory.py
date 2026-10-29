@@ -21,6 +21,7 @@ from everalgo.user_memory import EpisodeExtractor
 
 from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
+from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.events import EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
@@ -90,6 +91,9 @@ class UserMemoryPipeline:
         user_senders = _unique_user_senders(cell)
         if user_senders:
             algo_ep = await self._extract(ingested, prepared)
+            # The model writes in the conversation's language; what it chose
+            # pins every extraction downstream of this episode.
+            language = detect_output_language(algo_ep.episode)
             for sender_id in user_senders:
                 ep = Episode.from_algo(
                     algo_ep,
@@ -97,6 +101,7 @@ class UserMemoryPipeline:
                     session_id=ingested.session_id,
                     sender_ids=list(prepared.sender_ids),
                     parent_id=memcell_id,
+                    language=language,
                 )
                 ref = await self._persist(ingested, ep)
                 md_paths.append(ref.md_path)
@@ -111,6 +116,7 @@ class UserMemoryPipeline:
                         app_id=ingested.app_id,
                         project_id=ingested.project_id,
                         source="pipeline",
+                        language=language,
                     )
                 )
         return CellOutcome(

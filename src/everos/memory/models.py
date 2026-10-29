@@ -123,6 +123,10 @@ class Episode(BaseModel):
     sender_ids: list[str] = Field(default_factory=list)
     parent_id: str
     parent_type: EpisodeParentType = "memcell"
+    language: str | None = None
+    """The ``OutputLanguage`` value the episode is written in, detected from
+    its text; downstream extractions are pinned to it. ``None`` when unknown
+    (an episode stored before it existed, or text with no letters)."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -135,6 +139,7 @@ class Episode(BaseModel):
         session_id: str | None,
         sender_ids: list[str],
         parent_id: str,
+        language: str | None = None,
     ) -> Episode:
         """Build a domain Episode from an algo Episode plus engineering context.
 
@@ -156,6 +161,7 @@ class Episode(BaseModel):
         data["session_id"] = session_id
         data["sender_ids"] = list(sender_ids)
         data["parent_id"] = parent_id
+        data["language"] = language
         return cls.model_validate(data)
 
 
@@ -352,6 +358,9 @@ class Profile(BaseModel):
     timestamp: int
     explicit_info: list[ExplicitInfoItem] = Field(default_factory=list)
     implicit_traits: list[ImplicitTraitItem] = Field(default_factory=list)
+    primary_language: str | None = None
+    """The ``OutputLanguage`` value the profile is written in, frozen by the
+    first extraction that knew it and never changed automatically after."""
 
     @field_validator("explicit_info", "implicit_traits", mode="before")
     @classmethod
@@ -369,6 +378,7 @@ class Profile(BaseModel):
         timestamp: int,
         explicit_info: Sequence[object],
         implicit_traits: Sequence[object],
+        primary_language: str | None = None,
     ) -> Profile:
         """A stored profile, without the items that are no longer items.
 
@@ -385,6 +395,7 @@ class Profile(BaseModel):
             implicit_traits=_readable_items(
                 ImplicitTraitItem, implicit_traits, owner_id
             ),
+            primary_language=primary_language,
         )
 
 

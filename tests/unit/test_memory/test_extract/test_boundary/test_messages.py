@@ -5,10 +5,18 @@ from __future__ import annotations
 import datetime as _dt
 
 import pytest
-from everalgo.types import ChatMessage, ToolCallRequest, ToolCallResult
+from everalgo.boundary import DetectionResult
+from everalgo.types import (
+    ChatMessage,
+    ConversationItem,
+    MemCell,
+    ToolCallRequest,
+    ToolCallResult,
+)
 
 from everos.memory import CanonicalMessage, ToolCall
 from everos.memory.extract.boundary.messages import (
+    close_complete_tail,
     filter_for_mode,
     merge_dedupe_sort,
     slice_tail,
@@ -104,6 +112,45 @@ def test_slice_tail_returns_trailing_n() -> None:
     tail = [object()] * 2  # only length matters
     out = slice_tail(merged, tail)  # type: ignore[arg-type]
     assert [m.message_id for m in out] == ["m3", "m4"]
+
+
+# ── close_complete_tail ──────────────────────────────────────────────
+
+
+def _items(*ts_seconds: int) -> list[ConversationItem]:
+    return [
+        to_conversation_item(_msg(f"m{t}", "user", ts_seconds=t)) for t in ts_seconds
+    ]
+
+
+def test_close_complete_tail_true_appends_the_tail_as_last_cell() -> None:
+    first = MemCell(items=_items(100), timestamp=100_000)
+    tail = _items(200, 300)
+    result = DetectionResult(cells=[first], tail=tail, tail_complete=True)
+
+    closed = close_complete_tail(result, is_final=False)
+
+    assert closed.tail == []
+    assert len(closed.cells) == 2
+    assert closed.cells[0] is first
+    assert closed.cells[1].items == tail
+    assert closed.cells[1].timestamp == 300_000  # the last item's, not the first's
+
+
+@pytest.mark.parametrize("verdict", [False, None])
+def test_close_complete_tail_keeps_an_unjudged_or_open_tail(
+    verdict: bool | None,
+) -> None:
+    result = DetectionResult(cells=[], tail=_items(100, 200), tail_complete=verdict)
+
+    assert close_complete_tail(result, is_final=False) is result
+
+
+def test_close_complete_tail_leaves_a_final_call_alone() -> None:
+    cell = MemCell(items=_items(100, 200), timestamp=200_000)
+    result = DetectionResult(cells=[cell], tail=[], tail_complete=True)
+
+    assert close_complete_tail(result, is_final=True) is result
 
 
 # ── split_message_ids ──────────────────────────────────────────────

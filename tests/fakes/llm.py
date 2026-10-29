@@ -107,6 +107,7 @@ def memorize_llm(
     episode_title: str = "Test Subject",
     episode_content: str = "Test body",
     calls: list[str] | None = None,
+    tail_complete: bool = False,
     **scripts: str,
 ) -> FakeLLMClient:
     """A model for the memorize path, answering by the reply model requested.
@@ -122,6 +123,7 @@ def memorize_llm(
         episode_content: Every episode reply's ``content`` (and ``summary``).
         calls: When given, the requested reply model's name is appended per
             call.
+        tail_complete: Every boundary reply's verdict on the uncut tail.
         **scripts: ``operator=script`` overrides for the other user-track
             operators, as for :func:`user_track_llm`.
 
@@ -149,8 +151,10 @@ def memorize_llm(
         if name == "_BatchReply":
             if queue is None:
                 assert callable(boundaries)
-                return boundary_reply(boundaries(boundary_window(messages)))
-            return boundary_reply(queue.pop(0) if queue else [])
+                cuts = boundaries(boundary_window(messages))
+            else:
+                cuts = queue.pop(0) if queue else []
+            return boundary_reply(cuts, tail_complete=tail_complete)
         if name == "_EpisodeReply":
             return episode
         return canned.get(name, UNUSABLE_REPLY)

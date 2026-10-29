@@ -31,7 +31,9 @@ async def extract_atomic_facts(
     # 1. Run LLM extractor on episode text.
     extractor = AtomicFactExtractor(llm=deps.require_llm())
     algo_facts = await extractor.aextract_from_text(
-        event.episode_text, timestamp=event.episode_timestamp_ms
+        event.episode_text,
+        timestamp=event.episode_timestamp_ms,
+        output_language=event.language,
     )
 
     # 2. Build domain AtomicFacts (single owner from event).

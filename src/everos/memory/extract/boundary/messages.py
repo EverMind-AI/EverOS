@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "Mode",
+    "close_complete_tail",
     "filter_for_mode",
     "merge_dedupe_sort",
     "slice_tail",
@@ -20,6 +21,7 @@ __all__ = [
 from collections.abc import Sequence
 from typing import Literal
 
+from everalgo.boundary import DetectionResult
 from everalgo.types import (
     ChatMessage,
     ConversationItem,
@@ -55,6 +57,20 @@ def merge_dedupe_sort(
     for m in new:
         seen.setdefault(m.message_id, m)
     return sorted(seen.values(), key=lambda m: (m.timestamp, m.message_id))
+
+
+def close_complete_tail(result: DetectionResult, *, is_final: bool) -> DetectionResult:
+    """Close the uncut tail into a last cell when the model judged it complete.
+
+    Only an explicit ``tail_complete is True`` closes it: ``None`` means no
+    model judged the tail, and a final call has already closed it upstream.
+    The cell takes the tail's last timestamp, as everalgo's own cells do, so
+    it orders after its siblings.
+    """
+    if is_final or result.tail_complete is not True or not result.tail:
+        return result
+    tail_cell = MemCell(items=list(result.tail), timestamp=result.tail[-1].timestamp)
+    return result._replace(cells=[*result.cells, tail_cell], tail=[])
 
 
 def slice_tail(

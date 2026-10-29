@@ -44,6 +44,7 @@ def _event(
     episode_text: str = "alice likes hiking",
     episode_timestamp_ms: int = 1_700_000_001_000,
     source: str = "pipeline",
+    language: str | None = None,
 ) -> EpisodeExtracted:
     return EpisodeExtracted(
         memcell_id=memcell_id,
@@ -53,6 +54,7 @@ def _event(
         owner_id=owner_id,
         session_id="s_test",
         source=source,
+        language=language,
     )
 
 
@@ -75,7 +77,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
         patch(f"{_MODULE}.mint_cluster_id", return_value="cl_newuser00001"),
         structlog.testing.capture_logs() as captured,
     ):
-        events = await trigger_profile_clustering(_event(), deps)
+        events = await trigger_profile_clustering(_event(language="Chinese"), deps)
 
     new_cluster, existing = mock_cluster.call_args.args
     assert isinstance(new_cluster, AlgoCluster)
@@ -97,6 +99,7 @@ async def test_creates_new_cluster_when_no_existing() -> None:
     assert announced.memcell_id == "mc_aaaaaaaaaaa1"
     assert announced.cluster_id == "cl_newuser00001"
     assert announced.owner_id == "u_alice"
+    assert announced.language == "Chinese"
     assert any(r.get("event") == "profile_cluster_updated" for r in captured)
 
 

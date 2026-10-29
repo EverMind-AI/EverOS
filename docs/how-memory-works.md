@@ -140,8 +140,9 @@ index catches up asynchronously.
   the end of a chat/agent run.
 - **Boundary detection** (`memory/extract/boundary/BoundaryDetection`)
   asks the model, in one call over the buffered window, where finished
-  episodes end. It never closes the trailing segment of a non-final call
-  (the conversation may go on), so a window that is one open topic stays
+  episodes end. It also judges whether the trailing segment is already a
+  complete episode: if so, that segment is closed and extracted on the same
+  `/add`; if it is still open (the conversation may go on), it stays
   buffered until a later `/add` cuts it or `/flush` closes it. An unusable
   reply is tried three times; a session whose calls keep failing three
   times in a row has its buffer moved to a `quarantine` track so the

@@ -111,6 +111,9 @@ class EpisodeExtracted(Event):
     """Set on Reflection's merged episode (``source="reflection"``); carried
     through to :class:`AtomicFactsExtracted` so the step that finishes the
     merge knows what to deprecate."""
+    language: str | None = None
+    """The episode's detected ``OutputLanguage`` value; the extractions this
+    event drives write in it. ``None`` lets each extractor infer its own."""
 
 
 class AtomicFactsExtracted(Event):
@@ -177,6 +180,8 @@ class ProfileClusterUpdated(Event):
     owner_id: str
     app_id: str = "default"
     project_id: str = "default"
+    language: str | None = None
+    """Carried over from the triggering :class:`EpisodeExtracted`."""
 
 
 class SkillClusterUpdated(Event):

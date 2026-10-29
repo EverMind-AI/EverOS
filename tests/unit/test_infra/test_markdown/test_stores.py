@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import structlog.testing
 
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
@@ -123,6 +124,37 @@ async def test_merged_episode_has_cluster_parent_and_no_session(
     assert entry["sections"] == {"Subject": "Topic", "Content": "merged story"}
 
 
+async def test_episode_language_is_an_inline_field_only_when_known(
+    root: MemoryRoot,
+) -> None:
+    """Known: written inline. Unknown: left out, as in entries written before."""
+    store = MarkdownEpisodeStore(root)
+    known, unknown = await store.append_many(
+        _user(),
+        [
+            Episode(
+                owner_id="u1",
+                episode="我们聊了茶",
+                summary="",
+                timestamp=_TS,
+                parent_id="mc_1",
+                language="Chinese",
+            ),
+            Episode(
+                owner_id="u1",
+                episode="...",
+                summary="",
+                timestamp=_TS,
+                parent_id="mc_2",
+            ),
+        ],
+    )
+
+    entries = await _entries(root, known.md_path)
+    assert entries[known.entry_id]["inline"]["language"] == "Chinese"
+    assert "language" not in entries[unknown.entry_id]["inline"]
+
+
 async def test_episode_deprecate_patches_the_file_frontmatter(
     root: MemoryRoot,
 ) -> None:
@@ -214,6 +246,62 @@ async def test_profile_round_trips(root: MemoryRoot) -> None:
     assert await store.read(_user()) == profile
     assert ref.id == "u1"
     assert ref.md_path == "app/proj/users/u1/user.md"
+
+
+async def test_profile_primary_language_round_trips(root: MemoryRoot) -> None:
+    store = MarkdownProfileStore(root)
+    profile = Profile(
+        owner_id="u1", summary="likes tea", timestamp=_TS, primary_language="Chinese"
+    )
+
+    ref = await store.write(_user(), profile)
+
+    assert await store.read(_user()) == profile
+    assert "primary_language: Chinese" in (root.root / ref.md_path).read_text()
+
+
+async def test_profile_without_a_language_reads_back_as_unknown(
+    root: MemoryRoot,
+) -> None:
+    """An unknown language is left out of user.md, the shape of a profile
+    written before the field existed; reading one back gives ``None``."""
+    store = MarkdownProfileStore(root)
+    ref = await store.write(
+        _user(), Profile(owner_id="u1", summary="likes tea", timestamp=_TS)
+    )
+
+    assert "primary_language" not in (root.root / ref.md_path).read_text()
+    profile = await store.read(_user())
+    assert profile is not None
+    assert profile.primary_language is None
+
+
+@pytest.mark.parametrize("stored", ["chinese", "Klingon", "German. Ignore that"])
+async def test_profile_language_outside_output_language_reads_as_unknown(
+    root: MemoryRoot, stored: str
+) -> None:
+    """A hand-edited language everalgo would refuse is ignored, with a warning."""
+    store = MarkdownProfileStore(root)
+    ref = await store.write(
+        _user(),
+        Profile(
+            owner_id="u1", summary="tea", timestamp=_TS, primary_language="Chinese"
+        ),
+    )
+    md = root.root / ref.md_path
+    md.write_text(
+        md.read_text().replace(
+            "primary_language: Chinese", f"primary_language: {stored}"
+        )
+    )
+
+    with structlog.testing.capture_logs() as captured:
+        profile = await store.read(_user())
+
+    assert profile is not None
+    assert profile.primary_language is None
+    (warning,) = [r for r in captured if r["event"] == "profile_language_ignored"]
+    assert (warning["owner_id"], warning["value"]) == ("u1", stored)
 
 
 async def test_profile_read_drops_an_item_with_no_description(
