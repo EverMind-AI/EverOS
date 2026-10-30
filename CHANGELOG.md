@@ -48,6 +48,10 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **`IndexRepository.find_by_owner` is removed.** It read rows by
+  `owner_id` across every `(app_id, project_id)` scope; nothing called it
+  (#480). Scoped reads go through `find_where` with an explicit filter or
+  `find_by_owner_entries`.
 - **The cascade and OME engine switches are settings.** `[cascade]
   enabled` and `[cascade] watcher_enabled` replace the
   `EVEROS_DISABLE_CASCADE` and `EVEROS_DISABLE_CASCADE_WATCHER` environment
