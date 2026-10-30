@@ -42,7 +42,7 @@ from everos.component.tokenizer import build_tokenizer
 from everos.config import OmeSettings, Settings, load_settings
 from everos.core.errors import MemoryRootLockedError, QueueSaturatedError
 from everos.infra.cascade import CascadeOrchestrator
-from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+from everos.infra.cascade._worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
 from everos.infra.ome import OmeLock
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_indexes, build_stores

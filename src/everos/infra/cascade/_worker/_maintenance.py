@@ -29,7 +29,7 @@ from collections.abc import Mapping, Sequence
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.index import IndexMaintenance
 
-from ..projections import Handler
+from .._projections import Handler
 from ._kind_state import KindOptimizerState
 from ._stop import wait_or_stop
 from ._tuning import (

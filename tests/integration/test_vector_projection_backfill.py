@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from everos.component.tokenizer import build_tokenizer
-from everos.infra.cascade.projections import (
+from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
     AtomicFactHandler,
@@ -18,7 +18,7 @@ from everos.infra.cascade.projections import (
     HandlerDeps,
     KnowledgeTopicHandler,
 )
-from everos.infra.cascade.projections._daily_log_base import ParsedEntry
+from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.persistence.index import VECTOR_PROJECTIONS
 from everos.infra.persistence.index.vector_backfill import (
     _backfill_table,

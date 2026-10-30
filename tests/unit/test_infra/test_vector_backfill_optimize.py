@@ -34,7 +34,7 @@ from typing import Any
 import pytest
 
 from everos.core.observability.logging import configure_logging
-from everos.infra.cascade.worker import (
+from everos.infra.cascade._worker import (
     DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
 )
 from everos.infra.persistence.index import VectorProjection

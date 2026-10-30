@@ -29,13 +29,13 @@ from dataclasses import dataclass
 import pytest
 
 from everos.core.errors import EmbeddingServiceError
+from everos.infra.cascade._projections import Handler, HandlerDeps
+from everos.infra.cascade._worker import CascadeWorker
+from everos.infra.cascade._worker import _kind_state as kind_state
+from everos.infra.cascade._worker import _maintenance as maintenance
+from everos.infra.cascade._worker import _supervision as supervision
+from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.cascade.models import HandlerOutcome
-from everos.infra.cascade.projections import Handler, HandlerDeps
-from everos.infra.cascade.worker import CascadeWorker
-from everos.infra.cascade.worker import _kind_state as kind_state
-from everos.infra.cascade.worker import _maintenance as maintenance
-from everos.infra.cascade.worker import _supervision as supervision
-from everos.infra.cascade.worker import _tuning as tuning
 from tests.fakes import UnusedPort
 
 
@@ -1105,7 +1105,7 @@ async def test_persistent_optimize_failure_stays_visible_in_health(
 
 def test_worker_health_dataclass_thresholds() -> None:
     """reasons() fires exactly on each threshold, one entry per crossed signal."""
-    from everos.infra.cascade import worker as wmod
+    from everos.infra.cascade import _worker as wmod
 
     mk = wmod.CascadeWorkerHealth
     assert mk(0, 0, 0, 0.0).reasons() == []

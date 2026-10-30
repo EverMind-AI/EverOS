@@ -911,7 +911,7 @@ def test_prune_timeout_is_well_below_the_prune_cadence() -> None:
     (the ~97%-duty-cycle bug: timeout == cadence, so a hung prune was retried
     ~immediately after each expiry).
     """
-    from everos.infra.cascade.worker import (
+    from everos.infra.cascade._worker import (
         DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
     )
     from everos.infra.persistence.lancedb.base.repository import _PRUNE_TIMEOUT_SECONDS

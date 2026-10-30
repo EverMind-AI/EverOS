@@ -46,10 +46,10 @@ from typing import Any
 
 import anyio
 
-from everos.infra.cascade.projections._common import content_sha256, resolve_scope
-from everos.infra.cascade.projections._daily_log_base import BaseDailyLogHandler
-from everos.infra.cascade.projections.agent_skill import AgentSkillHandler
-from everos.infra.cascade.projections.user_profile import UserProfileHandler
+from everos.infra.cascade._projections._common import content_sha256, resolve_scope
+from everos.infra.cascade._projections._daily_log_base import BaseDailyLogHandler
+from everos.infra.cascade._projections.agent_skill import AgentSkillHandler
+from everos.infra.cascade._projections.user_profile import UserProfileHandler
 from everos.infra.cascade.registry import KIND_REGISTRY, KindSpec
 from everos.infra.persistence.index import IndexRepositories, eq, primary_key
 from everos.infra.persistence.markdown import AgentSkillFrontmatter, MarkdownReader

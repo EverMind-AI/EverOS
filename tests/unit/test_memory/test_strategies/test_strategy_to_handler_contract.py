@@ -22,12 +22,12 @@ from everalgo.types import AgentCase, AtomicFact, ChatMessage, Foresight, MemCel
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import (
+from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AtomicFactHandler,
     ForesightHandler,
 )
-from everos.infra.cascade.projections._daily_log_base import ParsedEntry
+from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,

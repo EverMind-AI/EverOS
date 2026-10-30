@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from everos.infra.cascade._projections import Handler
+from everos.infra.cascade._worker import CascadeWorker
 from everos.infra.cascade.models import HandlerOutcome
-from everos.infra.cascade.projections import Handler
-from everos.infra.cascade.worker import CascadeWorker
 
 
 @dataclass

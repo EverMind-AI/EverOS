@@ -26,7 +26,7 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.testing import FakeLLMClient
 from everalgo.user_memory import EpisodeReflector
 
-from everos.infra.cascade.projections import AtomicFactHandler, EpisodeHandler
+from everos.infra.cascade._projections import AtomicFactHandler, EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import (
     AtomicFactIndexAdapter,

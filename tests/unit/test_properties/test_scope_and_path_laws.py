@@ -39,7 +39,7 @@ from everos.entrypoints.api.schemas.ids import (
     _reject_path_traversal,
     _reject_reserved_scope_dir,
 )
-from everos.infra.cascade.projections._common import content_sha256
+from everos.infra.cascade._projections._common import content_sha256
 from everos.infra.persistence import memory_root as mr
 from everos.infra.persistence.markdown.base.path_safety import sanitize_dirname
 from everos.infra.persistence.markdown.mds.agent_skill import AgentSkillFrontmatter

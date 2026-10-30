@@ -47,9 +47,9 @@ from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
 from everos.config import LanceDBSettings, SqliteSettings
 from everos.core.errors import EmbeddingServiceError
-from everos.infra.cascade.projections.episode import EpisodeHandler
+from everos.infra.cascade._projections.episode import EpisodeHandler
+from everos.infra.cascade._worker import CascadeWorker
 from everos.infra.cascade.scanner import CascadeScanner
-from everos.infra.cascade.worker import CascadeWorker
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import LanceRepoBase, open_lancedb_connection
 from everos.infra.persistence.lancedb.repos.episode import _EpisodeRepo

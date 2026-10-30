@@ -369,7 +369,7 @@ place.
 ### Cascade scheduler knobs
 
 All defaults live in `everos.infra.cascade.orchestrator.CascadeConfig`
-and `everos.infra.cascade.worker.CascadeWorker`:
+and `everos.infra.cascade._worker.CascadeWorker`:
 
 | Knob | Default | Effect |
 |---|---|---|

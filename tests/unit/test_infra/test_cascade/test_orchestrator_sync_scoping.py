@@ -32,8 +32,8 @@ async def test_orchestrator_sync_once_default_scans_all(
     scanner and the worker's drain see ``kinds=None``."""
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
 
+    from everos.infra.cascade._worker import CascadeWorker
     from everos.infra.cascade.scanner import CascadeScanner
-    from everos.infra.cascade.worker import CascadeWorker
 
     captured: dict[str, object] = {}
 
@@ -85,8 +85,8 @@ async def test_orchestrator_sync_once_forwards_kinds_to_worker_drain(
     """
     monkeypatch.setenv("EVEROS_ROOT", str(tmp_path))
 
+    from everos.infra.cascade._worker import CascadeWorker
     from everos.infra.cascade.scanner import CascadeScanner
-    from everos.infra.cascade.worker import CascadeWorker
 
     captured: dict[str, object] = {}
 

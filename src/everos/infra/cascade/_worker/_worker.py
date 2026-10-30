@@ -53,8 +53,8 @@ from everos.core.errors import ExternalServiceError
 from everos.core.observability.logging import get_logger
 from everos.infra.persistence.sqlite import MdChangeState, MdChangeStateRepo
 
+from .._projections import Handler
 from ..models import ChangeType
-from ..projections import Handler
 from ._health import CascadeWorkerHealth
 from ._maintenance import IndexMaintainer
 from ._supervision import LoopSupervisor, request_process_exit

@@ -68,8 +68,11 @@ from everos.core.observability.tracing import (
     shutdown_score_sink,
     shutdown_tracing,
 )
-from everos.infra.cascade import CascadeAdmin, CascadeOrchestrator
-from everos.infra.cascade.worker import DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS
+from everos.infra.cascade import (
+    DEFAULT_OPTIMIZE_PRUNE_RETENTION_SECONDS,
+    CascadeAdmin,
+    CascadeOrchestrator,
+)
 from everos.infra.ome import (
     OfflineEngine,
     OMEConfig,

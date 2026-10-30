@@ -214,9 +214,9 @@ async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> in
     """
     import lancedb
 
-    from everos.infra.cascade.projections.atomic_fact import AtomicFactHandler
-    from everos.infra.cascade.projections.episode import EpisodeHandler
-    from everos.infra.cascade.projections.foresight import ForesightHandler
+    from everos.infra.cascade._projections.atomic_fact import AtomicFactHandler
+    from everos.infra.cascade._projections.episode import EpisodeHandler
+    from everos.infra.cascade._projections.foresight import ForesightHandler
     from everos.infra.persistence.markdown import MarkdownReader
     from tests._consistency_assertions import _daily_log_sha_for_entry
 

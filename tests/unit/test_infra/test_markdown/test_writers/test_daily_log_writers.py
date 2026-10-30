@@ -208,8 +208,8 @@ async def test_atomic_fact_writer_output_feeds_handler(
     """The writer's md is exactly what AtomicFactHandler expects to read."""
     from everos.component.embedding import EmbeddingProvider
     from everos.component.tokenizer import Tokenizer
-    from everos.infra.cascade.projections import AtomicFactHandler
-    from everos.infra.cascade.projections._daily_log_base import ParsedEntry
+    from everos.infra.cascade._projections import AtomicFactHandler
+    from everos.infra.cascade._projections._daily_log_base import ParsedEntry
 
     class _T(Tokenizer):
         def tokenize(self, t):  # type: ignore[no-untyped-def]

@@ -47,10 +47,10 @@ from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings
 from everos.core.errors import EmbeddingServiceError
+from everos.infra.cascade._projections import Handler
+from everos.infra.cascade._worker import CascadeWorker
+from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.cascade.models import HandlerOutcome
-from everos.infra.cascade.projections import Handler
-from everos.infra.cascade.worker import CascadeWorker
-from everos.infra.cascade.worker import _tuning as tuning
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import create_session_factory, create_system_engine
 from everos.infra.persistence.sqlite.repos.md_change_state import (

@@ -22,7 +22,7 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import KnowledgeTopicHandler
+from everos.infra.cascade._projections import KnowledgeTopicHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import KnowledgeTopic
 from everos.infra.persistence.sqlite import TopicUpsertPayload

@@ -30,11 +30,8 @@ from everos.infra.persistence.sqlite import (
     SqliteRepos,
 )
 
-from .projections import HandlerDeps
-from .registry import build_handlers
-from .scanner import CascadeScanner
-from .watcher import CascadeWatcher
-from .worker import (
+from ._projections import HandlerDeps
+from ._worker import (
     DEFAULT_HANDLER_CONCURRENCY,
     DEFAULT_OPTIMIZE_HEARTBEAT_SECONDS,
     DEFAULT_OPTIMIZE_PRUNE_INTERVAL_SECONDS,
@@ -42,6 +39,9 @@ from .worker import (
     DEFAULT_OPTIMIZE_REBUILD_INTERVAL_SECONDS,
     CascadeWorker,
 )
+from .registry import build_handlers
+from .scanner import CascadeScanner
+from .watcher import CascadeWatcher
 
 logger = get_logger(__name__)
 

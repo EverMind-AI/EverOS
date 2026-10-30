@@ -38,7 +38,7 @@ from everos.infra.persistence.records import (
     UserProfile,
 )
 
-from .projections import (
+from ._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
     AtomicFactHandler,

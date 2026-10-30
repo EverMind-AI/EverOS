@@ -17,15 +17,15 @@ from typing import Any
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import (
+from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
     AtomicFactHandler,
     ForesightHandler,
     HandlerDeps,
 )
-from everos.infra.cascade.projections._daily_log_base import ParsedEntry
-from everos.infra.cascade.projections.episode import EpisodeHandler
+from everos.infra.cascade._projections._daily_log_base import ParsedEntry
+from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentSkillFrontmatter,

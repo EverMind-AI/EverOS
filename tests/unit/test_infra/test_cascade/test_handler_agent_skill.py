@@ -18,7 +18,7 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import AgentSkillHandler
+from everos.infra.cascade._projections import AgentSkillHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import All, Comparison, Predicate, all_of, eq, ne
 from everos.infra.persistence.markdown import AgentSkillWriter

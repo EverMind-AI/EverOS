@@ -17,7 +17,7 @@ import pytest
 
 from everos.component.embedding import EmbeddingProvider
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections.episode import EpisodeHandler
+from everos.infra.cascade._projections.episode import EpisodeHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index import Comparison, Predicate
 from everos.infra.persistence.markdown import EpisodeWriter

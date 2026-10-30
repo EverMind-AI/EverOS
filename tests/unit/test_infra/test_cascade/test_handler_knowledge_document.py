@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import (
+from everos.infra.cascade._projections import (
     KnowledgeDocumentHandler,
 )
 from everos.infra.persistence import MemoryRoot

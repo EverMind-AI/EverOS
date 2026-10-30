@@ -345,6 +345,7 @@ forbidden_modules = [
     "everos.infra.persistence.index.**",
     "everos.infra.persistence.records.**",
     "everos.infra.persistence.milvus.**",
+    "everos.infra.cascade.**",
 ]
 # `forbidden` contracts run a *transitive closure* — any path from a
 # source module to a forbidden module fails the check, even when the
@@ -415,6 +416,11 @@ ignore_imports = [
     "everos.infra.persistence.records -> everos.infra.persistence.records.foresight",
     "everos.infra.persistence.records -> everos.infra.persistence.records.knowledge_topic",
     "everos.infra.persistence.records -> everos.infra.persistence.records.user_profile",
+    # The cascade facade assembles its public surface from its own modules.
+    "everos.infra.cascade -> everos.infra.cascade._worker",
+    "everos.infra.cascade -> everos.infra.cascade.admin",
+    "everos.infra.cascade -> everos.infra.cascade.orchestrator",
+    "everos.infra.cascade -> everos.infra.cascade.registry",
 ]
 
 [[tool.importlinter.contracts]]

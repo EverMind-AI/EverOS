@@ -13,8 +13,8 @@ from sqlmodel import SQLModel
 
 from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
-from everos.infra.cascade.worker import _kind_state as kind_state
-from everos.infra.cascade.worker import _tuning as tuning
+from everos.infra.cascade._worker import _kind_state as kind_state
+from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.persistence import MemoryRoot
 from tests.fakes.storage import Storage
 

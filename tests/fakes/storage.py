@@ -38,7 +38,7 @@ from typing import Any
 import pyarrow as pa
 
 from everos.config import Settings, load_settings
-from everos.infra.cascade.projections import HandlerDeps
+from everos.infra.cascade._projections import HandlerDeps
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.factories import build_derived_index
 from everos.infra.persistence.index import (

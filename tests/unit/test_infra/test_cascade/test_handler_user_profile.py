@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import UserProfileHandler
+from everos.infra.cascade._projections import UserProfileHandler
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.lancedb import UserProfile
 from everos.infra.persistence.markdown import ProfileWriter, UserProfileFrontmatter

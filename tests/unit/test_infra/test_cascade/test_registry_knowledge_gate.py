@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 
 from everos.component.tokenizer import Tokenizer
-from everos.infra.cascade.projections import HandlerDeps
+from everos.infra.cascade._projections import HandlerDeps
 from everos.infra.cascade.registry import build_handlers
 from everos.infra.persistence import MemoryRoot
 from tests.fakes import handler_deps
