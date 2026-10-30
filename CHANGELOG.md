@@ -48,6 +48,19 @@ both use the resulting `Application` through three facades:
 
 ### Changed
 
+- **Internal module layout: one convention across `infra` and `service`.**
+  Every `infra` subpackage now keeps its implementation in private
+  directories behind its `__init__` facade (`cascade/_projections`,
+  `cascade/_worker`, `markdown/_base|_mds|_readers|_writers`,
+  `sqlite/_base|_repos|_tables`, `lancedb/_base|_repos`, matching `ome`);
+  the backfill steps live in `service/ops/backfill/`; the index port
+  package no longer re-exports the record tables, which are imported from
+  `everos.infra.persistence.records`. Public facades are unchanged, and
+  `import-linter` now forbids the outer layers from reaching into
+  `everos.infra.cascade.**` as it already did for `persistence`. Logger
+  names follow module paths, so a log filter on a renamed module (for
+  example `everos.infra.persistence.sqlite.repos.*`) needs the `_repos`
+  spelling.
 - **`IndexRepository.find_by_owner` is removed.** It read rows by
   `owner_id` across every `(app_id, project_id)` scope; nothing called it
   (#480). Scoped reads go through `find_where` with an explicit filter or
