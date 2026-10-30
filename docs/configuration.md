@@ -343,6 +343,17 @@ This prints:
 - All settings sections with their effective values
 - API keys are masked in output
 
+### First start downloads the token-counting encoding
+
+The algorithm library counts tokens with tiktoken's `o200k_base` encoding.
+tiktoken downloads it (about 1.7 MB) the first time a machine uses it and
+caches it in `TIKTOKEN_CACHE_DIR` (default: a `data-gym-cache` folder under
+the temp directory). `everos server start` loads the encoding before it
+opens any storage, so a host that cannot download it stops at startup with
+`TokenizerAssetError` instead of failing the first agent `/add`. For an
+offline host, copy the cache folder from a machine that has it and point
+`TIKTOKEN_CACHE_DIR` at the copy.
+
 ## Advanced: Container Deployment
 
 In containerized environments, skip `everos init` and use environment

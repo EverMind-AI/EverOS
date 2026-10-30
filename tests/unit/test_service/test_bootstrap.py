@@ -219,6 +219,24 @@ async def test_start_brings_the_queue_up_last_and_aclose_unwinds_in_reverse(
     ]
 
 
+async def test_start_warms_the_token_counter_before_opening_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host that cannot load the encoding fails before anything is opened."""
+    events: list[str] = []
+    application = make_application(root=tmp_path, lifecycle=events)
+
+    async def _warm() -> None:
+        events.append("warmup")
+
+    monkeypatch.setattr("everos.service.bootstrap.warm_token_counter", _warm)
+
+    await application.start()
+
+    assert events == ["warmup", *_STARTED]
+    await application.aclose()
+
+
 async def test_aclose_without_start_closes_only_the_storage(tmp_path: Path) -> None:
     """A CLI command opens storage without starting; closing must still close it."""
     events: list[str] = []

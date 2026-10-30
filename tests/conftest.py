@@ -81,6 +81,14 @@ def _reset_table_write_locks() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _keep_token_counter_warmup_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``Application.start`` warms tiktoken's encoding, which a fresh machine
+    downloads. Answer the probe locally so no test reaches the network; the
+    warm-up itself is tested with its own fakes in ``test_warmup.py``."""
+    monkeypatch.setattr("everos.service._warmup.encode", lambda text: [])
+
+
+@pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     import structlog
 

@@ -113,6 +113,7 @@ from everos.memory.search.recall import (
     RecallerDeps,
 )
 from everos.memory.strategies import STRATEGY_SPECS
+from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
 from everos.service.memory import MemoryService
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
@@ -184,7 +185,9 @@ class Application:
     async def start(self) -> None:
         """Bring the application up for serving.
 
-        The order is load-bearing: the OME engine starts before the queue
+        The order is load-bearing: the token counter is warmed before any
+        storage is opened, so a host that cannot fetch its encoding fails
+        with nothing to unwind; the OME engine starts before the queue
         worker (the worker's deliveries publish into the engine), and the
         stack unwinds in reverse, so the worker stops -- and running
         extractions are waited for -- before the engine they publish to.
@@ -192,6 +195,8 @@ class Application:
         scores = await init_score_sink(self._settings.observability)
         self._stack.push_async_callback(_shielded("score_sink", shutdown_score_sink))
         logger.info("tracing_score_sink_ready", enabled=scores)
+
+        await warm_token_counter()
 
         self._root.ensure()
         tables = await self._admin.create_schema()

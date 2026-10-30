@@ -406,6 +406,13 @@ never one at a time.
   entry ids (`ac_…`), so no skill was ever bridged in (#478). The bridge is
   now keyed by entry id, and `SearchAgentCaseItem` exposes `entry_id` so a
   client can join cases to skills the same way.
+- **The first agent `/add` no longer downloads tiktoken's encoding.** The
+  algorithm library counts tokens with `o200k_base`, which tiktoken fetches
+  on first use; a fresh deployment paid for that download inside the first
+  agent write and answered a generic 500 when it failed (#277). The server
+  now warms the encoding at startup, before any storage is opened, and a
+  host that cannot load it fails to start with `TokenizerAssetError` naming
+  the cause and the `TIKTOKEN_CACHE_DIR` pre-cache option.
 
 
 ## [1.5.1] - 2026-10-22

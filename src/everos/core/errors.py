@@ -233,6 +233,15 @@ class MultimodalNotEnabledError(CapabilityError):
     """
 
 
+class TokenizerAssetError(CapabilityError):
+    """The token-counting encoding the algorithm library needs is unavailable.
+
+    Raised at startup when tiktoken's ``o200k_base`` encoding can neither be
+    read from its cache nor downloaded (offline host, TLS interception).
+    Admin action: allow the one-time download, or ship the cached file.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Configuration branch — misconfiguration detected at runtime
 # ---------------------------------------------------------------------------
